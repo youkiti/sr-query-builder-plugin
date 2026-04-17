@@ -1,0 +1,6 @@
+[submodule "tiab-review-plugin"]
+	path = tiab-review-plugin
+	url = https://github.com/youkiti/tiab-review-plugin.git
+[submodule "search-formula-developper"]
+	path = search-formula-developper
+	url = https://github.com/SRWS-PSG/search-formula-developper.git
