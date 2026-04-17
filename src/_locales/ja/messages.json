@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": "SR Query Builder",
+    "description": "拡張機能名"
+  },
+  "extDescription": {
+    "message": "研究プロトコルから PubMed 検索式を生成・検証し、各データベース向けに変換する Chrome 拡張",
+    "description": "拡張機能の説明"
+  }
+}

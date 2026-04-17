@@ -11,3 +11,20 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Node / ビルド
+node_modules/
+dist/
+coverage/
+
+# 環境変数（OAuth クライアント ID は個別配置）
+.env
+.env.local
+.env.*.local
+
+# ビルド成果物
+*.zip
+
+# Jest / tsbuildinfo
+.jest-cache/
+*.tsbuildinfo
