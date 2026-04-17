@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SR Query Builder - 設定</title>
+    <link rel="stylesheet" href="../styles/tokens.css" />
+    <link rel="stylesheet" href="../styles/globals.css" />
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main class="options">
+      <h1 class="options__title">設定</h1>
+      <p class="options__status" id="options-status">読み込み中…</p>
+      <section class="options__section">
+        <h2>LLM プロバイダ</h2>
+        <p class="options__muted">MVP は Gemini のみ対応。API キーは Chrome ローカルストレージに保存されます。</p>
+        <label class="options__field">
+          <span>Gemini API Key</span>
+          <input type="password" id="gemini-api-key" autocomplete="off" />
+        </label>
+        <div class="options__actions">
+          <button type="button" id="save-keys" class="options__button options__button--primary">
+            保存
+          </button>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": "SR Query Builder",
+    "description": "Extension name"
+  },
+  "extDescription": {
+    "message": "Chrome extension that generates, validates, and converts PubMed search strategies from research protocols",
+    "description": "Extension description"
+  }
+}
