@@ -16,35 +16,26 @@
 
 ```mermaid
 flowchart TD
-    Start([レビュー開始]) --> H1
-
-    H1[/"👤 ①プロトコル入力<br/>手入力 or protocol.md or .docx"/]
-    H1 --> A1[🤖 ブロック自動抽出<br/>RQ・組入除外基準・1〜5 ブロック]
-
-    A1 --> H2[/"👤 ②ブロック承認・編集<br/>ラベル / 統合分割 / 結合式 (#1 AND #2 …)"/]
-
+    Start([レビュー開始]) --> H1["👤 ①プロトコル入力<br/>手入力・protocol.md・docx"]
+    H1 --> A1["🤖 ブロック自動抽出<br/>RQ、組入除外基準、1〜5 ブロック"]
+    A1 --> H2["👤 ②ブロック承認・編集<br/>ラベル、統合分割、結合式"]
     H2 --> H3{"👤 ③シード論文はある？"}
-    H3 -->|あり| H3a[/"👤 PMID / NBIB / RIS で登録<br/>（無効 PMID も監査用に保持）"/]
+    H3 -->|あり| H3a["👤 PMID・NBIB・RIS で登録<br/>無効 PMID も監査用に保持"]
     H3 -->|なし| A2
     H3a --> A2
-
-    A2["🤖 検索式ドラフト生成（4 skill）<br/>・block-designer（骨格）<br/>・mesh-suggester（MeSH 提案）<br/>・freeword-designer（同義語・tiab）<br/>・filter-designer（Cochrane RCT / 年代のみ）"]
-    A2 --> V1[⚙️ 自動検証<br/>行ごとヒット数 / シード捕捉率 / MeSH 階層]
-
-    V1 --> H4[/"👤 ④検証結果の確認<br/>捕捉率・漏れ PMID・MeSH を眺める"/]
-
-    H4 --> A3[🤖 境界事例を 5 件ピックアップ<br/>結果 50 件からランダム抽出 → AI が 5 件選定]
-    A3 --> H5[/"👤 ⑤境界事例の判定<br/>include / exclude / maybe（キーボード i/e/m）"/]
-
-    H5 --> V2[⚙️ シード集合を更新<br/>捕捉率を再計算]
+    A2["🤖 検索式ドラフト生成 4 skill<br/>block-designer 骨格<br/>mesh-suggester MeSH 提案<br/>freeword-designer 同義語 tiab<br/>filter-designer RCT 年代のみ"]
+    A2 --> V1["⚙️ 自動検証<br/>行ごとヒット数、シード捕捉率、MeSH 階層"]
+    V1 --> H4["👤 ④検証結果の確認<br/>捕捉率、漏れ PMID、MeSH を眺める"]
+    H4 --> A3["🤖 境界事例 5 件をピックアップ<br/>結果 50 件ランダム抽出から AI が 5 件選定"]
+    A3 --> H5["👤 ⑤境界事例の判定<br/>include・exclude・maybe"]
+    H5 --> V2["⚙️ シード集合を更新、捕捉率を再計算"]
     V2 --> D1{"👤 ⑥次のアクション"}
-    D1 -->|"もう 1 ラウンド追加"| A3
-    D1 -->|"検索式を直したい"| H6[/"👤 検索式編集<br/>手動 or 行単位で AI に改善依頼"/]
+    D1 -->|もう1ラウンド| A3
+    D1 -->|検索式を直す| H6["👤 検索式編集<br/>手動、または行単位で AI に改善依頼"]
     H6 --> V1
-    D1 -->|"OK・確定"| A4[🤖 4 DB へ一括変換<br/>CENTRAL / Embase(Dialog) / CT.gov / ICTRP]
-
-    A4 --> H7[/"👤 ⑦変換結果の確認<br/>各 DB 検索画面で実行 → nbib 等を手動 DL"/]
-    H7 --> End([レビュー: 抄録収集フェーズへ])
+    D1 -->|OK・確定| A4["🤖 4 DB へ一括変換<br/>CENTRAL、Embase Dialog、CT.gov、ICTRP"]
+    A4 --> H7["👤 ⑦変換結果の確認<br/>各 DB で実行、nbib 等を手動 DL"]
+    H7 --> End([抄録収集フェーズへ])
 
     classDef hitl fill:#ffe4b5,stroke:#ff8c00,stroke-width:2px,color:#000
     classDef ai fill:#e6f3ff,stroke:#4a90e2,color:#000
