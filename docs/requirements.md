@@ -511,17 +511,17 @@ tiab-review-plugin と合わせる：
 
 ## 11. 未決事項（次フェーズで詰める）
 
-- [ ] UI 画面遷移図（メインビュー内のルーティング）
-- [ ] `extract-protocol` skill のプロンプトテンプレート（どのように RQ・ブロック・結合式を抽出させるか）
-- [ ] ブロック承認 UI の具体設計（並び替え・統合・分割・`combination_expression` 編集の UX）
-- [ ] LLM プロンプトテンプレート（ドラフト生成 / 境界事例抽出 / シノニム展開）
-- [ ] スキップされた seed 論文（PubMed 非収載）を Sheets にも残すか。MVP は UI 表示のみだが、監査要件が固まれば `SkippedSeeds` タブ追加を検討
-- [ ] `filter-designer` の「ヒット数過大」閾値の確定（暫定 50,000 件超）。また Cochrane HSSS の sensitivity 版 / balanced 版どちらをデフォルトにするか
-- [ ] Cochrane RCT フィルタ文字列の版管理（PubMed 版 2008 / 2024 改訂版等）。検索式内にフィルタ版番号をコメントで残すか
-- [ ] MVP のリリース判定基準（テストカバレッジ、動作確認項目）
-- [ ] ディレクトリ構造（`src/` 配下）の詳細
-- [ ] CI / CD（GitHub Actions、Chrome Web Store 自動公開の是非）
-- [ ] ライセンス表記の各サードパーティ（mammoth.js、jstat 等）確認
+- [ ] UI 画面遷移図（メインビュー内のルーティング）モックつくって
+- [ ] `extract-protocol` skill のプロンプトテンプレート（どのように RQ・ブロック・結合式を抽出させるか）　実装時にあなたが下書き、使ってみての結果で開発者が直す
+- [ ] ブロック承認 UI の具体設計（並び替え・統合・分割・`combination_expression` 編集の UX）　モックつくって
+- [ ] LLM プロンプトテンプレート（ドラフト生成 / 境界事例抽出 / シノニム展開）実装時にあなたが下書き、使ってみての結果で開発者が直す
+- [ ] スキップされた seed 論文（PubMed 非収載）を Sheets にも残すか。MVP は UI 表示のみだが、監査要件が固まれば `SkippedSeeds` タブ追加を検討　残す　タブ新たにするの面倒だから、seedのタブで列にそういうフラグを立てる
+- [ ] `filter-designer` の「ヒット数過大」閾値の確定（暫定 50,000 件超）。また Cochrane HSSS の sensitivity 版 / balanced 版どちらをデフォルトにするか　10000件とする sensitivity版
+- [ ] Cochrane RCT フィルタ文字列の版管理（PubMed 版 2008 / 2024 改訂版等）。検索式内にフィルタ版番号をコメントで残すか　2024版high sensitivityをデフォルトとする
+- [ ] MVP のリリース判定基準（テストカバレッジ、動作確認項目） 100%カバレッジ テストはあなたが作ったもの全部
+- [ ] ディレクトリ構造（`src/` 配下）の詳細　まかせる
+- [ ] CI / CD（GitHub Actions、Chrome Web Store 自動公開の是非）　これはあとから設定するので今は不要
+- [ ] ライセンス表記の各サードパーティ（mammoth.js、jstat 等）確認　まかせる
 
 ## 12. 参考リンク
 
