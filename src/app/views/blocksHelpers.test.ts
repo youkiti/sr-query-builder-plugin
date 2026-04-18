@@ -62,6 +62,36 @@ describe('removeBlock', () => {
     expect(next.blocks.map((b) => b.blockLabel)).toEqual(['L0', 'L2']);
   });
 
+  test('削除時に combination_expression の参照を詰める', () => {
+    const next = removeBlock(draftOf(3, '(#1 AND #2) OR #3'), 1);
+    expect(next.combinationExpression).toBe('#1 OR #2');
+  });
+
+  test('削除対象だけを参照していた NOT 式は既定の全 AND に戻す', () => {
+    const next = removeBlock(draftOf(2, 'NOT #2'), 1);
+    expect(next.combinationExpression).toBe('#1');
+  });
+
+  test('削除対象ではない NOT 式はリインデックスされる', () => {
+    const next = removeBlock(draftOf(2, 'NOT #2'), 0);
+    expect(next.combinationExpression).toBe('NOT #1');
+  });
+
+  test('削除対象が左オペランドでも残りの式を保つ', () => {
+    const next = removeBlock(draftOf(3, '#2 OR #3'), 1);
+    expect(next.combinationExpression).toBe('#2');
+  });
+
+  test('不正な combination_expression は削除時にそのまま残す', () => {
+    const next = removeBlock(draftOf(3, '#1 AND OR #2'), 1);
+    expect(next.combinationExpression).toBe('#1 AND OR #2');
+  });
+
+  test('トークン化できない combination_expression も削除時にそのまま残す', () => {
+    const next = removeBlock(draftOf(3, '#1 @ #2'), 1);
+    expect(next.combinationExpression).toBe('#1 @ #2');
+  });
+
   test(`MIN_BLOCKS=${MIN_BLOCKS} を割り込むなら削除しない`, () => {
     const draft = draftOf(1);
     expect(removeBlock(draft, 0)).toBe(draft);
@@ -78,6 +108,36 @@ describe('moveBlock', () => {
   test('上下隣接スワップ', () => {
     const next = moveBlock(draftOf(3), 1, -1);
     expect(next.blocks.map((b) => b.blockLabel)).toEqual(['L1', 'L0', 'L2']);
+  });
+
+  test('並び替え時に combination_expression の参照を新 index に合わせる', () => {
+    const next = moveBlock(draftOf(3, '(#1 AND #2) OR #3'), 2, -1);
+    expect(next.combinationExpression).toBe('#1 AND #3 OR #2');
+  });
+
+  test('下方向への移動でも named block を保ったまま参照を書き換える', () => {
+    const next = moveBlock(draftOf(2, '#RCTfilter AND #1'), 0, 1);
+    expect(next.combinationExpression).toBe('#RCTfilter AND #2');
+  });
+
+  test('未知の数値参照はそのまま残しつつ既知参照だけを並び替える', () => {
+    const next = moveBlock(draftOf(2, '#99 AND #1'), 0, 1);
+    expect(next.combinationExpression).toBe('#99 AND #2');
+  });
+
+  test('NOT 式の参照も並び替えに追従する', () => {
+    const next = moveBlock(draftOf(2, 'NOT #1'), 0, 1);
+    expect(next.combinationExpression).toBe('NOT #2');
+  });
+
+  test('優先順位が変わる場合は括弧を維持する', () => {
+    const next = moveBlock(draftOf(3, '#1 AND (#2 OR #3)'), 0, 1);
+    expect(next.combinationExpression).toBe('#2 AND (#1 OR #3)');
+  });
+
+  test('不正な combination_expression は移動時にそのまま残す', () => {
+    const next = moveBlock(draftOf(3, '#1 AND OR #2'), 1, -1);
+    expect(next.combinationExpression).toBe('#1 AND OR #2');
   });
 
   test('範囲外への移動は無視', () => {

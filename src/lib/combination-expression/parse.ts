@@ -114,44 +114,56 @@ export function validateReferences(
 export function validateGrammar(tokens: readonly CombinationToken[]): ParseError[] {
   const errors: ParseError[] = [];
   if (tokens.length === 0) {
-    return errors;
+    return [{ message: '空の結合式です', position: 0 }];
   }
+  let expectingOperand = true;
   let prev: CombinationToken | null = null;
   for (const tok of tokens) {
-    if (prev === null) {
-      if (tok.kind === 'op' && tok.op !== 'NOT') {
+    if (expectingOperand) {
+      if (tok.kind === 'ref') {
+        expectingOperand = false;
+      } else if (tok.kind === 'lparen' || (tok.kind === 'op' && tok.op === 'NOT')) {
+        // `(` と unary `NOT` の後は引き続き被演算子を待つ
+      } else if (tok.kind === 'op') {
         errors.push({
-          message: `先頭に二項演算子 ${tok.op} は置けません`,
+          message:
+            prev === null
+              ? `先頭に二項演算子 ${tok.op} は置けません`
+              : prev.kind === 'op' && prev.op !== 'NOT'
+                ? `二項演算子が連続しています: ${prev.op} ${tok.op}`
+                : `ここには二項演算子 ${tok.op} は置けません`,
           position: tok.position,
         });
+      } else {
+        errors.push({ message: '被演算子が必要です', position: tok.position });
       }
-    } else if (endsOperand(prev) && startsOperand(tok)) {
+    } else if (tok.kind === 'op' && tok.op !== 'NOT') {
+      expectingOperand = true;
+    } else if (tok.kind === 'rparen') {
+      // `)` は 1 つの被演算子の終端として扱う
+    } else if (tok.kind === 'op' && tok.op === 'NOT') {
       errors.push({
-        message: `被演算子が連続しています（演算子 AND/OR が必要）`,
+        message: '被演算子の直後に NOT は置けません（AND/OR が必要）',
         position: tok.position,
       });
-    } else if (prev.kind === 'op' && prev.op !== 'NOT' && tok.kind === 'op' && tok.op !== 'NOT') {
+    } else {
       errors.push({
-        message: `二項演算子が連続しています: ${prev.op} ${tok.op}`,
+        message: '被演算子が連続しています（演算子 AND/OR が必要）',
         position: tok.position,
       });
     }
     prev = tok;
   }
-  if (prev !== null && prev.kind === 'op') {
-    errors.push({ message: `末尾が演算子 ${prev.op} で終わっています`, position: prev.position });
+  if (expectingOperand && prev !== null) {
+    errors.push({
+      message:
+        prev.kind === 'op'
+          ? `末尾が演算子 ${prev.op} で終わっています`
+          : '末尾で被演算子が不足しています',
+      position: prev.position,
+    });
   }
   return errors;
-}
-
-/** 被演算子の終端と扱えるトークン（次に二項演算子が来ても良い） */
-function endsOperand(tok: CombinationToken): boolean {
-  return tok.kind === 'ref' || tok.kind === 'rparen';
-}
-
-/** 新しい被演算子の開始と扱えるトークン */
-function startsOperand(tok: CombinationToken): boolean {
-  return tok.kind === 'ref' || tok.kind === 'lparen';
 }
 
 /**

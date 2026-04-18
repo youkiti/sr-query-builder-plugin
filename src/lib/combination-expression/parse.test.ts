@@ -84,7 +84,7 @@ describe('validateGrammar', () => {
   });
 
   test('空入力はエラー無し', () => {
-    expect(validateGrammar([])).toEqual([]);
+    expect(validateGrammar([])[0]?.message).toContain('空');
   });
 
   test('先頭の二項演算子（AND）はエラー', () => {
@@ -111,6 +111,27 @@ describe('validateGrammar', () => {
   test('AND NOT の連続は許可', () => {
     const { tokens } = tokenizeCombination('#1 AND NOT #2');
     expect(validateGrammar(tokens)).toEqual([]);
+  });
+
+  test('被演算子の直後に NOT はエラー', () => {
+    const { tokens } = tokenizeCombination('#1 NOT #2');
+    expect(validateGrammar(tokens)[0]?.message).toContain('NOT');
+  });
+
+  test('NOT の直後に二項演算子は置けない', () => {
+    const { tokens } = tokenizeCombination('NOT AND #1');
+    expect(validateGrammar(tokens)[0]?.message).toContain('ここには');
+  });
+
+  test('空の括弧はエラー', () => {
+    const { tokens } = tokenizeCombination('()');
+    expect(validateGrammar(tokens)[0]?.message).toContain('被演算子');
+  });
+
+  test('開き括弧で終わると末尾エラー', () => {
+    const { tokens } = tokenizeCombination('#1 AND (');
+    const errors = validateGrammar(tokens);
+    expect(errors[errors.length - 1]?.message).toContain('末尾');
   });
 
   test('末尾が演算子だとエラー', () => {
