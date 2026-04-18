@@ -1,64 +1,100 @@
 /**
  * メインビュー（app.html）の起動ロジック。
- * 現段階ではルーティングだけ組んでおき、各 view は後続 PR で実装する。
+ * router / store / views を組み合わせ、ハッシュ変更とストア更新の両方で再レンダする。
  */
 
+import { ROUTE_LABELS, ROUTES, buildHash, parseRoute, type RouteName } from './router';
+import { createStore, type AppStore } from './store';
+import { VIEWS, type ViewContext } from './views';
+
 export interface AppBootstrapOptions {
-  /** 現在の URL ハッシュ（`#/home` 等）を取得する関数。テスト時に差し替え可能 */
   getHash: () => string;
-  /** ハッシュ変更イベントを監視する関数。戻り値は解除用 */
   onHashChange: (listener: () => void) => () => void;
+  /** location.hash を更新するための関数。テスト時に差し替え可能 */
+  setHash: (hash: string) => void;
+  /** テスト時に差し替え可能なストア（既定は createStore()） */
+  store?: AppStore;
 }
 
-export const ROUTES = [
-  'home',
-  'protocol',
-  'blocks',
-  'seeds',
-  'draft',
-  'validate',
-  'expand',
-  'edit',
-  'export',
-  'done',
-  'history',
-] as const;
-
-export type RouteName = (typeof ROUTES)[number];
-
-export const DEFAULT_ROUTE: RouteName = 'home';
-
-export function parseRoute(hash: string): RouteName {
-  const normalized = hash.replace(/^#\/?/, '');
-  return (ROUTES as readonly string[]).includes(normalized)
-    ? (normalized as RouteName)
-    : DEFAULT_ROUTE;
+export interface AppHandle {
+  /** イベントリスナー解除 + ストアサブスクライブ解除を行う */
+  dispose: () => void;
+  store: AppStore;
 }
 
-export function createLocationOptions(win: Window): AppBootstrapOptions {
+export function createLocationOptions(
+  win: Window
+): Pick<AppBootstrapOptions, 'getHash' | 'onHashChange' | 'setHash'> {
   return {
     getHash: () => win.location.hash,
     onHashChange: (listener) => {
       win.addEventListener('hashchange', listener);
       return () => win.removeEventListener('hashchange', listener);
     },
+    setHash: (hash) => {
+      win.location.hash = hash;
+    },
   };
 }
 
-export function startApp(doc: Document, opts: AppBootstrapOptions): () => void {
+export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
+  const store = opts.store ?? createStore();
   const status = doc.getElementById('app-status');
   const content = doc.getElementById('app-content');
+  const sidebar = doc.querySelector('#app-sidebar nav');
+
+  const navigate = (route: RouteName): void => {
+    opts.setHash(buildHash(route));
+  };
 
   const render = (): void => {
     const route = parseRoute(opts.getHash());
+    if (route !== store.getState().route) {
+      store.setState((s) => ({ ...s, route }));
+    }
     if (status) {
-      status.textContent = `ルート: #/${route}`;
+      const projectName = store.getState().project?.title ?? '(未選択)';
+      status.textContent = `${ROUTE_LABELS[route]} / ${projectName}`;
+    }
+    if (sidebar) {
+      renderSidebar(sidebar as HTMLElement, route, navigate);
     }
     if (content) {
-      content.textContent = `[${route}] 画面は実装中です。`;
+      const ctx: ViewContext = { state: store.getState(), navigate };
+      VIEWS[route](content as HTMLElement, ctx);
     }
   };
 
   render();
-  return opts.onHashChange(render);
+  const unlistenHash = opts.onHashChange(render);
+  const unsubscribe = store.subscribe(render);
+
+  return {
+    store,
+    dispose: () => {
+      unlistenHash();
+      unsubscribe();
+    },
+  };
+}
+
+function renderSidebar(
+  nav: HTMLElement,
+  current: RouteName,
+  navigate: (route: RouteName) => void
+): void {
+  nav.innerHTML = '';
+  const ul = nav.ownerDocument.createElement('ul');
+  ul.className = 'app__nav-list';
+  for (const route of ROUTES) {
+    const li = nav.ownerDocument.createElement('li');
+    const btn = nav.ownerDocument.createElement('button');
+    btn.type = 'button';
+    btn.textContent = ROUTE_LABELS[route];
+    btn.className = route === current ? 'is-active' : '';
+    btn.addEventListener('click', () => navigate(route));
+    li.appendChild(btn);
+    ul.appendChild(li);
+  }
+  nav.appendChild(ul);
 }
