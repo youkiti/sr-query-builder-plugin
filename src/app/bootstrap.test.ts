@@ -46,6 +46,7 @@ describe('startApp', () => {
       route: 'home',
       project: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'd', title: 'My SR' },
       cumulativeCostUsd: null,
+      blocksDraft: null,
     });
     startApp(doc, { ...noopHashOptions('#/home'), store });
     expect(doc.getElementById('app-status')?.textContent).toContain('My SR');

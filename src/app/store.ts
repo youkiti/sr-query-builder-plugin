@@ -7,6 +7,24 @@ import type { RouteName } from './router';
  * インターフェースは互換のまま使えるよう保つ。
  */
 
+/**
+ * ブロック承認画面（#/blocks）で編集中のドラフト。
+ * extract-protocol skill の結果を初期値としてここに入れ、
+ * ユーザーの編集を反映してから ProtocolBlocks タブへ保存する。
+ */
+export interface BlockDraft {
+  blockLabel: string;
+  description: string;
+  /** AI が生成したまま未編集なら true、ユーザーが触ったら false */
+  aiGenerated: boolean;
+  note: string;
+}
+
+export interface BlocksDraft {
+  blocks: BlockDraft[];
+  combinationExpression: string;
+}
+
 export interface AppState {
   /** 現在のハッシュルート */
   route: RouteName;
@@ -14,12 +32,15 @@ export interface AppState {
   project: CurrentProjectEntry | null;
   /** トップバー右側の累積コスト表示用（USD）。未集計なら null */
   cumulativeCostUsd: number | null;
+  /** ブロック承認画面の編集中ドラフト。未開始なら null */
+  blocksDraft: BlocksDraft | null;
 }
 
 export const INITIAL_STATE: AppState = {
   route: 'home',
   project: null,
   cumulativeCostUsd: null,
+  blocksDraft: null,
 };
 
 export type Updater = (prev: AppState) => AppState;

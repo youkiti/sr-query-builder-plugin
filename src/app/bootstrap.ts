@@ -5,7 +5,7 @@
 
 import { ROUTE_LABELS, ROUTES, buildHash, parseRoute, type RouteName } from './router';
 import { createStore, type AppStore } from './store';
-import { VIEWS, type ViewContext } from './views';
+import { buildViews, type BuildViewsOptions, type ViewContext } from './views';
 
 export interface AppBootstrapOptions {
   getHash: () => string;
@@ -14,6 +14,8 @@ export interface AppBootstrapOptions {
   setHash: (hash: string) => void;
   /** テスト時に差し替え可能なストア（既定は createStore()） */
   store?: AppStore;
+  /** view ごとのコールバック注入（blocks の保存ボタン等） */
+  viewOptions?: BuildViewsOptions;
 }
 
 export interface AppHandle {
@@ -39,6 +41,7 @@ export function createLocationOptions(
 
 export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
   const store = opts.store ?? createStore();
+  const views = buildViews(store, opts.viewOptions);
   const status = doc.getElementById('app-status');
   const content = doc.getElementById('app-content');
   const sidebar = doc.querySelector('#app-sidebar nav');
@@ -61,7 +64,7 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
     }
     if (content) {
       const ctx: ViewContext = { state: store.getState(), navigate };
-      VIEWS[route](content as HTMLElement, ctx);
+      views[route](content as HTMLElement, ctx);
     }
   };
 

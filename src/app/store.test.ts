@@ -11,6 +11,7 @@ describe('createStore', () => {
       route: 'protocol',
       project: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'd', title: 'T' },
       cumulativeCostUsd: 1.23,
+      blocksDraft: null,
     });
     expect(store.getState().route).toBe('protocol');
   });
