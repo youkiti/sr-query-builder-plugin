@@ -22,6 +22,9 @@ coverage/
 .env.local
 .env.*.local
 
+# OAuth 用秘密鍵（拡張 ID を固定するために生成）
+key.pem
+
 # ビルド成果物
 *.zip
 
