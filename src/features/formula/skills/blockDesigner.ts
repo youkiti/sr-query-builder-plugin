@@ -1,0 +1,88 @@
+import type { LLMProvider } from '@/lib/llm';
+import { parseSkillJson } from './parseSkillJson';
+
+/**
+ * `block-designer` skill — 単一ブロックの概念を MeSH 要件・フリーワード要件に
+ * 振り分け、検索式 1 行 (#N) の骨格を設計する。
+ * 後続の mesh-suggester / freeword-designer に渡す入力を作る役割。
+ */
+
+export interface BlockDesignerInput {
+  blockLabel: string;
+  description: string;
+  researchQuestion: string;
+}
+
+export interface BlockSkeleton {
+  /** 概念を要約した英語 1 文（後続 skill のプロンプトで使う） */
+  conceptSummary: string;
+  /** MeSH 候補生成のヒント（記述子の方向性） */
+  meshRequirements: string[];
+  /** フリーワード候補生成のヒント（同義語・関連語の方向性） */
+  freewordRequirements: string[];
+  /** このブロックを検索式 1 行に表現する戦略の自然文メモ（UI 表示用） */
+  rationale: string;
+}
+
+const SKILL_NAME = 'block-designer';
+
+export const BLOCK_DESIGNER_SYSTEM_PROMPT = `
+あなたはシステマティックレビューの司書です。
+1 つの検索ブロックについて、PubMed 検索式 1 行で表現する骨格を設計します。
+
+ルール:
+- MeSH 要件とフリーワード要件を**別々のリスト**で書き出す。
+  MeSH は階層を意識した一般的な記述子、フリーワードは tiab で拾う具体語にする。
+- conceptSummary は英語 1 文、rationale は日本語の戦略メモ。
+- 出力は JSON のみ。
+`.trim();
+
+export const BLOCK_DESIGNER_USER_PROMPT_TEMPLATE = `
+RQ: {{RQ}}
+
+ブロック:
+- label: {{LABEL}}
+- description: {{DESC}}
+
+スキーマ:
+{
+  "concept_summary": "<英語 1 文>",
+  "mesh_requirements": ["<記述子方向性>"],
+  "freeword_requirements": ["<同義語・関連語の方向性>"],
+  "rationale": "<検索式 1 行に落とすときの戦略メモ（日本語）>"
+}
+`.trim();
+
+interface RawBlock {
+  concept_summary?: string;
+  mesh_requirements?: string[];
+  freeword_requirements?: string[];
+  rationale?: string;
+}
+
+export async function designBlock(
+  input: BlockDesignerInput,
+  provider: LLMProvider
+): Promise<BlockSkeleton> {
+  const userPrompt = BLOCK_DESIGNER_USER_PROMPT_TEMPLATE.replace(
+    '{{RQ}}',
+    input.researchQuestion
+  )
+    .replace('{{LABEL}}', input.blockLabel)
+    .replace('{{DESC}}', input.description);
+
+  const response = await provider.chat(
+    [
+      { role: 'system', content: BLOCK_DESIGNER_SYSTEM_PROMPT },
+      { role: 'user', content: userPrompt },
+    ],
+    { responseFormat: 'json', temperature: 0.3 }
+  );
+  const raw = parseSkillJson<RawBlock>(response.text, SKILL_NAME);
+  return {
+    conceptSummary: raw.concept_summary ?? '',
+    meshRequirements: raw.mesh_requirements ?? [],
+    freewordRequirements: raw.freeword_requirements ?? [],
+    rationale: raw.rationale ?? '',
+  };
+}
