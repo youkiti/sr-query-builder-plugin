@@ -7,5 +7,6 @@ describe('features/conversion index 再エクスポート', () => {
     expect(typeof mod.convertToClinicalTrials).toBe('function');
     expect(typeof mod.convertToIctrp).toBe('function');
     expect(typeof mod.convertToAllDatabases).toBe('function');
+    expect(typeof mod.appendConversion).toBe('function');
   });
 });

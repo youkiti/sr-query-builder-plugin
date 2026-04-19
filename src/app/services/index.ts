@@ -33,3 +33,10 @@ export {
   type DraftResult,
   type DraftServiceDeps,
 } from './draftService';
+export {
+  exportToAllDatabases,
+  suggestFileName,
+  toDownloadUrl,
+  type ExportResult,
+  type ExportServiceDeps,
+} from './exportService';
