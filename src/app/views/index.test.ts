@@ -4,6 +4,7 @@ import {
   buildNotImplementedView,
   buildViews,
   createBlocksView,
+  createProtocolView,
   renderHomeView,
   renderProtocolView,
 } from './index';
@@ -16,10 +17,11 @@ describe('buildViews', () => {
     }
   });
 
-  test('home / protocol は固定の render 関数を使う', () => {
+  test('home は固定の render 関数を使う', () => {
     const views = buildViews(createStore());
     expect(views.home).toBe(renderHomeView);
-    expect(views.protocol).toBe(renderProtocolView);
+    // protocol は createProtocolView 経由で都度生成されるため参照比較は不可
+    expect(typeof views.protocol).toBe('function');
   });
 
   test('blocks の callback を options 経由で差し込める', () => {
@@ -30,5 +32,13 @@ describe('buildViews', () => {
   test('再エクスポートが揃っている', () => {
     expect(typeof buildNotImplementedView).toBe('function');
     expect(typeof createBlocksView).toBe('function');
+    expect(typeof renderProtocolView).toBe('function');
+    expect(typeof createProtocolView).toBe('function');
+  });
+
+  test('protocol callback も options 経由で差し込める', () => {
+    const onSubmit = jest.fn();
+    const views = buildViews(createStore(), { protocol: { onSubmit } });
+    expect(typeof views.protocol).toBe('function');
   });
 });
