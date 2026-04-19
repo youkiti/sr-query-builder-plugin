@@ -110,7 +110,11 @@ async function switchProject(
 
 function bindOpenAppButton(doc: Document, deps: PopupDeps): void {
   const btn = doc.getElementById('open-app') as HTMLButtonElement | null;
-  btn?.addEventListener('click', () => {
+  if (btn === null) {
+    return;
+  }
+  btn.addEventListener('click', () => {
+    /* istanbul ignore if -- 実ブラウザでは disabled なボタンはクリックイベント自体が発火しない */
     if (btn.disabled) return;
     deps.openAppTab();
   });
