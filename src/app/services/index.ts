@@ -40,3 +40,14 @@ export {
   type ExportResult,
   type ExportServiceDeps,
 } from './exportService';
+export {
+  ingestSeeds,
+  type IngestInput,
+  type IngestSummary,
+  type SeedServiceDeps,
+} from './seedService';
+export {
+  runValidation,
+  type ValidationServiceDeps,
+  type ValidationSummary,
+} from './validationService';

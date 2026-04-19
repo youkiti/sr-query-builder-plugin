@@ -6,3 +6,4 @@ export {
   type RisIngestFormat,
 } from './resolveRisEntry';
 export { verifyPmids, verifySinglePmid, type VerifyResult } from './verifyPmid';
+export { appendSeedPaper, listSeedPapers, hasValidSeedPmid } from './seedRepository';

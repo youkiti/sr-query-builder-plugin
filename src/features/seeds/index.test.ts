@@ -7,5 +7,8 @@ describe('features/seeds index 再エクスポート', () => {
     expect(typeof mod.resolveRisEntry).toBe('function');
     expect(typeof mod.verifyPmids).toBe('function');
     expect(typeof mod.verifySinglePmid).toBe('function');
+    expect(typeof mod.appendSeedPaper).toBe('function');
+    expect(typeof mod.listSeedPapers).toBe('function');
+    expect(typeof mod.hasValidSeedPmid).toBe('function');
   });
 });

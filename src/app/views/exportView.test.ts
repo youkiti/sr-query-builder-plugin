@@ -96,6 +96,18 @@ describe('createExportView', () => {
     expect(container.querySelector('.export__pubmed-link')).toBeNull();
   });
 
+  test('コードブロックが空なら PubMed リンクは出ない', () => {
+    const view = createExportView();
+    const container = buildContainer();
+    view(container, {
+      state: stateWithDraft({
+        currentFormulaMarkdown: '## PubMed\n\n```\n\n```\n',
+      }),
+      navigate: jest.fn(),
+    });
+    expect(container.querySelector('.export__pubmed-link')).toBeNull();
+  });
+
   test('エクスポートボタンで onExport が呼ばれ、結果が <details> に表示される', async () => {
     const onExport = jest.fn(async () => sampleResult());
     const view = createExportView({ onExport });

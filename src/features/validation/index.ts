@@ -6,3 +6,4 @@ export {
   aggregateMeshFrequency,
   type MeshForSeed,
 } from './extractMesh';
+export { appendValidationLog } from './validationRepository';
