@@ -62,6 +62,7 @@ export async function approveBlocks(deps: BlocksServiceDeps): Promise<ApprovedPr
   });
   await appendProtocol(spreadsheetId, protocol, deps.google);
   await appendProtocolBlocks(spreadsheetId, version, blocks, deps.google);
+  deps.store.setState((s) => ({ ...s, currentProtocolVersion: version }));
   return { version, protocol, blocks };
 }
 

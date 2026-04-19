@@ -27,3 +27,9 @@ export {
   type ApprovedProtocol,
   type BlocksServiceDeps,
 } from './blocksService';
+export {
+  generateDraft,
+  type DraftProgress,
+  type DraftResult,
+  type DraftServiceDeps,
+} from './draftService';

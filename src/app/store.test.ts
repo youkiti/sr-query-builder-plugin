@@ -13,6 +13,9 @@ describe('createStore', () => {
       cumulativeCostUsd: 1.23,
       blocksDraft: null,
       protocolDraft: null,
+      currentProtocolVersion: null,
+      currentFormulaVersionId: null,
+      currentFormulaMarkdown: null,
     });
     expect(store.getState().route).toBe('protocol');
   });

@@ -50,6 +50,9 @@ describe('startApp', () => {
       cumulativeCostUsd: null,
       blocksDraft: null,
       protocolDraft: null,
+      currentProtocolVersion: null,
+      currentFormulaVersionId: null,
+      currentFormulaMarkdown: null,
     });
     startApp(doc, { ...noopHashOptions('#/home'), store });
     expect(doc.getElementById('app-status')?.textContent).toContain('My SR');
