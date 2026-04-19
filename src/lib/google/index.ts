@@ -17,4 +17,10 @@ export {
   getSheetValues,
   type CreatedSpreadsheet,
 } from './sheets';
-export { createFolder, uploadTextFile, getFileText, type DriveFileRef } from './drive';
+export {
+  createFolder,
+  ensureChildFolder,
+  uploadTextFile,
+  getFileText,
+  type DriveFileRef,
+} from './drive';

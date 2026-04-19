@@ -4,6 +4,7 @@ import {
   type AppBootstrapOptions,
 } from './bootstrap';
 import { createStore } from './store';
+import { SHEET_HEADERS } from '@/domain/sheetsSchema';
 
 function buildDocument(): Document {
   const doc = document.implementation.createHTMLDocument('test');
@@ -408,6 +409,106 @@ describe('startApp - wiring 層', () => {
       (c[0] as string).includes('Conversions') && (c[0] as string).includes(':append')
     );
     expect(appendCalls).toHaveLength(4);
+  });
+
+  test('seeds view 既定 onIngest が SeedPapers に追記する', async () => {
+    const doc = buildDocument();
+    const seedHeader = [...SHEET_HEADERS.SeedPapers];
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+    });
+    fetchMock.mockImplementation(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/values/SeedPapers')) {
+        return jsonResponse({ values: [seedHeader] });
+      }
+      if (typeof url === 'string' && url.includes('eutils.ncbi.nlm.nih.gov')) {
+        if (url.includes('efetch')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({}),
+            text: async () =>
+              `<?xml version="1.0"?><PubmedArticleSet><PubmedArticle><MedlineCitation><PMID>111</PMID><Article><ArticleTitle>X</ArticleTitle></Article></MedlineCitation></PubmedArticle></PubmedArticleSet>`,
+          } as Response;
+        }
+        return jsonResponse({ esearchresult: { count: '1', idlist: ['111'] } });
+      }
+      return jsonResponse({});
+    });
+    startApp(doc, {
+      getHash: () => '#/seeds',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    const textarea = doc.querySelector<HTMLTextAreaElement>('.seeds__pmid-input')!;
+    textarea.value = '111';
+    const pmidBtn = Array.from(doc.querySelectorAll('#app-content fieldset'))[0]!.querySelector(
+      'button'
+    )!;
+    pmidBtn.click();
+    for (let i = 0; i < 10; i += 1) {
+      await flush();
+    }
+    const appendCalls = fetchMock.mock.calls.filter((c) =>
+      (c[0] as string).includes('SeedPapers') && (c[0] as string).includes(':append')
+    );
+    expect(appendCalls.length).toBeGreaterThan(0);
+  });
+
+  test('validate view 既定 onRun が ValidationLog に 5 行追記する', async () => {
+    const doc = buildDocument();
+    const seedHeader = [...SHEET_HEADERS.SeedPapers];
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+    });
+    fetchMock.mockImplementation(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/values/SeedPapers')) {
+        const seedRow = seedHeader.map((k) => {
+          if (k === 'pmid') return '111';
+          if (k === 'is_valid') return 'true';
+          if (k === 'source') return 'initial';
+          if (k === 'ingest_format') return 'pmid_direct';
+          return '';
+        });
+        return jsonResponse({ values: [seedHeader, seedRow] });
+      }
+      if (typeof url === 'string' && url.includes('eutils.ncbi.nlm.nih.gov')) {
+        if (url.includes('efetch')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({}),
+            text: async () => `<?xml version="1.0"?><PubmedArticleSet></PubmedArticleSet>`,
+          } as Response;
+        }
+        return jsonResponse({ esearchresult: { count: '0', idlist: [] } });
+      }
+      return jsonResponse({});
+    });
+    const handle = startApp(doc, {
+      getHash: () => '#/validate',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({
+      ...s,
+      currentFormulaVersionId: 'v-1',
+      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 diabetes\n```\n',
+    }));
+    const runBtn = doc.querySelector<HTMLButtonElement>('#app-content button')!;
+    runBtn.click();
+    for (let i = 0; i < 10; i += 1) {
+      await flush();
+    }
+    const appendCalls = fetchMock.mock.calls.filter((c) =>
+      (c[0] as string).includes('ValidationLog') && (c[0] as string).includes(':append')
+    );
+    // line_hits 1 行 + final_query 1 行 + mesh 1 行 = 3 行（formula のブロック数=1 のため）
+    expect(appendCalls.length).toBe(3);
   });
 });
 

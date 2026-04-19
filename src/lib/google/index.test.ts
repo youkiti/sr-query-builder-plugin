@@ -14,6 +14,7 @@ describe('lib/google index 再エクスポート', () => {
     expect(typeof mod.appendRow).toBe('function');
     expect(typeof mod.getSheetValues).toBe('function');
     expect(typeof mod.createFolder).toBe('function');
+    expect(typeof mod.ensureChildFolder).toBe('function');
     expect(typeof mod.uploadTextFile).toBe('function');
     expect(typeof mod.getFileText).toBe('function');
   });

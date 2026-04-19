@@ -1,4 +1,4 @@
-import { createFolder, getFileText, uploadTextFile } from './drive';
+import { createFolder, ensureChildFolder, getFileText, uploadTextFile } from './drive';
 
 function okJson(body: unknown): Response {
   return {
@@ -69,6 +69,36 @@ describe('uploadTextFile', () => {
     await uploadTextFile({ name: 'note.txt', content: 'hi', parentId: 'P' }, deps);
     const body = (fetch.mock.calls[0][1] as RequestInit).body as string;
     expect(body).toContain('text/plain; charset=UTF-8');
+  });
+});
+
+describe('ensureChildFolder', () => {
+  test('既存フォルダがあれば再利用する', async () => {
+    const fetch = jest
+      .fn()
+      .mockResolvedValueOnce(okJson({ files: [{ id: 'F1', webViewLink: 'https://drive/existing' }] }));
+    const deps = { fetch, getAccessToken: jest.fn().mockResolvedValue('t') };
+    await expect(ensureChildFolder('raw_protocols', 'PARENT', deps)).resolves.toEqual({
+      id: 'F1',
+      webViewLink: 'https://drive/existing',
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toContain('q=');
+  });
+
+  test('既存フォルダが無ければ作成する', async () => {
+    const fetch = jest
+      .fn()
+      .mockResolvedValueOnce(okJson({ files: [] }))
+      .mockResolvedValueOnce(okJson({ id: 'F2', webViewLink: 'https://drive/new' }));
+    const deps = { fetch, getAccessToken: jest.fn().mockResolvedValue('t') };
+    await expect(ensureChildFolder('skipped_seeds', 'PARENT', deps)).resolves.toEqual({
+      id: 'F2',
+      webViewLink: 'https://drive/new',
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const createBody = JSON.parse((fetch.mock.calls[1][1] as RequestInit).body as string);
+    expect(createBody.name).toBe('skipped_seeds');
   });
 });
 

@@ -7,5 +7,6 @@ describe('features/validation index 再エクスポート', () => {
     expect(typeof mod.checkFinalQuery).toBe('function');
     expect(typeof mod.extractMeshForSeeds).toBe('function');
     expect(typeof mod.aggregateMeshFrequency).toBe('function');
+    expect(typeof mod.appendValidationLog).toBe('function');
   });
 });

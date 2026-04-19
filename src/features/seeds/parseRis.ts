@@ -23,6 +23,8 @@
 export interface RisEntry {
   /** 元 RIS のタグ → 値（複数値可）。キーは大文字に揃える */
   tags: Record<string, string[]>;
+  /** 元 RIS エントリ本文。監査用に Drive へ退避するときに使う */
+  rawText: string;
   title: string | null;
   year: number | null;
   /** `DB` タグの値（あれば）。例: `PubMed` / `Embase` / `CENTRAL` / `Scopus` */
@@ -36,6 +38,7 @@ const TAG_LINE_PATTERN = /^([A-Z][A-Z0-9])\s{1,}-\s?(.*)$/;
 export function parseRis(text: string): RisEntry[] {
   const entries: RisEntry[] = [];
   let current: Record<string, string[]> | null = null;
+  let currentLines: string[] = [];
 
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.replace(/\ufeff/, ''); // BOM 除去
@@ -51,35 +54,41 @@ export function parseRis(text: string): RisEntry[] {
     const value = match[2] as string;
     if (tag === 'ER') {
       if (current !== null) {
-        entries.push(finalizeEntry(current));
+        currentLines.push(line);
+        entries.push(finalizeEntry(current, currentLines));
         current = null;
+        currentLines = [];
       }
       continue;
     }
     if (tag === 'TY') {
       // 新しいレコードの開始
       if (current !== null) {
-        entries.push(finalizeEntry(current));
+        entries.push(finalizeEntry(current, currentLines));
       }
       current = {};
+      currentLines = [];
     }
     if (current === null) {
       current = {};
+      currentLines = [];
     }
+    currentLines.push(line);
     if (!current[tag]) {
       current[tag] = [];
     }
     current[tag].push(value.trim());
   }
   if (current !== null) {
-    entries.push(finalizeEntry(current));
+    entries.push(finalizeEntry(current, currentLines));
   }
   return entries;
 }
 
-function finalizeEntry(tags: Record<string, string[]>): RisEntry {
+function finalizeEntry(tags: Record<string, string[]>, rawLines: readonly string[]): RisEntry {
   return {
     tags,
+    rawText: rawLines.join('\n'),
     title: firstValue(tags, 'TI') ?? firstValue(tags, 'T1') ?? null,
     year: parseYear(firstValue(tags, 'PY') ?? firstValue(tags, 'Y1')),
     originalDb: firstValue(tags, 'DB') ?? null,

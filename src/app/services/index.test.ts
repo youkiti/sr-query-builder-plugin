@@ -16,5 +16,7 @@ describe('app/services index 再エクスポート', () => {
     expect(typeof mod.exportToAllDatabases).toBe('function');
     expect(typeof mod.toDownloadUrl).toBe('function');
     expect(typeof mod.suggestFileName).toBe('function');
+    expect(typeof mod.ingestSeeds).toBe('function');
+    expect(typeof mod.runValidation).toBe('function');
   });
 });
