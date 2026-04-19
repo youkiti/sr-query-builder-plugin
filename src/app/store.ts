@@ -58,6 +58,12 @@ export interface AppState {
   blocksDraft: BlocksDraft | null;
   /** プロトコル本文のメタ情報。未開始なら null */
   protocolDraft: ProtocolDraft | null;
+  /** blocksService.approveBlocks が採番した Protocol.version */
+  currentProtocolVersion: number | null;
+  /** draftService.generateDraft が採番した FormulaVersions.version_id */
+  currentFormulaVersionId: string | null;
+  /** 直近に生成 / 読み込んだ検索式の markdown */
+  currentFormulaMarkdown: string | null;
 }
 
 export const INITIAL_STATE: AppState = {
@@ -66,6 +72,9 @@ export const INITIAL_STATE: AppState = {
   cumulativeCostUsd: null,
   blocksDraft: null,
   protocolDraft: null,
+  currentProtocolVersion: null,
+  currentFormulaVersionId: null,
+  currentFormulaMarkdown: null,
 };
 
 export type Updater = (prev: AppState) => AppState;

@@ -54,6 +54,9 @@ function makeStateWithDrafts(): AppState {
     cumulativeCostUsd: null,
     blocksDraft: makeBlocksDraft(),
     protocolDraft: makeProtocolDraft(),
+    currentProtocolVersion: null,
+    currentFormulaVersionId: null,
+    currentFormulaMarkdown: null,
   };
 }
 

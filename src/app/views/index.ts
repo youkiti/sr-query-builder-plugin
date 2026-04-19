@@ -7,12 +7,16 @@ import {
   type ProtocolViewCallbacks,
 } from './protocolView';
 import { createBlocksView, type BlocksViewCallbacks } from './blocksView';
+import { createDraftView, type DraftViewCallbacks } from './draftView';
+import { createExportView, type ExportViewCallbacks } from './exportView';
 import { buildNotImplementedView } from './notImplementedView';
 import type { RenderView } from './types';
 
 export interface BuildViewsOptions {
   blocks?: BlocksViewCallbacks;
   protocol?: ProtocolViewCallbacks;
+  draft?: DraftViewCallbacks;
+  export?: ExportViewCallbacks;
 }
 
 /**
@@ -28,11 +32,11 @@ export function buildViews(
     protocol: createProtocolView(options.protocol),
     blocks: createBlocksView(store, options.blocks),
     seeds: buildNotImplementedView('seeds'),
-    draft: buildNotImplementedView('draft'),
+    draft: createDraftView(options.draft),
     validate: buildNotImplementedView('validate'),
     expand: buildNotImplementedView('expand'),
     edit: buildNotImplementedView('edit'),
-    export: buildNotImplementedView('export'),
+    export: createExportView(options.export),
     done: buildNotImplementedView('done'),
     history: buildNotImplementedView('history'),
   };
@@ -45,4 +49,6 @@ export {
   createProtocolView,
   buildNotImplementedView,
   createBlocksView,
+  createDraftView,
+  createExportView,
 };

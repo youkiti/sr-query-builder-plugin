@@ -4,6 +4,8 @@ import {
   buildNotImplementedView,
   buildViews,
   createBlocksView,
+  createDraftView,
+  createExportView,
   createProtocolView,
   renderHomeView,
   renderProtocolView,
@@ -34,6 +36,20 @@ describe('buildViews', () => {
     expect(typeof createBlocksView).toBe('function');
     expect(typeof renderProtocolView).toBe('function');
     expect(typeof createProtocolView).toBe('function');
+    expect(typeof createDraftView).toBe('function');
+    expect(typeof createExportView).toBe('function');
+  });
+
+  test('draft callback も options 経由で差し込める', () => {
+    const onGenerate = jest.fn();
+    const views = buildViews(createStore(), { draft: { onGenerate } });
+    expect(typeof views.draft).toBe('function');
+  });
+
+  test('export callback も options 経由で差し込める', () => {
+    const onExport = jest.fn();
+    const views = buildViews(createStore(), { export: { onExport } });
+    expect(typeof views.export).toBe('function');
   });
 
   test('protocol callback も options 経由で差し込める', () => {

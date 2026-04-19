@@ -27,3 +27,16 @@ export {
   type ApprovedProtocol,
   type BlocksServiceDeps,
 } from './blocksService';
+export {
+  generateDraft,
+  type DraftProgress,
+  type DraftResult,
+  type DraftServiceDeps,
+} from './draftService';
+export {
+  exportToAllDatabases,
+  suggestFileName,
+  toDownloadUrl,
+  type ExportResult,
+  type ExportServiceDeps,
+} from './exportService';

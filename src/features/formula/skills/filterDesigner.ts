@@ -47,13 +47,11 @@ export const HIT_THRESHOLD = 10000;
  * Cochrane Highly Sensitive Search Strategy（PubMed 版・2024 改訂・sensitivity-maximizing）。
  * 出典: Cochrane Handbook 2024 Box 4.b。
  *
- * NOTE: 文字列は要件 §4.4 で「2024 版 high sensitivity をデフォルト」と決定済み。
- * 細部は実利用時に検証して修正する。
+ * NOTE: DesignedFilter.expression は `#<id> <expression>` の 1 行に直列化されるため、
+ * クエリ本体だけを保持し、説明文は DesignedFilter.comment 側に寄せる。
  */
-export const COCHRANE_HSSS_2024_PUBMED = [
-  '# Cochrane HSSS PubMed 2024 (sensitivity-maximizing)',
-  '(randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh]))',
-].join('\n');
+export const COCHRANE_HSSS_2024_PUBMED =
+  '(randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh]))';
 
 const RCT_DESIGN_PATTERN = /\b(rct|randomized|randomised)\b/i;
 

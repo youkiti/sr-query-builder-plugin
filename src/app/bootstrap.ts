@@ -10,8 +10,12 @@ import {
   approveBlocks,
   buildLlmProviderFactory,
   createChromeRuntimeDeps,
+  exportToAllDatabases,
+  generateDraft,
   submitProtocol,
   type ChromeRuntimeDeps,
+  type DraftProgress,
+  type ExportResult,
   type LlmFactoryDeps,
   type ProtocolSubmissionInput,
 } from './services';
@@ -146,6 +150,14 @@ function buildDefaultViewOptions(
         navigate('draft');
       },
     },
+    draft: {
+      onGenerate: async (onProgress) => {
+        await runGenerateDraft(store, runtime, llmFactoryDepsBase(), onProgress);
+      },
+    },
+    export: {
+      onExport: async (): Promise<ExportResult> => runExport(store, runtime),
+    },
   };
 }
 
@@ -174,6 +186,34 @@ async function runProtocolSubmit(
 
 async function runApprove(store: AppStore, runtime: ChromeRuntimeDeps): Promise<void> {
   await approveBlocks({ google: runtime.google, profile: runtime.profile, store });
+}
+
+async function runGenerateDraft(
+  store: AppStore,
+  runtime: ChromeRuntimeDeps,
+  baseDeps: Omit<LlmFactoryDeps, 'llmLogFolderId' | 'spreadsheetId'>,
+  onProgress: (p: DraftProgress) => void
+): Promise<void> {
+  const project = store.getState().project;
+  /* istanbul ignore if -- draft view は project 選択済みでしかボタンを出さない */
+  if (!project) {
+    return;
+  }
+  const factory = await buildLlmProviderFactory({
+    ...baseDeps,
+    llmLogFolderId: project.driveFolderId,
+    spreadsheetId: project.spreadsheetId,
+  });
+  await generateDraft({
+    google: runtime.google,
+    store,
+    llmFactory: factory,
+    onProgress,
+  });
+}
+
+async function runExport(store: AppStore, runtime: ChromeRuntimeDeps): Promise<ExportResult> {
+  return exportToAllDatabases({ google: runtime.google, store });
 }
 
 function renderSidebar(

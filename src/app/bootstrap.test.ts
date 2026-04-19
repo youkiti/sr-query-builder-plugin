@@ -50,6 +50,9 @@ describe('startApp', () => {
       cumulativeCostUsd: null,
       blocksDraft: null,
       protocolDraft: null,
+      currentProtocolVersion: null,
+      currentFormulaVersionId: null,
+      currentFormulaMarkdown: null,
     });
     startApp(doc, { ...noopHashOptions('#/home'), store });
     expect(doc.getElementById('app-status')?.textContent).toContain('My SR');
@@ -303,6 +306,108 @@ describe('startApp - wiring 層', () => {
     const calls = fetchMock.mock.calls.map((c) => c[0] as string);
     expect(calls.some((u) => u.includes(':append'))).toBe(true);
     expect(setHash).toHaveBeenCalledWith('#/draft');
+  });
+
+  test('draft view 既定 onGenerate が generateDraft を呼び FormulaVersions に追記する', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+      'apiKeys.gemini': 'KEY',
+    });
+    fetchMock.mockImplementation(async (url: string) => {
+      if (typeof url === 'string' && url.includes('generativelanguage.googleapis.com')) {
+        return jsonResponse({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      concept_summary: 'c',
+                      mesh_requirements: [],
+                      freeword_requirements: [],
+                      rationale: '',
+                      suggestions: [
+                        { descriptor: 'Desc', tag_syntax: '"Desc"[Mesh]', rationale: '' },
+                      ],
+                      freewords: [{ query: 'term[tiab]', rationale: '' }],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        });
+      }
+      if (typeof url === 'string' && url.includes('/upload/drive/v3/files')) {
+        return jsonResponse({ id: 'f', webViewLink: '' });
+      }
+      return jsonResponse({});
+    });
+    const handle = startApp(doc, {
+      getHash: () => '#/draft',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush(); // hydrate
+    handle.store.setState((s) => ({
+      ...s,
+      protocolDraft: {
+        frameworkType: 'pico',
+        researchQuestion: 'RQ',
+        inclusionCriteria: '',
+        exclusionCriteria: '',
+        studyDesign: 'RCT',
+        sourceType: 'manual',
+        sourceFilename: null,
+        rawTextRef: null,
+        rawTextPreview: 'p',
+        rawTextInline: '本文',
+      },
+      blocksDraft: {
+        blocks: [{ blockLabel: 'P', description: 'p', aiGenerated: true, note: '' }],
+        combinationExpression: '#1',
+      },
+    }));
+    const generateBtn = doc.querySelector<HTMLButtonElement>('#app-content button')!;
+    generateBtn.click();
+    for (let i = 0; i < 10; i += 1) {
+      await flush();
+    }
+    const calls = fetchMock.mock.calls.map((c) => c[0] as string);
+    expect(calls.some((u) => u.includes('FormulaVersions') && u.includes(':append'))).toBe(true);
+    expect(handle.store.getState().currentFormulaVersionId).toBeTruthy();
+  });
+
+  test('export view 既定 onExport が Conversions に 4 行追記する', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+    });
+    fetchMock.mockResolvedValue(jsonResponse({}));
+    const handle = startApp(doc, {
+      getHash: () => '#/export',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({
+      ...s,
+      currentFormulaVersionId: 'v-1',
+      currentFormulaMarkdown:
+        '## PubMed/MEDLINE\n\n```\n#1 "Diabetes"[Mesh]\n#2 #1 AND metformin\n```\n',
+    }));
+    const exportBtn = doc.querySelector<HTMLButtonElement>('#app-content button')!;
+    exportBtn.click();
+    for (let i = 0; i < 10; i += 1) {
+      await flush();
+    }
+    const appendCalls = fetchMock.mock.calls.filter((c) =>
+      (c[0] as string).includes('Conversions') && (c[0] as string).includes(':append')
+    );
+    expect(appendCalls).toHaveLength(4);
   });
 });
 
