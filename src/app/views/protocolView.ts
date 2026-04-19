@@ -11,7 +11,7 @@ import type { RenderView } from './types';
  */
 
 export interface ProtocolViewCallbacks {
-  onSubmit?: (input: ProtocolSubmissionInput) => void;
+  onSubmit?: (input: ProtocolSubmissionInput) => void | Promise<void>;
 }
 
 export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): RenderView {
@@ -49,6 +49,7 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
     const errorBox = doc.createElement('p');
     errorBox.className = 'protocol__error';
     errorBox.id = 'protocol-error';
+    errorBox.setAttribute('aria-live', 'polite');
     form.appendChild(errorBox);
 
     form.addEventListener('submit', (event) => {
@@ -56,9 +57,16 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
       errorBox.textContent = '';
       try {
         const input = collectFormInput(form);
-        callbacks.onSubmit?.(input);
+        submit.disabled = true;
+        void Promise.resolve(callbacks.onSubmit?.(input))
+          .catch((err: unknown) => {
+            errorBox.textContent = formatError(err);
+          })
+          .finally(() => {
+            submit.disabled = false;
+          });
       } catch (err) {
-        errorBox.textContent = err instanceof Error ? err.message : String(err);
+        errorBox.textContent = formatError(err);
       }
     });
 
@@ -115,6 +123,10 @@ function readSourceType(form: HTMLFormElement): ProtocolSubmissionInput['sourceT
 function readField(form: HTMLFormElement, id: string): string {
   // 同モジュール内の buildField で必ず作っているので非 null 想定
   return (form.querySelector(`textarea#${id}`) as HTMLTextAreaElement).value;
+}
+
+function formatError(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 function buildSection(

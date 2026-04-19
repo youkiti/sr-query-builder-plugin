@@ -209,6 +209,7 @@ describe('startApp - wiring 層', () => {
       currentProject: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'D', title: 'T' },
       'apiKeys.gemini': 'KEY',
     });
+    const setHash = jest.fn();
     fetchMock.mockImplementation(async (url: string) => {
       if (typeof url === 'string' && url.includes('generativelanguage.googleapis.com')) {
         return jsonResponse({
@@ -238,7 +239,7 @@ describe('startApp - wiring 層', () => {
     const handle = startApp(doc, {
       getHash: () => '#/protocol',
       onHashChange: jest.fn().mockReturnValue(() => undefined),
-      setHash: jest.fn(),
+      setHash,
       runtime,
     });
     await flush(); // hydrate
@@ -251,6 +252,7 @@ describe('startApp - wiring 層', () => {
     await flush();
     await flush();
     expect(handle.store.getState().blocksDraft?.blocks[0]?.blockLabel).toBe('P');
+    expect(setHash).toHaveBeenCalledWith('#/blocks');
     expect(data['LLM_LOG']).toBeUndefined(); // sanity: no unexpected key
   });
 
@@ -259,11 +261,12 @@ describe('startApp - wiring 層', () => {
     const { runtime, fetchMock } = makeRuntime({
       currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
     });
+    const setHash = jest.fn();
     fetchMock.mockResolvedValue(jsonResponse({}));
     const handle = startApp(doc, {
       getHash: () => '#/blocks',
       onHashChange: jest.fn().mockReturnValue(() => undefined),
-      setHash: jest.fn(),
+      setHash,
       runtime,
     });
     await flush();
@@ -299,6 +302,7 @@ describe('startApp - wiring 層', () => {
     // approveBlocks は :append を呼ぶ
     const calls = fetchMock.mock.calls.map((c) => c[0] as string);
     expect(calls.some((u) => u.includes(':append'))).toBe(true);
+    expect(setHash).toHaveBeenCalledWith('#/draft');
   });
 });
 

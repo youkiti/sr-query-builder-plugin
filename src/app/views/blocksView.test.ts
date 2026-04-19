@@ -28,6 +28,10 @@ function draftOf(count: number, combination = '#1'): BlocksDraft {
   };
 }
 
+async function flushAsync(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 describe('createBlocksView', () => {
   test('プロジェクト未選択時は警告だけ', () => {
     const store = createStore();
@@ -178,6 +182,76 @@ describe('createBlocksView', () => {
       (b) => b.textContent === '下書きとして保存'
     )!;
     expect(() => saveBtn.click()).not.toThrow();
+  });
+
+  test('save callback が非同期の間は action button が pending になり、完了後に戻る', async () => {
+    let resolveSave: (() => void) | undefined;
+    const onSaveDraft = jest.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSave = resolve;
+        })
+    );
+    const store = createStore({ ...withProject(), blocksDraft: draftOf(2, '#1 AND #2') });
+    const view = createBlocksView(store, { onSaveDraft });
+    const container = buildContainer();
+    view(container, { state: store.getState(), navigate: jest.fn() });
+    const saveBtn = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find(
+      (b) => b.textContent === '下書きとして保存'
+    )!;
+    const approveBtn = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find(
+      (b) => b.textContent?.startsWith('承認して')
+    )!;
+    saveBtn.click();
+    expect(saveBtn.disabled).toBe(true);
+    expect(approveBtn.disabled).toBe(true);
+    resolveSave?.();
+    await flushAsync();
+    expect(saveBtn.disabled).toBe(false);
+    expect(approveBtn.disabled).toBe(false);
+  });
+
+  test('approve callback が同期的に throw した場合はエラー表示される', () => {
+    const onApprove = jest.fn(() => {
+      throw new Error('sync approve failed');
+    });
+    const store = createStore({ ...withProject(), blocksDraft: draftOf(2, '#1 AND #2') });
+    const view = createBlocksView(store, { onApprove });
+    const container = buildContainer();
+    view(container, { state: store.getState(), navigate: jest.fn() });
+    const approveBtn = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find(
+      (b) => b.textContent?.startsWith('承認して')
+    )!;
+    approveBtn.click();
+    expect(container.querySelector('#blocks-error')?.textContent).toBe('sync approve failed');
+  });
+
+  test('approve callback が非同期に reject した場合はエラー表示される', async () => {
+    const onApprove = jest.fn().mockRejectedValue(new Error('approve failed'));
+    const store = createStore({ ...withProject(), blocksDraft: draftOf(2, '#1 AND #2') });
+    const view = createBlocksView(store, { onApprove });
+    const container = buildContainer();
+    view(container, { state: store.getState(), navigate: jest.fn() });
+    const approveBtn = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find(
+      (b) => b.textContent?.startsWith('承認して')
+    )!;
+    approveBtn.click();
+    await flushAsync();
+    expect(container.querySelector('#blocks-error')?.textContent).toBe('approve failed');
+  });
+
+  test('Error 以外の例外も String 化して表示する', async () => {
+    const onApprove = jest.fn().mockRejectedValue('rare approve failure');
+    const store = createStore({ ...withProject(), blocksDraft: draftOf(2, '#1 AND #2') });
+    const view = createBlocksView(store, { onApprove });
+    const container = buildContainer();
+    view(container, { state: store.getState(), navigate: jest.fn() });
+    const approveBtn = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find(
+      (b) => b.textContent?.startsWith('承認して')
+    )!;
+    approveBtn.click();
+    await flushAsync();
+    expect(container.querySelector('#blocks-error')?.textContent).toBe('rare approve failure');
   });
 
   test('description / note を更新すると store が更新される', () => {

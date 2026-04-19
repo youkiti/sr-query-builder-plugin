@@ -57,15 +57,14 @@ export function createLocationOptions(
 export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
   const store = opts.store ?? createStore();
   const runtime = opts.runtime === undefined ? createChromeRuntimeDeps() : opts.runtime;
-  const viewOptions = opts.viewOptions ?? buildDefaultViewOptions(store, runtime);
+  const navigate = (route: RouteName): void => {
+    opts.setHash(buildHash(route));
+  };
+  const viewOptions = opts.viewOptions ?? buildDefaultViewOptions(store, runtime, navigate);
   const views = buildViews(store, viewOptions);
   const status = doc.getElementById('app-status');
   const content = doc.getElementById('app-content');
   const sidebar = doc.querySelector('#app-sidebar nav');
-
-  const navigate = (route: RouteName): void => {
-    opts.setHash(buildHash(route));
-  };
 
   const render = (): void => {
     const route = parseRoute(opts.getHash());
@@ -123,7 +122,8 @@ async function hydrateCurrentProject(store: AppStore, runtime: ChromeRuntimeDeps
  */
 function buildDefaultViewOptions(
   store: AppStore,
-  runtime: ChromeRuntimeDeps | null
+  runtime: ChromeRuntimeDeps | null,
+  navigate: (route: RouteName) => void
 ): BuildViewsOptions {
   if (!runtime) {
     return {};
@@ -135,13 +135,15 @@ function buildDefaultViewOptions(
   });
   return {
     protocol: {
-      onSubmit: (input: ProtocolSubmissionInput) => {
-        void runProtocolSubmit(store, runtime, llmFactoryDepsBase(), llmFactoryPromise, input);
+      onSubmit: async (input: ProtocolSubmissionInput) => {
+        await runProtocolSubmit(store, runtime, llmFactoryDepsBase(), llmFactoryPromise, input);
+        navigate('blocks');
       },
     },
     blocks: {
-      onApprove: () => {
-        void runApprove(store, runtime);
+      onApprove: async () => {
+        await runApprove(store, runtime);
+        navigate('draft');
       },
     },
   };

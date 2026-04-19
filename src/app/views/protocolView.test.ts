@@ -154,6 +154,10 @@ describe('createProtocolView - docx ファイル未選択', () => {
 });
 
 describe('createProtocolView - エラー表示', () => {
+  async function flushAsync(): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
   test('onSubmit が同期的に throw した場合もエラーボックスに表示される', () => {
     const onSubmit = jest.fn(() => {
       throw new Error('boom');
@@ -174,6 +178,16 @@ describe('createProtocolView - エラー表示', () => {
     view(container, { state: stateWithProject, navigate: jest.fn() });
     container.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }));
     expect(container.querySelector('#protocol-error')?.textContent).toBe('rare');
+  });
+
+  test('onSubmit が非同期に reject した場合もエラーボックスに表示される', async () => {
+    const onSubmit = jest.fn().mockRejectedValue(new Error('async boom'));
+    const view = createProtocolView({ onSubmit });
+    const container = buildContainer();
+    view(container, { state: stateWithProject, navigate: jest.fn() });
+    container.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }));
+    await flushAsync();
+    expect(container.querySelector('#protocol-error')?.textContent).toBe('async boom');
   });
 });
 
