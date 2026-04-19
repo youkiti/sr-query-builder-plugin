@@ -7,5 +7,8 @@ describe('features/protocol index 再エクスポート', () => {
     expect(typeof mod.parseManualProtocol).toBe('function');
     expect(typeof mod.buildPreview).toBe('function');
     expect(typeof mod.PREVIEW_MAX_LENGTH).toBe('number');
+    expect(typeof mod.appendProtocol).toBe('function');
+    expect(typeof mod.appendProtocolBlocks).toBe('function');
+    expect(typeof mod.getNextProtocolVersion).toBe('function');
   });
 });

@@ -1,49 +1,133 @@
+import type { ProtocolSubmissionInput } from '@/app/services';
 import { ROUTE_LABELS } from '../router';
 import type { RenderView } from './types';
 
 /**
  * プロトコル入力フォーム（手入力 / .md / .docx）。
  *
- * MVP のこの段階ではフォーム UI のみ提供し、実際の送信処理（features/protocol
- * パーサ呼び出し → extract-protocol skill → ブロック承認画面遷移）は
- * 後続の wiring セッションで bootstrap.ts から組み合わせる。
+ * 送信時は `onSubmit` callback に `ProtocolSubmissionInput` を渡し、
+ * 実呼び出し（features/protocol パーサ → extract-protocol skill →
+ * blocksDraft 更新 → /blocks ナビ）は bootstrap.ts 側で組み立てる。
  */
-export const renderProtocolView: RenderView = (container, ctx) => {
-  container.innerHTML = '';
 
-  const heading = container.ownerDocument.createElement('h2');
-  heading.textContent = ROUTE_LABELS.protocol;
-  container.appendChild(heading);
+export interface ProtocolViewCallbacks {
+  onSubmit?: (input: ProtocolSubmissionInput) => void | Promise<void>;
+}
 
-  if (!ctx.state.project) {
-    const warn = container.ownerDocument.createElement('p');
-    warn.className = 'protocol__warning';
-    warn.textContent = '先にプロジェクトを選択してください。';
-    container.appendChild(warn);
-    return;
+export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): RenderView {
+  return (container, ctx) => {
+    container.innerHTML = '';
+
+    const heading = container.ownerDocument.createElement('h2');
+    heading.textContent = ROUTE_LABELS.protocol;
+    container.appendChild(heading);
+
+    if (!ctx.state.project) {
+      const warn = container.ownerDocument.createElement('p');
+      warn.className = 'protocol__warning';
+      warn.textContent = '先にプロジェクトを選択してください。';
+      container.appendChild(warn);
+      return;
+    }
+
+    const doc = container.ownerDocument;
+    const form = doc.createElement('form');
+    form.className = 'protocol__form';
+
+    form.appendChild(buildSection(doc, '入力形式', buildSourceTypeRadios));
+    form.appendChild(buildField(doc, 'rq', 'RQ（リサーチクエスチョン）'));
+    form.appendChild(buildField(doc, 'inclusion', '組入基準（改行区切り）'));
+    form.appendChild(buildField(doc, 'exclusion', '除外基準（改行区切り）'));
+    form.appendChild(buildField(doc, 'inline', '元テキスト（手入力時のみ）'));
+    form.appendChild(buildFileInput(doc, 'file', '.md / .docx アップロード'));
+
+    const submit = doc.createElement('button');
+    submit.type = 'submit';
+    submit.textContent = '次へ（ブロック抽出）';
+    form.appendChild(submit);
+
+    const errorBox = doc.createElement('p');
+    errorBox.className = 'protocol__error';
+    errorBox.id = 'protocol-error';
+    errorBox.setAttribute('aria-live', 'polite');
+    form.appendChild(errorBox);
+
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      errorBox.textContent = '';
+      try {
+        const input = collectFormInput(form);
+        submit.disabled = true;
+        void Promise.resolve(callbacks.onSubmit?.(input))
+          .catch((err: unknown) => {
+            errorBox.textContent = formatError(err);
+          })
+          .finally(() => {
+            submit.disabled = false;
+          });
+      } catch (err) {
+        errorBox.textContent = formatError(err);
+      }
+    });
+
+    container.appendChild(form);
+  };
+}
+
+/**
+ * 旧 API（callback 無し）。テストや placeholder 用途で残す。
+ * 実際の wiring は createProtocolView を使う。
+ */
+export const renderProtocolView: RenderView = createProtocolView();
+
+function collectFormInput(form: HTMLFormElement): ProtocolSubmissionInput {
+  const sourceType = readSourceType(form);
+  const rq = readField(form, 'rq');
+  const inclusion = readField(form, 'inclusion');
+  const exclusion = readField(form, 'exclusion');
+  const inline = readField(form, 'inline');
+  const fileInput = form.querySelector<HTMLInputElement>('input[type=file]');
+  const file = fileInput?.files?.[0] ?? null;
+  const base: ProtocolSubmissionInput = {
+    sourceType,
+    researchQuestion: rq,
+    inclusionCriteria: inclusion,
+    exclusionCriteria: exclusion,
+    inlineText: inline,
+  };
+  if (sourceType === 'markdown') {
+    if (!file) {
+      throw new Error('markdown ファイルを選択してください');
+    }
+    return { ...base, markdownFile: { name: file.name, text: () => file.text() } };
   }
+  if (sourceType === 'docx') {
+    if (!file) {
+      throw new Error('.docx ファイルを選択してください');
+    }
+    return {
+      ...base,
+      docxFile: { name: file.name, arrayBuffer: () => file.arrayBuffer() },
+    };
+  }
+  return base;
+}
 
-  const form = container.ownerDocument.createElement('form');
-  form.className = 'protocol__form';
-  form.addEventListener('submit', (event) => {
-    event.preventDefault();
-    // 実送信は後続セッションで bootstrap.ts から差し込む
-  });
+function readSourceType(form: HTMLFormElement): ProtocolSubmissionInput['sourceType'] {
+  const checked = form.querySelector<HTMLInputElement>('input[name=sourceType]:checked');
+  const value = checked?.value;
+  if (value === 'markdown' || value === 'docx') return value;
+  return 'manual';
+}
 
-  form.appendChild(buildSection(container.ownerDocument, '入力形式', buildSourceTypeRadios));
-  form.appendChild(buildField(container.ownerDocument, 'rq', 'RQ（リサーチクエスチョン）'));
-  form.appendChild(buildField(container.ownerDocument, 'inclusion', '組入基準（改行区切り）'));
-  form.appendChild(buildField(container.ownerDocument, 'exclusion', '除外基準（改行区切り）'));
-  form.appendChild(buildField(container.ownerDocument, 'inline', '元テキスト（手入力時のみ）'));
-  form.appendChild(buildFileInput(container.ownerDocument, 'file', '.md / .docx アップロード'));
+function readField(form: HTMLFormElement, id: string): string {
+  // 同モジュール内の buildField で必ず作っているので非 null 想定
+  return (form.querySelector(`textarea#${id}`) as HTMLTextAreaElement).value;
+}
 
-  const submit = container.ownerDocument.createElement('button');
-  submit.type = 'submit';
-  submit.textContent = '次へ（ブロック抽出）';
-  form.appendChild(submit);
-
-  container.appendChild(form);
-};
+function formatError(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
 
 function buildSection(
   doc: Document,

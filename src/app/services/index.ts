@@ -1,0 +1,29 @@
+export {
+  createChromeGoogleApiDeps,
+  createChromeRuntimeDeps,
+  type ChromeRuntimeDeps,
+} from './factories';
+export {
+  createNewProject,
+  loadExistingProject,
+  type ProjectServiceDeps,
+} from './projectService';
+export {
+  STORAGE_KEY_GEMINI,
+  LlmApiKeyMissingError,
+  buildLlmProviderFactory,
+  getGeminiApiKey,
+  type LlmFactoryDeps,
+  type LlmProviderFactory,
+} from './llmProviderService';
+export {
+  submitProtocol,
+  type ProtocolServiceDeps,
+  type ProtocolSubmissionInput,
+  type ProtocolSubmissionResult,
+} from './protocolService';
+export {
+  approveBlocks,
+  type ApprovedProtocol,
+  type BlocksServiceDeps,
+} from './blocksService';

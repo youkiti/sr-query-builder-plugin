@@ -20,6 +20,8 @@ function noopHashOptions(initial = ''): AppBootstrapOptions {
     getHash: () => initial,
     onHashChange: jest.fn().mockReturnValue(() => undefined),
     setHash: jest.fn(),
+    // 既存テストは wiring 層を触らないので runtime を無効化する
+    runtime: null,
   };
 }
 
@@ -47,6 +49,7 @@ describe('startApp', () => {
       project: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'd', title: 'My SR' },
       cumulativeCostUsd: null,
       blocksDraft: null,
+      protocolDraft: null,
     });
     startApp(doc, { ...noopHashOptions('#/home'), store });
     expect(doc.getElementById('app-status')?.textContent).toContain('My SR');
@@ -117,6 +120,189 @@ describe('startApp', () => {
   test('必要な DOM 要素が欠けていても例外にならない', () => {
     const doc = document.implementation.createHTMLDocument('empty');
     expect(() => startApp(doc, noopHashOptions(''))).not.toThrow();
+  });
+});
+
+describe('startApp - wiring 層', () => {
+  function jsonResponse(body: unknown): Response {
+    return {
+      ok: true,
+      status: 200,
+      json: async () => body,
+      text: async () => JSON.stringify(body),
+    } as Response;
+  }
+
+  function makeRuntime(initialStore: Record<string, unknown> = {}): {
+    runtime: NonNullable<AppBootstrapOptions['runtime']>;
+    data: Record<string, unknown>;
+    fetchMock: jest.Mock;
+  } {
+    const data = { ...initialStore };
+    const fetchMock = jest.fn();
+    return {
+      data,
+      fetchMock,
+      runtime: {
+        google: {
+          fetch: fetchMock as unknown as typeof fetch,
+          getAccessToken: jest.fn().mockResolvedValue('t'),
+        },
+        profile: {
+          getProfileUserInfo: jest.fn().mockResolvedValue({ email: 'me@x', id: 'u' }),
+        },
+        store: {
+          read: async <T>(key: string) => data[key] as T | undefined,
+          write: async (items) => {
+            Object.assign(data, items);
+          },
+        },
+      },
+    };
+  }
+
+  async function flush(): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  test('hydrate: chrome.storage の currentProject を store に取り込む', async () => {
+    const doc = buildDocument();
+    const { runtime } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'd', title: 'My SR' },
+    });
+    const handle = startApp(doc, { ...noopHashOptions('#/home'), runtime });
+    await flush();
+    expect(handle.store.getState().project?.title).toBe('My SR');
+  });
+
+  test('hydrate: 同じ projectId なら setState せず参照を変えない', async () => {
+    const doc = buildDocument();
+    const { runtime } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'd', title: 'X' },
+    });
+    const initialProject = {
+      projectId: 'p',
+      spreadsheetId: 's',
+      driveFolderId: 'd',
+      title: 'Initial',
+    };
+    const store = createStore({
+      ...createStore().getState(),
+      project: initialProject,
+    });
+    startApp(doc, { ...noopHashOptions('#/home'), store, runtime });
+    await flush();
+    expect(store.getState().project).toBe(initialProject);
+  });
+
+  test('hydrate: storage に何も無ければ project は null のまま', async () => {
+    const doc = buildDocument();
+    const { runtime } = makeRuntime();
+    const handle = startApp(doc, { ...noopHashOptions('#/home'), runtime });
+    await flush();
+    expect(handle.store.getState().project).toBeNull();
+  });
+
+  test('protocol view 既定 onSubmit が submitProtocol を呼び blocksDraft を埋める', async () => {
+    const doc = buildDocument();
+    const { runtime, data, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'D', title: 'T' },
+      'apiKeys.gemini': 'KEY',
+    });
+    const setHash = jest.fn();
+    fetchMock.mockImplementation(async (url: string) => {
+      if (typeof url === 'string' && url.includes('generativelanguage.googleapis.com')) {
+        return jsonResponse({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      framework_type: 'pico',
+                      research_question: 'RQ',
+                      blocks: [{ block_label: 'P', description: 'p' }],
+                      combination_expression: '#1',
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        });
+      }
+      if (typeof url === 'string' && url.includes('/upload/drive/v3/files')) {
+        return jsonResponse({ id: 'f', webViewLink: 'https://drive/x' });
+      }
+      return jsonResponse({});
+    });
+    const handle = startApp(doc, {
+      getHash: () => '#/protocol',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash,
+      runtime,
+    });
+    await flush(); // hydrate
+    handle.store.setState((s) => ({ ...s })); // force re-render so view sees project
+    const form = doc.querySelector('form')!;
+    const inline = doc.querySelector<HTMLTextAreaElement>('textarea#inline')!;
+    inline.value = '本文';
+    form.dispatchEvent(new Event('submit', { cancelable: true }));
+    await flush();
+    await flush();
+    await flush();
+    expect(handle.store.getState().blocksDraft?.blocks[0]?.blockLabel).toBe('P');
+    expect(setHash).toHaveBeenCalledWith('#/blocks');
+    expect(data['LLM_LOG']).toBeUndefined(); // sanity: no unexpected key
+  });
+
+  test('blocks view 既定 onApprove が approveBlocks を呼ぶ', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+    });
+    const setHash = jest.fn();
+    fetchMock.mockResolvedValue(jsonResponse({}));
+    const handle = startApp(doc, {
+      getHash: () => '#/blocks',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash,
+      runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({
+      ...s,
+      protocolDraft: {
+        frameworkType: 'pico',
+        researchQuestion: 'RQ',
+        inclusionCriteria: '',
+        exclusionCriteria: '',
+        studyDesign: 'RCT',
+        sourceType: 'manual',
+        sourceFilename: null,
+        rawTextRef: null,
+        rawTextPreview: 'p',
+        rawTextInline: '本文',
+      },
+      blocksDraft: {
+        blocks: [
+          { blockLabel: 'P', description: '', aiGenerated: true, note: '' },
+          { blockLabel: 'I', description: '', aiGenerated: true, note: '' },
+        ],
+        combinationExpression: '#1 AND #2',
+      },
+    }));
+    const approveBtn = Array.from(doc.querySelectorAll<HTMLButtonElement>('button')).find(
+      (b) => b.textContent?.startsWith('承認して')
+    )!;
+    approveBtn.click();
+    await flush();
+    await flush();
+    await flush();
+    // approveBlocks は :append を呼ぶ
+    const calls = fetchMock.mock.calls.map((c) => c[0] as string);
+    expect(calls.some((u) => u.includes(':append'))).toBe(true);
+    expect(setHash).toHaveBeenCalledWith('#/draft');
   });
 });
 

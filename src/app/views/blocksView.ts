@@ -35,9 +35,9 @@ import type { RenderView } from './types';
 
 export interface BlocksViewCallbacks {
   /** 「下書きとして保存」ボタンが押されたとき */
-  onSaveDraft?: (draft: BlocksDraft) => void;
+  onSaveDraft?: (draft: BlocksDraft) => void | Promise<void>;
   /** 「承認して検索式生成へ」が押されたとき */
-  onApprove?: (draft: BlocksDraft) => void;
+  onApprove?: (draft: BlocksDraft) => void | Promise<void>;
 }
 
 export function createBlocksView(
@@ -237,7 +237,19 @@ function buildActionRow(
   draftBtn.type = 'button';
   draftBtn.textContent = '下書きとして保存';
   draftBtn.addEventListener('click', () => {
-    callbacks.onSaveDraft?.(store.getState().blocksDraft as BlocksDraft);
+    runAction(
+      callbacks.onSaveDraft,
+      store,
+      errorBox,
+      () => {
+        draftBtn.disabled = true;
+        approveBtn.disabled = true;
+      },
+      () => {
+        draftBtn.disabled = false;
+        approveBtn.disabled = hasErrors;
+      }
+    );
   });
   wrap.appendChild(draftBtn);
 
@@ -246,9 +258,27 @@ function buildActionRow(
   approveBtn.textContent = '承認して検索式生成へ →';
   approveBtn.disabled = hasErrors;
   approveBtn.addEventListener('click', () => {
-    callbacks.onApprove?.(store.getState().blocksDraft as BlocksDraft);
+    runAction(
+      callbacks.onApprove,
+      store,
+      errorBox,
+      () => {
+        draftBtn.disabled = true;
+        approveBtn.disabled = true;
+      },
+      () => {
+        draftBtn.disabled = false;
+        approveBtn.disabled = hasErrors;
+      }
+    );
   });
   wrap.appendChild(approveBtn);
+
+  const errorBox = doc.createElement('p');
+  errorBox.className = 'blocks__error';
+  errorBox.id = 'blocks-error';
+  errorBox.setAttribute('aria-live', 'polite');
+  wrap.appendChild(errorBox);
 
   return wrap;
 }
@@ -272,4 +302,40 @@ function mutateDraft(store: AppStore, mutator: (d: BlocksDraft) => BlocksDraft):
     if (s.blocksDraft === null) return s;
     return { ...s, blocksDraft: mutator(s.blocksDraft) };
   });
+}
+
+function runAction(
+  action: ((draft: BlocksDraft) => void | Promise<void>) | undefined,
+  store: AppStore,
+  errorBox: HTMLElement,
+  onStart: () => void,
+  onFinally: () => void
+): void {
+  errorBox.textContent = '';
+  const draft = store.getState().blocksDraft;
+  if (!action || draft === null) {
+    return;
+  }
+  try {
+    const result = action(draft);
+    if (!isPromiseLike(result)) {
+      return;
+    }
+    onStart();
+    void result
+      .catch((err: unknown) => {
+        errorBox.textContent = formatError(err);
+      })
+      .finally(onFinally);
+  } catch (err) {
+    errorBox.textContent = formatError(err);
+  }
+}
+
+function formatError(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function isPromiseLike(value: unknown): value is Promise<void> {
+  return typeof value === 'object' && value !== null && 'then' in value;
 }

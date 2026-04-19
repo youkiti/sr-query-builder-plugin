@@ -1,3 +1,3 @@
-import { createChromeDeps, startPopup } from './bootstrap';
+import { createChromePopupDeps, startPopup } from './bootstrap';
 
-startPopup(document, createChromeDeps());
+void startPopup(document, createChromePopupDeps());

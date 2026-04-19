@@ -1,18 +1,23 @@
 import type { AppStore } from '../store';
 import type { RouteName } from '../router';
 import { renderHomeView } from './homeView';
-import { renderProtocolView } from './protocolView';
+import {
+  createProtocolView,
+  renderProtocolView,
+  type ProtocolViewCallbacks,
+} from './protocolView';
 import { createBlocksView, type BlocksViewCallbacks } from './blocksView';
 import { buildNotImplementedView } from './notImplementedView';
 import type { RenderView } from './types';
 
 export interface BuildViewsOptions {
   blocks?: BlocksViewCallbacks;
+  protocol?: ProtocolViewCallbacks;
 }
 
 /**
  * ルートごとの render 関数マップを store と共に組み立てる。
- * ストアに依存する view（blocksView）はここで closure を結びつける。
+ * ストアや callback に依存する view（blocks / protocol）はここで closure を結びつける。
  */
 export function buildViews(
   store: AppStore,
@@ -20,7 +25,7 @@ export function buildViews(
 ): Record<RouteName, RenderView> {
   return {
     home: renderHomeView,
-    protocol: renderProtocolView,
+    protocol: createProtocolView(options.protocol),
     blocks: createBlocksView(store, options.blocks),
     seeds: buildNotImplementedView('seeds'),
     draft: buildNotImplementedView('draft'),
@@ -34,4 +39,10 @@ export function buildViews(
 }
 
 export type { RenderView, ViewContext } from './types';
-export { renderHomeView, renderProtocolView, buildNotImplementedView, createBlocksView };
+export {
+  renderHomeView,
+  renderProtocolView,
+  createProtocolView,
+  buildNotImplementedView,
+  createBlocksView,
+};

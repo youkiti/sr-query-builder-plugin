@@ -1,8 +1,21 @@
 /**
  * メインビュー（app.html）の起動ロジック。
  * router / store / views を組み合わせ、ハッシュ変更とストア更新の両方で再レンダする。
+ *
+ * wiring 層も兼ねており、起動時に chrome.storage から currentProject を読んで
+ * store に反映し、protocol / blocks view の callback に services を結び付ける。
  */
 
+import {
+  approveBlocks,
+  buildLlmProviderFactory,
+  createChromeRuntimeDeps,
+  submitProtocol,
+  type ChromeRuntimeDeps,
+  type LlmFactoryDeps,
+  type ProtocolSubmissionInput,
+} from './services';
+import { getCurrentProject } from '@/features/project';
 import { ROUTE_LABELS, ROUTES, buildHash, parseRoute, type RouteName } from './router';
 import { createStore, type AppStore } from './store';
 import { buildViews, type BuildViewsOptions, type ViewContext } from './views';
@@ -14,8 +27,10 @@ export interface AppBootstrapOptions {
   setHash: (hash: string) => void;
   /** テスト時に差し替え可能なストア（既定は createStore()） */
   store?: AppStore;
-  /** view ごとのコールバック注入（blocks の保存ボタン等） */
+  /** view ごとのコールバック注入（テスト時に直接渡したいとき用） */
   viewOptions?: BuildViewsOptions;
+  /** wiring 用の Chrome runtime（既定: createChromeRuntimeDeps）。null で wiring を無効化（テスト用） */
+  runtime?: ChromeRuntimeDeps | null;
 }
 
 export interface AppHandle {
@@ -41,14 +56,15 @@ export function createLocationOptions(
 
 export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
   const store = opts.store ?? createStore();
-  const views = buildViews(store, opts.viewOptions);
-  const status = doc.getElementById('app-status');
-  const content = doc.getElementById('app-content');
-  const sidebar = doc.querySelector('#app-sidebar nav');
-
+  const runtime = opts.runtime === undefined ? createChromeRuntimeDeps() : opts.runtime;
   const navigate = (route: RouteName): void => {
     opts.setHash(buildHash(route));
   };
+  const viewOptions = opts.viewOptions ?? buildDefaultViewOptions(store, runtime, navigate);
+  const views = buildViews(store, viewOptions);
+  const status = doc.getElementById('app-status');
+  const content = doc.getElementById('app-content');
+  const sidebar = doc.querySelector('#app-sidebar nav');
 
   const render = (): void => {
     const route = parseRoute(opts.getHash());
@@ -68,6 +84,11 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
     }
   };
 
+  // 起動時に chrome.storage から currentProject を取り込む（runtime が無い場合はスキップ）
+  if (runtime) {
+    void hydrateCurrentProject(store, runtime).then(render);
+  }
+
   render();
   const unlistenHash = opts.onHashChange(render);
   const unsubscribe = store.subscribe(render);
@@ -79,6 +100,80 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
       unsubscribe();
     },
   };
+}
+
+/**
+ * chrome.storage の currentProject をストアに反映する。
+ * Popup 側で更新された後、メインビューを開いた直後に同期するための初期化処理。
+ */
+async function hydrateCurrentProject(store: AppStore, runtime: ChromeRuntimeDeps): Promise<void> {
+  const current = await getCurrentProject(runtime.store);
+  if (!current) {
+    return;
+  }
+  store.setState((s) => (s.project?.projectId === current.projectId ? s : { ...s, project: current }));
+}
+
+/**
+ * runtime が利用可能なときの既定 view options。
+ * - protocol.onSubmit → submitProtocol（LLM 呼び出し）→ blocksDraft 更新 → /blocks ナビ
+ * - blocks.onApprove → approveBlocks（Sheets 書き込み）→ /draft ナビ（暫定）
+ * - blocks.onSaveDraft → 何もしない（store にのみ残す）
+ */
+function buildDefaultViewOptions(
+  store: AppStore,
+  runtime: ChromeRuntimeDeps | null,
+  navigate: (route: RouteName) => void
+): BuildViewsOptions {
+  if (!runtime) {
+    return {};
+  }
+  const llmFactoryPromise: Promise<Awaited<ReturnType<typeof buildLlmProviderFactory>>> | null = null;
+  const llmFactoryDepsBase = (): Omit<LlmFactoryDeps, 'llmLogFolderId' | 'spreadsheetId'> => ({
+    google: runtime.google,
+    store: runtime.store,
+  });
+  return {
+    protocol: {
+      onSubmit: async (input: ProtocolSubmissionInput) => {
+        await runProtocolSubmit(store, runtime, llmFactoryDepsBase(), llmFactoryPromise, input);
+        navigate('blocks');
+      },
+    },
+    blocks: {
+      onApprove: async () => {
+        await runApprove(store, runtime);
+        navigate('draft');
+      },
+    },
+  };
+}
+
+async function runProtocolSubmit(
+  store: AppStore,
+  runtime: ChromeRuntimeDeps,
+  baseDeps: Omit<LlmFactoryDeps, 'llmLogFolderId' | 'spreadsheetId'>,
+  _llmFactoryPromise: unknown,
+  input: ProtocolSubmissionInput
+): Promise<void> {
+  const project = store.getState().project;
+  /* istanbul ignore if -- project 未選択時はそもそも protocol view が出ない */
+  if (!project) {
+    return;
+  }
+  // logs/llm の Drive フォルダ ID は要件 §3.3 で `{drive_folder_id}/logs/llm/` に置く。
+  // 取得には Drive 検索が必要だが、MVP では project トップフォルダ直下に保存する暫定運用。
+  const factory = await buildLlmProviderFactory({
+    ...baseDeps,
+    llmLogFolderId: project.driveFolderId,
+    spreadsheetId: project.spreadsheetId,
+  });
+  const provider = factory.forPurpose('extract_protocol');
+  await submitProtocol(input, { store, provider });
+}
+
+async function runApprove(store: AppStore, runtime: ChromeRuntimeDeps): Promise<void> {
+  await approveBlocks({ google: runtime.google, profile: runtime.profile, store });
 }
 
 function renderSidebar(
