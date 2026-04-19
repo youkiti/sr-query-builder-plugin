@@ -12,13 +12,19 @@ import {
   createChromeRuntimeDeps,
   exportToAllDatabases,
   generateDraft,
+  ingestSeeds,
+  runValidation,
   submitProtocol,
   type ChromeRuntimeDeps,
   type DraftProgress,
   type ExportResult,
+  type IngestInput,
+  type IngestSummary,
   type LlmFactoryDeps,
   type ProtocolSubmissionInput,
+  type ValidationSummary,
 } from './services';
+import type { EutilsDeps } from '@/lib/ncbi';
 import { getCurrentProject } from '@/features/project';
 import { ROUTE_LABELS, ROUTES, buildHash, parseRoute, type RouteName } from './router';
 import { createStore, type AppStore } from './store';
@@ -158,7 +164,42 @@ function buildDefaultViewOptions(
     export: {
       onExport: async (): Promise<ExportResult> => runExport(store, runtime),
     },
+    seeds: {
+      onIngest: async (input: IngestInput): Promise<IngestSummary> =>
+        runIngestSeeds(store, runtime, input),
+    },
+    validate: {
+      onRun: async (): Promise<ValidationSummary> => runValidate(store, runtime),
+    },
   };
+}
+
+function toEutilsDeps(runtime: ChromeRuntimeDeps): EutilsDeps {
+  // NCBI API キー（BYOK）は §11 で将来対応。MVP は未設定のまま 3 req/s 枠で動かす
+  return { fetch: runtime.google.fetch };
+}
+
+async function runIngestSeeds(
+  store: AppStore,
+  runtime: ChromeRuntimeDeps,
+  input: IngestInput
+): Promise<IngestSummary> {
+  return ingestSeeds(input, {
+    google: runtime.google,
+    eutils: toEutilsDeps(runtime),
+    store,
+  });
+}
+
+async function runValidate(
+  store: AppStore,
+  runtime: ChromeRuntimeDeps
+): Promise<ValidationSummary> {
+  return runValidation({
+    google: runtime.google,
+    eutils: toEutilsDeps(runtime),
+    store,
+  });
 }
 
 async function runProtocolSubmit(

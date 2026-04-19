@@ -7,6 +7,8 @@ import {
   createDraftView,
   createExportView,
   createProtocolView,
+  createSeedsView,
+  createValidateView,
   renderHomeView,
   renderProtocolView,
 } from './index';
@@ -38,6 +40,8 @@ describe('buildViews', () => {
     expect(typeof createProtocolView).toBe('function');
     expect(typeof createDraftView).toBe('function');
     expect(typeof createExportView).toBe('function');
+    expect(typeof createSeedsView).toBe('function');
+    expect(typeof createValidateView).toBe('function');
   });
 
   test('draft callback も options 経由で差し込める', () => {
@@ -50,6 +54,17 @@ describe('buildViews', () => {
     const onExport = jest.fn();
     const views = buildViews(createStore(), { export: { onExport } });
     expect(typeof views.export).toBe('function');
+  });
+
+  test('seeds / validate callback も options 経由で差し込める', () => {
+    const onIngest = jest.fn();
+    const onRun = jest.fn();
+    const views = buildViews(createStore(), {
+      seeds: { onIngest },
+      validate: { onRun },
+    });
+    expect(typeof views.seeds).toBe('function');
+    expect(typeof views.validate).toBe('function');
   });
 
   test('protocol callback も options 経由で差し込める', () => {
