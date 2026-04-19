@@ -39,6 +39,7 @@ function sampleSummary(overrides: Partial<ValidationSummary> = {}): ValidationSu
       capturedPmids: ['111', '222', '333'],
       missedPmids: ['444'],
     },
+    finalQueryError: null,
     mesh: [
       { pmid: '111', title: 'A', meshHeadings: ['Diabetes Mellitus'] },
     ],
@@ -46,6 +47,7 @@ function sampleSummary(overrides: Partial<ValidationSummary> = {}): ValidationSu
       { descriptor: 'Diabetes Mellitus', count: 2 },
       { descriptor: 'Metformin', count: 1 },
     ],
+    meshError: null,
     eligibleSeedCount: 4,
     totalSeedCount: 5,
     loggedValidationIds: ['v1', 'v2', 'v3', 'v4', 'v5'],
@@ -91,6 +93,24 @@ describe('createValidateView', () => {
     expect(container.querySelector('.validate__final')?.textContent).toContain('75.0%');
     expect(container.querySelectorAll('.validate__missed li')).toHaveLength(2); // "未捕捉 PMID:" + 444
     expect(container.querySelectorAll('.validate__mesh li')).toHaveLength(2);
+  });
+
+  test('final_query / mesh の部分失敗は各セクションに表示する', async () => {
+    const onRun = jest.fn().mockResolvedValue(
+      sampleSummary({
+        finalQueryError: 'final down',
+        meshError: 'mesh down',
+        meshFrequency: [],
+      })
+    );
+    const view = createValidateView({ onRun });
+    const container = buildContainer();
+    view(container, { state: stateReady(), navigate: jest.fn() });
+    container.querySelector('button')!.click();
+    await flushAsync();
+    await flushAsync();
+    expect(container.querySelector('.validate__final-error')?.textContent).toContain('final down');
+    expect(container.querySelector('.validate__mesh-error')?.textContent).toContain('mesh down');
   });
 
   test('seed が 0 件なら捕捉率は「計算不能」表示', async () => {

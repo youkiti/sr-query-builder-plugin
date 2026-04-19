@@ -24,6 +24,7 @@ describe('parseRis', () => {
     expect(entries).toHaveLength(2);
     expect(entries[0]).toEqual({
       tags: expect.any(Object),
+      rawText: expect.stringContaining('TY  - JOUR'),
       title: 'Title A',
       year: 2020,
       originalDb: 'PubMed',
@@ -31,6 +32,7 @@ describe('parseRis', () => {
     });
     expect(entries[1]).toEqual({
       tags: expect.any(Object),
+      rawText: expect.stringContaining('DB  - Embase'),
       title: 'Title B',
       year: 2019,
       originalDb: 'Embase',
@@ -73,6 +75,7 @@ describe('parseRis', () => {
   test('BOM 付きでも読める', () => {
     const text = '\ufeffTY  - JOUR\nTI  - X\nER  - \n';
     expect(parseRis(text)[0]?.title).toBe('X');
+    expect(parseRis(text)[0]?.rawText.startsWith('TY  - JOUR')).toBe(true);
   });
 
   test('TY が無い開始でも先頭を 1 レコードとして扱う', () => {

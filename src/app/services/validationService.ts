@@ -40,8 +40,10 @@ export interface ValidationServiceDeps {
 export interface ValidationSummary {
   lineHits: LineHitResult[];
   finalQuery: FinalQueryResult;
+  finalQueryError: string | null;
   mesh: MeshForSeed[];
   meshFrequency: Array<{ descriptor: string; count: number }>;
+  meshError: string | null;
   /** 検証に使用した有効 seed（検証対象から外れた seed 数も UI で伝えるため件数を保持） */
   eligibleSeedCount: number;
   totalSeedCount: number;
@@ -69,9 +71,24 @@ export async function runValidation(deps: ValidationServiceDeps): Promise<Valida
     .filter((pmid): pmid is string => pmid !== null);
 
   const lineHits = await checkSearchLines(formula, deps.eutils);
-  const finalQuery = await checkFinalQuery(formula, eligiblePmids, deps.eutils);
-  const mesh = await extractMeshForSeeds(eligiblePmids, deps.eutils);
-  const meshFrequency = aggregateMeshFrequency(mesh);
+
+  let finalQuery = buildEmptyFinalQuery();
+  let finalQueryError: string | null = null;
+  try {
+    finalQuery = await checkFinalQuery(formula, eligiblePmids, deps.eutils);
+  } catch (err) {
+    finalQueryError = formatError(err);
+  }
+
+  let mesh: MeshForSeed[] = [];
+  let meshFrequency: Array<{ descriptor: string; count: number }> = [];
+  let meshError: string | null = null;
+  try {
+    mesh = await extractMeshForSeeds(eligiblePmids, deps.eutils);
+    meshFrequency = aggregateMeshFrequency(mesh);
+  } catch (err) {
+    meshError = formatError(err);
+  }
 
   const uuidFn = deps.newUuid ?? newUuid;
   const nowFn = deps.now ?? nowIso;
@@ -103,10 +120,10 @@ export async function runValidation(deps: ValidationServiceDeps): Promise<Valida
 
   await logEntry({
     checkType: 'final_query',
-    totalHits: finalQuery.totalHits,
-    captureRate: finalQuery.captureRate,
-    capturedPmids: finalQuery.capturedPmids.join(','),
-    missedPmids: finalQuery.missedPmids.join(','),
+    totalHits: finalQueryError === null ? finalQuery.totalHits : null,
+    captureRate: finalQueryError === null ? finalQuery.captureRate : null,
+    capturedPmids: finalQueryError === null ? finalQuery.capturedPmids.join(',') : null,
+    missedPmids: finalQueryError === null ? finalQuery.missedPmids.join(',') : null,
     detailRef: null,
   });
 
@@ -122,10 +139,26 @@ export async function runValidation(deps: ValidationServiceDeps): Promise<Valida
   return {
     lineHits,
     finalQuery,
+    finalQueryError,
     mesh,
     meshFrequency,
+    meshError,
     eligibleSeedCount: eligible.length,
     totalSeedCount: seeds.length,
     loggedValidationIds,
   };
+}
+
+function buildEmptyFinalQuery(): FinalQueryResult {
+  return {
+    finalQuery: '',
+    totalHits: 0,
+    captureRate: 0,
+    capturedPmids: [],
+    missedPmids: [],
+  };
+}
+
+function formatError(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }

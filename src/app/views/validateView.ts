@@ -119,6 +119,14 @@ function renderFinalQuery(doc: Document, summary: ValidationSummary): HTMLElemen
   h3.textContent = '最終検索式とシード捕捉率';
   section.appendChild(h3);
 
+  if (summary.finalQueryError !== null) {
+    const error = doc.createElement('p');
+    error.className = 'validate__final-error';
+    error.textContent = `final_query の取得に失敗しました: ${summary.finalQueryError}`;
+    section.appendChild(error);
+    return section;
+  }
+
   const total = doc.createElement('p');
   total.textContent = `全体ヒット数: ${summary.finalQuery.totalHits}`;
   section.appendChild(total);
@@ -155,6 +163,13 @@ function renderMesh(doc: Document, summary: ValidationSummary): HTMLElement {
   const h3 = doc.createElement('h3');
   h3.textContent = 'Seed の MeSH（頻度順）';
   section.appendChild(h3);
+  if (summary.meshError !== null) {
+    const error = doc.createElement('p');
+    error.className = 'validate__mesh-error';
+    error.textContent = `MeSH の取得に失敗しました: ${summary.meshError}`;
+    section.appendChild(error);
+    return section;
+  }
   if (summary.meshFrequency.length === 0) {
     const empty = doc.createElement('p');
     empty.textContent = 'Seed が無いため MeSH 頻度を集計できません。';

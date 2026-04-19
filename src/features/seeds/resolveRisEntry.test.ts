@@ -4,6 +4,7 @@ import type { RisEntry } from './parseRis';
 function entry(overrides: Partial<RisEntry> & { tags?: Record<string, string[]> }): RisEntry {
   return {
     tags: {},
+    rawText: 'TY  - JOUR\nER  - ',
     title: 'title',
     year: 2020,
     originalDb: null,

@@ -56,6 +56,13 @@ function setupDeps(): {
       maxRetries: 0,
     },
     store,
+    newUuid: (() => {
+      let i = 0;
+      return () => {
+        i += 1;
+        return `seed-${i}`;
+      };
+    })(),
   };
   return { store, sheetsFetchMock, eutilsFetchMock, deps };
 }
@@ -257,6 +264,15 @@ describe('ingestSeeds - RIS', () => {
       if (typeof url === 'string' && url.includes('/values/SeedPapers')) {
         return jsonResponse(emptySheetsListResponse);
       }
+      if (typeof url === 'string' && url.includes('/drive/v3/files?fields=files')) {
+        return jsonResponse({ files: [] });
+      }
+      if (typeof url === 'string' && url.includes('/drive/v3/files?fields=id,webViewLink')) {
+        return jsonResponse({ id: 'folder-or-file', webViewLink: 'https://drive/folder' });
+      }
+      if (typeof url === 'string' && url.includes('/upload/drive/v3/files')) {
+        return jsonResponse({ id: 'raw-ris', webViewLink: 'https://drive/raw-ris' });
+      }
       return jsonResponse({});
     });
     // DOI 解決でも 0 件
@@ -282,6 +298,37 @@ describe('ingestSeeds - RIS', () => {
     expect(map['title']).toBe('My Paper');
     expect(map['year']).toBe(2021);
     expect(map['original_db']).toBe('Scopus');
+    expect(map['original_payload_ref']).toBe('https://drive/raw-ris');
+  });
+
+  test('newUuid を省略しても ris_no_pmid の payload を保存できる', async () => {
+    const { sheetsFetchMock, eutilsFetchMock, deps } = setupDeps();
+    sheetsFetchMock.mockImplementation(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/values/SeedPapers')) {
+        return jsonResponse(emptySheetsListResponse);
+      }
+      if (typeof url === 'string' && url.includes('/drive/v3/files?fields=files')) {
+        return jsonResponse({ files: [] });
+      }
+      if (typeof url === 'string' && url.includes('/drive/v3/files?fields=id,webViewLink')) {
+        return jsonResponse({ id: 'folder-or-file', webViewLink: 'https://drive/folder' });
+      }
+      if (typeof url === 'string' && url.includes('/upload/drive/v3/files')) {
+        return jsonResponse({ id: 'raw-ris', webViewLink: 'https://drive/raw-ris' });
+      }
+      return jsonResponse({});
+    });
+    eutilsFetchMock.mockResolvedValue(
+      jsonResponse({ esearchresult: { count: '0', idlist: [] } })
+    );
+    const withoutUuid: SeedServiceDeps = { ...deps };
+    delete (withoutUuid as { newUuid?: unknown }).newUuid;
+    await expect(
+      ingestSeeds(
+        { mode: 'ris', text: 'TY  - JOUR\nDB  - Scopus\nTI  - My Paper\nER  - \n' },
+        withoutUuid
+      )
+    ).resolves.toBeDefined();
   });
 });
 

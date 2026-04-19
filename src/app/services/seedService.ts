@@ -7,10 +7,12 @@ import {
   resolveRisEntry,
   verifyPmids,
   type NbibEntry,
+  type RisEntry,
   type ResolvedRisEntry,
 } from '@/features/seeds';
 import type { EutilsDeps } from '@/lib/ncbi';
-import type { GoogleApiDeps } from '@/lib/google';
+import { ensureChildFolder, uploadTextFile, type GoogleApiDeps } from '@/lib/google';
+import { newUuid } from '@/utils/uuid';
 import type { AppStore } from '../store';
 
 /**
@@ -20,7 +22,7 @@ import type { AppStore } from '../store';
  *
  * - 全経路で E-utilities の存在確認を必ず走らせ、is_valid フラグで検証対象外を表す
  * - 重複 PMID は is_valid=false, exclusion_reason=duplicate_pmid として追記（上書きしない）
- * - RIS の `ris_no_pmid` も SeedPapers に残し、元 RIS エントリ本体の退避は別途ユーザーが行う
+ * - RIS の `ris_no_pmid` も SeedPapers に残し、元 RIS エントリ本体は Drive に退避する
  */
 
 export type IngestInputMode = 'pmid_direct' | 'nbib' | 'ris';
@@ -54,6 +56,7 @@ export interface SeedServiceDeps {
   google: GoogleApiDeps;
   eutils: EutilsDeps;
   store: AppStore;
+  newUuid?: () => string;
   now?: () => string;
 }
 
@@ -105,7 +108,12 @@ export async function ingestSeeds(
         summary
       );
     } else {
-      const seed = buildNoPmidSeed(resolved, deps);
+      const originalPayloadRef = await uploadSkippedRisEntry(
+        entry,
+        state.project.driveFolderId,
+        deps
+      );
+      const seed = buildNoPmidSeed(resolved, originalPayloadRef, deps);
       await appendSeedPaper(spreadsheetId, seed, deps.google);
       summary.registered += 1;
       summary.invalid += 1;
@@ -210,7 +218,11 @@ async function ingestPmidBatch(
   }
 }
 
-function buildNoPmidSeed(resolved: ResolvedRisEntry, deps: SeedServiceDeps): SeedPaper {
+function buildNoPmidSeed(
+  resolved: ResolvedRisEntry,
+  originalPayloadRef: string,
+  deps: SeedServiceDeps
+): SeedPaper {
   // now は現時点未使用（RIS no_pmid 行は時刻を持たない）。将来の decided_at 用に deps に残す
   void deps;
   return {
@@ -222,12 +234,32 @@ function buildNoPmidSeed(resolved: ResolvedRisEntry, deps: SeedServiceDeps): See
     originalDb: resolved.originalDb,
     isValid: false,
     exclusionReason: 'no_pmid_resolved',
-    originalPayloadRef: null,
+    originalPayloadRef,
     userDecision: null,
     decidedAt: null,
     decidedBy: null,
     note: null,
   };
+}
+
+async function uploadSkippedRisEntry(
+  entry: RisEntry,
+  driveFolderId: string,
+  deps: SeedServiceDeps
+): Promise<string> {
+  const rawProtocols = await ensureChildFolder('raw_protocols', driveFolderId, deps.google);
+  const skippedSeeds = await ensureChildFolder('skipped_seeds', rawProtocols.id, deps.google);
+  const uuidFn = deps.newUuid ?? newUuid;
+  const uploaded = await uploadTextFile(
+    {
+      name: `${uuidFn()}.ris`,
+      content: entry.rawText,
+      parentId: skippedSeeds.id,
+      mimeType: 'application/x-research-info-systems',
+    },
+    deps.google
+  );
+  return uploaded.webViewLink;
 }
 
 function dedupePreserveOrder(pmids: readonly string[]): string[] {

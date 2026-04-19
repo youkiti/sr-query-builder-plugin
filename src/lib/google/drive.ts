@@ -13,6 +13,10 @@ export interface DriveFileRef {
   webViewLink: string;
 }
 
+interface DriveListResponse {
+  files?: DriveFileRef[];
+}
+
 /**
  * Drive にフォルダを作成する。`parentId` を指定すると配下に、null で「マイドライブ直下」。
  */
@@ -37,6 +41,30 @@ export async function createFolder(
     deps
   );
   return (await res.json()) as DriveFileRef;
+}
+
+export async function ensureChildFolder(
+  name: string,
+  parentId: string,
+  deps: GoogleApiDeps
+): Promise<DriveFileRef> {
+  const escapedName = name.replace(/'/g, "\\'");
+  const query = [
+    `name='${escapedName}'`,
+    `mimeType='application/vnd.google-apps.folder'`,
+    `'${parentId}' in parents`,
+    'trashed=false',
+  ].join(' and ');
+  const url =
+    `${METADATA_API}?fields=files(id,webViewLink)` +
+    `&pageSize=1&q=${encodeURIComponent(query)}`;
+  const res = await googleFetch(url, { method: 'GET' }, deps);
+  const body = (await res.json()) as DriveListResponse;
+  const existing = body.files?.[0];
+  if (existing) {
+    return existing;
+  }
+  return createFolder(name, parentId, deps);
 }
 
 /**

@@ -126,8 +126,10 @@ describe('runValidation', () => {
     expect(summary.lineHits[0]?.hitCount).toBe(100);
     expect(summary.finalQuery.totalHits).toBe(500);
     expect(summary.finalQuery.captureRate).toBe(1);
+    expect(summary.finalQueryError).toBeNull();
     expect(summary.mesh).toHaveLength(1);
     expect(summary.meshFrequency[0]?.descriptor).toBe('Diabetes Mellitus');
+    expect(summary.meshError).toBeNull();
     expect(summary.eligibleSeedCount).toBe(1);
     expect(summary.totalSeedCount).toBe(1);
     expect(summary.loggedValidationIds).toHaveLength(5);
@@ -193,6 +195,42 @@ describe('runValidation', () => {
     expect(
       sheetsFetchMock.mock.calls.some((c) => (c[0] as string).includes('/values/SeedPapers'))
     ).toBe(true);
+  });
+
+  test('final_query / mesh が失敗しても line_hits とログ追記は継続する', async () => {
+    const { sheetsFetchMock, eutilsFetchMock, deps } = setupDeps();
+    eutilsFetchMock
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '100', idlist: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '200', idlist: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '50', idlist: [] } }))
+      .mockRejectedValueOnce('final down')
+      .mockRejectedValueOnce('mesh down');
+    const summary = await runValidation(deps);
+    expect(summary.lineHits).toHaveLength(3);
+    expect(summary.finalQueryError).toBe('final down');
+    expect(summary.meshError).toBe('mesh down');
+    const appendCalls = sheetsFetchMock.mock.calls.filter((c) =>
+      (c[0] as string).includes('ValidationLog') && (c[0] as string).includes(':append')
+    );
+    expect(appendCalls).toHaveLength(5);
+    const finalBody = JSON.parse((appendCalls[3]![1] as RequestInit).body as string) as {
+      values: (string | number | boolean | null)[][];
+    };
+    const totalHitsIdx = SHEET_HEADERS.ValidationLog.indexOf('total_hits');
+    expect(finalBody.values[0]![totalHitsIdx]).toBe('');
+  });
+
+  test('final_query / mesh の Error 例外は message を使う', async () => {
+    const { eutilsFetchMock, deps } = setupDeps();
+    eutilsFetchMock
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '100', idlist: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '200', idlist: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '50', idlist: [] } }))
+      .mockRejectedValueOnce(new Error('final error'))
+      .mockRejectedValueOnce(new Error('mesh error'));
+    const summary = await runValidation(deps);
+    expect(summary.finalQueryError).toBe('final error');
+    expect(summary.meshError).toBe('mesh error');
   });
 
   test('プロジェクト未選択ならエラー', async () => {
