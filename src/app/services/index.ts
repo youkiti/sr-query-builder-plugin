@@ -16,3 +16,9 @@ export {
   type LlmFactoryDeps,
   type LlmProviderFactory,
 } from './llmProviderService';
+export {
+  submitProtocol,
+  type ProtocolServiceDeps,
+  type ProtocolSubmissionInput,
+  type ProtocolSubmissionResult,
+} from './protocolService';
