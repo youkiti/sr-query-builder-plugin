@@ -25,6 +25,28 @@ export interface BlocksDraft {
   combinationExpression: string;
 }
 
+/**
+ * プロトコル本文（手入力 / md / docx）のメタ情報。
+ * extract-protocol skill 出力のうちブロック以外（framework_type / RQ /
+ * inclusion / exclusion / study_design）と、Sheets `Protocol` 行に必要な
+ * source_type / source_filename / raw_text_* を保持する。
+ */
+export interface ProtocolDraft {
+  frameworkType: 'pico' | 'peco' | 'pcc' | 'spider' | 'custom';
+  researchQuestion: string;
+  inclusionCriteria: string;
+  exclusionCriteria: string;
+  studyDesign: string;
+  sourceType: 'manual' | 'markdown' | 'docx';
+  sourceFilename: string | null;
+  /** 元テキストの Drive 退避先 URL。manual 時 / Drive 退避前は null */
+  rawTextRef: string | null;
+  /** Sheets セル用プレビュー（先頭 500 文字） */
+  rawTextPreview: string;
+  /** manual 時のフォーム入力本文。md/docx は null（Drive 側が正本のため） */
+  rawTextInline: string | null;
+}
+
 export interface AppState {
   /** 現在のハッシュルート */
   route: RouteName;
@@ -34,6 +56,8 @@ export interface AppState {
   cumulativeCostUsd: number | null;
   /** ブロック承認画面の編集中ドラフト。未開始なら null */
   blocksDraft: BlocksDraft | null;
+  /** プロトコル本文のメタ情報。未開始なら null */
+  protocolDraft: ProtocolDraft | null;
 }
 
 export const INITIAL_STATE: AppState = {
@@ -41,6 +65,7 @@ export const INITIAL_STATE: AppState = {
   project: null,
   cumulativeCostUsd: null,
   blocksDraft: null,
+  protocolDraft: null,
 };
 
 export type Updater = (prev: AppState) => AppState;

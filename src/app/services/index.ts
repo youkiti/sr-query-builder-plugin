@@ -22,3 +22,8 @@ export {
   type ProtocolSubmissionInput,
   type ProtocolSubmissionResult,
 } from './protocolService';
+export {
+  approveBlocks,
+  type ApprovedProtocol,
+  type BlocksServiceDeps,
+} from './blocksService';

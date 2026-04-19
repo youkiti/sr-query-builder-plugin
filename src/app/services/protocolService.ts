@@ -9,7 +9,7 @@ import {
 } from '@/features/protocol';
 import { extractProtocol } from '@/features/formula/skills';
 import type { LLMProvider } from '@/lib/llm';
-import type { AppStore, BlockDraft, BlocksDraft } from '../store';
+import type { AppStore, BlockDraft, BlocksDraft, ProtocolDraft } from '../store';
 
 /**
  * プロトコル入力フォームの送信を扱うサービス。
@@ -48,11 +48,15 @@ export interface ProtocolServiceDeps {
 export interface ProtocolSubmissionResult {
   parsed: ParsedProtocolFile;
   blocksDraft: BlocksDraft;
+  protocolDraft: ProtocolDraft;
 }
 
 /**
- * ファイル種別に応じてパースし、extract-protocol を呼び、blocksDraft を組み立てて
- * `store.blocksDraft` を上書きする。
+ * ファイル種別に応じてパースし、extract-protocol を呼び、blocksDraft +
+ * protocolDraft を組み立てて store を上書きする。
+ *
+ * - blocksDraft はブロック編集 UI が消費
+ * - protocolDraft は blocksService が Protocol タブへ書き込む際に消費
  */
 export async function submitProtocol(
   input: ProtocolSubmissionInput,
@@ -65,8 +69,22 @@ export async function submitProtocol(
     blocks: draft.blocks.map(toBlockDraft),
     combinationExpression: draft.combinationExpression,
   };
-  deps.store.setState((s) => ({ ...s, blocksDraft }));
-  return { parsed, blocksDraft };
+  const protocolDraft: ProtocolDraft = {
+    frameworkType: draft.frameworkType,
+    researchQuestion: draft.researchQuestion || (input.researchQuestion?.trim() ?? ''),
+    inclusionCriteria:
+      draft.inclusionCriteria || (input.inclusionCriteria?.trim() ?? ''),
+    exclusionCriteria:
+      draft.exclusionCriteria || (input.exclusionCriteria?.trim() ?? ''),
+    studyDesign: draft.studyDesign,
+    sourceType: parsed.sourceType,
+    sourceFilename: parsed.sourceFilename === '' ? null : parsed.sourceFilename,
+    rawTextRef: null, // Drive 退避は wiring 層で別途実装する
+    rawTextPreview: parsed.preview,
+    rawTextInline: parsed.sourceType === 'manual' ? parsed.plainText : null,
+  };
+  deps.store.setState((s) => ({ ...s, blocksDraft, protocolDraft }));
+  return { parsed, blocksDraft, protocolDraft };
 }
 
 async function parseInput(input: ProtocolSubmissionInput): Promise<ParsedProtocolFile> {

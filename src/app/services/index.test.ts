@@ -11,5 +11,6 @@ describe('app/services index 再エクスポート', () => {
     expect(typeof mod.LlmApiKeyMissingError).toBe('function');
     expect(typeof mod.STORAGE_KEY_GEMINI).toBe('string');
     expect(typeof mod.submitProtocol).toBe('function');
+    expect(typeof mod.approveBlocks).toBe('function');
   });
 });
