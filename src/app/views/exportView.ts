@@ -1,7 +1,9 @@
 import type { TargetDatabase } from '@/domain/conversion';
 import type { ExportResult } from '@/app/services';
 import { suggestFileName, toDownloadUrl } from '@/app/services';
+import { expandFormula } from '@/features/validation';
 import { buildPubmedSearchUrl } from '@/lib/ncbi';
+import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
 import { ROUTE_LABELS } from '../router';
 import type { RenderView } from './types';
 
@@ -132,9 +134,13 @@ function renderResults(doc: Document, container: HTMLElement, result: ExportResu
 }
 
 function buildPubmedLink(doc: Document, markdown: string): HTMLElement | null {
-  // PubMed セクションの combination 式（最終行）を抜き出してリンクにする
-  const combinationLine = extractCombinationExpression(markdown);
-  if (!combinationLine) {
+  let expandedQuery = '';
+  try {
+    expandedQuery = expandFormula(parsePubmedFormulaMd(markdown)).trim();
+  } catch {
+    return null;
+  }
+  if (expandedQuery === '') {
     return null;
   }
   const wrap = doc.createElement('p');
@@ -142,25 +148,13 @@ function buildPubmedLink(doc: Document, markdown: string): HTMLElement | null {
   const label = doc.createElement('span');
   label.textContent = 'PubMed で直接開く: ';
   const a = doc.createElement('a');
-  a.href = buildPubmedSearchUrl(combinationLine);
+  a.href = buildPubmedSearchUrl(expandedQuery);
   a.target = '_blank';
   a.rel = 'noopener noreferrer';
-  a.textContent = combinationLine;
+  a.textContent = expandedQuery;
   wrap.appendChild(label);
   wrap.appendChild(a);
   return wrap;
-}
-
-function extractCombinationExpression(markdown: string): string | null {
-  // PubMed セクションの最後の #N 行を取り出す簡易実装
-  const match = markdown.match(/```[^\n]*\n([\s\S]*?)\n```/);
-  if (!match || match[1] === undefined) {
-    return null;
-  }
-  const lines = match[1].split('\n').filter((l) => l.trim().startsWith('#'));
-  const last = lines[lines.length - 1] ?? '';
-  const parsed = last.match(/^#\S+\s+(.+)$/);
-  return parsed?.[1]?.trim() ?? null;
 }
 
 function dbLabel(db: TargetDatabase): string {

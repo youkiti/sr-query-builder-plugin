@@ -61,13 +61,15 @@ describe('createExportView', () => {
     expect(container.querySelector('.view__placeholder')?.textContent).toContain('/draft');
   });
 
-  test('PubMed リンクを結合式から組み立てて表示する', () => {
+  test('PubMed リンクを展開済みクエリから組み立てて表示する', () => {
     const view = createExportView();
     const container = buildContainer();
     view(container, { state: stateWithDraft(), navigate: jest.fn() });
     const link = container.querySelector<HTMLAnchorElement>('.export__pubmed-link a');
     expect(link?.href).toContain('pubmed.ncbi.nlm.nih.gov');
-    expect(link?.href).toContain('term=');
+    const term = link ? new URL(link.href).searchParams.get('term') : null;
+    expect(term).toBe('("Diabetes"[Mesh]) AND metformin');
+    expect(term).not.toContain('#1');
   });
 
   test('PubMed セクションにコードブロックが無い場合はリンクを出さない', () => {

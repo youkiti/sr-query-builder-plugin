@@ -129,6 +129,9 @@ describe('assembleFormulaMd', () => {
     expect(formula.blocks[3]?.expression).toBe('#1 AND #2 AND #RCTfilter');
     expect(markdown).toContain('#RCTfilter');
     expect(markdown).toContain('#3 #1 AND #2 AND #RCTfilter');
+    const reparsed = parsePubmedFormulaMd(markdown);
+    expect(reparsed.blocks.map((b) => b.id)).toEqual(['1', '2', 'RCTfilter', '3']);
+    expect(reparsed.combinationExpression).toBe('#1 AND #2 AND #RCTfilter');
   });
 
   test('baseCombinationExpression が空で append のみでも落ちない', () => {
