@@ -17,6 +17,12 @@ export {
   type LlmProviderFactory,
 } from './llmProviderService';
 export {
+  STORAGE_KEY_NCBI,
+  buildEutilsDeps,
+  getNcbiApiKey,
+  type BuildEutilsDepsOptions,
+} from './ncbiConfigService';
+export {
   submitProtocol,
   type ProtocolServiceDeps,
   type ProtocolSubmissionInput,
@@ -52,8 +58,13 @@ export {
   type ValidationSummary,
 } from './validationService';
 export {
+  applyBlockImprovement,
+  requestBlockImprovement,
   saveEditedFormula,
+  type BlockImprovementDeps,
+  type BlockImprovementResult,
   type EditServiceDeps,
+  type RequestBlockImprovementInput,
   type SaveEditedFormulaInput,
   type SaveEditedFormulaResult,
 } from './editService';

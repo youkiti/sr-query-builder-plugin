@@ -13,6 +13,7 @@ export type LlmPurpose =
   | 'pick_boundary'
   | 'interpret_result'
   | 'extract_protocol'
+  | 'improve_block'
   | 'other';
 
 export interface LlmApiLogEntry {

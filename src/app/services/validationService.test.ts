@@ -120,6 +120,13 @@ describe('runValidation', () => {
         xmlResponse(
           `<?xml version="1.0"?><PubmedArticleSet><PubmedArticle><MedlineCitation><PMID>111</PMID><Article><ArticleTitle>X</ArticleTitle></Article><MeshHeadingList><MeshHeading><DescriptorName>Diabetes Mellitus</DescriptorName></MeshHeading></MeshHeadingList></MedlineCitation></PubmedArticle></PubmedArticleSet>`
         )
+      )
+      // mesh tree 解決: db=mesh esearch → efetch
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { idlist: ['2001'] } }))
+      .mockResolvedValueOnce(
+        xmlResponse(
+          `<?xml version="1.0"?><DescriptorRecordSet><DescriptorRecord><DescriptorName><String>Diabetes Mellitus</String></DescriptorName><TreeNumberList><TreeNumber>C18.452.394</TreeNumber></TreeNumberList></DescriptorRecord></DescriptorRecordSet>`
+        )
       );
     const summary = await runValidation(deps);
     expect(summary.lineHits).toHaveLength(3);
@@ -130,6 +137,15 @@ describe('runValidation', () => {
     expect(summary.mesh).toHaveLength(1);
     expect(summary.meshFrequency[0]?.descriptor).toBe('Diabetes Mellitus');
     expect(summary.meshError).toBeNull();
+    expect(summary.meshHierarchyError).toBeNull();
+    expect(summary.meshHierarchy.map((n) => n.treeId)).toEqual([
+      'C',
+      'C18',
+      'C18.452',
+      'C18.452.394',
+    ]);
+    expect(summary.meshMermaid).toContain('flowchart TD');
+    expect(summary.meshMermaid).toContain('C18_452_394["C18.452.394<br/>Diabetes Mellitus"]');
     expect(summary.eligibleSeedCount).toBe(1);
     expect(summary.totalSeedCount).toBe(1);
     expect(summary.loggedValidationIds).toHaveLength(5);
@@ -137,6 +153,48 @@ describe('runValidation', () => {
       (c[0] as string).includes('ValidationLog') && (c[0] as string).includes(':append')
     );
     expect(appendCalls).toHaveLength(5);
+  });
+
+  test('mesh tree 取得のみ失敗した場合、meshFrequency は生きて meshHierarchyError にメッセージが入る', async () => {
+    const { eutilsFetchMock, deps } = setupDeps();
+    eutilsFetchMock
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '1', idlist: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '1', idlist: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '1', idlist: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '10', idlist: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '1', idlist: ['111'] } }))
+      .mockResolvedValueOnce(
+        xmlResponse(
+          `<?xml version="1.0"?><PubmedArticleSet><PubmedArticle><MedlineCitation><PMID>111</PMID><Article><ArticleTitle>X</ArticleTitle></Article><MeshHeadingList><MeshHeading><DescriptorName>Diabetes Mellitus</DescriptorName></MeshHeading></MeshHeadingList></MedlineCitation></PubmedArticle></PubmedArticleSet>`
+        )
+      )
+      // mesh tree esearch が失敗
+      .mockRejectedValueOnce(new Error('mesh tree down'));
+    const summary = await runValidation(deps);
+    expect(summary.meshError).toBeNull();
+    expect(summary.meshFrequency).toHaveLength(1);
+    expect(summary.meshHierarchy).toEqual([]);
+    expect(summary.meshMermaid).toContain('(MeSH 階層なし)');
+    expect(summary.meshHierarchyError).toBe('mesh tree down');
+  });
+
+  test('meshFrequency が 0 件なら tree 取得は呼ばれず、meshHierarchy は空のまま', async () => {
+    const { eutilsFetchMock, deps } = setupDeps();
+    eutilsFetchMock
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '0', idlist: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '0', idlist: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '0', idlist: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '0', idlist: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '0', idlist: [] } }))
+      .mockResolvedValueOnce(
+        xmlResponse(`<?xml version="1.0"?><PubmedArticleSet></PubmedArticleSet>`)
+      );
+    const summary = await runValidation(deps);
+    expect(summary.meshFrequency).toEqual([]);
+    expect(summary.meshHierarchy).toEqual([]);
+    expect(summary.meshHierarchyError).toBeNull();
+    // mesh tree 取得を呼ばないので、eutils の fetch は 6 回で止まる
+    expect(eutilsFetchMock).toHaveBeenCalledTimes(6);
   });
 
   test('line_hits エラーは totalHits=null で記録する', async () => {
@@ -195,6 +253,8 @@ describe('runValidation', () => {
     expect(
       sheetsFetchMock.mock.calls.some((c) => (c[0] as string).includes('/values/SeedPapers'))
     ).toBe(true);
+    // MeSH 頻度が 0 件なので hierarchy 取得はスキップされる
+    expect(summary.meshHierarchy).toEqual([]);
   });
 
   test('final_query / mesh が失敗しても line_hits とログ追記は継続する', async () => {

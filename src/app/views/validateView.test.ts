@@ -48,6 +48,13 @@ function sampleSummary(overrides: Partial<ValidationSummary> = {}): ValidationSu
       { descriptor: 'Metformin', count: 1 },
     ],
     meshError: null,
+    meshHierarchy: [
+      { treeId: 'C', parentId: null, labels: [] },
+      { treeId: 'C18', parentId: 'C', labels: [] },
+      { treeId: 'C18.452.394', parentId: 'C18', labels: ['Diabetes Mellitus'] },
+    ],
+    meshMermaid: 'flowchart TD\n  C["C"]\n  C18["C18"]\n  C18_452_394["C18.452.394<br/>Diabetes Mellitus"]\n  C --> C18\n  C18 --> C18_452_394',
+    meshHierarchyError: null,
     eligibleSeedCount: 4,
     totalSeedCount: 5,
     loggedValidationIds: ['v1', 'v2', 'v3', 'v4', 'v5'],
@@ -93,6 +100,54 @@ describe('createValidateView', () => {
     expect(container.querySelector('.validate__final')?.textContent).toContain('75.0%');
     expect(container.querySelectorAll('.validate__missed li')).toHaveLength(2); // "未捕捉 PMID:" + 444
     expect(container.querySelectorAll('.validate__mesh li')).toHaveLength(2);
+    const mermaid = container.querySelector('.validate__mesh-mermaid');
+    expect(mermaid?.textContent).toContain('flowchart TD');
+    expect(mermaid?.className).toContain('mermaid');
+    expect(container.querySelector('.validate__mesh-hierarchy-note')?.textContent).toContain(
+      'mermaid.live'
+    );
+  });
+
+  test('mesh 階層取得失敗時は meshHierarchy エラーセクションに理由を出し、frequency は残す', async () => {
+    const onRun = jest.fn().mockResolvedValue(
+      sampleSummary({
+        meshHierarchy: [],
+        meshMermaid: 'flowchart TD\n  empty["(MeSH 階層なし)"]',
+        meshHierarchyError: 'mesh tree down',
+      })
+    );
+    const view = createValidateView({ onRun });
+    const container = buildContainer();
+    view(container, { state: stateReady(), navigate: jest.fn() });
+    container.querySelector('button')!.click();
+    await flushAsync();
+    await flushAsync();
+    // 頻度リストは 2 件のまま
+    expect(container.querySelectorAll('.validate__mesh li')).toHaveLength(2);
+    expect(container.querySelector('.validate__mesh-hierarchy-error')?.textContent).toContain(
+      'mesh tree down'
+    );
+    expect(container.querySelector('.validate__mesh-mermaid')).toBeNull();
+  });
+
+  test('meshHierarchy が空かつエラー無しなら「階層情報が取得できませんでした」を出す', async () => {
+    const onRun = jest.fn().mockResolvedValue(
+      sampleSummary({
+        meshHierarchy: [],
+        meshMermaid: 'flowchart TD\n  empty["(MeSH 階層なし)"]',
+        meshHierarchyError: null,
+      })
+    );
+    const view = createValidateView({ onRun });
+    const container = buildContainer();
+    view(container, { state: stateReady(), navigate: jest.fn() });
+    container.querySelector('button')!.click();
+    await flushAsync();
+    await flushAsync();
+    expect(container.querySelector('.validate__mesh-hierarchy')?.textContent).toContain(
+      '階層情報が取得できませんでした'
+    );
+    expect(container.querySelector('.validate__mesh-mermaid')).toBeNull();
   });
 
   test('final_query / mesh の部分失敗は各セクションに表示する', async () => {

@@ -6,4 +6,9 @@ export {
   aggregateMeshFrequency,
   type MeshForSeed,
 } from './extractMesh';
+export {
+  buildMeshHierarchy,
+  toMermaidFlowchart,
+  type MeshHierarchyNode,
+} from './buildMeshHierarchy';
 export { appendValidationLog } from './validationRepository';

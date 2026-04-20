@@ -1,6 +1,11 @@
 /**
  * Options 画面の起動ロジック。
- * 現段階では API キーの保存フォームだけを動かす。
+ *
+ * - Gemini API キー（LLM プロバイダ）
+ * - NCBI API キー（E-utilities の 3→10 req/s 引き上げ用、任意）
+ *
+ * をそれぞれ chrome.storage.local に保存する。両者は 1 つの「保存」ボタンで
+ * まとめて書き込み、UI 上はステータス文字列にまとめて結果を出す。
  */
 
 export interface OptionsDeps {
@@ -10,7 +15,8 @@ export interface OptionsDeps {
   writeKey: (key: string, value: string) => Promise<void>;
 }
 
-const STORAGE_KEY_GEMINI = 'apiKeys.gemini';
+export const STORAGE_KEY_GEMINI = 'apiKeys.gemini';
+export const STORAGE_KEY_NCBI = 'apiKeys.ncbi';
 
 export function createChromeOptionsDeps(): OptionsDeps {
   return {
@@ -27,23 +33,39 @@ export function createChromeOptionsDeps(): OptionsDeps {
 
 export async function startOptions(doc: Document, deps: OptionsDeps): Promise<void> {
   const status = doc.getElementById('options-status');
-  const input = doc.getElementById('gemini-api-key') as HTMLInputElement | null;
+  const geminiInput = doc.getElementById('gemini-api-key') as HTMLInputElement | null;
+  const ncbiInput = doc.getElementById('ncbi-api-key') as HTMLInputElement | null;
   const saveBtn = doc.getElementById('save-keys');
 
-  const existing = await deps.readKey(STORAGE_KEY_GEMINI);
-  if (input && existing !== undefined) {
-    input.value = existing;
+  const existingGemini = await deps.readKey(STORAGE_KEY_GEMINI);
+  const existingNcbi = await deps.readKey(STORAGE_KEY_NCBI);
+  if (geminiInput && existingGemini !== undefined) {
+    geminiInput.value = existingGemini;
+  }
+  if (ncbiInput && existingNcbi !== undefined) {
+    ncbiInput.value = existingNcbi;
   }
   if (status) {
-    status.textContent = existing ? 'API キーは保存済みです。' : 'API キーが未設定です。';
+    status.textContent = buildInitialStatus(existingGemini, existingNcbi);
   }
 
   saveBtn?.addEventListener('click', () => {
-    const value = input?.value ?? '';
-    void deps.writeKey(STORAGE_KEY_GEMINI, value).then(() => {
+    const gemini = geminiInput?.value ?? '';
+    const ncbi = ncbiInput?.value ?? '';
+    void Promise.all([
+      deps.writeKey(STORAGE_KEY_GEMINI, gemini),
+      deps.writeKey(STORAGE_KEY_NCBI, ncbi),
+    ]).then(() => {
       if (status) {
         status.textContent = '保存しました。';
       }
     });
   });
+}
+
+function buildInitialStatus(gemini: string | undefined, ncbi: string | undefined): string {
+  const parts: string[] = [];
+  parts.push(gemini ? 'Gemini: 保存済み' : 'Gemini: 未設定');
+  parts.push(ncbi ? 'NCBI: 保存済み' : 'NCBI: 未設定（3 req/s 枠）');
+  return parts.join(' / ');
 }

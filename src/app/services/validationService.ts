@@ -4,14 +4,17 @@ import { listSeedPapers } from '@/features/seeds';
 import {
   aggregateMeshFrequency,
   appendValidationLog,
+  buildMeshHierarchy,
   checkFinalQuery,
   checkSearchLines,
   extractMeshForSeeds,
+  toMermaidFlowchart,
   type FinalQueryResult,
   type LineHitResult,
   type MeshForSeed,
+  type MeshHierarchyNode,
 } from '@/features/validation';
-import type { EutilsDeps } from '@/lib/ncbi';
+import { fetchMeshTreeNumbers, type EutilsDeps } from '@/lib/ncbi';
 import type { GoogleApiDeps } from '@/lib/google';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
 import { nowIso } from '@/utils/iso8601';
@@ -44,6 +47,12 @@ export interface ValidationSummary {
   mesh: MeshForSeed[];
   meshFrequency: Array<{ descriptor: string; count: number }>;
   meshError: string | null;
+  /** MeSH tree number 階層（Mermaid 描画用）。mesh 取得に失敗した場合は空配列 */
+  meshHierarchy: MeshHierarchyNode[];
+  /** `flowchart TD` 形式の Mermaid ソース。view で `<pre class="mermaid">` 等に流し込む */
+  meshMermaid: string;
+  /** 階層取得に失敗した場合のメッセージ（frequency は出せたが tree 取得だけ失敗 等） */
+  meshHierarchyError: string | null;
   /** 検証に使用した有効 seed（検証対象から外れた seed 数も UI で伝えるため件数を保持） */
   eligibleSeedCount: number;
   totalSeedCount: number;
@@ -88,6 +97,25 @@ export async function runValidation(deps: ValidationServiceDeps): Promise<Valida
     meshFrequency = aggregateMeshFrequency(mesh);
   } catch (err) {
     meshError = formatError(err);
+  }
+
+  // MeSH 階層可視化（requirements.md §4.6）: descriptor → tree numbers を取って
+  // Mermaid flowchart ソースに変換する。tree 取得だけ失敗した場合も meshFrequency は
+  // 返したいので、別チャネルのエラーとして記録する。
+  let meshHierarchy: MeshHierarchyNode[] = [];
+  let meshMermaid: string = toMermaidFlowchart([]);
+  let meshHierarchyError: string | null = null;
+  if (meshError === null && meshFrequency.length > 0) {
+    try {
+      const treeMap = await fetchMeshTreeNumbers(
+        meshFrequency.map((entry) => entry.descriptor),
+        deps.eutils
+      );
+      meshHierarchy = buildMeshHierarchy(treeMap);
+      meshMermaid = toMermaidFlowchart(meshHierarchy);
+    } catch (err) {
+      meshHierarchyError = formatError(err);
+    }
   }
 
   const uuidFn = deps.newUuid ?? newUuid;
@@ -143,6 +171,9 @@ export async function runValidation(deps: ValidationServiceDeps): Promise<Valida
     mesh,
     meshFrequency,
     meshError,
+    meshHierarchy,
+    meshMermaid,
+    meshHierarchyError,
     eligibleSeedCount: eligible.length,
     totalSeedCount: seeds.length,
     loggedValidationIds,

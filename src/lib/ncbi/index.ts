@@ -9,6 +9,11 @@ export {
   type EsearchResult,
   type EutilsDeps,
 } from './eutils';
+export {
+  fetchMeshTreeNumbers,
+  parseMeshTreeXml,
+  type MeshTreeRecord,
+} from './mesh';
 export { buildPubmedSearchUrl } from './pubmedUrl';
 export {
   exponentialBackoff,

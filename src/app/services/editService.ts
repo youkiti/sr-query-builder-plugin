@@ -1,8 +1,14 @@
-import { appendFormulaVersion, getFormulaVersionById } from '@/features/formula';
+import {
+  appendFormulaVersion,
+  getFormulaVersionById,
+  improveBlockExpression,
+  type ImproveBlockProposal,
+} from '@/features/formula';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
 import type { GoogleApiDeps } from '@/lib/google';
 import { nowIso } from '@/utils/iso8601';
 import { newUuid } from '@/utils/uuid';
+import type { LlmProviderFactory } from './llmProviderService';
 import type { AppStore } from '../store';
 
 /**
@@ -75,6 +81,112 @@ export async function saveEditedFormula(
   }));
 
   return { versionId, parentVersionId };
+}
+
+export interface RequestBlockImprovementInput {
+  /** 改善対象のブロック ID（例: `"1"`, `"RCTfilter"`） */
+  blockId: string;
+}
+
+export interface BlockImprovementResult {
+  blockId: string;
+  /** 改善前の expression（formula_md から抽出したもの） */
+  currentExpression: string;
+  /** LLM の提案 expression */
+  proposedExpression: string;
+  /** 提案の改善ポイント（日本語） */
+  rationale: string;
+}
+
+export interface BlockImprovementDeps {
+  store: AppStore;
+  llmFactory: LlmProviderFactory;
+}
+
+/**
+ * 指定ブロックに対して improve-block skill を走らせ、新しい expression 案を返す。
+ * store は書き換えない（diff を見せてから accept / reject をユーザーに選ばせるため）。
+ *
+ * @throws {Error} currentFormulaMarkdown が空、または blockId が見つからない場合
+ */
+export async function requestBlockImprovement(
+  input: RequestBlockImprovementInput,
+  deps: BlockImprovementDeps
+): Promise<BlockImprovementResult> {
+  const state = deps.store.getState();
+  if (state.currentFormulaMarkdown === null || state.currentFormulaMarkdown.trim() === '') {
+    throw new Error('検索式がまだ生成されていません');
+  }
+  const formula = parsePubmedFormulaMd(state.currentFormulaMarkdown);
+  const target = formula.blocks.find((b) => b.id === input.blockId);
+  if (!target) {
+    throw new Error(`ブロック #${input.blockId} が見つかりません`);
+  }
+  const blockContext = findBlockContext(deps.store, target.id);
+  const provider = deps.llmFactory.forPurpose('improve_block');
+  const proposal: ImproveBlockProposal = await improveBlockExpression(
+    {
+      currentExpression: target.expression,
+      blockLabel: blockContext.label,
+      blockDescription: blockContext.description,
+      researchQuestion: state.protocolDraft?.researchQuestion ?? '',
+    },
+    provider
+  );
+  return {
+    blockId: target.id,
+    currentExpression: target.expression,
+    proposedExpression: proposal.proposedExpression,
+    rationale: proposal.rationale,
+  };
+}
+
+/**
+ * 現在の formula_md の #N 行を新しい expression で差し替えた新しい Markdown を返す。
+ * 保存は行わず、textarea に書き戻すだけなので副作用は無い。
+ *
+ * @throws {Error} 指定 blockId が見つからない
+ */
+export function applyBlockImprovement(
+  formulaMd: string,
+  blockId: string,
+  newExpression: string
+): string {
+  const lineRegex = new RegExp(`^#${escapeRegex(blockId)}\\s+.+$`, 'm');
+  if (!lineRegex.test(formulaMd)) {
+    throw new Error(`ブロック #${blockId} の行が formula_md に見つかりません`);
+  }
+  const replacement = `#${blockId} ${newExpression.trim()}`;
+  return formulaMd.replace(lineRegex, replacement);
+}
+
+function escapeRegex(raw: string): string {
+  return raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * store の blocksDraft から当該ブロックの label / description を探す。
+ * blocksDraft はユーザーが承認したブロックの並び順で入っているので、
+ * 数値 ID（`"1"` 〜）を 1-indexed として使う。
+ * 数値でないブロック ID（例: `RCTfilter`）や、blocksDraft 外の ID では空文字を返す。
+ */
+function findBlockContext(
+  store: AppStore,
+  blockId: string
+): { label: string; description: string } {
+  const draft = store.getState().blocksDraft;
+  if (draft === null) {
+    return { label: '', description: '' };
+  }
+  const asNumber = Number.parseInt(blockId, 10);
+  if (!Number.isFinite(asNumber) || asNumber < 1) {
+    return { label: '', description: '' };
+  }
+  const entry = draft.blocks[asNumber - 1];
+  if (entry === undefined) {
+    return { label: '', description: '' };
+  }
+  return { label: entry.blockLabel, description: entry.description };
 }
 
 async function resolveProtocolContext(

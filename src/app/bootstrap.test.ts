@@ -649,6 +649,74 @@ describe('startApp - wiring 層', () => {
     expect(handle.store.getState().currentFormulaMarkdown).toContain('edited');
   });
 
+  test('edit view 既定 onImproveBlock が improve-block skill を呼んで提案を返す', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+      'apiKeys.gemini': 'KEY',
+    });
+    fetchMock.mockImplementation(async (url: string) => {
+      if (typeof url === 'string' && url.includes('generativelanguage.googleapis.com')) {
+        return jsonResponse({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      proposed_expression: '"Asthma"[Mesh]',
+                      rationale: 'MeSH に寄せる',
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        });
+      }
+      if (typeof url === 'string' && url.includes('/upload/drive/v3/files')) {
+        return jsonResponse({ id: 'f', webViewLink: '' });
+      }
+      return jsonResponse({});
+    });
+    const handle = startApp(doc, {
+      getHash: () => '#/edit',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({
+      ...s,
+      protocolDraft: {
+        frameworkType: 'pico',
+        researchQuestion: 'RQ',
+        inclusionCriteria: '',
+        exclusionCriteria: '',
+        studyDesign: 'RCT',
+        sourceType: 'manual',
+        sourceFilename: null,
+        rawTextRef: null,
+        rawTextPreview: 'p',
+        rawTextInline: '本文',
+      },
+      currentFormulaVersionId: 'v1',
+      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 asthma[tiab]\n```\n',
+    }));
+    const improveBtn = doc.querySelector<HTMLButtonElement>('.edit__block-improve')!;
+    improveBtn.click();
+    for (let i = 0; i < 5; i += 1) {
+      await flush();
+    }
+    const row = doc.querySelector('.edit__block-row[data-block-id="1"]')!;
+    expect(row.querySelector('.edit__block-diff-after pre')?.textContent).toBe('"Asthma"[Mesh]');
+    // LLMApiLog 追記も起こる
+    const logAppends = fetchMock.mock.calls.filter((c) =>
+      (c[0] as string).includes('LLMApiLog') && (c[0] as string).includes(':append')
+    );
+    expect(logAppends.length).toBeGreaterThan(0);
+  });
+
   test('expand view 既定 onFetch が esearch→efetch→skill を呼び、onDecide が SeedPapers に追記する', async () => {
     const doc = buildDocument();
     const { runtime, fetchMock } = makeRuntime({
@@ -790,6 +858,54 @@ describe('startApp - wiring 層', () => {
     );
     // line_hits 1 行 + final_query 1 行 + mesh 1 行 = 3 行（formula のブロック数=1 のため）
     expect(appendCalls.length).toBe(3);
+  });
+
+  test('apiKeys.ncbi が保存されていれば、validate の eutils 呼び出しに api_key が載る', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+      'apiKeys.ncbi': 'NCBI-KEY',
+    });
+    fetchMock.mockImplementation(async (url: string) => {
+      const u = typeof url === 'string' ? url : String(url);
+      if (u.includes('/values/SeedPapers')) {
+        return jsonResponse({ values: [SHEET_HEADERS.SeedPapers] });
+      }
+      if (u.includes('eutils.ncbi.nlm.nih.gov')) {
+        if (u.includes('efetch')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({}),
+            text: async () => `<?xml version="1.0"?><PubmedArticleSet></PubmedArticleSet>`,
+          } as Response;
+        }
+        return jsonResponse({ esearchresult: { count: '0', idlist: [] } });
+      }
+      return jsonResponse({});
+    });
+    const handle = startApp(doc, {
+      getHash: () => '#/validate',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({
+      ...s,
+      currentFormulaVersionId: 'v-1',
+      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 diabetes\n```\n',
+    }));
+    const runBtn = doc.querySelector<HTMLButtonElement>('#app-content button')!;
+    runBtn.click();
+    for (let i = 0; i < 10; i += 1) {
+      await flush();
+    }
+    const eutilsCalls = fetchMock.mock.calls
+      .map((c) => c[0] as string)
+      .filter((u) => u.includes('eutils.ncbi.nlm.nih.gov'));
+    expect(eutilsCalls.length).toBeGreaterThan(0);
+    expect(eutilsCalls.every((u) => u.includes('api_key=NCBI-KEY'))).toBe(true);
   });
 });
 

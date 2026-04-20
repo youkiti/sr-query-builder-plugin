@@ -21,5 +21,10 @@ describe('app/services index 再エクスポート', () => {
     expect(typeof mod.saveEditedFormula).toBe('function');
     expect(typeof mod.fetchBoundaryCandidates).toBe('function');
     expect(typeof mod.recordDecision).toBe('function');
+    expect(typeof mod.buildEutilsDeps).toBe('function');
+    expect(typeof mod.getNcbiApiKey).toBe('function');
+    expect(typeof mod.STORAGE_KEY_NCBI).toBe('string');
+    expect(typeof mod.requestBlockImprovement).toBe('function');
+    expect(typeof mod.applyBlockImprovement).toBe('function');
   });
 });

@@ -8,5 +8,8 @@ describe('features/formula index 再エクスポート', () => {
     expect(typeof mod.getLatestFormulaVersion).toBe('function');
     expect(typeof mod.listFormulaVersions).toBe('function');
     expect(typeof mod.getFormulaVersionById).toBe('function');
+    expect(typeof mod.improveBlockExpression).toBe('function');
+    expect(typeof mod.IMPROVE_BLOCK_SYSTEM_PROMPT).toBe('string');
+    expect(typeof mod.IMPROVE_BLOCK_USER_PROMPT_TEMPLATE).toBe('string');
   });
 });
