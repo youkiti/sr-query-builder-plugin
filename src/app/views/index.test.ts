@@ -7,8 +7,12 @@ import {
   createDraftView,
   createExportView,
   createProtocolView,
+  createEditView,
+  createExpandView,
+  createHistoryView,
   createSeedsView,
   createValidateView,
+  renderDoneView,
   renderHomeView,
   renderProtocolView,
 } from './index';
@@ -28,6 +32,11 @@ describe('buildViews', () => {
     expect(typeof views.protocol).toBe('function');
   });
 
+  test('done は renderDoneView を使う', () => {
+    const views = buildViews(createStore());
+    expect(views.done).toBe(renderDoneView);
+  });
+
   test('blocks の callback を options 経由で差し込める', () => {
     const views = buildViews(createStore(), { blocks: { onSaveDraft: jest.fn() } });
     expect(typeof views.blocks).toBe('function');
@@ -42,6 +51,30 @@ describe('buildViews', () => {
     expect(typeof createExportView).toBe('function');
     expect(typeof createSeedsView).toBe('function');
     expect(typeof createValidateView).toBe('function');
+    expect(typeof renderDoneView).toBe('function');
+    expect(typeof createHistoryView).toBe('function');
+    expect(typeof createEditView).toBe('function');
+    expect(typeof createExpandView).toBe('function');
+  });
+
+  test('history callback も options 経由で差し込める', () => {
+    const onList = jest.fn();
+    const onLoad = jest.fn();
+    const views = buildViews(createStore(), { history: { onList, onLoad } });
+    expect(typeof views.history).toBe('function');
+  });
+
+  test('edit callback も options 経由で差し込める', () => {
+    const onSave = jest.fn();
+    const views = buildViews(createStore(), { edit: { onSave } });
+    expect(typeof views.edit).toBe('function');
+  });
+
+  test('expand callback も options 経由で差し込める', () => {
+    const onFetch = jest.fn();
+    const onDecide = jest.fn();
+    const views = buildViews(createStore(), { expand: { onFetch, onDecide } });
+    expect(typeof views.expand).toBe('function');
   });
 
   test('draft callback も options 経由で差し込める', () => {

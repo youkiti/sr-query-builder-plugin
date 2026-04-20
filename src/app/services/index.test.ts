@@ -18,5 +18,8 @@ describe('app/services index 再エクスポート', () => {
     expect(typeof mod.suggestFileName).toBe('function');
     expect(typeof mod.ingestSeeds).toBe('function');
     expect(typeof mod.runValidation).toBe('function');
+    expect(typeof mod.saveEditedFormula).toBe('function');
+    expect(typeof mod.fetchBoundaryCandidates).toBe('function');
+    expect(typeof mod.recordDecision).toBe('function');
   });
 });

@@ -8,6 +8,7 @@ describe('features/formula/skills index 再エクスポート', () => {
     expect(typeof mod.designFreewords).toBe('function');
     expect(typeof mod.designDefaultFilters).toBe('function');
     expect(typeof mod.proposeExcessFilters).toBe('function');
+    expect(typeof mod.pickBoundaryCases).toBe('function');
     expect(typeof mod.parseSkillJson).toBe('function');
     expect(typeof mod.SkillResponseError).toBe('function');
     expect(typeof mod.HIT_THRESHOLD).toBe('number');
@@ -17,6 +18,7 @@ describe('features/formula/skills index 再エクスポート', () => {
     expect(mod.MESH_SUGGESTER_SYSTEM_PROMPT.length).toBeGreaterThan(0);
     expect(mod.FREEWORD_DESIGNER_SYSTEM_PROMPT.length).toBeGreaterThan(0);
     expect(mod.EXCESS_FILTER_SYSTEM_PROMPT.length).toBeGreaterThan(0);
+    expect(mod.PICK_BOUNDARY_SYSTEM_PROMPT.length).toBeGreaterThan(0);
   });
 
   test('SkillResponseError がインスタンス化できる', () => {
@@ -36,5 +38,6 @@ describe('features/formula/skills index 再エクスポート', () => {
     expect(mod.MESH_SUGGESTER_USER_PROMPT_TEMPLATE.length).toBeGreaterThan(0);
     expect(mod.FREEWORD_DESIGNER_USER_PROMPT_TEMPLATE.length).toBeGreaterThan(0);
     expect(mod.EXCESS_FILTER_USER_PROMPT_TEMPLATE.length).toBeGreaterThan(0);
+    expect(mod.PICK_BOUNDARY_USER_PROMPT_TEMPLATE.length).toBeGreaterThan(0);
   });
 });

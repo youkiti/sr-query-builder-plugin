@@ -6,5 +6,7 @@ describe('features/formula index 再エクスポート', () => {
     expect(typeof mod.AssembleFormulaError).toBe('function');
     expect(typeof mod.appendFormulaVersion).toBe('function');
     expect(typeof mod.getLatestFormulaVersion).toBe('function');
+    expect(typeof mod.listFormulaVersions).toBe('function');
+    expect(typeof mod.getFormulaVersionById).toBe('function');
   });
 });

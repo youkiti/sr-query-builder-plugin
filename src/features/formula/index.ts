@@ -8,5 +8,7 @@ export {
 export {
   appendFormulaVersion,
   getLatestFormulaVersion,
+  listFormulaVersions,
+  getFormulaVersionById,
   type FormulaVersionRow,
 } from './formulaRepository';

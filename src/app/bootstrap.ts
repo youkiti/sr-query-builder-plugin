@@ -11,19 +11,30 @@ import {
   buildLlmProviderFactory,
   createChromeRuntimeDeps,
   exportToAllDatabases,
+  fetchBoundaryCandidates,
   generateDraft,
   ingestSeeds,
+  recordDecision,
   runValidation,
+  saveEditedFormula,
   submitProtocol,
+  type BoundaryCasesResult,
   type ChromeRuntimeDeps,
   type DraftProgress,
   type ExportResult,
   type IngestInput,
   type IngestSummary,
   type LlmFactoryDeps,
+  type LlmProviderFactory,
   type ProtocolSubmissionInput,
+  type RecordDecisionInput,
+  type RecordDecisionResult,
+  type SaveEditedFormulaInput,
+  type SaveEditedFormulaResult,
   type ValidationSummary,
 } from './services';
+import { listFormulaVersions } from '@/features/formula';
+import type { FormulaVersion } from '@/domain/formulaVersion';
 import type { EutilsDeps } from '@/lib/ncbi';
 import { getCurrentProject } from '@/features/project';
 import { ROUTE_LABELS, ROUTES, buildHash, parseRoute, type RouteName } from './router';
@@ -171,7 +182,89 @@ function buildDefaultViewOptions(
     validate: {
       onRun: async (): Promise<ValidationSummary> => runValidate(store, runtime),
     },
+    history: {
+      onList: async (): Promise<FormulaVersion[]> => runListHistory(store, runtime),
+      onLoad: (version) => {
+        store.setState((s) => ({
+          ...s,
+          currentFormulaVersionId: version.versionId,
+          currentFormulaMarkdown: version.formulaMd,
+        }));
+      },
+    },
+    edit: {
+      onSave: async (input: SaveEditedFormulaInput): Promise<SaveEditedFormulaResult> =>
+        runSaveEditedFormula(store, runtime, input),
+    },
+    expand: {
+      onFetch: async (): Promise<BoundaryCasesResult> =>
+        runFetchBoundary(store, runtime, llmFactoryDepsBase()),
+      onDecide: async (input: RecordDecisionInput): Promise<RecordDecisionResult> =>
+        runRecordDecision(store, runtime, input),
+    },
   };
+}
+
+async function runListHistory(
+  store: AppStore,
+  runtime: ChromeRuntimeDeps
+): Promise<FormulaVersion[]> {
+  const project = store.getState().project;
+  /* istanbul ignore if -- history view は project 選択済みでしか onList を呼ばない */
+  if (!project) {
+    return [];
+  }
+  return listFormulaVersions(project.spreadsheetId, runtime.google);
+}
+
+async function runSaveEditedFormula(
+  store: AppStore,
+  runtime: ChromeRuntimeDeps,
+  input: SaveEditedFormulaInput
+): Promise<SaveEditedFormulaResult> {
+  return saveEditedFormula(input, { google: runtime.google, store });
+}
+
+async function runFetchBoundary(
+  store: AppStore,
+  runtime: ChromeRuntimeDeps,
+  baseDeps: Omit<LlmFactoryDeps, 'llmLogFolderId' | 'spreadsheetId'>
+): Promise<BoundaryCasesResult> {
+  const project = store.getState().project;
+  /* istanbul ignore if -- expand view は project + formula 有り時しか onFetch を呼ばない */
+  if (!project) {
+    throw new Error('プロジェクトが選択されていません');
+  }
+  const factory: LlmProviderFactory = await buildLlmProviderFactory({
+    ...baseDeps,
+    llmLogFolderId: project.driveFolderId,
+    spreadsheetId: project.spreadsheetId,
+  });
+  return fetchBoundaryCandidates({
+    google: runtime.google,
+    eutils: toEutilsDeps(runtime),
+    store,
+    llmFactory: factory,
+  });
+}
+
+async function runRecordDecision(
+  store: AppStore,
+  runtime: ChromeRuntimeDeps,
+  input: RecordDecisionInput
+): Promise<RecordDecisionResult> {
+  return recordDecision(input, {
+    google: runtime.google,
+    eutils: toEutilsDeps(runtime),
+    store,
+    // recordDecision は LLM を呼ばないので forPurpose は呼ばれない（guard）
+    llmFactory: { forPurpose: neverCalledProvider },
+  });
+}
+
+/* istanbul ignore next -- recordDecision は LLM を呼ばないのでこの関数は呼ばれない */
+function neverCalledProvider(): never {
+  throw new Error('llmFactory.forPurpose should not be called in recordDecision');
 }
 
 function toEutilsDeps(runtime: ChromeRuntimeDeps): EutilsDeps {

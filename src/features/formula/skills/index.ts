@@ -37,4 +37,12 @@ export {
   type DesignedFilter,
   type ExcessFilterCandidate,
 } from './filterDesigner';
+export {
+  pickBoundaryCases,
+  PICK_BOUNDARY_SYSTEM_PROMPT,
+  PICK_BOUNDARY_USER_PROMPT_TEMPLATE,
+  type BoundaryCandidate,
+  type BoundaryPick,
+  type PickBoundaryCasesInput,
+} from './pickBoundaryCases';
 export { parseSkillJson, SkillResponseError } from './parseSkillJson';
