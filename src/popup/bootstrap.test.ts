@@ -10,6 +10,10 @@ function buildDocument(): Document {
       <p id="login-error"></p>
     </section>
     <div id="popup-projects" hidden>
+      <section id="popup-account">
+        <span id="popup-email">—</span>
+        <button id="logout-button"></button>
+      </section>
       <section id="popup-recent-section" hidden><ul id="popup-recent"></ul></section>
       <form id="popup-create-form"><input id="popup-create-title" /></form>
       <p id="popup-create-error"></p>
@@ -33,6 +37,7 @@ function jsonResponse(body: unknown): Response {
 interface TestPopupDeps extends PopupDeps {
   isAuthenticated: jest.Mock<Promise<boolean>, []>;
   signIn: jest.Mock<Promise<boolean>, []>;
+  signOut: jest.Mock<Promise<void>, []>;
   openAppTab: jest.Mock<void, []>;
   openOptions: jest.Mock<void, []>;
 }
@@ -48,6 +53,7 @@ function makeDeps(
     openOptions: jest.fn(),
     isAuthenticated: jest.fn().mockResolvedValue(opts.authed ?? true),
     signIn: jest.fn().mockResolvedValue(true),
+    signOut: jest.fn().mockResolvedValue(undefined),
     runtime: {
       google: {
         fetch: fetchMock as unknown as typeof fetch,
@@ -244,6 +250,49 @@ describe('startPopup / ログイン済', () => {
     expect(deps.openOptions).toHaveBeenCalledTimes(1);
   });
 
+  test('ログイン中のメールを popup-email に表示する', async () => {
+    const doc = buildDocument();
+    const { deps } = makeDeps();
+    await startPopup(doc, deps);
+    expect(doc.getElementById('popup-email')?.textContent).toBe('me@x');
+  });
+
+  test('プロフィール取得に失敗しても email 欄は (不明) に置き換わるだけ', async () => {
+    const doc = buildDocument();
+    const { deps } = makeDeps();
+    (deps.runtime.profile.getProfileUserInfo as jest.Mock).mockRejectedValue(
+      new Error('boom')
+    );
+    await startPopup(doc, deps);
+    expect(doc.getElementById('popup-email')?.textContent).toBe('(不明)');
+  });
+
+  test('ログアウトボタンで signOut → 未ログイン画面に切り替わる', async () => {
+    const doc = buildDocument();
+    const { deps } = makeDeps();
+    await startPopup(doc, deps);
+    // signOut 後の 2 回目 isAuthenticated は false
+    deps.isAuthenticated.mockResolvedValue(false);
+    (doc.getElementById('logout-button') as HTMLButtonElement).click();
+    await flushAsync();
+    await flushAsync();
+    expect(deps.signOut).toHaveBeenCalledTimes(1);
+    expect((doc.getElementById('popup-auth') as HTMLElement).hidden).toBe(false);
+    expect((doc.getElementById('popup-projects') as HTMLElement).hidden).toBe(true);
+  });
+
+  test('signOut が throw してもボタンは再び押せる', async () => {
+    const doc = buildDocument();
+    const { deps } = makeDeps();
+    deps.signOut.mockRejectedValue(new Error('boom'));
+    await startPopup(doc, deps);
+    const btn = doc.getElementById('logout-button') as HTMLButtonElement;
+    btn.click();
+    await flushAsync();
+    await flushAsync();
+    expect(btn.disabled).toBe(false);
+  });
+
   test('DOM 要素が一部欠けていても例外にならない', async () => {
     const doc = document.implementation.createHTMLDocument('empty');
     doc.body.innerHTML = '<p id="popup-status"></p>';
@@ -292,6 +341,7 @@ describe('createChromePopupDeps', () => {
         local: {
           get: jest.fn().mockResolvedValue({}),
           set: jest.fn().mockResolvedValue(undefined),
+          remove: jest.fn().mockResolvedValue(undefined),
         },
       },
     } as unknown as typeof chrome;
@@ -305,6 +355,56 @@ describe('createChromePopupDeps', () => {
     expect(getAuthToken).toHaveBeenLastCalledWith({ interactive: false }, expect.any(Function));
     expect(await deps.signIn()).toBe(true);
     expect(getAuthToken).toHaveBeenLastCalledWith({ interactive: true }, expect.any(Function));
+  });
+
+  test('signOut はキャッシュトークンを除去し、storage.local から currentProject / recentProjects を削除する', async () => {
+    const removeCached = jest.fn((_o: unknown, cb: () => void) => cb());
+    const storageRemove = jest.fn().mockResolvedValue(undefined);
+    (globalThis as unknown as { chrome: typeof chrome }).chrome = {
+      tabs: { create: jest.fn() },
+      runtime: { getURL: (p: string) => p, openOptionsPage: jest.fn(), lastError: undefined },
+      identity: {
+        getAuthToken: (_o: unknown, cb: (t: string) => void) => cb('TOK'),
+        removeCachedAuthToken: removeCached,
+        getProfileUserInfo: (_o: unknown, cb: (i: { email: string; id: string }) => void) =>
+          cb({ email: '', id: '' }),
+      },
+      storage: {
+        local: {
+          get: jest.fn().mockResolvedValue({}),
+          set: jest.fn().mockResolvedValue(undefined),
+          remove: storageRemove,
+        },
+      },
+    } as unknown as typeof chrome;
+    const deps = createChromePopupDeps();
+    await deps.signOut();
+    expect(removeCached).toHaveBeenCalledWith({ token: 'TOK' }, expect.any(Function));
+    expect(storageRemove).toHaveBeenCalledWith(['currentProject', 'recentProjects']);
+  });
+
+  test('signOut は既にトークンが無くても storage クリアだけは実行する', async () => {
+    const storageRemove = jest.fn().mockResolvedValue(undefined);
+    (globalThis as unknown as { chrome: typeof chrome }).chrome = {
+      tabs: { create: jest.fn() },
+      runtime: { getURL: (p: string) => p, openOptionsPage: jest.fn(), lastError: undefined },
+      identity: {
+        getAuthToken: (_o: unknown, cb: (t: string | undefined) => void) => cb(undefined),
+        removeCachedAuthToken: (_o: unknown, cb: () => void) => cb(),
+        getProfileUserInfo: (_o: unknown, cb: (i: { email: string; id: string }) => void) =>
+          cb({ email: '', id: '' }),
+      },
+      storage: {
+        local: {
+          get: jest.fn().mockResolvedValue({}),
+          set: jest.fn().mockResolvedValue(undefined),
+          remove: storageRemove,
+        },
+      },
+    } as unknown as typeof chrome;
+    const deps = createChromePopupDeps();
+    await deps.signOut();
+    expect(storageRemove).toHaveBeenCalledWith(['currentProject', 'recentProjects']);
   });
 
   test('getAuthToken がエラーを返せば isAuthenticated / signIn は false', async () => {
@@ -324,6 +424,7 @@ describe('createChromePopupDeps', () => {
         local: {
           get: jest.fn().mockResolvedValue({}),
           set: jest.fn().mockResolvedValue(undefined),
+          remove: jest.fn().mockResolvedValue(undefined),
         },
       },
     } as unknown as typeof chrome;

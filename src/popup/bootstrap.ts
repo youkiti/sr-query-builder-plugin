@@ -17,6 +17,7 @@ import {
   loadExistingProject,
   type ChromeRuntimeDeps,
 } from '@/app/services';
+import { getCurrentUserEmail } from '@/lib/google';
 import {
   getRecentProjects,
   setCurrentProject,
@@ -34,6 +35,12 @@ export interface PopupDeps {
   isAuthenticated: () => Promise<boolean>;
   /** Google OAuth 同意 UI を明示的に開く。true=成功 / false=失敗 */
   signIn: () => Promise<boolean>;
+  /**
+   * ログアウト。キャッシュされた OAuth トークンを削除し、
+   * `chrome.storage.local` の `currentProject` / `recentProjects` もクリアする。
+   * Google 側のトークン失効は行わない（Chrome の identity キャッシュからの除去のみ）。
+   */
+  signOut: () => Promise<void>;
 }
 
 export function createChromePopupDeps(): PopupDeps {
@@ -47,6 +54,10 @@ export function createChromePopupDeps(): PopupDeps {
         }
         resolve(token);
       });
+    });
+  const removeCachedToken = (token: string): Promise<void> =>
+    new Promise((resolve) => {
+      chrome.identity.removeCachedAuthToken({ token }, () => resolve());
     });
   return {
     openAppTab: () => {
@@ -72,11 +83,23 @@ export function createChromePopupDeps(): PopupDeps {
         return false;
       }
     },
+    signOut: async () => {
+      try {
+        const token = await getToken(false);
+        await removeCachedToken(token);
+      } catch {
+        // トークンが既に無ければ何もしない
+      }
+      // プロジェクト選択状態もユーザーに紐付くため一緒にクリア。
+      // 別アカウントでログインし直しても他人の recent が残らない。
+      await chrome.storage.local.remove(['currentProject', 'recentProjects']);
+    },
   };
 }
 
 export async function startPopup(doc: Document, deps: PopupDeps): Promise<void> {
   bindLoginButton(doc, deps);
+  bindLogoutButton(doc, deps);
   bindOpenOptionsButton(doc, deps);
   bindCreateForm(doc, deps);
   bindOpenForm(doc, deps);
@@ -97,6 +120,7 @@ async function refresh(doc: Document, deps: PopupDeps): Promise<void> {
     return;
   }
 
+  await renderAccount(doc, deps);
   const recent = await getRecentProjects(deps.runtime.store);
   renderRecent(doc, recent, deps);
   if (status) {
@@ -104,6 +128,17 @@ async function refresh(doc: Document, deps: PopupDeps): Promise<void> {
       recent.length > 0
         ? '最近のプロジェクトから選ぶか、新しく作成してください。'
         : '新しいプロジェクトを作成するか、スプレッドシート ID から開いてください。';
+  }
+}
+
+async function renderAccount(doc: Document, deps: PopupDeps): Promise<void> {
+  const emailSpan = doc.getElementById('popup-email');
+  if (!emailSpan) return;
+  try {
+    const email = await getCurrentUserEmail(deps.runtime.profile);
+    emailSpan.textContent = email ?? '(不明)';
+  } catch {
+    emailSpan.textContent = '(不明)';
   }
 }
 
@@ -162,6 +197,23 @@ function bindLoginButton(doc: Document, deps: PopupDeps): void {
         await refresh(doc, deps);
       })
       .catch(() => {
+        btn.disabled = false;
+      });
+  });
+}
+
+function bindLogoutButton(doc: Document, deps: PopupDeps): void {
+  const btn = doc.getElementById('logout-button') as HTMLButtonElement | null;
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    btn.disabled = true;
+    void deps
+      .signOut()
+      .then(() => refresh(doc, deps))
+      .catch(() => {
+        // ログアウト失敗時は UI を動かさずボタンだけ戻す（監査は LLMApiLog の対象外）
+      })
+      .finally(() => {
         btn.disabled = false;
       });
   });

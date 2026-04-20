@@ -30,3 +30,14 @@ a {
 a:hover {
   text-decoration: underline;
 }
+
+/*
+ * `hidden` 属性を常に効かせる。
+ * UA スタイルの `[hidden] { display: none }` は specificity(0,1,0) しかないので、
+ * `.popup__section { display: flex }` や `#popup-projects { display: flex }` のような
+ * ページ側の display 指定に負けてセクションが隠れなくなる（popup のログインセクションと
+ * プロジェクト選択セクションが同時表示されるバグの原因）。!important で固定する。
+ */
+[hidden] {
+  display: none !important;
+}

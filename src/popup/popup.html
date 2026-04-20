@@ -29,6 +29,20 @@
       </section>
 
       <div id="popup-projects" hidden>
+        <section class="popup__section popup__account" id="popup-account">
+          <p class="popup__muted popup__account-row">
+            ログイン中:
+            <span id="popup-email" class="popup__account-email">—</span>
+          </p>
+          <button
+            type="button"
+            id="logout-button"
+            class="popup__button popup__button--text"
+          >
+            ログアウト
+          </button>
+        </section>
+
         <section class="popup__section" id="popup-recent-section" hidden>
           <h2 class="popup__section-title">最近のプロジェクト</h2>
           <ul class="popup__recent" id="popup-recent"></ul>
