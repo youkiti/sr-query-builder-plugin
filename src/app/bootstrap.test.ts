@@ -649,6 +649,74 @@ describe('startApp - wiring 層', () => {
     expect(handle.store.getState().currentFormulaMarkdown).toContain('edited');
   });
 
+  test('edit view 既定 onImproveBlock が improve-block skill を呼んで提案を返す', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+      'apiKeys.gemini': 'KEY',
+    });
+    fetchMock.mockImplementation(async (url: string) => {
+      if (typeof url === 'string' && url.includes('generativelanguage.googleapis.com')) {
+        return jsonResponse({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      proposed_expression: '"Asthma"[Mesh]',
+                      rationale: 'MeSH に寄せる',
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        });
+      }
+      if (typeof url === 'string' && url.includes('/upload/drive/v3/files')) {
+        return jsonResponse({ id: 'f', webViewLink: '' });
+      }
+      return jsonResponse({});
+    });
+    const handle = startApp(doc, {
+      getHash: () => '#/edit',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({
+      ...s,
+      protocolDraft: {
+        frameworkType: 'pico',
+        researchQuestion: 'RQ',
+        inclusionCriteria: '',
+        exclusionCriteria: '',
+        studyDesign: 'RCT',
+        sourceType: 'manual',
+        sourceFilename: null,
+        rawTextRef: null,
+        rawTextPreview: 'p',
+        rawTextInline: '本文',
+      },
+      currentFormulaVersionId: 'v1',
+      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 asthma[tiab]\n```\n',
+    }));
+    const improveBtn = doc.querySelector<HTMLButtonElement>('.edit__block-improve')!;
+    improveBtn.click();
+    for (let i = 0; i < 5; i += 1) {
+      await flush();
+    }
+    const row = doc.querySelector('.edit__block-row[data-block-id="1"]')!;
+    expect(row.querySelector('.edit__block-diff-after pre')?.textContent).toBe('"Asthma"[Mesh]');
+    // LLMApiLog 追記も起こる
+    const logAppends = fetchMock.mock.calls.filter((c) =>
+      (c[0] as string).includes('LLMApiLog') && (c[0] as string).includes(':append')
+    );
+    expect(logAppends.length).toBeGreaterThan(0);
+  });
+
   test('expand view 既定 onFetch が esearch→efetch→skill を呼び、onDecide が SeedPapers に追記する', async () => {
     const doc = buildDocument();
     const { runtime, fetchMock } = makeRuntime({

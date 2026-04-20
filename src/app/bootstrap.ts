@@ -16,9 +16,11 @@ import {
   generateDraft,
   ingestSeeds,
   recordDecision,
+  requestBlockImprovement,
   runValidation,
   saveEditedFormula,
   submitProtocol,
+  type BlockImprovementResult,
   type BoundaryCasesResult,
   type ChromeRuntimeDeps,
   type DraftProgress,
@@ -30,6 +32,7 @@ import {
   type ProtocolSubmissionInput,
   type RecordDecisionInput,
   type RecordDecisionResult,
+  type RequestBlockImprovementInput,
   type SaveEditedFormulaInput,
   type SaveEditedFormulaResult,
   type ValidationSummary,
@@ -222,6 +225,10 @@ function buildDefaultViewOptions(
     edit: {
       onSave: async (input: SaveEditedFormulaInput): Promise<SaveEditedFormulaResult> =>
         runSaveEditedFormula(store, runtime, input),
+      onImproveBlock: async (
+        input: RequestBlockImprovementInput
+      ): Promise<BlockImprovementResult> =>
+        runImproveBlock(store, runtime, llmFactoryDepsBase(), input),
     },
     expand: {
       onFetch: async (): Promise<BoundaryCasesResult> =>
@@ -251,6 +258,25 @@ async function runSaveEditedFormula(
   input: SaveEditedFormulaInput
 ): Promise<SaveEditedFormulaResult> {
   return saveEditedFormula(input, { google: runtime.google, store });
+}
+
+async function runImproveBlock(
+  store: AppStore,
+  runtime: ChromeRuntimeDeps,
+  baseDeps: Omit<LlmFactoryDeps, 'llmLogFolderId' | 'spreadsheetId'>,
+  input: RequestBlockImprovementInput
+): Promise<BlockImprovementResult> {
+  const project = store.getState().project;
+  /* istanbul ignore if -- edit view は project 選択済みでしか onImproveBlock を呼ばない */
+  if (!project) {
+    throw new Error('プロジェクトが選択されていません');
+  }
+  const factory: LlmProviderFactory = await buildLlmProviderFactory({
+    ...baseDeps,
+    llmLogFolderId: project.driveFolderId,
+    spreadsheetId: project.spreadsheetId,
+  });
+  return requestBlockImprovement(input, { store, llmFactory: factory });
 }
 
 async function runFetchBoundary(

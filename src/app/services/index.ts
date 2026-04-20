@@ -58,8 +58,13 @@ export {
   type ValidationSummary,
 } from './validationService';
 export {
+  applyBlockImprovement,
+  requestBlockImprovement,
   saveEditedFormula,
+  type BlockImprovementDeps,
+  type BlockImprovementResult,
   type EditServiceDeps,
+  type RequestBlockImprovementInput,
   type SaveEditedFormulaInput,
   type SaveEditedFormulaResult,
 } from './editService';

@@ -45,4 +45,11 @@ export {
   type BoundaryPick,
   type PickBoundaryCasesInput,
 } from './pickBoundaryCases';
+export {
+  improveBlockExpression,
+  IMPROVE_BLOCK_SYSTEM_PROMPT,
+  IMPROVE_BLOCK_USER_PROMPT_TEMPLATE,
+  type ImproveBlockInput,
+  type ImproveBlockProposal,
+} from './improveBlock';
 export { parseSkillJson, SkillResponseError } from './parseSkillJson';

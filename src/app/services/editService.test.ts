@@ -5,7 +5,14 @@ import {
   type BlocksDraft,
   type ProtocolDraft,
 } from '../store';
-import { saveEditedFormula } from './editService';
+import {
+  applyBlockImprovement,
+  requestBlockImprovement,
+  saveEditedFormula,
+  type BlockImprovementDeps,
+} from './editService';
+import type { LlmProviderFactory } from './llmProviderService';
+import type { LLMProvider } from '@/lib/llm';
 
 function jsonResponse(body: unknown): Response {
   return {
@@ -254,5 +261,219 @@ describe('saveEditedFormula', () => {
     );
     expect(typeof result.versionId).toBe('string');
     expect(result.versionId.length).toBeGreaterThan(0);
+  });
+});
+
+function fakeLlmFactory(
+  responseJson: string
+): { factory: LlmProviderFactory; captured: { purpose: string | null } } {
+  const captured = { purpose: null as string | null };
+  const provider: LLMProvider = {
+    providerId: 'gemini',
+    model: 'test',
+    chat: async () => ({ text: responseJson, tokensIn: null, tokensOut: null, raw: {} }),
+  };
+  return {
+    captured,
+    factory: {
+      forPurpose: (purpose) => {
+        captured.purpose = purpose;
+        return provider;
+      },
+    },
+  };
+}
+
+describe('requestBlockImprovement', () => {
+  test('blockId が見つかれば improve-block skill を `improve_block` purpose で呼び結果を返す', async () => {
+    const store = createStore(
+      makeState({
+        currentFormulaMarkdown: VALID_MD,
+      })
+    );
+    const { factory, captured } = fakeLlmFactory(
+      JSON.stringify({
+        proposed_expression: '"Asthma"[Mesh] OR asthma*[tiab]',
+        rationale: 'MeSH 追加で感度向上',
+      })
+    );
+    const deps: BlockImprovementDeps = { store, llmFactory: factory };
+    const result = await requestBlockImprovement({ blockId: '1' }, deps);
+    expect(captured.purpose).toBe('improve_block');
+    expect(result).toEqual({
+      blockId: '1',
+      currentExpression: 'asthma[tiab]',
+      proposedExpression: '"Asthma"[Mesh] OR asthma*[tiab]',
+      rationale: 'MeSH 追加で感度向上',
+    });
+  });
+
+  test('formula_md が未設定なら例外', async () => {
+    const store = createStore(makeState({ currentFormulaMarkdown: null }));
+    const { factory } = fakeLlmFactory('{}');
+    await expect(
+      requestBlockImprovement({ blockId: '1' }, { store, llmFactory: factory })
+    ).rejects.toThrow(/検索式/);
+  });
+
+  test('formula_md が空白のみでも「検索式」エラー', async () => {
+    const store = createStore(makeState({ currentFormulaMarkdown: '   \n  ' }));
+    const { factory } = fakeLlmFactory('{}');
+    await expect(
+      requestBlockImprovement({ blockId: '1' }, { store, llmFactory: factory })
+    ).rejects.toThrow(/検索式/);
+  });
+
+  test('blockId が見つからないと例外', async () => {
+    const store = createStore(makeState({ currentFormulaMarkdown: VALID_MD }));
+    const { factory } = fakeLlmFactory('{}');
+    await expect(
+      requestBlockImprovement({ blockId: '99' }, { store, llmFactory: factory })
+    ).rejects.toThrow(/#99/);
+  });
+
+  test('blocksDraft が無ければ blockLabel / description は空文字で渡す', async () => {
+    const store = createStore(
+      makeState({
+        currentFormulaMarkdown: VALID_MD,
+        blocksDraft: null,
+      })
+    );
+    const calls: string[] = [];
+    const provider: LLMProvider = {
+      providerId: 'gemini',
+      model: 'test',
+      chat: async (messages) => {
+        const user = messages.find((m) => m.role === 'user')!.content;
+        calls.push(user);
+        return {
+          text: JSON.stringify({ proposed_expression: 'x', rationale: 'y' }),
+          tokensIn: null,
+          tokensOut: null,
+          raw: {},
+        };
+      },
+    };
+    const factory: LlmProviderFactory = { forPurpose: () => provider };
+    await requestBlockImprovement({ blockId: '1' }, { store, llmFactory: factory });
+    // label と description が空なので description は「(不明)」で埋められる
+    expect(calls[0]).toContain('(不明)');
+  });
+
+  test('数値でない blockId（例: `RCTfilter`）は blocksDraft 参照せずに空 context で通す', async () => {
+    const mdWithRct = [
+      '## PubMed/MEDLINE',
+      '',
+      '```',
+      '#1 asthma[tiab]',
+      '#RCTfilter "randomized controlled trial"[pt]',
+      '#2 #1 AND #RCTfilter',
+      '```',
+      '',
+    ].join('\n');
+    const store = createStore(makeState({ currentFormulaMarkdown: mdWithRct }));
+    const { factory } = fakeLlmFactory(
+      JSON.stringify({ proposed_expression: 'updated', rationale: 'r' })
+    );
+    const result = await requestBlockImprovement(
+      { blockId: 'RCTfilter' },
+      { store, llmFactory: factory }
+    );
+    expect(result.currentExpression).toBe('"randomized controlled trial"[pt]');
+    expect(result.proposedExpression).toBe('updated');
+  });
+
+  test('blocksDraft の範囲外の blockId（例: 2 だが blocks 1 個だけ）は空 context', async () => {
+    const mdMulti = [
+      '## PubMed/MEDLINE',
+      '',
+      '```',
+      '#1 asthma[tiab]',
+      '#2 children[tiab]',
+      '#3 #1 AND #2',
+      '```',
+      '',
+    ].join('\n');
+    const store = createStore(makeState({ currentFormulaMarkdown: mdMulti }));
+    const calls: string[] = [];
+    const provider: LLMProvider = {
+      providerId: 'gemini',
+      model: 'test',
+      chat: async (messages) => {
+        calls.push(messages.find((m) => m.role === 'user')!.content);
+        return {
+          text: JSON.stringify({ proposed_expression: 'new', rationale: 'r' }),
+          tokensIn: null,
+          tokensOut: null,
+          raw: {},
+        };
+      },
+    };
+    await requestBlockImprovement(
+      { blockId: '2' },
+      { store, llmFactory: { forPurpose: () => provider } }
+    );
+    expect(calls[0]).toContain('(不明)');
+  });
+
+  test('protocolDraft が null なら RQ 欄は空文字で送る', async () => {
+    const store = createStore(
+      makeState({
+        currentFormulaMarkdown: VALID_MD,
+        protocolDraft: null,
+      })
+    );
+    const calls: string[] = [];
+    const provider: LLMProvider = {
+      providerId: 'gemini',
+      model: 'test',
+      chat: async (messages) => {
+        calls.push(messages.find((m) => m.role === 'user')!.content);
+        return {
+          text: JSON.stringify({ proposed_expression: 'x', rationale: 'r' }),
+          tokensIn: null,
+          tokensOut: null,
+          raw: {},
+        };
+      },
+    };
+    await requestBlockImprovement(
+      { blockId: '1' },
+      { store, llmFactory: { forPurpose: () => provider } }
+    );
+    // RQ: の直後に空行がくる（`RQ: \n` パターン）
+    expect(calls[0]).toMatch(/RQ:\s*\n/);
+  });
+});
+
+describe('applyBlockImprovement', () => {
+  test('指定行の expression を差し替える（他行はそのまま）', () => {
+    const result = applyBlockImprovement(VALID_MD, '1', '"Asthma"[Mesh]');
+    expect(result).toContain('#1 "Asthma"[Mesh]');
+    expect(result).toContain('#2 children[tiab]');
+    expect(result).toContain('#3 #1 AND #2');
+  });
+
+  test('新 expression の前後空白は trim される', () => {
+    const result = applyBlockImprovement(VALID_MD, '1', '   new-expr   ');
+    expect(result).toContain('#1 new-expr');
+  });
+
+  test('英数混在 blockId（`RCTfilter` など）も差し替えできる', () => {
+    const md = [
+      '## PubMed/MEDLINE',
+      '',
+      '```',
+      '#1 x',
+      '#RCTfilter "randomized controlled trial"[pt]',
+      '```',
+      '',
+    ].join('\n');
+    const result = applyBlockImprovement(md, 'RCTfilter', 'updated');
+    expect(result).toContain('#RCTfilter updated');
+  });
+
+  test('見つからない blockId は例外', () => {
+    expect(() => applyBlockImprovement(VALID_MD, 'ZZ', 'x')).toThrow(/#ZZ/);
   });
 });

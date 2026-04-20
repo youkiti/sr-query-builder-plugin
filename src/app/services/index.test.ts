@@ -24,5 +24,7 @@ describe('app/services index 再エクスポート', () => {
     expect(typeof mod.buildEutilsDeps).toBe('function');
     expect(typeof mod.getNcbiApiKey).toBe('function');
     expect(typeof mod.STORAGE_KEY_NCBI).toBe('string');
+    expect(typeof mod.requestBlockImprovement).toBe('function');
+    expect(typeof mod.applyBlockImprovement).toBe('function');
   });
 });
