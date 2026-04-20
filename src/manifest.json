@@ -26,5 +26,9 @@
   "action": {
     "default_popup": "popup/popup.html",
     "default_title": "__MSG_extName__"
+  },
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
   }
 }

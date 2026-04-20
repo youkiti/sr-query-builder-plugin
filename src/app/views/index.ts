@@ -1,6 +1,6 @@
 import type { AppStore } from '../store';
 import type { RouteName } from '../router';
-import { renderHomeView } from './homeView';
+import { createHomeView, renderHomeView, type HomeViewCallbacks } from './homeView';
 import {
   createProtocolView,
   renderProtocolView,
@@ -19,6 +19,7 @@ import { buildNotImplementedView } from './notImplementedView';
 import type { RenderView } from './types';
 
 export interface BuildViewsOptions {
+  home?: HomeViewCallbacks;
   blocks?: BlocksViewCallbacks;
   protocol?: ProtocolViewCallbacks;
   draft?: DraftViewCallbacks;
@@ -39,7 +40,7 @@ export function buildViews(
   options: BuildViewsOptions = {}
 ): Record<RouteName, RenderView> {
   return {
-    home: renderHomeView,
+    home: createHomeView(options.home),
     protocol: createProtocolView(options.protocol),
     blocks: createBlocksView(store, options.blocks),
     seeds: createSeedsView(options.seeds),
@@ -55,6 +56,7 @@ export function buildViews(
 
 export type { RenderView, ViewContext } from './types';
 export {
+  createHomeView,
   renderHomeView,
   renderProtocolView,
   createProtocolView,
@@ -69,3 +71,4 @@ export {
   createEditView,
   createExpandView,
 };
+export type { HomeViewCallbacks };

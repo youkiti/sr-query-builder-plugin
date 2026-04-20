@@ -25,11 +25,21 @@ describe('buildViews', () => {
     }
   });
 
-  test('home は固定の render 関数を使う', () => {
+  test('home も createHomeView 経由で都度生成される（render 関数が生える）', () => {
     const views = buildViews(createStore());
-    expect(views.home).toBe(renderHomeView);
-    // protocol は createProtocolView 経由で都度生成されるため参照比較は不可
+    expect(typeof views.home).toBe('function');
+    // protocol も createProtocolView 経由で都度生成されるため参照比較は不可
     expect(typeof views.protocol).toBe('function');
+  });
+
+  test('home callback も options 経由で差し込める', () => {
+    const onOpenPopup = jest.fn();
+    const views = buildViews(createStore(), { home: { onOpenPopup } });
+    expect(typeof views.home).toBe('function');
+  });
+
+  test('renderHomeView は後方互換の再エクスポートとして関数', () => {
+    expect(typeof renderHomeView).toBe('function');
   });
 
   test('done は renderDoneView を使う', () => {

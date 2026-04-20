@@ -7,9 +7,31 @@
   background: var(--color-bg);
 }
 
+.app__header-brand {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
 .app__title {
   margin: 0;
   font-size: var(--font-size-xl);
+}
+
+.app__title-link {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.app__title-link:hover,
+.app__title-link:focus-visible {
+  color: var(--color-primary);
 }
 
 .app__header-status {
@@ -91,6 +113,23 @@
 .home__summary {
   color: var(--color-text-muted);
   margin: var(--space-2) 0 var(--space-4);
+}
+
+.home__actions {
+  margin: var(--space-4) 0 0;
+}
+
+.home__switch-project {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.home__switch-project:hover {
+  background: var(--color-bg-muted);
 }
 
 .home__status {
@@ -191,6 +230,60 @@
 
 .protocol__submit:hover {
   background: var(--color-primary-hover);
+}
+
+.protocol__submit:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.protocol__progress {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-muted);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  justify-self: start;
+}
+
+.protocol__progress[hidden] {
+  display: none;
+}
+
+.protocol__spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: protocol-spin 0.9s linear infinite;
+  flex-shrink: 0;
+}
+
+.protocol__progress-stage {
+  font-weight: 500;
+}
+
+.protocol__progress-elapsed {
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+
+@keyframes protocol-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .protocol__spinner {
+    animation-duration: 3s;
+  }
 }
 
 .protocol__error {

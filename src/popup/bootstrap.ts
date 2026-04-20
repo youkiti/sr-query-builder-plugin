@@ -14,6 +14,7 @@
 import {
   createChromeRuntimeDeps,
   createNewProject,
+  getGeminiApiKey,
   loadExistingProject,
   type ChromeRuntimeDeps,
 } from '@/app/services';
@@ -23,6 +24,12 @@ import {
   setCurrentProject,
   type CurrentProjectEntry,
 } from '@/features/project';
+
+/**
+ * API キー未設定時の「後で Options から戻って開く」ための一時フラグ。
+ * Options 保存時にフラグが立っていれば、保存直後にメインビューを開いてからフラグを畳む。
+ */
+export const STORAGE_KEY_PENDING_APP_TAB = 'pendingOpenAppTab';
 
 export interface PopupDeps {
   /** メインビュー（app.html）を新規タブで開く */
@@ -164,16 +171,39 @@ function renderRecent(
     btn.type = 'button';
     btn.textContent = `${entry.title} — ${entry.projectId.slice(0, 8)}`;
     btn.addEventListener('click', () => {
-      void openRecent(deps, entry);
+      void openRecent(doc, deps, entry);
     });
     li.appendChild(btn);
     list.appendChild(li);
   }
 }
 
-async function openRecent(deps: PopupDeps, entry: CurrentProjectEntry): Promise<void> {
+async function openRecent(
+  doc: Document,
+  deps: PopupDeps,
+  entry: CurrentProjectEntry
+): Promise<void> {
   await setCurrentProject(entry, deps.runtime.store);
-  deps.openAppTab();
+  await openAppOrRedirect(doc, deps);
+}
+
+/**
+ * メインビュー遷移前に Gemini API キーの有無をチェックする。
+ * 未設定なら保存後に自動でメインビューへ戻れるよう pending フラグを立て、Options 画面へ誘導する。
+ */
+async function openAppOrRedirect(doc: Document, deps: PopupDeps): Promise<void> {
+  const apiKey = await getGeminiApiKey(deps.runtime.store);
+  if (apiKey !== null) {
+    deps.openAppTab();
+    return;
+  }
+  await deps.runtime.store.write({ [STORAGE_KEY_PENDING_APP_TAB]: '1' });
+  const status = doc.getElementById('popup-status');
+  if (status) {
+    status.textContent =
+      'Gemini APIキーが未設定です。設定画面で入力すると、保存後にトップ画面に戻ります。';
+  }
+  deps.openOptions();
 }
 
 function bindLoginButton(doc: Document, deps: PopupDeps): void {
@@ -234,9 +264,9 @@ function bindCreateForm(doc: Document, deps: PopupDeps): void {
     event.preventDefault();
     if (error) error.textContent = '';
     void createNewProject(titleInput.value, deps.runtime)
-      .then(() => {
+      .then(async () => {
         titleInput.value = '';
-        deps.openAppTab();
+        await openAppOrRedirect(doc, deps);
       })
       .catch((err: unknown) => {
         if (error) error.textContent = formatError(err);
@@ -253,9 +283,9 @@ function bindOpenForm(doc: Document, deps: PopupDeps): void {
     event.preventDefault();
     if (error) error.textContent = '';
     void loadExistingProject(idInput.value, deps.runtime)
-      .then(() => {
+      .then(async () => {
         idInput.value = '';
-        deps.openAppTab();
+        await openAppOrRedirect(doc, deps);
       })
       .catch((err: unknown) => {
         if (error) error.textContent = formatError(err);

@@ -1,5 +1,5 @@
 import { INITIAL_STATE } from '../store';
-import { renderHomeView } from './homeView';
+import { createHomeView, renderHomeView } from './homeView';
 
 function buildContainer(): HTMLElement {
   const doc = document.implementation.createHTMLDocument('test');
@@ -15,7 +15,10 @@ describe('renderHomeView', () => {
     renderHomeView(container, { state: INITIAL_STATE, navigate });
     expect(container.querySelector('h2')?.textContent).toBe('ホーム');
     expect(container.textContent).toContain('プロジェクトが選択されていません');
-    expect(container.querySelectorAll('button')).toHaveLength(0);
+    // 「別のプロジェクトを開く」ボタンは常に描画する（ステップ導線ではない）
+    const buttons = container.querySelectorAll<HTMLButtonElement>('button');
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]?.className).toBe('home__switch-project');
   });
 
   test('プロジェクトがあればタイトルと短縮 ID を出す', () => {
@@ -81,5 +84,24 @@ describe('renderHomeView', () => {
     expect(text).toContain('Protocol version');
     expect(text).toContain('v2');
     expect(text).not.toContain('Formula version');
+  });
+
+  test('「別のプロジェクトを開く」ボタンで onOpenPopup が呼ばれる', () => {
+    const container = buildContainer();
+    const onOpenPopup = jest.fn();
+    const view = createHomeView({ onOpenPopup });
+    view(container, { state: INITIAL_STATE, navigate: jest.fn() });
+    const btn = container.querySelector<HTMLButtonElement>('.home__switch-project');
+    expect(btn).toBeTruthy();
+    btn!.click();
+    expect(onOpenPopup).toHaveBeenCalledTimes(1);
+  });
+
+  test('onOpenPopup が未指定でもクリックで例外にならない', () => {
+    const container = buildContainer();
+    const view = createHomeView();
+    view(container, { state: INITIAL_STATE, navigate: jest.fn() });
+    const btn = container.querySelector<HTMLButtonElement>('.home__switch-project')!;
+    expect(() => btn.click()).not.toThrow();
   });
 });

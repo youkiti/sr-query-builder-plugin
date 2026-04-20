@@ -91,6 +91,9 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
     submit.className = 'protocol__submit';
     form.appendChild(submit);
 
+    const progress = buildProgress(doc);
+    form.appendChild(progress.element);
+
     const errorBox = doc.createElement('p');
     errorBox.className = 'protocol__error';
     errorBox.id = 'protocol-error';
@@ -117,12 +120,14 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
       try {
         const input = collectFormInput(form);
         submit.disabled = true;
+        progress.start();
         void Promise.resolve(callbacks.onSubmit?.(input))
           .catch((err: unknown) => {
             errorBox.textContent = formatError(err);
           })
           .finally(() => {
             submit.disabled = false;
+            progress.stop();
           });
       } catch (err) {
         errorBox.textContent = formatError(err);
@@ -243,6 +248,79 @@ function buildField(doc: Document, id: string, label: string): HTMLElement {
   }
   wrap.appendChild(control);
   return wrap;
+}
+
+interface ProgressHandle {
+  element: HTMLElement;
+  start: () => void;
+  stop: () => void;
+}
+
+/**
+ * 送信中に「AI が動いている」ことを伝える進捗インジケータ。
+ *
+ * プロトコル解析は LLM 呼び出しを含み 10〜30 秒かかり得るので、
+ * 経過秒数と段階ラベルを表示し、沈黙時間を埋める。
+ *
+ * 段階ラベルは実処理の厳密なフェーズではなく、経過時間に応じた
+ * ヒューリスティック。ユーザーに「止まっていない」感を与えるのが目的。
+ */
+function buildProgress(doc: Document): ProgressHandle {
+  const element = doc.createElement('div');
+  element.className = 'protocol__progress';
+  element.id = 'protocol-progress';
+  element.setAttribute('role', 'status');
+  element.setAttribute('aria-live', 'polite');
+  element.hidden = true;
+
+  const spinner = doc.createElement('span');
+  spinner.className = 'protocol__spinner';
+  spinner.setAttribute('aria-hidden', 'true');
+  element.appendChild(spinner);
+
+  const stage = doc.createElement('span');
+  stage.className = 'protocol__progress-stage';
+  element.appendChild(stage);
+
+  const elapsed = doc.createElement('span');
+  elapsed.className = 'protocol__progress-elapsed';
+  elapsed.setAttribute('aria-hidden', 'true');
+  element.appendChild(elapsed);
+
+  let timerId: ReturnType<typeof setInterval> | null = null;
+  let startedAt = 0;
+
+  const update = (): void => {
+    const seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    stage.textContent = stageLabel(seconds);
+    elapsed.textContent = `${seconds}s`;
+  };
+
+  return {
+    element,
+    start: () => {
+      startedAt = Date.now();
+      element.hidden = false;
+      update();
+      if (timerId !== null) {
+        clearInterval(timerId);
+      }
+      timerId = setInterval(update, 1000);
+    },
+    stop: () => {
+      if (timerId !== null) {
+        clearInterval(timerId);
+        timerId = null;
+      }
+      element.hidden = true;
+    },
+  };
+}
+
+function stageLabel(seconds: number): string {
+  if (seconds < 3) return 'AI がプロトコルを読み取り中…';
+  if (seconds < 15) return 'AI がブロック候補を抽出中…';
+  return 'まだ処理中です。LLM の応答を待っています…';
 }
 
 function buildFileInput(doc: Document, id: string, label: string): HTMLElement {

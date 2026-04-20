@@ -1,5 +1,11 @@
 import { SHEET_HEADERS } from '@/domain/sheetsSchema';
-import { createChromePopupDeps, startPopup, type PopupDeps } from './bootstrap';
+import { STORAGE_KEY_GEMINI } from '@/app/services';
+import {
+  STORAGE_KEY_PENDING_APP_TAB,
+  createChromePopupDeps,
+  startPopup,
+  type PopupDeps,
+} from './bootstrap';
 
 function buildDocument(): Document {
   const doc = document.implementation.createHTMLDocument('test');
@@ -46,7 +52,9 @@ function makeDeps(
   initialStore: Record<string, unknown> = {},
   opts: { authed?: boolean } = {}
 ): { deps: TestPopupDeps; data: Record<string, unknown>; fetchMock: jest.Mock } {
-  const data = { ...initialStore };
+  // 既存テストは API キー未設定による Options 誘導を意識していないため、
+  // 既定では Gemini キー設定済み扱いにして openAppTab が呼ばれる流れをそのまま検証する。
+  const data: Record<string, unknown> = { [STORAGE_KEY_GEMINI]: 'g-key', ...initialStore };
   const fetchMock = jest.fn();
   const deps: TestPopupDeps = {
     openAppTab: jest.fn(),
@@ -291,6 +299,73 @@ describe('startPopup / ログイン済', () => {
     await flushAsync();
     await flushAsync();
     expect(btn.disabled).toBe(false);
+  });
+
+  test('Gemini キー未設定で recent を開くと Options へ誘導し、pending フラグを立てる', async () => {
+    const doc = buildDocument();
+    const { deps, data } = makeDeps({
+      [STORAGE_KEY_GEMINI]: '',
+      recentProjects: [
+        { projectId: 'p-aaa', spreadsheetId: 's-aaa', driveFolderId: 'd', title: 'A' },
+      ],
+    });
+    await startPopup(doc, deps);
+    const btn = doc.querySelector<HTMLButtonElement>('#popup-recent button');
+    btn!.click();
+    await flushAsync();
+    await flushAsync();
+    expect(deps.openAppTab).not.toHaveBeenCalled();
+    expect(deps.openOptions).toHaveBeenCalledTimes(1);
+    expect(data[STORAGE_KEY_PENDING_APP_TAB]).toBe('1');
+    expect(doc.getElementById('popup-status')?.textContent).toContain('APIキー');
+  });
+
+  test('Gemini キー未設定で新規作成すると Options に誘導し、pending フラグを立てる', async () => {
+    const doc = buildDocument();
+    const { deps, fetchMock, data } = makeDeps({ [STORAGE_KEY_GEMINI]: '' });
+    fetchMock.mockImplementation(async (url: string, init: RequestInit) => {
+      if (url.startsWith('https://www.googleapis.com/drive/v3/files') && init.method === 'POST') {
+        const body = JSON.parse(init.body as string) as { name: string };
+        return jsonResponse({ id: `F-${body.name}`, webViewLink: '' });
+      }
+      if (url === 'https://sheets.googleapis.com/v4/spreadsheets') {
+        return jsonResponse({ spreadsheetId: 'SHEET-1', spreadsheetUrl: '' });
+      }
+      return jsonResponse({});
+    });
+    await startPopup(doc, deps);
+    (doc.getElementById('popup-create-title') as HTMLInputElement).value = 'T';
+    (doc.getElementById('popup-create-form') as HTMLFormElement).dispatchEvent(
+      new Event('submit', { cancelable: true })
+    );
+    await flushAsync();
+    await flushAsync();
+    expect(deps.openAppTab).not.toHaveBeenCalled();
+    expect(deps.openOptions).toHaveBeenCalledTimes(1);
+    expect(data[STORAGE_KEY_PENDING_APP_TAB]).toBe('1');
+  });
+
+  test('Gemini キー未設定で既存スプレッドシートを開くと Options に誘導する', async () => {
+    const doc = buildDocument();
+    const { deps, data, fetchMock } = makeDeps({ [STORAGE_KEY_GEMINI]: '' });
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        values: [
+          [...SHEET_HEADERS.Meta],
+          ['pid', 'タイトル', 'sid', 'did', '1.0', '2026-04-19T00:00:00.000Z', 'me@x'],
+        ],
+      })
+    );
+    await startPopup(doc, deps);
+    (doc.getElementById('popup-open-id') as HTMLInputElement).value = 'sid';
+    (doc.getElementById('popup-open-form') as HTMLFormElement).dispatchEvent(
+      new Event('submit', { cancelable: true })
+    );
+    await flushAsync();
+    await flushAsync();
+    expect(deps.openAppTab).not.toHaveBeenCalled();
+    expect(deps.openOptions).toHaveBeenCalledTimes(1);
+    expect(data[STORAGE_KEY_PENDING_APP_TAB]).toBe('1');
   });
 
   test('DOM 要素が一部欠けていても例外にならない', async () => {
