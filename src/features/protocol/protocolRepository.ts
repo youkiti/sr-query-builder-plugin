@@ -64,6 +64,7 @@ export async function getLatestProtocol(
   }
   const dataRows = rows.slice(1);
   const last = dataRows[dataRows.length - 1];
+  /* istanbul ignore if -- rows.length > 1 が保証されているので dataRows は必ず 1 要素以上 */
   if (!last) {
     return null;
   }

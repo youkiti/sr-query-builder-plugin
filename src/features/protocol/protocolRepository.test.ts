@@ -153,6 +153,29 @@ describe('getLatestProtocol', () => {
     const d = deps([[...SHEET_HEADERS.Protocol]]);
     await expect(getLatestProtocol('sid', d)).resolves.toBeNull();
   });
+
+  test('セル欠損・不正値の行でも安全に fromProtocolRow される（null / 0 / 既定値フォールバック）', async () => {
+    // ヘッダ長より短い行 + version と block_count が非数値 + framework_type / source_type が未知値
+    const short: string[] = ['not-a-number', 'unknown-framework', 'RQ', '', '', '', 'NaN'];
+    const d = deps([[...SHEET_HEADERS.Protocol], short]);
+    await expect(getLatestProtocol('sid', d)).resolves.toEqual({
+      version: 0,
+      frameworkType: null,
+      researchQuestion: 'RQ',
+      inclusionCriteria: null,
+      exclusionCriteria: null,
+      studyDesign: null,
+      blockCount: 0,
+      combinationExpression: '',
+      sourceType: 'manual',
+      sourceFilename: null,
+      rawTextRef: null,
+      rawTextPreview: null,
+      rawTextInline: null,
+      createdAt: '',
+      createdBy: '',
+    });
+  });
 });
 
 describe('getProtocolByVersion', () => {
@@ -191,6 +214,22 @@ describe('getProtocolByVersion', () => {
   test('存在しない version は null', async () => {
     const d = deps([[...SHEET_HEADERS.Protocol]]);
     await expect(getProtocolByVersion('sid', 9, d)).resolves.toBeNull();
+  });
+
+  test('データ行はあるが指定 version が無ければ null（version セル空の行を含む）', async () => {
+    const row = (version: string): string[] =>
+      SHEET_HEADERS.Protocol.map((key) => {
+        if (key === 'version') return version;
+        if (key === 'research_question') return 'RQ';
+        if (key === 'block_count') return '1';
+        if (key === 'source_type') return 'manual';
+        if (key === 'created_at') return '2026';
+        if (key === 'created_by') return 'tester';
+        return '';
+      });
+    // 空行（row[versionIdx] が undefined）も混ぜることで `row?.[versionIdx] ?? ''` の fallback を経由させる
+    const d = deps([[...SHEET_HEADERS.Protocol], [], row('1'), row('2')]);
+    await expect(getProtocolByVersion('sid', 99, d)).resolves.toBeNull();
   });
 });
 
