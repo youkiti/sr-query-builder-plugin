@@ -5,6 +5,8 @@ const config: Config = {
   testEnvironment: 'jsdom',
   roots: ['<rootDir>/src', '<rootDir>/tests'],
   testMatch: ['**/*.test.ts'],
+  // Playwright スモーク（tests/e2e/*.spec.ts）は jest と別実行する
+  testPathIgnorePatterns: ['/node_modules/', '<rootDir>/tests/e2e/'],
   setupFiles: ['<rootDir>/tests/setup/chrome-mock.ts'],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
