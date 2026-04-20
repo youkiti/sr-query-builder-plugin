@@ -81,13 +81,53 @@ describe('startApp', () => {
   test('サイドバーの「プロトコル入力」ボタンで setHash が呼ばれる', () => {
     const doc = buildDocument();
     const setHash = jest.fn();
-    startApp(doc, { ...noopHashOptions('#/home'), setHash });
+    const store = createStore({
+      route: 'home',
+      project: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'd', title: 'T' },
+      cumulativeCostUsd: null,
+      blocksDraft: null,
+      protocolDraft: null,
+      currentProtocolVersion: null,
+      currentFormulaVersionId: null,
+      currentFormulaMarkdown: null,
+    });
+    startApp(doc, { ...noopHashOptions('#/home'), setHash, store });
     const protocolBtn = Array.from(
       doc.querySelectorAll<HTMLButtonElement>('#app-sidebar nav button')
     ).find((b) => b.textContent === 'プロトコル入力');
     expect(protocolBtn).toBeTruthy();
     protocolBtn!.click();
     expect(setHash).toHaveBeenCalledWith('#/protocol');
+  });
+
+  test('ガード未達のサイドバーボタンは is-disabled 付きで、クリック時は status に理由を表示', () => {
+    const doc = buildDocument();
+    const setHash = jest.fn();
+    startApp(doc, { ...noopHashOptions('#/home'), setHash });
+    const blocksBtn = Array.from(
+      doc.querySelectorAll<HTMLButtonElement>('#app-sidebar nav button')
+    ).find((b) => b.textContent === 'ブロック承認')!;
+    expect(blocksBtn.classList.contains('is-disabled')).toBe(true);
+    expect(blocksBtn.getAttribute('aria-disabled')).toBe('true');
+    expect(blocksBtn.title).toContain('プロジェクト');
+    blocksBtn.click();
+    expect(setHash).not.toHaveBeenCalled();
+    expect(doc.getElementById('app-status')?.textContent).toContain('プロジェクト');
+  });
+
+  test('status 要素が無くてもガード済みボタンクリックで例外にならない', () => {
+    const doc = document.implementation.createHTMLDocument('no-status');
+    doc.body.innerHTML = `
+      <aside id="app-sidebar"><nav></nav></aside>
+      <section id="app-content"></section>
+    `;
+    const setHash = jest.fn();
+    startApp(doc, { ...noopHashOptions('#/home'), setHash });
+    const blocksBtn = Array.from(
+      doc.querySelectorAll<HTMLButtonElement>('#app-sidebar nav button')
+    ).find((b) => b.textContent === 'ブロック承認')!;
+    expect(() => blocksBtn.click()).not.toThrow();
+    expect(setHash).not.toHaveBeenCalled();
   });
 
   test('現在のルートのサイドバーボタンに is-active が付く', () => {

@@ -37,6 +37,7 @@ import { listFormulaVersions } from '@/features/formula';
 import type { FormulaVersion } from '@/domain/formulaVersion';
 import type { EutilsDeps } from '@/lib/ncbi';
 import { getCurrentProject } from '@/features/project';
+import { evaluateGuards } from './guards';
 import { ROUTE_LABELS, ROUTES, buildHash, parseRoute, type RouteName } from './router';
 import { createStore, type AppStore } from './store';
 import { buildViews, type BuildViewsOptions, type ViewContext } from './views';
@@ -92,15 +93,16 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
     if (route !== store.getState().route) {
       store.setState((s) => ({ ...s, route }));
     }
+    const snapshot = store.getState();
     if (status) {
-      const projectName = store.getState().project?.title ?? '(未選択)';
+      const projectName = snapshot.project?.title ?? '(未選択)';
       status.textContent = `${ROUTE_LABELS[route]} / ${projectName}`;
     }
     if (sidebar) {
-      renderSidebar(sidebar as HTMLElement, route, navigate);
+      renderSidebar(sidebar as HTMLElement, route, navigate, snapshot, status);
     }
     if (content) {
-      const ctx: ViewContext = { state: store.getState(), navigate };
+      const ctx: ViewContext = { state: snapshot, navigate };
       views[route](content as HTMLElement, ctx);
     }
   };
@@ -355,9 +357,12 @@ async function runExport(store: AppStore, runtime: ChromeRuntimeDeps): Promise<E
 function renderSidebar(
   nav: HTMLElement,
   current: RouteName,
-  navigate: (route: RouteName) => void
+  navigate: (route: RouteName) => void,
+  state: ReturnType<AppStore['getState']>,
+  status: HTMLElement | null
 ): void {
   nav.innerHTML = '';
+  const guards = evaluateGuards(state);
   const ul = nav.ownerDocument.createElement('ul');
   ul.className = 'app__nav-list';
   for (const route of ROUTES) {
@@ -365,8 +370,22 @@ function renderSidebar(
     const btn = nav.ownerDocument.createElement('button');
     btn.type = 'button';
     btn.textContent = ROUTE_LABELS[route];
-    btn.className = route === current ? 'is-active' : '';
-    btn.addEventListener('click', () => navigate(route));
+    const guard = guards[route];
+    const classes: string[] = [];
+    if (route === current) classes.push('is-active');
+    if (!guard.enabled) classes.push('is-disabled');
+    btn.className = classes.join(' ');
+    if (!guard.enabled) {
+      btn.title = guard.reason;
+      btn.setAttribute('aria-disabled', 'true');
+      btn.addEventListener('click', () => {
+        if (status) {
+          status.textContent = `${ROUTE_LABELS[route]}: ${guard.reason}`;
+        }
+      });
+    } else {
+      btn.addEventListener('click', () => navigate(route));
+    }
     li.appendChild(btn);
     ul.appendChild(li);
   }
