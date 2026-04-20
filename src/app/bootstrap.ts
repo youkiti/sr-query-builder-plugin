@@ -79,14 +79,26 @@ export function createLocationOptions(
 export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
   const store = opts.store ?? createStore();
   const runtime = opts.runtime === undefined ? createChromeRuntimeDeps() : opts.runtime;
+  const status = doc.getElementById('app-status');
+  const content = doc.getElementById('app-content');
+  const sidebar = doc.querySelector('#app-sidebar nav');
+  /**
+   * ガード判定付きナビゲーション。サイドバー / ホーム画面 / サービス層からの遷移すべてが
+   * これを経由するので、前提条件を満たさないルートへは setHash を発行せず、
+   * 代わりに理由を `#app-status` に表示する。
+   */
   const navigate = (route: RouteName): void => {
+    const guard = evaluateGuards(store.getState())[route];
+    if (!guard.enabled) {
+      if (status) {
+        status.textContent = `${ROUTE_LABELS[route]}: ${guard.reason}`;
+      }
+      return;
+    }
     opts.setHash(buildHash(route));
   };
   const viewOptions = opts.viewOptions ?? buildDefaultViewOptions(store, runtime, navigate);
   const views = buildViews(store, viewOptions);
-  const status = doc.getElementById('app-status');
-  const content = doc.getElementById('app-content');
-  const sidebar = doc.querySelector('#app-sidebar nav');
 
   const render = (): void => {
     const route = parseRoute(opts.getHash());
@@ -94,16 +106,23 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
       store.setState((s) => ({ ...s, route }));
     }
     const snapshot = store.getState();
+    const guard = evaluateGuards(snapshot)[route];
     if (status) {
       const projectName = snapshot.project?.title ?? '(未選択)';
       status.textContent = `${ROUTE_LABELS[route]} / ${projectName}`;
     }
     if (sidebar) {
-      renderSidebar(sidebar as HTMLElement, route, navigate, snapshot, status);
+      renderSidebar(sidebar as HTMLElement, route, navigate, snapshot);
     }
     if (content) {
-      const ctx: ViewContext = { state: snapshot, navigate };
-      views[route](content as HTMLElement, ctx);
+      if (!guard.enabled) {
+        // ハッシュ直変更や外部導線から未達ルートに入った場合の防御。
+        // views[route] を描画せずに、理由を明示したプレースホルダを出す。
+        renderGuardedPlaceholder(content as HTMLElement, route, guard.reason);
+      } else {
+        const ctx: ViewContext = { state: snapshot, navigate };
+        views[route](content as HTMLElement, ctx);
+      }
     }
   };
 
@@ -358,8 +377,7 @@ function renderSidebar(
   nav: HTMLElement,
   current: RouteName,
   navigate: (route: RouteName) => void,
-  state: ReturnType<AppStore['getState']>,
-  status: HTMLElement | null
+  state: ReturnType<AppStore['getState']>
 ): void {
   nav.innerHTML = '';
   const guards = evaluateGuards(state);
@@ -378,16 +396,28 @@ function renderSidebar(
     if (!guard.enabled) {
       btn.title = guard.reason;
       btn.setAttribute('aria-disabled', 'true');
-      btn.addEventListener('click', () => {
-        if (status) {
-          status.textContent = `${ROUTE_LABELS[route]}: ${guard.reason}`;
-        }
-      });
-    } else {
-      btn.addEventListener('click', () => navigate(route));
     }
+    // クリック時は一律 navigate に渡す。ガード判定は navigate 側で一元化しているため、
+    // 無効ルートは setHash されず理由だけが status に表示される。
+    btn.addEventListener('click', () => navigate(route));
     li.appendChild(btn);
     ul.appendChild(li);
   }
   nav.appendChild(ul);
+}
+
+function renderGuardedPlaceholder(
+  container: HTMLElement,
+  route: RouteName,
+  reason: string
+): void {
+  container.innerHTML = '';
+  const doc = container.ownerDocument;
+  const heading = doc.createElement('h2');
+  heading.textContent = ROUTE_LABELS[route];
+  container.appendChild(heading);
+  const msg = doc.createElement('p');
+  msg.className = 'view__placeholder';
+  msg.textContent = reason;
+  container.appendChild(msg);
 }

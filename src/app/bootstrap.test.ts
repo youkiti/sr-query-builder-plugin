@@ -130,6 +130,34 @@ describe('startApp', () => {
     expect(setHash).not.toHaveBeenCalled();
   });
 
+  test('ホーム画面のステップボタンもガードを通り、未達ルートは setHash されない', () => {
+    const doc = buildDocument();
+    const setHash = jest.fn();
+    // project 無しなら protocol も未達
+    startApp(doc, { ...noopHashOptions('#/home'), setHash });
+    const homeProtocolBtn = Array.from(
+      doc.querySelectorAll<HTMLButtonElement>('#app-content button')
+    ).find((b) => b.textContent === 'プロトコル入力');
+    expect(homeProtocolBtn).toBeTruthy();
+    homeProtocolBtn!.click();
+    expect(setHash).not.toHaveBeenCalled();
+    expect(doc.getElementById('app-status')?.textContent).toContain('プロジェクト');
+  });
+
+  test('ハッシュで直接未達ルートに入った場合は guard placeholder を描画し、view は呼ばない', () => {
+    const doc = buildDocument();
+    // project 未選択のまま /blocks に直接飛ばす
+    startApp(doc, noopHashOptions('#/blocks'));
+    const content = doc.getElementById('app-content')!;
+    expect(content.querySelector('h2')?.textContent).toBe('ブロック承認');
+    const placeholder = content.querySelector('.view__placeholder');
+    expect(placeholder?.textContent).toContain('プロジェクト');
+    // 実 blocks view は store.blocksDraft を参照して空時にもフォームを描画するため、
+    // 「placeholder しか無い = view が呼ばれていない」ことを form / fieldset 不在で確認
+    expect(content.querySelector('form')).toBeNull();
+    expect(content.querySelector('fieldset')).toBeNull();
+  });
+
   test('現在のルートのサイドバーボタンに is-active が付く', () => {
     const doc = buildDocument();
     startApp(doc, noopHashOptions('#/blocks'));
@@ -410,6 +438,9 @@ describe('startApp - wiring 層', () => {
         blocks: [{ blockLabel: 'P', description: 'p', aiGenerated: true, note: '' }],
         combinationExpression: '#1',
       },
+      // draft ルートのガードは「ブロック承認済み（currentProtocolVersion が採番済み）」を要求するため、
+      // wiring 層テストでは明示的に 1 を入れておく
+      currentProtocolVersion: 1,
     }));
     const generateBtn = doc.querySelector<HTMLButtonElement>('#app-content button')!;
     generateBtn.click();
