@@ -57,6 +57,12 @@ export interface AppBootstrapOptions {
   viewOptions?: BuildViewsOptions;
   /** wiring 用の Chrome runtime（既定: createChromeRuntimeDeps）。null で wiring を無効化（テスト用） */
   runtime?: ChromeRuntimeDeps | null;
+  /**
+   * /edit 画面のテキストエリアを CodeMirror 等で拡張する関数。未指定なら plain textarea。
+   * 本番エントリ（src/app/app.ts）で `mountCodeMirrorFormulaEditor` を渡す。
+   * bootstrap 自身は CodeMirror を import しない（jsdom テストで ESM を読み込むのを避けるため）。
+   */
+  enhanceFormulaEditor?: (textarea: HTMLTextAreaElement) => void;
 }
 
 export interface AppHandle {
@@ -102,7 +108,9 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
     }
     opts.setHash(buildHash(route));
   };
-  const viewOptions = opts.viewOptions ?? buildDefaultViewOptions(store, runtime, navigate);
+  const viewOptions =
+    opts.viewOptions ??
+    buildDefaultViewOptions(store, runtime, navigate, opts.enhanceFormulaEditor);
   const views = buildViews(store, viewOptions);
 
   const render = (): void => {
@@ -173,10 +181,14 @@ async function hydrateCurrentProject(store: AppStore, runtime: ChromeRuntimeDeps
 function buildDefaultViewOptions(
   store: AppStore,
   runtime: ChromeRuntimeDeps | null,
-  navigate: (route: RouteName) => void
+  navigate: (route: RouteName) => void,
+  enhanceFormulaEditor?: (textarea: HTMLTextAreaElement) => void
 ): BuildViewsOptions {
   if (!runtime) {
-    return {};
+    // runtime が無ければ service 呼び出しは無効だが、enhancer だけは通しておく。
+    // これにより `startApp(doc, { runtime: null, enhanceFormulaEditor })` という
+    // 「wiring 抜き + CodeMirror だけ」のテスト形態に対応できる。
+    return enhanceFormulaEditor ? { edit: { enhanceEditor: enhanceFormulaEditor } } : {};
   }
   const llmFactoryPromise: Promise<Awaited<ReturnType<typeof buildLlmProviderFactory>>> | null = null;
   const llmFactoryDepsBase = (): Omit<LlmFactoryDeps, 'llmLogFolderId' | 'spreadsheetId'> => ({
@@ -229,6 +241,7 @@ function buildDefaultViewOptions(
         input: RequestBlockImprovementInput
       ): Promise<BlockImprovementResult> =>
         runImproveBlock(store, runtime, llmFactoryDepsBase(), input),
+      enhanceEditor: enhanceFormulaEditor,
     },
     expand: {
       onFetch: async (): Promise<BoundaryCasesResult> =>

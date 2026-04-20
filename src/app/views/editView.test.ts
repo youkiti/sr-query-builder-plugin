@@ -63,6 +63,24 @@ describe('createEditView', () => {
     expect(textarea?.value).toContain('#1 x');
   });
 
+  test('enhanceEditor が指定されていれば textarea を引数に呼ばれる', () => {
+    const enhanceEditor = jest.fn();
+    const view = createEditView({ enhanceEditor });
+    const container = buildContainer();
+    view(container, { state: stateReady, navigate: jest.fn() });
+    expect(enhanceEditor).toHaveBeenCalledTimes(1);
+    const arg = enhanceEditor.mock.calls[0]![0] as HTMLTextAreaElement;
+    expect(arg.className).toBe('edit__formula');
+    expect(arg.value).toContain('#1 x');
+  });
+
+  test('enhanceEditor 未指定でも textarea は描画される', () => {
+    const view = createEditView();
+    const container = buildContainer();
+    view(container, { state: stateReady, navigate: jest.fn() });
+    expect(container.querySelector('.edit__formula')).not.toBeNull();
+  });
+
   test('保存ボタン押下で onSave が呼ばれ、status を更新', async () => {
     const onSave = jest
       .fn()

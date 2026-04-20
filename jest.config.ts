@@ -21,6 +21,9 @@ const config: Config = {
     '<rootDir>/src/app/app.ts',
     '<rootDir>/src/options/options.ts',
     '<rootDir>/src/background/service-worker.ts',
+    // CodeMirror 統合は DOM-heavy かつ jsdom では検証できないため
+    // architecture.md §4.4 に沿って coverage 対象外とする
+    '<rootDir>/src/app/views/formulaEditorCodeMirror.ts',
   ],
   coverageThreshold: {
     global: {

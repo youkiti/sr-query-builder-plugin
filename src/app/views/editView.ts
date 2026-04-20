@@ -28,6 +28,12 @@ export interface EditViewCallbacks {
   onSave?: (input: SaveEditedFormulaInput) => Promise<SaveEditedFormulaResult>;
   /** 指定ブロックを LLM で改善させる */
   onImproveBlock?: (input: RequestBlockImprovementInput) => Promise<BlockImprovementResult>;
+  /**
+   * textarea を拡張する（CodeMirror 等でシンタックスハイライトを付ける）オプション。
+   * 既定では textarea のまま。本番エントリ（`src/app/app.ts`）で CodeMirror 実装を渡す。
+   * jsdom テストでは未指定 or stub のまま動く。
+   */
+  enhanceEditor?: (textarea: HTMLTextAreaElement) => void;
 }
 
 interface ProposalEntry extends BlockImprovementResult {
@@ -69,6 +75,9 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
     textarea.rows = 20;
     textarea.value = ctx.state.currentFormulaMarkdown;
     container.appendChild(textarea);
+    // シンタックスハイライト等の DOM 拡張は呼び出し側で追加する
+    // （bootstrap で CodeMirror 実装を注入、テストでは stub）。
+    callbacks.enhanceEditor?.(textarea);
 
     const blocksSection = doc.createElement('section');
     blocksSection.className = 'edit__blocks';

@@ -196,6 +196,23 @@ describe('startApp', () => {
     expect(() => startApp(doc, noopHashOptions(''))).not.toThrow();
   });
 
+  test('runtime=null でも enhanceFormulaEditor を渡せば /edit で呼ばれる', () => {
+    const doc = buildDocument();
+    const store = createStore({
+      ...INITIAL_STATE,
+      project: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'd', title: 'T' },
+      currentFormulaVersionId: 'v1',
+      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 asthma[tiab]\n```\n',
+    });
+    const enhanceFormulaEditor = jest.fn();
+    startApp(doc, {
+      ...noopHashOptions('#/edit'),
+      store,
+      enhanceFormulaEditor,
+    });
+    expect(enhanceFormulaEditor).toHaveBeenCalledTimes(1);
+  });
+
   test('Protocol / Formula 未確定時は #app-context は空文字', () => {
     const doc = buildDocument();
     startApp(doc, noopHashOptions('#/home'));
@@ -715,6 +732,30 @@ describe('startApp - wiring 層', () => {
       (c[0] as string).includes('LLMApiLog') && (c[0] as string).includes(':append')
     );
     expect(logAppends.length).toBeGreaterThan(0);
+  });
+
+  test('enhanceFormulaEditor を渡すと /edit の textarea に対して呼ばれる', async () => {
+    const doc = buildDocument();
+    const { runtime } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+    });
+    const enhanceFormulaEditor = jest.fn();
+    const handle = startApp(doc, {
+      getHash: () => '#/edit',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+      enhanceFormulaEditor,
+    });
+    await flush();
+    handle.store.setState((s) => ({
+      ...s,
+      currentFormulaVersionId: 'v1',
+      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 asthma[tiab]\n```\n',
+    }));
+    expect(enhanceFormulaEditor).toHaveBeenCalledTimes(1);
+    const textarea = enhanceFormulaEditor.mock.calls[0]![0] as HTMLTextAreaElement;
+    expect(textarea.className).toBe('edit__formula');
   });
 
   test('expand view 既定 onFetch が esearch→efetch→skill を呼び、onDecide が SeedPapers に追記する', async () => {

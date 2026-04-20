@@ -276,3 +276,25 @@
   font-size: var(--font-size-sm);
   font-style: italic;
 }
+
+.edit__formula-cm {
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: var(--space-3);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-sm);
+}
+
+.edit__formula-cm .cm-editor {
+  min-height: 280px;
+}
+
+.edit__formula-cm .cm-editor.cm-focused {
+  outline: 2px solid var(--color-focus, #0969da);
+  outline-offset: -2px;
+}
+
+.edit__formula-cm .cm-scroller {
+  overflow: auto;
+}
