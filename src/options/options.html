@@ -19,12 +19,27 @@
           <span>Gemini API Key</span>
           <input type="password" id="gemini-api-key" autocomplete="off" />
         </label>
-        <div class="options__actions">
-          <button type="button" id="save-keys" class="options__button options__button--primary">
-            保存
-          </button>
-        </div>
       </section>
+      <section class="options__section">
+        <h2>NCBI E-utilities</h2>
+        <p class="options__muted">
+          NCBI API キー（任意）。登録すると PubMed API のレート上限が 3 req/s → 10 req/s
+          に上がります。未設定でも動作しますが、検証フェーズで rate limit に当たる場合は
+          <a href="https://www.ncbi.nlm.nih.gov/account/settings/" target="_blank" rel="noreferrer">
+            NCBI アカウント設定</a
+          >
+          で取得して設定してください。
+        </p>
+        <label class="options__field">
+          <span>NCBI API Key</span>
+          <input type="password" id="ncbi-api-key" autocomplete="off" />
+        </label>
+      </section>
+      <div class="options__actions">
+        <button type="button" id="save-keys" class="options__button options__button--primary">
+          保存
+        </button>
+      </div>
     </main>
     <script type="module" src="options.js"></script>
   </body>

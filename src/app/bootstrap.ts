@@ -8,6 +8,7 @@
 
 import {
   approveBlocks,
+  buildEutilsDeps,
   buildLlmProviderFactory,
   createChromeRuntimeDeps,
   exportToAllDatabases,
@@ -35,7 +36,6 @@ import {
 } from './services';
 import { listFormulaVersions } from '@/features/formula';
 import type { FormulaVersion } from '@/domain/formulaVersion';
-import type { EutilsDeps } from '@/lib/ncbi';
 import { getCurrentProject } from '@/features/project';
 import { evaluateGuards } from './guards';
 import { ROUTE_LABELS, ROUTES, buildHash, parseRoute, type RouteName } from './router';
@@ -268,9 +268,10 @@ async function runFetchBoundary(
     llmLogFolderId: project.driveFolderId,
     spreadsheetId: project.spreadsheetId,
   });
+  const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
   return fetchBoundaryCandidates({
     google: runtime.google,
-    eutils: toEutilsDeps(runtime),
+    eutils,
     store,
     llmFactory: factory,
   });
@@ -281,9 +282,10 @@ async function runRecordDecision(
   runtime: ChromeRuntimeDeps,
   input: RecordDecisionInput
 ): Promise<RecordDecisionResult> {
+  const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
   return recordDecision(input, {
     google: runtime.google,
-    eutils: toEutilsDeps(runtime),
+    eutils,
     store,
     // recordDecision は LLM を呼ばないので forPurpose は呼ばれない（guard）
     llmFactory: { forPurpose: neverCalledProvider },
@@ -295,19 +297,15 @@ function neverCalledProvider(): never {
   throw new Error('llmFactory.forPurpose should not be called in recordDecision');
 }
 
-function toEutilsDeps(runtime: ChromeRuntimeDeps): EutilsDeps {
-  // NCBI API キー（BYOK）は §11 で将来対応。MVP は未設定のまま 3 req/s 枠で動かす
-  return { fetch: runtime.google.fetch };
-}
-
 async function runIngestSeeds(
   store: AppStore,
   runtime: ChromeRuntimeDeps,
   input: IngestInput
 ): Promise<IngestSummary> {
+  const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
   return ingestSeeds(input, {
     google: runtime.google,
-    eutils: toEutilsDeps(runtime),
+    eutils,
     store,
   });
 }
@@ -316,9 +314,10 @@ async function runValidate(
   store: AppStore,
   runtime: ChromeRuntimeDeps
 ): Promise<ValidationSummary> {
+  const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
   return runValidation({
     google: runtime.google,
-    eutils: toEutilsDeps(runtime),
+    eutils,
     store,
   });
 }

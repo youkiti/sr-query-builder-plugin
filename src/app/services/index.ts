@@ -17,6 +17,12 @@ export {
   type LlmProviderFactory,
 } from './llmProviderService';
 export {
+  STORAGE_KEY_NCBI,
+  buildEutilsDeps,
+  getNcbiApiKey,
+  type BuildEutilsDepsOptions,
+} from './ncbiConfigService';
+export {
   submitProtocol,
   type ProtocolServiceDeps,
   type ProtocolSubmissionInput,
