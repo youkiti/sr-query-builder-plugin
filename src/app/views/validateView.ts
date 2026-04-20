@@ -183,7 +183,48 @@ function renderMesh(doc: Document, summary: ValidationSummary): HTMLElement {
     ul.appendChild(li);
   }
   section.appendChild(ul);
+
+  section.appendChild(renderMeshHierarchy(doc, summary));
   return section;
+}
+
+/**
+ * MeSH tree number 由来の階層を Mermaid flowchart として表示するサブセクション。
+ * 階層取得に失敗した場合はエラー文を出し、frequency セクションは活かしたままにする。
+ */
+function renderMeshHierarchy(doc: Document, summary: ValidationSummary): HTMLElement {
+  const wrap = doc.createElement('div');
+  wrap.className = 'validate__mesh-hierarchy';
+  const h4 = doc.createElement('h4');
+  h4.textContent = 'MeSH 階層（Mermaid）';
+  wrap.appendChild(h4);
+
+  if (summary.meshHierarchyError !== null) {
+    const err = doc.createElement('p');
+    err.className = 'validate__mesh-hierarchy-error';
+    err.textContent = `MeSH 階層の取得に失敗しました: ${summary.meshHierarchyError}`;
+    wrap.appendChild(err);
+    return wrap;
+  }
+
+  if (summary.meshHierarchy.length === 0) {
+    const empty = doc.createElement('p');
+    empty.textContent = '階層情報が取得できませんでした（該当する tree number 無し）。';
+    wrap.appendChild(empty);
+    return wrap;
+  }
+
+  const note = doc.createElement('p');
+  note.className = 'validate__mesh-hierarchy-note';
+  note.textContent =
+    '下の Mermaid ソースを https://mermaid.live に貼ると SVG として描画できます。';
+  wrap.appendChild(note);
+
+  const pre = doc.createElement('pre');
+  pre.className = 'validate__mesh-mermaid mermaid';
+  pre.textContent = summary.meshMermaid;
+  wrap.appendChild(pre);
+  return wrap;
 }
 
 function formatError(err: unknown): string {

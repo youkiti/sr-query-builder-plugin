@@ -150,3 +150,29 @@
 .expand__round-error {
   color: var(--color-danger);
 }
+
+.validate__mesh-hierarchy {
+  margin-top: var(--space-4);
+}
+
+.validate__mesh-hierarchy-note {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  margin: 0 0 var(--space-2);
+}
+
+.validate__mesh-mermaid {
+  background: var(--color-bg-muted, #f5f5f5);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: var(--space-3);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-sm);
+  overflow-x: auto;
+  white-space: pre;
+  line-height: 1.4;
+}
+
+.validate__mesh-hierarchy-error {
+  color: var(--color-danger);
+}

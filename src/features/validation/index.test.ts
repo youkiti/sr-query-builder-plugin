@@ -8,5 +8,7 @@ describe('features/validation index 再エクスポート', () => {
     expect(typeof mod.extractMeshForSeeds).toBe('function');
     expect(typeof mod.aggregateMeshFrequency).toBe('function');
     expect(typeof mod.appendValidationLog).toBe('function');
+    expect(typeof mod.buildMeshHierarchy).toBe('function');
+    expect(typeof mod.toMermaidFlowchart).toBe('function');
   });
 });
