@@ -1,15 +1,17 @@
 import {
+  buildContextLabel,
   createLocationOptions,
   startApp,
   type AppBootstrapOptions,
 } from './bootstrap';
-import { createStore } from './store';
+import { createStore, INITIAL_STATE } from './store';
 import { SHEET_HEADERS } from '@/domain/sheetsSchema';
 
 function buildDocument(): Document {
   const doc = document.implementation.createHTMLDocument('test');
   doc.body.innerHTML = `
     <span id="app-status"></span>
+    <span id="app-context"></span>
     <aside id="app-sidebar"><nav></nav></aside>
     <section id="app-content"></section>
   `;
@@ -192,6 +194,39 @@ describe('startApp', () => {
   test('必要な DOM 要素が欠けていても例外にならない', () => {
     const doc = document.implementation.createHTMLDocument('empty');
     expect(() => startApp(doc, noopHashOptions(''))).not.toThrow();
+  });
+
+  test('Protocol / Formula 未確定時は #app-context は空文字', () => {
+    const doc = buildDocument();
+    startApp(doc, noopHashOptions('#/home'));
+    expect(doc.getElementById('app-context')?.textContent).toBe('');
+  });
+
+  test('Protocol version と Formula version がストアにあれば #app-context に両方出る', () => {
+    const doc = buildDocument();
+    const store = createStore({
+      ...INITIAL_STATE,
+      project: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'd', title: 'My SR' },
+      currentProtocolVersion: 2,
+      currentFormulaVersionId: 'deadbeef-cafe-1234-5678-000000000000',
+    });
+    startApp(doc, { ...noopHashOptions('#/home'), store });
+    const ctx = doc.getElementById('app-context')?.textContent ?? '';
+    expect(ctx).toContain('Protocol v2');
+    expect(ctx).toContain('Formula deadbeef');
+    expect(ctx).toContain('/');
+  });
+
+  test('Protocol version だけでも #app-context に出る（Formula はまだ無い）', () => {
+    const doc = buildDocument();
+    const store = createStore({
+      ...INITIAL_STATE,
+      project: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'd', title: 'T' },
+      currentProtocolVersion: 1,
+    });
+    startApp(doc, { ...noopHashOptions('#/home'), store });
+    const ctx = doc.getElementById('app-context')?.textContent ?? '';
+    expect(ctx).toBe('Protocol v1');
   });
 });
 
@@ -755,6 +790,31 @@ describe('startApp - wiring 層', () => {
     );
     // line_hits 1 行 + final_query 1 行 + mesh 1 行 = 3 行（formula のブロック数=1 のため）
     expect(appendCalls.length).toBe(3);
+  });
+});
+
+describe('buildContextLabel', () => {
+  test('空状態は空文字', () => {
+    expect(buildContextLabel(INITIAL_STATE)).toBe('');
+  });
+
+  test('Protocol version と Formula version を " / " 区切りで結合する', () => {
+    expect(
+      buildContextLabel({
+        ...INITIAL_STATE,
+        currentProtocolVersion: 5,
+        currentFormulaVersionId: 'abcdef01-2345-6789-abcd-ef0123456789',
+      })
+    ).toBe('Protocol v5 / Formula abcdef01');
+  });
+
+  test('Formula version だけあれば Formula ラベルだけ出す', () => {
+    expect(
+      buildContextLabel({
+        ...INITIAL_STATE,
+        currentFormulaVersionId: 'short',
+      })
+    ).toBe('Formula short');
   });
 });
 

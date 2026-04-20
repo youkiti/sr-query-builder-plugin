@@ -56,4 +56,34 @@ describe('renderHomeView', () => {
     renderHomeView(container, { state: INITIAL_STATE, navigate });
     expect(container.querySelectorAll('h2')).toHaveLength(1);
   });
+
+  test('Protocol / Formula 未確定時は「未確定」「未生成」と出す', () => {
+    const container = buildContainer();
+    renderHomeView(container, { state: INITIAL_STATE, navigate: jest.fn() });
+    const dl = container.querySelector<HTMLElement>('dl.home__status');
+    expect(dl).toBeTruthy();
+    const text = dl!.textContent ?? '';
+    expect(text).toContain('Protocol version');
+    expect(text).toContain('未確定');
+    expect(text).toContain('Formula version');
+    expect(text).toContain('未生成');
+  });
+
+  test('Protocol / Formula 決定済みなら v1 と短縮 UUID を出す', () => {
+    const container = buildContainer();
+    renderHomeView(container, {
+      state: {
+        ...INITIAL_STATE,
+        currentProtocolVersion: 3,
+        currentFormulaVersionId: 'deadbeef-cafe-1234-5678-000000000000',
+      },
+      navigate: jest.fn(),
+    });
+    const dl = container.querySelector<HTMLElement>('dl.home__status');
+    expect(dl).toBeTruthy();
+    const text = dl!.textContent ?? '';
+    expect(text).toContain('v3');
+    expect(text).toContain('deadbeef');
+    expect(text).not.toContain('0000000000');
+  });
 });

@@ -39,8 +39,9 @@ import type { EutilsDeps } from '@/lib/ncbi';
 import { getCurrentProject } from '@/features/project';
 import { evaluateGuards } from './guards';
 import { ROUTE_LABELS, ROUTES, buildHash, parseRoute, type RouteName } from './router';
-import { createStore, type AppStore } from './store';
+import { createStore, type AppState, type AppStore } from './store';
 import { buildViews, type BuildViewsOptions, type ViewContext } from './views';
+import { formatFormulaVersionShort } from './views/formatHelpers';
 
 export interface AppBootstrapOptions {
   getHash: () => string;
@@ -80,6 +81,7 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
   const store = opts.store ?? createStore();
   const runtime = opts.runtime === undefined ? createChromeRuntimeDeps() : opts.runtime;
   const status = doc.getElementById('app-status');
+  const contextEl = doc.getElementById('app-context');
   const content = doc.getElementById('app-content');
   const sidebar = doc.querySelector('#app-sidebar nav');
   /**
@@ -110,6 +112,9 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
     if (status) {
       const projectName = snapshot.project?.title ?? '(未選択)';
       status.textContent = `${ROUTE_LABELS[route]} / ${projectName}`;
+    }
+    if (contextEl) {
+      contextEl.textContent = buildContextLabel(snapshot);
     }
     if (sidebar) {
       renderSidebar(sidebar as HTMLElement, route, navigate, snapshot);
@@ -404,6 +409,23 @@ function renderSidebar(
     ul.appendChild(li);
   }
   nav.appendChild(ul);
+}
+
+/**
+ * ヘッダー右上の context ラベル文字列を組み立てる。
+ * docs/ui-flow.md §4 のトップバー要件を最小実装で満たすもので、
+ * プロトコル／検索式の現在地を 1 行で俯瞰できるようにする。
+ */
+export function buildContextLabel(state: AppState): string {
+  const parts: string[] = [];
+  if (state.currentProtocolVersion !== null) {
+    parts.push(`Protocol v${state.currentProtocolVersion}`);
+  }
+  const formulaShort = formatFormulaVersionShort(state.currentFormulaVersionId);
+  if (formulaShort !== null) {
+    parts.push(`Formula ${formulaShort}`);
+  }
+  return parts.join(' / ');
 }
 
 function renderGuardedPlaceholder(
