@@ -11,7 +11,10 @@
   <body>
     <header class="app__header">
       <h1 class="app__title">SR Query Builder</h1>
-      <span class="app__status" id="app-status">起動中…</span>
+      <div class="app__header-status">
+        <span class="app__status" id="app-status">起動中…</span>
+        <span class="app__context" id="app-context" aria-live="polite"></span>
+      </div>
     </header>
     <main class="app__main">
       <aside class="app__sidebar" id="app-sidebar">
