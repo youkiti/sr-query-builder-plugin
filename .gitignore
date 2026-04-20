@@ -31,3 +31,8 @@ key.pem
 # Jest / tsbuildinfo
 .jest-cache/
 *.tsbuildinfo
+
+# Playwright (Tier 2 / Tier 3)
+playwright-report/
+test-results/
+playwright/.cache/

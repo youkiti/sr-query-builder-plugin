@@ -1,0 +1,37 @@
+{
+  "extends": ["stylelint-config-standard"],
+  "plugins": [
+    "./tools/stylelint-plugins/require-hidden-attr-reset.js",
+    "./tools/stylelint-plugins/no-display-without-hidden-guard.js"
+  ],
+  "rules": {
+    "selector-class-pattern": null,
+    "selector-id-pattern": null,
+    "no-descending-specificity": null,
+    "declaration-empty-line-before": null,
+    "comment-empty-line-before": null,
+    "rule-empty-line-before": null,
+    "color-hex-length": null,
+    "color-function-notation": null,
+    "color-function-alias-notation": null,
+    "alpha-value-notation": null,
+    "value-keyword-case": null,
+    "custom-property-empty-line-before": null,
+    "selector-attribute-quotes": null,
+    "selector-not-notation": "simple",
+    "sr-query-builder/no-display-without-hidden-guard": [
+      true,
+      {
+        "ignoreSelectors": ["html", "body", "main", "*"]
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": ["src/styles/globals.css"],
+      "rules": {
+        "sr-query-builder/require-hidden-attr-reset": [true]
+      }
+    }
+  ]
+}

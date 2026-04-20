@@ -11,6 +11,8 @@
 - [ブロック承認 UI ワイヤーフレーム](docs/ui-block-approval.md)
 - [アーキテクチャ / ディレクトリ構造](docs/architecture.md)
 - [ライブラリアンフローチャート](docs/librarian-flowchart.md)
+- [UI レビュー戦略](docs/ui-review-strategy.md)
+- [UI 状態マトリクス](docs/ui-states.md)
 
 ## 開発環境
 
@@ -25,9 +27,21 @@ npm run watch         # 差分ビルド
 npm run build         # 本番ビルド
 npm run build:zip     # dist/ を zip 化
 npm run lint
+npm run lint:css      # stylelint（[hidden] 規約の固定化）
 npm run typecheck
 npm run test
 npm run test:coverage
+npm run test:e2e      # Playwright スモーク（事前に `npx playwright install chromium` が必要）
+```
+
+### UI レビュー層（[docs/ui-review-strategy.md](docs/ui-review-strategy.md)）
+
+`npm run lint:css` は CSS の `[hidden]` リセット規約を固定化する Tier 0、`npm run test:e2e` は実 Chromium で popup の可視状態と axe a11y 監査を回す Tier 2 / Tier 3。`tests/e2e/popup.spec.ts` の各ケースは [docs/ui-states.md](docs/ui-states.md) の状態 ID に対応する。
+
+CI 投入は MVP 直前の予定（要件 §11.1）。それまではローカルで以下を一通り通す:
+
+```bash
+npm run lint && npm run lint:css && npm run typecheck && npm test && npm run test:e2e
 ```
 
 ## 拡張の読み込み方法（開発時）
