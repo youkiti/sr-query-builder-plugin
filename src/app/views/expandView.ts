@@ -39,6 +39,7 @@ interface CandidateItemHandle {
   element: HTMLElement;
   decide: (decision: SeedUserDecision) => void;
   isDecided: () => boolean;
+  isPending: () => boolean;
 }
 
 export function createExpandView(callbacks: ExpandViewCallbacks = {}): RenderView {
@@ -224,7 +225,7 @@ function decideFocused(
   /* istanbul ignore if -- フェッチ完了後は setFocus(0) でインデックスが必ず有効化される */
   if (focusIndex < 0 || focusIndex >= items.length) return;
   const item = items[focusIndex]!;
-  if (item.isDecided()) return;
+  if (item.isDecided() || item.isPending()) return;
   item.decide(decision);
 }
 
@@ -277,10 +278,12 @@ function buildCandidateItem(
   };
 
   let decided = false;
+  let pending = false;
   const triggerDecision = (decision: SeedUserDecision): void => {
     if (!onDecide) return;
     /* istanbul ignore if -- decideFocused 側で isDecided() ガード済み + button.disabled でも防がれる */
-    if (decided) return;
+    if (decided || pending) return;
+    pending = true;
     const btn = buttons[decision];
     btn.disabled = true;
     const others = (Object.keys(buttons) as SeedUserDecision[])
@@ -298,10 +301,12 @@ function buildCandidateItem(
       .then(() => {
         status.textContent = `${decision} として保存しました`;
         li.classList.add('expand__candidate--decided');
+        pending = false;
         decided = true;
         onDecided();
       })
       .catch((err: unknown) => {
+        pending = false;
         status.textContent = `保存失敗: ${formatError(err)}`;
         btn.disabled = false;
         others.forEach((b) => (b.disabled = false));
@@ -318,6 +323,7 @@ function buildCandidateItem(
     element: li,
     decide: triggerDecision,
     isDecided: () => decided,
+    isPending: () => pending,
   };
 }
 

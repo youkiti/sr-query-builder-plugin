@@ -249,6 +249,32 @@ describe('createExpandView', () => {
     expect(onDecide.mock.calls[0]![0]).toMatchObject({ pmid: '111', decision: 'include' });
   });
 
+  test('保存中に同じショートカットを連打しても onDecide は 1 回しか呼ばれない', async () => {
+    const onFetch = jest.fn().mockResolvedValue(sampleResult());
+    type EmptySeedResult = { seed: Record<string, never> };
+    let resolveDecision: ((value: EmptySeedResult) => void) | null = null;
+    const onDecide = jest.fn().mockImplementation(
+      () =>
+        new Promise<EmptySeedResult>((resolve) => {
+          resolveDecision = resolve;
+        })
+    );
+    const view = createExpandView({ onFetch, onDecide });
+    const container = buildContainer();
+    view(container, { state: stateReady, navigate: jest.fn() });
+    container.querySelector<HTMLButtonElement>('.expand__actions button')!.click();
+    await flushAsync();
+    await flushAsync();
+    const list = container.querySelector<HTMLElement>('.expand__candidates')!;
+    pressKey(list, 'i');
+    pressKey(list, 'i');
+    expect(onDecide).toHaveBeenCalledTimes(1);
+    resolveDecision!({ seed: {} });
+    await flushAsync();
+    await flushAsync();
+    expect(container.querySelector('.expand__candidate-status')?.textContent).toContain('保存しました');
+  });
+
   test('"e" / "m" キーも対応する判定をトリガする', async () => {
     const onFetch = jest.fn().mockResolvedValue(sampleResult());
     const onDecide = jest.fn().mockResolvedValue({ seed: {} });
