@@ -124,6 +124,7 @@ function buildPmidForm(
   const textarea = doc.createElement('textarea');
   textarea.placeholder = 'PMID を改行またはカンマ区切りで貼り付け';
   textarea.className = 'seeds__pmid-input';
+  textarea.setAttribute('aria-label', 'PMID 入力');
   fieldset.appendChild(textarea);
 
   const btn = doc.createElement('button');
@@ -161,6 +162,7 @@ function buildFileForm(
   const fileInput = doc.createElement('input');
   fileInput.type = 'file';
   fileInput.accept = accept;
+  fileInput.setAttribute('aria-label', legendText);
   fieldset.appendChild(fileInput);
 
   const btn = doc.createElement('button');

@@ -429,6 +429,9 @@ function renderSidebar(
     if (route === current) classes.push('is-active');
     if (!guard.enabled) classes.push('is-disabled');
     btn.className = classes.join(' ');
+    if (route === current) {
+      btn.setAttribute('aria-current', 'page');
+    }
     if (!guard.enabled) {
       btn.title = guard.reason;
       btn.setAttribute('aria-disabled', 'true');

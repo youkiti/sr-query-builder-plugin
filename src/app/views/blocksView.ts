@@ -139,6 +139,7 @@ function buildBlockItem(
   labelInput.value = block.blockLabel;
   labelInput.placeholder = 'Label (例: Population)';
   labelInput.className = 'blocks__label-input';
+  labelInput.setAttribute('aria-label', `ブロック ${index + 1} のラベル`);
   labelInput.addEventListener('input', () => {
     mutateDraft(store, (d) => updateBlock(d, index, { blockLabel: labelInput.value }));
   });
@@ -148,6 +149,7 @@ function buildBlockItem(
   descArea.value = block.description;
   descArea.placeholder = 'このブロックで捉えたい概念を 1-3 文で';
   descArea.className = 'blocks__desc';
+  descArea.setAttribute('aria-label', `ブロック ${index + 1} の説明`);
   descArea.addEventListener('input', () => {
     mutateDraft(store, (d) => updateBlock(d, index, { description: descArea.value }));
   });
@@ -157,6 +159,7 @@ function buildBlockItem(
   noteArea.value = block.note;
   noteArea.placeholder = 'note（任意）';
   noteArea.className = 'blocks__note';
+  noteArea.setAttribute('aria-label', `ブロック ${index + 1} のノート`);
   noteArea.addEventListener('input', () => {
     mutateDraft(store, (d) => updateBlock(d, index, { note: noteArea.value }));
   });
@@ -197,6 +200,7 @@ function buildCombinationEditor(
   input.type = 'text';
   input.value = draft.combinationExpression;
   input.className = 'blocks__combination-input';
+  input.setAttribute('aria-label', '結合式 (combination_expression)');
   input.addEventListener('input', () => {
     mutateDraft(store, (d) => setCombinationExpression(d, input.value));
   });

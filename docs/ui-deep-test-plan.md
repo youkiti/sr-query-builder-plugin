@@ -3,7 +3,15 @@
 - **作成日**: 2026-04-20
 - **親ドキュメント**: [ui-review-strategy.md](ui-review-strategy.md) §3 Tier 2 / [ui-states.md](ui-states.md) / [ui-flow.md](ui-flow.md)
 - **対象**: Playwright + `@axe-core/playwright` による実 Chromium スモーク
-- **現状**: [tests/e2e/popup.spec.ts](../tests/e2e/popup.spec.ts) に popup 5 ケースのみ。app.html（11 ルート）と options.html は未着手
+- **現状** (2026-04-20 更新): Phase A〜G を初版実装済み。unit 828 / E2E 89 すべて green。
+  - Phase A: [tests/e2e/fixtures/appStub.ts](../tests/e2e/fixtures/appStub.ts) + [src/app/app.ts](../src/app/app.ts) の `window.__E2E_PRELOADED_STATE__` hook、[app-smoke-of-smoke.spec.ts](../tests/e2e/app-smoke-of-smoke.spec.ts) 11 ケース
+  - Phase B: `app-{home,protocol,blocks,seeds,draft,validate,expand,edit,export,done,history}.spec.ts` 計 37 ケース（含む a11y 11）
+  - Phase C: [app-guards.spec.ts](../tests/e2e/app-guards.spec.ts) 6 ケース、[app-sidebar-visual.spec.ts](../tests/e2e/app-sidebar-visual.spec.ts) 4 ケース
+  - Phase D: `journey-docx-upload.spec.ts` (J3 UI-only) + `journey-history-switch.spec.ts` (J2) — J1/J4 は LLM stub 整備待ち
+  - Phase E: `journey-errors.spec.ts`（OAuth レイヤのみ）— Sheets 403 / NCBI 429 / LLM 500 は Phase A#4 fetch stub 拡充後
+  - Phase F: `app-regression.spec.ts` で 11 ルート × `#app-content` 非空 + 3 status 非空 + long-title bounding box
+  - Phase G: `options.spec.ts` 5 ケース（MVP 現実装向け）
+  - **副作用**: axe が実バグを検出したため以下を修正: `blocksView.ts` / `editView.ts` / `seedsView.ts` に `aria-label`、`bootstrap.ts` のサイドバーに `aria-current="page"`、`options.css` に `.options__muted a { text-decoration: underline }`。
 - **目的**: CLAUDE.md §目的 の user flow（protocol 入力 → blocks 承認 → seeds → draft → validate → expand → edit → export → done）を **画面単位 + ジャーニー単位 + 異常系** の 3 層で網羅し、CSS specificity / レイアウト / 画面間 state 引き回し事故を構造的に落とす
 
 ## 1. 方針
