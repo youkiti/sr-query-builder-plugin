@@ -41,50 +41,62 @@ const MIME = {
 
 function safeJoin(rootDir, requestPath) {
   const decoded = decodeURIComponent(requestPath.split('?')[0]);
-  const joined = path.normalize(path.join(rootDir, decoded));
-  if (!joined.startsWith(rootDir)) return null;
-  return joined;
+  const relativePath = decoded.replace(/^[/\\]+/, '');
+  const resolved = path.resolve(rootDir, relativePath);
+  const rootPrefix = `${rootDir}${path.sep}`;
+  if (resolved !== rootDir && !resolved.startsWith(rootPrefix)) return null;
+  return resolved;
 }
 
-const server = http.createServer((req, res) => {
-  const filePath = safeJoin(ROOT, req.url || '/');
-  if (!filePath) {
-    res.writeHead(403);
-    res.end('Forbidden');
-    return;
-  }
-  fs.stat(filePath, (err, stats) => {
-    if (err) {
-      res.writeHead(404);
-      res.end('Not Found');
+function createServer(rootDir) {
+  return http.createServer((req, res) => {
+    const filePath = safeJoin(rootDir, req.url || '/');
+    if (!filePath) {
+      res.writeHead(403);
+      res.end('Forbidden');
       return;
     }
-    const target = stats.isDirectory() ? path.join(filePath, 'index.html') : filePath;
-    fs.readFile(target, (readErr, data) => {
-      if (readErr) {
+    fs.stat(filePath, (err, stats) => {
+      if (err) {
         res.writeHead(404);
         res.end('Not Found');
         return;
       }
-      const mime = MIME[path.extname(target).toLowerCase()] || 'application/octet-stream';
-      res.writeHead(200, {
-        'Content-Type': mime,
-        'Cache-Control': 'no-store',
+      const target = stats.isDirectory() ? path.join(filePath, 'index.html') : filePath;
+      fs.readFile(target, (readErr, data) => {
+        if (readErr) {
+          res.writeHead(404);
+          res.end('Not Found');
+          return;
+        }
+        const mime = MIME[path.extname(target).toLowerCase()] || 'application/octet-stream';
+        res.writeHead(200, {
+          'Content-Type': mime,
+          'Cache-Control': 'no-store',
+        });
+        res.end(data);
       });
-      res.end(data);
     });
   });
-});
+}
 
-server.listen(PORT, () => {
-  // Playwright webServer はこの行の URL ヘルスチェックを使うため、
-  // 起動完了をログに出して確実にレディネスを見せる。
-  // eslint-disable-next-line no-console
-  console.log(`[playwright-server] serving ${ROOT} at http://localhost:${PORT}`);
-});
+if (require.main === module) {
+  const server = createServer(ROOT);
+  server.listen(PORT, () => {
+    // Playwright webServer はこの行の URL ヘルスチェックを使うため、
+    // 起動完了をログに出して確実にレディネスを見せる。
+    // eslint-disable-next-line no-console
+    console.log(`[playwright-server] serving ${ROOT} at http://localhost:${PORT}`);
+  });
 
-process.on('SIGTERM', () => server.close());
-process.on('SIGINT', () => {
-  server.close();
-  process.exit(0);
-});
+  process.on('SIGTERM', () => server.close());
+  process.on('SIGINT', () => {
+    server.close();
+    process.exit(0);
+  });
+}
+
+module.exports = {
+  createServer,
+  safeJoin,
+};
