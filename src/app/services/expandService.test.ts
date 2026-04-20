@@ -451,6 +451,121 @@ describe('fetchBoundaryCandidates', () => {
     ]);
     expect(provider.chat).toHaveBeenCalled();
   });
+
+  test('Sheet 由来 Protocol の inclusion / exclusion が空でも candidate 取得が成立する', async () => {
+    const store = createStore(
+      makeState({
+        protocolDraft: null,
+        currentProtocolVersion: null,
+        currentFormulaVersionId: 'v-from-history',
+      })
+    );
+    const googleFetch = jest.fn().mockImplementation(async (url: string) => {
+      if (url.includes('/values/SeedPapers')) {
+        return jsonResponse({ values: [SHEET_HEADERS.SeedPapers] });
+      }
+      if (url.includes('/values/FormulaVersions')) {
+        return jsonResponse({
+          values: [
+            SHEET_HEADERS.FormulaVersions,
+            formulaVersionRow(
+              'v-from-history',
+              '5',
+              '## PubMed/MEDLINE\n\n```\n#1 asthma[tiab]\n#2 #1\n```\n'
+            ),
+          ],
+        });
+      }
+      if (url.includes('/values/Protocol')) {
+        return jsonResponse({
+          values: [
+            SHEET_HEADERS.Protocol,
+            protocolRow('5', { inclusion_criteria: '', exclusion_criteria: '' }),
+          ],
+        });
+      }
+      return jsonResponse({});
+    });
+    const eutilsFetch = jest.fn().mockImplementation(async (url: string) => {
+      if (url.includes('esearch.fcgi')) {
+        return jsonResponse({
+          esearchresult: { count: '1', idlist: ['999'] },
+        });
+      }
+      return textResponse(buildEfetchXml([{ pmid: '999', title: 'p999' }]));
+    });
+    const capturedPrompts: string[] = [];
+    const provider: LLMProvider = {
+      providerId: 'gemini',
+      model: 'test',
+      chat: jest.fn().mockImplementation(async (messages: Array<{ content: string }>) => {
+        capturedPrompts.push(messages.map((m) => m.content).join('\n'));
+        return {
+          text: JSON.stringify({ picks: [{ pmid: '999', reason: 'any' }] }),
+          tokensIn: null,
+          tokensOut: null,
+          raw: {},
+        };
+      }),
+    };
+    await fetchBoundaryCandidates({
+      google: {
+        fetch: googleFetch as unknown as typeof fetch,
+        getAccessToken: jest.fn().mockResolvedValue('t'),
+      },
+      eutils: {
+        fetch: eutilsFetch as unknown as typeof fetch,
+        sleep: async () => undefined,
+        maxRetries: 0,
+      },
+      store,
+      llmFactory: { forPurpose: () => provider },
+    });
+    expect(provider.chat).toHaveBeenCalled();
+  });
+
+  test('指定 protocol version が Sheet に存在しなければ例外', async () => {
+    const store = createStore(
+      makeState({
+        protocolDraft: null,
+        currentProtocolVersion: null,
+        currentFormulaVersionId: 'v-dangling',
+      })
+    );
+    const googleFetch = jest.fn().mockImplementation(async (url: string) => {
+      if (url.includes('/values/FormulaVersions')) {
+        return jsonResponse({
+          values: [
+            SHEET_HEADERS.FormulaVersions,
+            formulaVersionRow(
+              'v-dangling',
+              '42',
+              '## PubMed/MEDLINE\n\n```\n#1 asthma[tiab]\n#2 #1\n```\n'
+            ),
+          ],
+        });
+      }
+      if (url.includes('/values/Protocol')) {
+        return jsonResponse({ values: [SHEET_HEADERS.Protocol] });
+      }
+      return jsonResponse({});
+    });
+    await expect(
+      fetchBoundaryCandidates({
+        google: {
+          fetch: googleFetch as unknown as typeof fetch,
+          getAccessToken: jest.fn().mockResolvedValue('t'),
+        },
+        eutils: {
+          fetch: jest.fn() as unknown as typeof fetch,
+          sleep: async () => undefined,
+          maxRetries: 0,
+        },
+        store,
+        llmFactory: { forPurpose: () => mockProvider('{}') },
+      })
+    ).rejects.toThrow('Protocol version 42');
+  });
 });
 
 describe('recordDecision', () => {

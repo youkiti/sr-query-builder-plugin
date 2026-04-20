@@ -196,6 +196,7 @@ async function resolveBoundaryProtocol(
   exclusionCriteria: string;
 }> {
   const state = deps.store.getState();
+  /* istanbul ignore if -- fetchBoundaryCandidates が呼び出し前に project を検証済み */
   if (state.project === null) {
     throw new Error('プロジェクトが選択されていません');
   }

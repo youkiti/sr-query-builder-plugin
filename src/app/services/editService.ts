@@ -81,6 +81,7 @@ async function resolveProtocolContext(
   deps: EditServiceDeps
 ): Promise<{ protocolVersion: number; protocolSnapshotRef: string }> {
   const state = deps.store.getState();
+  /* istanbul ignore if -- saveEditedFormula が呼び出し前に project を検証済み */
   if (state.project === null) {
     throw new Error('プロジェクトが選択されていません');
   }
