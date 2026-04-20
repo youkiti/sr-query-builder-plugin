@@ -51,3 +51,18 @@ export {
   type ValidationServiceDeps,
   type ValidationSummary,
 } from './validationService';
+export {
+  saveEditedFormula,
+  type EditServiceDeps,
+  type SaveEditedFormulaInput,
+  type SaveEditedFormulaResult,
+} from './editService';
+export {
+  fetchBoundaryCandidates,
+  recordDecision,
+  type BoundaryCaseView,
+  type BoundaryCasesResult,
+  type ExpandServiceDeps,
+  type RecordDecisionInput,
+  type RecordDecisionResult,
+} from './expandService';

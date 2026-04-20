@@ -457,6 +457,181 @@ describe('startApp - wiring 層', () => {
     expect(appendCalls.length).toBeGreaterThan(0);
   });
 
+  test('history view 既定 onList が FormulaVersions を読み、onLoad で store を差し替える', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+    });
+    const header = [...SHEET_HEADERS.FormulaVersions];
+    fetchMock.mockImplementation(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/values/FormulaVersions')) {
+        const row = (versionId: string): string[] =>
+          header.map((k) => {
+            if (k === 'version_id') return versionId;
+            if (k === 'protocol_version') return versionId === 'v2' ? '7' : '1';
+            if (k === 'formula_md') return `## PubMed/MEDLINE\n\n\`\`\`\n#1 md-${versionId}\n\`\`\`\n`;
+            if (k === 'created_by') return 'ai_draft';
+            if (k === 'created_at') return '2026';
+            return '';
+          });
+        return jsonResponse({ values: [header, row('v1'), row('v2')] });
+      }
+      return jsonResponse({});
+    });
+    const handle = startApp(doc, {
+      getHash: () => '#/history',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({ ...s })); // force re-render after hydrate
+    for (let i = 0; i < 5; i += 1) {
+      await flush();
+    }
+    const items = doc.querySelectorAll('.history__item');
+    expect(items.length).toBe(2);
+    // 上の方（最新）は v2
+    const loadBtn = items[0]!.querySelector<HTMLButtonElement>('.history__load')!;
+    loadBtn.click();
+    expect(handle.store.getState().currentProtocolVersion).toBe(7);
+    expect(handle.store.getState().currentFormulaVersionId).toBe('v2');
+    expect(handle.store.getState().currentFormulaMarkdown).toContain('md-v2');
+  });
+
+  test('edit view 既定 onSave が FormulaVersions に user_edit 行を追加する', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+    });
+    fetchMock.mockResolvedValue(jsonResponse({}));
+    const handle = startApp(doc, {
+      getHash: () => '#/edit',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({
+      ...s,
+      protocolDraft: {
+        frameworkType: 'pico',
+        researchQuestion: 'RQ',
+        inclusionCriteria: '',
+        exclusionCriteria: '',
+        studyDesign: 'RCT',
+        sourceType: 'manual',
+        sourceFilename: null,
+        rawTextRef: null,
+        rawTextPreview: 'p',
+        rawTextInline: '本文',
+      },
+      currentFormulaVersionId: 'parent-v',
+      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 old\n```\n',
+    }));
+    const textarea = doc.querySelector<HTMLTextAreaElement>('.edit__formula')!;
+    textarea.value = '## PubMed/MEDLINE\n\n```\n#1 edited\n```\n';
+    const saveBtn = doc.querySelector<HTMLButtonElement>('.edit__actions button')!;
+    saveBtn.click();
+    for (let i = 0; i < 5; i += 1) {
+      await flush();
+    }
+    const appendCalls = fetchMock.mock.calls.filter((c) =>
+      (c[0] as string).includes('FormulaVersions') && (c[0] as string).includes(':append')
+    );
+    expect(appendCalls).toHaveLength(1);
+    expect(handle.store.getState().currentFormulaMarkdown).toContain('edited');
+  });
+
+  test('expand view 既定 onFetch が esearch→efetch→skill を呼び、onDecide が SeedPapers に追記する', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+      'apiKeys.gemini': 'KEY',
+    });
+    fetchMock.mockImplementation(async (url: string) => {
+      const u = typeof url === 'string' ? url : String(url);
+      if (u.includes('/values/SeedPapers')) {
+        return jsonResponse({ values: [SHEET_HEADERS.SeedPapers] });
+      }
+      if (u.includes('esearch.fcgi')) {
+        return jsonResponse({ esearchresult: { count: '50', idlist: ['111', '222'] } });
+      }
+      if (u.includes('efetch.fcgi')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({}),
+          text: async () =>
+            `<?xml version="1.0"?><PubmedArticleSet><PubmedArticle><MedlineCitation><PMID>111</PMID><Article><ArticleTitle>A</ArticleTitle></Article></MedlineCitation></PubmedArticle><PubmedArticle><MedlineCitation><PMID>222</PMID><Article><ArticleTitle>B</ArticleTitle></Article></MedlineCitation></PubmedArticle></PubmedArticleSet>`,
+        } as Response;
+      }
+      if (u.includes('generativelanguage.googleapis.com')) {
+        return jsonResponse({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      picks: [{ pmid: '111', reason: 'subset' }],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        });
+      }
+      if (u.includes('/upload/drive/v3/files')) {
+        return jsonResponse({ id: 'f', webViewLink: '' });
+      }
+      return jsonResponse({});
+    });
+    const handle = startApp(doc, {
+      getHash: () => '#/expand',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({
+      ...s,
+      protocolDraft: {
+        frameworkType: 'pico',
+        researchQuestion: 'RQ',
+        inclusionCriteria: '',
+        exclusionCriteria: '',
+        studyDesign: 'RCT',
+        sourceType: 'manual',
+        sourceFilename: null,
+        rawTextRef: null,
+        rawTextPreview: 'p',
+        rawTextInline: '本文',
+      },
+      currentFormulaVersionId: 'v-1',
+      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 asthma[tiab]\n```\n',
+    }));
+    const fetchBtn = doc.querySelector<HTMLButtonElement>('.expand__actions button')!;
+    fetchBtn.click();
+    for (let i = 0; i < 10; i += 1) {
+      await flush();
+    }
+    const items = doc.querySelectorAll('.expand__candidate');
+    expect(items.length).toBe(1);
+    const includeBtn = items[0]!.querySelector<HTMLButtonElement>(
+      'button[data-decision=include]'
+    )!;
+    includeBtn.click();
+    for (let i = 0; i < 5; i += 1) {
+      await flush();
+    }
+    const seedAppends = fetchMock.mock.calls.filter((c) =>
+      (c[0] as string).includes('SeedPapers') && (c[0] as string).includes(':append')
+    );
+    expect(seedAppends).toHaveLength(1);
+  });
+
   test('validate view 既定 onRun が ValidationLog に 5 行追記する', async () => {
     const doc = buildDocument();
     const seedHeader = [...SHEET_HEADERS.SeedPapers];

@@ -2,7 +2,9 @@ import { SHEET_HEADERS } from '@/domain/sheetsSchema';
 import type { FormulaVersion } from '@/domain/formulaVersion';
 import {
   appendFormulaVersion,
+  getFormulaVersionById,
   getLatestFormulaVersion,
+  listFormulaVersions,
 } from './formulaRepository';
 
 function jsonResponse(body: unknown): Response {
@@ -154,5 +156,115 @@ describe('getLatestFormulaVersion', () => {
     } as Response);
     const d = { fetch: mockFetch, getAccessToken: jest.fn().mockResolvedValue('t') };
     await expect(getLatestFormulaVersion('sid', d)).resolves.toBeNull();
+  });
+});
+
+describe('listFormulaVersions', () => {
+  const header = [...SHEET_HEADERS.FormulaVersions];
+  function row(overrides: Partial<Record<string, string>> = {}): string[] {
+    const base: Record<string, string> = {
+      version_id: 'v1',
+      parent_version_id: '',
+      protocol_version: '1',
+      protocol_snapshot_ref: 'snap',
+      formula_md: '#1 x',
+      created_by: 'ai_draft',
+      created_at: '2026',
+      note: '',
+    };
+    return header.map((key) => overrides[key] ?? base[key] ?? '');
+  }
+
+  test('ヘッダのみなら空配列', async () => {
+    const d = deps({ values: [header] });
+    await expect(listFormulaVersions('sid', d)).resolves.toEqual([]);
+  });
+
+  test('values なしでも空配列', async () => {
+    const d = deps({});
+    await expect(listFormulaVersions('sid', d)).resolves.toEqual([]);
+  });
+
+  test('末尾が先頭にくる逆順で返す', async () => {
+    const d = deps({
+      values: [
+        header,
+        row({ version_id: 'v1', protocol_version: '1' }),
+        row({ version_id: 'v2', parent_version_id: 'v1', protocol_version: '2' }),
+        row({ version_id: 'v3', parent_version_id: 'v2', protocol_version: '3' }),
+      ],
+    });
+    const result = await listFormulaVersions('sid', d);
+    expect(result.map((v) => v.versionId)).toEqual(['v3', 'v2', 'v1']);
+  });
+
+  test('非配列の行は除外する', async () => {
+    const mockFetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ values: [header, row({ version_id: 'v1' }), undefined] }),
+      text: async () => '',
+    } as Response);
+    const d = { fetch: mockFetch, getAccessToken: jest.fn().mockResolvedValue('t') };
+    const result = await listFormulaVersions('sid', d);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.versionId).toBe('v1');
+  });
+});
+
+describe('getFormulaVersionById', () => {
+  const header = [...SHEET_HEADERS.FormulaVersions];
+  function row(overrides: Partial<Record<string, string>> = {}): string[] {
+    const base: Record<string, string> = {
+      version_id: 'v1',
+      parent_version_id: '',
+      protocol_version: '1',
+      protocol_snapshot_ref: 'snap',
+      formula_md: '#1 x',
+      created_by: 'ai_draft',
+      created_at: '2026',
+      note: '',
+    };
+    return header.map((key) => overrides[key] ?? base[key] ?? '');
+  }
+
+  test('ヘッダのみなら null', async () => {
+    const d = deps({ values: [header] });
+    await expect(getFormulaVersionById('sid', 'v1', d)).resolves.toBeNull();
+  });
+
+  test('values なしでも null', async () => {
+    const d = deps({});
+    await expect(getFormulaVersionById('sid', 'v1', d)).resolves.toBeNull();
+  });
+
+  test('一致する行を返す', async () => {
+    const d = deps({
+      values: [
+        header,
+        row({ version_id: 'v1' }),
+        row({ version_id: 'v2', note: 'target' }),
+      ],
+    });
+    const result = await getFormulaVersionById('sid', 'v2', d);
+    expect(result?.versionId).toBe('v2');
+    expect(result?.note).toBe('target');
+  });
+
+  test('一致しなければ null', async () => {
+    const d = deps({ values: [header, row({ version_id: 'v1' })] });
+    await expect(getFormulaVersionById('sid', 'v9', d)).resolves.toBeNull();
+  });
+
+  test('非配列の行はスキップする', async () => {
+    const mockFetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ values: [header, undefined, row({ version_id: 'v1' })] }),
+      text: async () => '',
+    } as Response);
+    const d = { fetch: mockFetch, getAccessToken: jest.fn().mockResolvedValue('t') };
+    const result = await getFormulaVersionById('sid', 'v1', d);
+    expect(result?.versionId).toBe('v1');
   });
 });

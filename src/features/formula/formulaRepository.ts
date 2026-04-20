@@ -42,6 +42,51 @@ export async function getLatestFormulaVersion(
   return fromRow(last);
 }
 
+/**
+ * FormulaVersions タブの全行を新しい順で返す。ヘッダ行は除外する。
+ * #/history 画面で一覧表示に使う。
+ */
+export async function listFormulaVersions(
+  spreadsheetId: string,
+  deps: GoogleApiDeps
+): Promise<FormulaVersion[]> {
+  const rows = await getSheetValues(spreadsheetId, 'FormulaVersions', deps);
+  if (rows.length <= 1) {
+    return [];
+  }
+  const dataRows = rows.slice(1).filter((r): r is string[] => Array.isArray(r));
+  const versions = dataRows.map((row) => fromRow(row));
+  // 末尾が最新なので逆順
+  return versions.reverse();
+}
+
+/**
+ * 指定した version_id に一致する 1 件を返す。存在しなければ null。
+ * /history や /edit で特定バージョンを読み込むときに使う。
+ */
+export async function getFormulaVersionById(
+  spreadsheetId: string,
+  versionId: string,
+  deps: GoogleApiDeps
+): Promise<FormulaVersion | null> {
+  const rows = await getSheetValues(spreadsheetId, 'FormulaVersions', deps);
+  if (rows.length <= 1) {
+    return null;
+  }
+  const idIdx = HEADER.indexOf('version_id');
+  /* istanbul ignore if -- HEADER に version_id は必ず含まれる */
+  if (idIdx < 0) return null;
+  for (const row of rows.slice(1)) {
+    if (!Array.isArray(row)) continue;
+    /* istanbul ignore next -- noUncheckedIndexedAccess 対策。実配列は範囲内で値を持つ */
+    const cell = row[idIdx] ?? '';
+    if (cell === versionId) {
+      return fromRow(row);
+    }
+  }
+  return null;
+}
+
 function toRow(v: FormulaVersionRow): (string | number | boolean | null)[] {
   const map: Record<string, string | number | boolean | null> = {
     version_id: v.versionId,
