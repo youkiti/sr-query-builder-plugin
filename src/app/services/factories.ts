@@ -17,7 +17,11 @@ export function createChromeGoogleApiDeps(auth?: AuthDeps): GoogleApiDeps {
   const a = auth ?? createChromeAuthDeps();
   return {
     fetch: (input, init) => globalThis.fetch(input, init),
-    getAccessToken: () => getAccessToken(a, false),
+    // interactive=true: 未同意時は Chrome の OAuth 同意 UI を開き、
+    // 同意済みならキャッシュされたトークンを即返す（UI は出ない）。
+    // false だと初回常に "OAuth2 not granted or revoked" になり、
+    // popup / app 双方でログイン導線が成立しないため true 固定とする。
+    getAccessToken: () => getAccessToken(a, true),
   };
 }
 

@@ -5,13 +5,17 @@ function buildDocument(): Document {
   const doc = document.implementation.createHTMLDocument('test');
   doc.body.innerHTML = `
     <p id="popup-status"></p>
-    <p id="popup-current-name"></p>
-    <button id="open-app"></button>
-    <form id="popup-create-form"><input id="popup-create-title" /></form>
-    <p id="popup-create-error"></p>
-    <form id="popup-open-form"><input id="popup-open-id" /></form>
-    <p id="popup-open-error"></p>
-    <section id="popup-recent-section" hidden><ul id="popup-recent"></ul></section>
+    <section id="popup-auth" hidden>
+      <button id="login-button"></button>
+      <p id="login-error"></p>
+    </section>
+    <div id="popup-projects" hidden>
+      <section id="popup-recent-section" hidden><ul id="popup-recent"></ul></section>
+      <form id="popup-create-form"><input id="popup-create-title" /></form>
+      <p id="popup-create-error"></p>
+      <form id="popup-open-form"><input id="popup-open-id" /></form>
+      <p id="popup-open-error"></p>
+    </div>
     <button id="open-options"></button>
   `;
   return doc;
@@ -26,16 +30,24 @@ function jsonResponse(body: unknown): Response {
   } as Response;
 }
 
-function makeRuntime(initialStore: Record<string, unknown> = {}): {
-  runtime: PopupDeps['runtime'];
-  data: Record<string, unknown>;
-  fetchMock: jest.Mock;
-} {
+interface TestPopupDeps extends PopupDeps {
+  isAuthenticated: jest.Mock<Promise<boolean>, []>;
+  signIn: jest.Mock<Promise<boolean>, []>;
+  openAppTab: jest.Mock<void, []>;
+  openOptions: jest.Mock<void, []>;
+}
+
+function makeDeps(
+  initialStore: Record<string, unknown> = {},
+  opts: { authed?: boolean } = {}
+): { deps: TestPopupDeps; data: Record<string, unknown>; fetchMock: jest.Mock } {
   const data = { ...initialStore };
   const fetchMock = jest.fn();
-  return {
-    data,
-    fetchMock,
+  const deps: TestPopupDeps = {
+    openAppTab: jest.fn(),
+    openOptions: jest.fn(),
+    isAuthenticated: jest.fn().mockResolvedValue(opts.authed ?? true),
+    signIn: jest.fn().mockResolvedValue(true),
     runtime: {
       google: {
         fetch: fetchMock as unknown as typeof fetch,
@@ -52,78 +64,85 @@ function makeRuntime(initialStore: Record<string, unknown> = {}): {
       },
     },
   };
+  return { deps, data, fetchMock };
 }
 
 async function flushAsync(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-describe('startPopup', () => {
-  test('現在プロジェクト未選択ならステータスに案内文、open-app は disabled', async () => {
+describe('startPopup / 未ログイン', () => {
+  test('未ログイン時はログイン画面を表示し、プロジェクト選択は隠す', async () => {
     const doc = buildDocument();
-    const { runtime } = makeRuntime();
-    const deps: PopupDeps = {
-      openAppTab: jest.fn(),
-      openOptions: jest.fn(),
-      runtime,
-    };
+    const { deps } = makeDeps({}, { authed: false });
     await startPopup(doc, deps);
-    expect((doc.getElementById('open-app') as HTMLButtonElement).disabled).toBe(true);
-    expect(doc.getElementById('popup-status')?.textContent).toContain('プロジェクトを作成');
+    expect((doc.getElementById('popup-auth') as HTMLElement).hidden).toBe(false);
+    expect((doc.getElementById('popup-projects') as HTMLElement).hidden).toBe(true);
+    expect(doc.getElementById('popup-status')?.textContent).toContain('ログイン');
   });
 
-  test('現在プロジェクトがあれば名前を表示し open-app が有効', async () => {
+  test('ログインボタンを押すと signIn が呼ばれ、成功時はプロジェクト画面に切り替わる', async () => {
     const doc = buildDocument();
-    const { runtime } = makeRuntime({
-      currentProject: {
-        projectId: '12345678-aaaa-bbbb-cccc-dddddddddddd',
-        spreadsheetId: 's',
-        driveFolderId: 'd',
-        title: 'My SR',
-      },
-    });
-    const deps: PopupDeps = {
-      openAppTab: jest.fn(),
-      openOptions: jest.fn(),
-      runtime,
-    };
+    const { deps } = makeDeps({}, { authed: false });
     await startPopup(doc, deps);
-    expect(doc.getElementById('popup-current-name')?.textContent).toContain('My SR');
-    expect(doc.getElementById('popup-current-name')?.textContent).toContain('12345678');
-    expect((doc.getElementById('open-app') as HTMLButtonElement).disabled).toBe(false);
-    (doc.getElementById('open-app') as HTMLButtonElement).click();
+    // signIn 成功後の 2 回目 isAuthenticated は true
+    deps.isAuthenticated.mockResolvedValue(true);
+    (doc.getElementById('login-button') as HTMLButtonElement).click();
+    await flushAsync();
+    await flushAsync();
+    expect(deps.signIn).toHaveBeenCalledTimes(1);
+    expect((doc.getElementById('popup-auth') as HTMLElement).hidden).toBe(true);
+    expect((doc.getElementById('popup-projects') as HTMLElement).hidden).toBe(false);
+  });
+
+  test('signIn が失敗すればエラー文を表示してボタンは再び押せる', async () => {
+    const doc = buildDocument();
+    const { deps } = makeDeps({}, { authed: false });
+    deps.signIn.mockResolvedValue(false);
+    await startPopup(doc, deps);
+    const btn = doc.getElementById('login-button') as HTMLButtonElement;
+    btn.click();
+    await flushAsync();
+    await flushAsync();
+    expect(doc.getElementById('login-error')?.textContent).toContain('失敗');
+    expect(btn.disabled).toBe(false);
+  });
+});
+
+describe('startPopup / ログイン済', () => {
+  test('履歴が無ければ recent セクションは hidden のまま、案内文は新規作成を促す', async () => {
+    const doc = buildDocument();
+    const { deps } = makeDeps();
+    await startPopup(doc, deps);
+    expect((doc.getElementById('popup-recent-section') as HTMLElement).hidden).toBe(true);
+    expect(doc.getElementById('popup-status')?.textContent).toContain('作成');
+  });
+
+  test('履歴があればリストを表示し、クリックで currentProject 更新 + メインビュータブを開く', async () => {
+    const doc = buildDocument();
+    const { deps, data } = makeDeps({
+      recentProjects: [
+        { projectId: 'p-aaa', spreadsheetId: 's-aaa', driveFolderId: 'd', title: 'A' },
+        { projectId: 'p-bbb', spreadsheetId: 's-bbb', driveFolderId: 'd', title: 'B' },
+      ],
+    });
+    await startPopup(doc, deps);
+    const section = doc.getElementById('popup-recent-section') as HTMLElement;
+    expect(section.hidden).toBe(false);
+    const buttons = doc.querySelectorAll<HTMLButtonElement>('#popup-recent button');
+    expect(buttons.length).toBe(2);
+    buttons[1]!.click();
+    await flushAsync();
+    await flushAsync();
+    expect((data['currentProject'] as { projectId?: string } | undefined)?.projectId).toBe(
+      'p-bbb'
+    );
     expect(deps.openAppTab).toHaveBeenCalledTimes(1);
   });
 
-  test('disabled 状態の open-app クリックは openAppTab を呼ばない', async () => {
+  test('新規作成成功後は自動でメインビューを開く', async () => {
     const doc = buildDocument();
-    const { runtime } = makeRuntime();
-    const deps: PopupDeps = {
-      openAppTab: jest.fn(),
-      openOptions: jest.fn(),
-      runtime,
-    };
-    await startPopup(doc, deps);
-    (doc.getElementById('open-app') as HTMLButtonElement).click();
-    expect(deps.openAppTab).not.toHaveBeenCalled();
-  });
-
-  test('open-options をクリックすると openOptions が呼ばれる', async () => {
-    const doc = buildDocument();
-    const { runtime } = makeRuntime();
-    const deps: PopupDeps = {
-      openAppTab: jest.fn(),
-      openOptions: jest.fn(),
-      runtime,
-    };
-    await startPopup(doc, deps);
-    (doc.getElementById('open-options') as HTMLButtonElement).click();
-    expect(deps.openOptions).toHaveBeenCalledTimes(1);
-  });
-
-  test('新規プロジェクトフォーム送信で createNewProject が呼ばれ、storage が更新される', async () => {
-    const doc = buildDocument();
-    const { runtime, data, fetchMock } = makeRuntime();
+    const { deps, fetchMock, data } = makeDeps();
     fetchMock.mockImplementation(async (url: string, init: RequestInit) => {
       if (url.startsWith('https://www.googleapis.com/drive/v3/files') && init.method === 'POST') {
         const body = JSON.parse(init.body as string) as { name: string };
@@ -134,52 +153,50 @@ describe('startPopup', () => {
       }
       return jsonResponse({});
     });
-    const deps: PopupDeps = {
-      openAppTab: jest.fn(),
-      openOptions: jest.fn(),
-      runtime,
-    };
     await startPopup(doc, deps);
     const titleInput = doc.getElementById('popup-create-title') as HTMLInputElement;
     titleInput.value = 'New Project';
-    const form = doc.getElementById('popup-create-form') as HTMLFormElement;
-    form.dispatchEvent(new Event('submit', { cancelable: true }));
+    (doc.getElementById('popup-create-form') as HTMLFormElement).dispatchEvent(
+      new Event('submit', { cancelable: true })
+    );
     await flushAsync();
     await flushAsync();
     expect((data['currentProject'] as { title?: string } | undefined)?.title).toBe('New Project');
+    expect(deps.openAppTab).toHaveBeenCalledTimes(1);
     expect(titleInput.value).toBe('');
   });
 
-  test('新規作成のエラーは popup-create-error に表示される', async () => {
+  test('新規作成のエラーは popup-create-error に表示され、メインビューは開かない', async () => {
     const doc = buildDocument();
-    const { runtime } = makeRuntime();
-    const deps: PopupDeps = { openAppTab: jest.fn(), openOptions: jest.fn(), runtime };
+    const { deps } = makeDeps();
     await startPopup(doc, deps);
-    const form = doc.getElementById('popup-create-form') as HTMLFormElement;
-    // 空タイトルで送信 → projectService が「必須」エラー
-    form.dispatchEvent(new Event('submit', { cancelable: true }));
+    (doc.getElementById('popup-create-form') as HTMLFormElement).dispatchEvent(
+      new Event('submit', { cancelable: true })
+    );
     await flushAsync();
     expect(doc.getElementById('popup-create-error')?.textContent).toContain('必須');
+    expect(deps.openAppTab).not.toHaveBeenCalled();
   });
 
   test('Error 以外の例外も String 化されて表示される', async () => {
     const doc = buildDocument();
-    const { runtime, fetchMock } = makeRuntime();
+    const { deps, fetchMock } = makeDeps();
     fetchMock.mockRejectedValue('rare-non-error');
-    const deps: PopupDeps = { openAppTab: jest.fn(), openOptions: jest.fn(), runtime };
     await startPopup(doc, deps);
     const idInput = doc.getElementById('popup-open-id') as HTMLInputElement;
     idInput.value = 'sid';
-    const form = doc.getElementById('popup-open-form') as HTMLFormElement;
-    form.dispatchEvent(new Event('submit', { cancelable: true }));
+    (doc.getElementById('popup-open-form') as HTMLFormElement).dispatchEvent(
+      new Event('submit', { cancelable: true })
+    );
     await flushAsync();
     await flushAsync();
     expect(doc.getElementById('popup-open-error')?.textContent).toContain('rare-non-error');
+    expect(deps.openAppTab).not.toHaveBeenCalled();
   });
 
-  test('既存を開くフォームで loadExistingProject が呼ばれる', async () => {
+  test('既存を開くフォームで loadExistingProject が呼ばれ、自動でメインビューを開く', async () => {
     const doc = buildDocument();
-    const { runtime, data, fetchMock } = makeRuntime();
+    const { deps, data, fetchMock } = makeDeps();
     fetchMock.mockResolvedValue(
       jsonResponse({
         values: [
@@ -188,81 +205,63 @@ describe('startPopup', () => {
         ],
       })
     );
-    const deps: PopupDeps = { openAppTab: jest.fn(), openOptions: jest.fn(), runtime };
     await startPopup(doc, deps);
     const idInput = doc.getElementById('popup-open-id') as HTMLInputElement;
     idInput.value = 'sid';
-    const form = doc.getElementById('popup-open-form') as HTMLFormElement;
-    form.dispatchEvent(new Event('submit', { cancelable: true }));
+    (doc.getElementById('popup-open-form') as HTMLFormElement).dispatchEvent(
+      new Event('submit', { cancelable: true })
+    );
     await flushAsync();
     await flushAsync();
-    expect((data['currentProject'] as { spreadsheetId?: string } | undefined)?.spreadsheetId).toBe('sid');
+    expect((data['currentProject'] as { spreadsheetId?: string } | undefined)?.spreadsheetId).toBe(
+      'sid'
+    );
+    expect(deps.openAppTab).toHaveBeenCalledTimes(1);
     expect(idInput.value).toBe('');
   });
 
   test('既存読み込みのエラーは popup-open-error に表示される', async () => {
     const doc = buildDocument();
-    const { runtime, fetchMock } = makeRuntime();
+    const { deps, fetchMock } = makeDeps();
     fetchMock.mockResolvedValue(jsonResponse({ values: [] }));
-    const deps: PopupDeps = { openAppTab: jest.fn(), openOptions: jest.fn(), runtime };
     await startPopup(doc, deps);
     const idInput = doc.getElementById('popup-open-id') as HTMLInputElement;
     idInput.value = 'sid';
-    const form = doc.getElementById('popup-open-form') as HTMLFormElement;
-    form.dispatchEvent(new Event('submit', { cancelable: true }));
+    (doc.getElementById('popup-open-form') as HTMLFormElement).dispatchEvent(
+      new Event('submit', { cancelable: true })
+    );
     await flushAsync();
     await flushAsync();
     expect(doc.getElementById('popup-open-error')?.textContent).toContain('Meta');
+    expect(deps.openAppTab).not.toHaveBeenCalled();
   });
 
-  test('recent project があるとリストを表示し、クリックで currentProject が切り替わる', async () => {
+  test('open-options をクリックすると openOptions が呼ばれる', async () => {
     const doc = buildDocument();
-    const { runtime, data } = makeRuntime({
-      recentProjects: [
-        { projectId: 'p-aaa', spreadsheetId: 's-aaa', driveFolderId: 'd', title: 'A' },
-        { projectId: 'p-bbb', spreadsheetId: 's-bbb', driveFolderId: 'd', title: 'B' },
-      ],
-    });
-    const deps: PopupDeps = { openAppTab: jest.fn(), openOptions: jest.fn(), runtime };
+    const { deps } = makeDeps();
     await startPopup(doc, deps);
-    const section = doc.getElementById('popup-recent-section') as HTMLElement;
-    expect(section.hidden).toBe(false);
-    const buttons = doc.querySelectorAll<HTMLButtonElement>('#popup-recent button');
-    expect(buttons.length).toBe(2);
-    buttons[1]!.click();
-    await flushAsync();
-    await flushAsync();
-    expect((data['currentProject'] as { projectId?: string } | undefined)?.projectId).toBe('p-bbb');
+    (doc.getElementById('open-options') as HTMLButtonElement).click();
+    expect(deps.openOptions).toHaveBeenCalledTimes(1);
   });
 
-  test('recent project が無いと section は hidden のまま', async () => {
-    const doc = buildDocument();
-    const { runtime } = makeRuntime();
-    const deps: PopupDeps = { openAppTab: jest.fn(), openOptions: jest.fn(), runtime };
-    await startPopup(doc, deps);
-    const section = doc.getElementById('popup-recent-section') as HTMLElement;
-    expect(section.hidden).toBe(true);
-  });
-
-  test('DOM 要素が一部欠けていても例外にならない（フォームのみ欠落）', async () => {
+  test('DOM 要素が一部欠けていても例外にならない', async () => {
     const doc = document.implementation.createHTMLDocument('empty');
     doc.body.innerHTML = '<p id="popup-status"></p>';
-    const { runtime } = makeRuntime();
-    const deps: PopupDeps = { openAppTab: jest.fn(), openOptions: jest.fn(), runtime };
+    const { deps } = makeDeps();
     await expect(startPopup(doc, deps)).resolves.toBeUndefined();
   });
 
-  test('フォームはあるがエラー表示用の要素が無くても例外にならない', async () => {
+  test('フォームはあるがエラー表示要素が無くても例外にならない', async () => {
     const doc = document.implementation.createHTMLDocument('partial');
     doc.body.innerHTML = `
       <p id="popup-status"></p>
-      <p id="popup-current-name"></p>
-      <button id="open-app"></button>
-      <form id="popup-create-form"><input id="popup-create-title" /></form>
-      <form id="popup-open-form"><input id="popup-open-id" /></form>
+      <section id="popup-auth" hidden></section>
+      <div id="popup-projects">
+        <form id="popup-create-form"><input id="popup-create-title" /></form>
+        <form id="popup-open-form"><input id="popup-open-id" /></form>
+      </div>
     `;
-    const { runtime } = makeRuntime();
-    const deps: PopupDeps = { openAppTab: jest.fn(), openOptions: jest.fn(), runtime };
+    const { deps } = makeDeps();
     await startPopup(doc, deps);
     const createForm = doc.getElementById('popup-create-form') as HTMLFormElement;
     expect(() =>
@@ -273,21 +272,27 @@ describe('startPopup', () => {
 });
 
 describe('createChromePopupDeps', () => {
-  test('chrome API ラッパとして openAppTab / openOptions / runtime を返す', () => {
+  test('chrome API ラッパとして各機能を返す', async () => {
     const tabsCreate = jest.fn();
     const getURL = jest.fn((p: string) => `chrome-extension://x/${p}`);
     const openOptionsPage = jest.fn();
+    const getAuthToken = jest.fn(
+      (_o: { interactive: boolean }, cb: (t: string | undefined) => void) => cb('TOK')
+    );
     (globalThis as unknown as { chrome: typeof chrome }).chrome = {
       tabs: { create: tabsCreate },
-      runtime: { getURL, openOptionsPage },
+      runtime: { getURL, openOptionsPage, lastError: undefined },
       identity: {
-        getAuthToken: (_o: unknown, cb: (t: string) => void) => cb('TOK'),
+        getAuthToken,
         removeCachedAuthToken: (_o: unknown, cb: () => void) => cb(),
         getProfileUserInfo: (_o: unknown, cb: (i: { email: string; id: string }) => void) =>
           cb({ email: 'me@x', id: 'u' }),
       },
       storage: {
-        local: { get: jest.fn().mockResolvedValue({}), set: jest.fn().mockResolvedValue(undefined) },
+        local: {
+          get: jest.fn().mockResolvedValue({}),
+          set: jest.fn().mockResolvedValue(undefined),
+        },
       },
     } as unknown as typeof chrome;
     const deps = createChromePopupDeps();
@@ -296,6 +301,34 @@ describe('createChromePopupDeps', () => {
     expect(tabsCreate).toHaveBeenCalled();
     deps.openOptions();
     expect(openOptionsPage).toHaveBeenCalled();
-    expect(typeof deps.runtime.google.getAccessToken).toBe('function');
+    expect(await deps.isAuthenticated()).toBe(true);
+    expect(getAuthToken).toHaveBeenLastCalledWith({ interactive: false }, expect.any(Function));
+    expect(await deps.signIn()).toBe(true);
+    expect(getAuthToken).toHaveBeenLastCalledWith({ interactive: true }, expect.any(Function));
+  });
+
+  test('getAuthToken がエラーを返せば isAuthenticated / signIn は false', async () => {
+    const getAuthToken = jest.fn(
+      (_o: { interactive: boolean }, cb: (t: string | undefined) => void) => cb(undefined)
+    );
+    (globalThis as unknown as { chrome: typeof chrome }).chrome = {
+      tabs: { create: jest.fn() },
+      runtime: { getURL: (p: string) => p, openOptionsPage: jest.fn(), lastError: undefined },
+      identity: {
+        getAuthToken,
+        removeCachedAuthToken: (_o: unknown, cb: () => void) => cb(),
+        getProfileUserInfo: (_o: unknown, cb: (i: { email: string; id: string }) => void) =>
+          cb({ email: '', id: '' }),
+      },
+      storage: {
+        local: {
+          get: jest.fn().mockResolvedValue({}),
+          set: jest.fn().mockResolvedValue(undefined),
+        },
+      },
+    } as unknown as typeof chrome;
+    const deps = createChromePopupDeps();
+    await expect(deps.isAuthenticated()).resolves.toBe(false);
+    await expect(deps.signIn()).resolves.toBe(false);
   });
 });

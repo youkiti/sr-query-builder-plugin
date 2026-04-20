@@ -26,7 +26,7 @@ describe('createChromeGoogleApiDeps', () => {
     };
     const deps = createChromeGoogleApiDeps(auth);
     await expect(deps.getAccessToken()).resolves.toBe('CUSTOM');
-    expect(auth.getAuthToken).toHaveBeenCalledWith({ interactive: false });
+    expect(auth.getAuthToken).toHaveBeenCalledWith({ interactive: true });
   });
 
   test('AuthDeps 未指定なら createChromeAuthDeps を内部で使う', async () => {

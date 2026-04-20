@@ -31,10 +31,16 @@
   font-weight: 600;
 }
 
-.popup__current {
+.popup__muted {
   margin: 0;
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
+}
+
+#popup-projects {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
 }
 
 .popup__form {
