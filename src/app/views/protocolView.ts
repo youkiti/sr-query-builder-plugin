@@ -5,22 +5,24 @@ import type { RenderView } from './types';
 /**
  * プロトコル入力フォーム。
  *
- * 要件 §4.2 に基づき、入力形式は 3 系統で排他：
- *   - manual   : プロトコル全文の 1 つのテキストエリア
- *   - markdown : `.md` ファイル 1 つ
- *   - docx     : `.docx` ファイル 1 つ
+ * 入力モードは 2 系統で排他：
+ *   - manual : プロトコル全文の 1 つのテキストエリア
+ *   - file   : `.md` / `.markdown` / `.docx` のいずれかをアップロード
+ *
+ * `ProtocolSubmissionInput.sourceType`（'manual' | 'markdown' | 'docx'）は内部表現として残し、
+ * file モード時は拡張子から markdown / docx を判定する。
  *
  * RQ / 組入 / 除外基準は LLM (`extract-protocol` skill) が元テキストから
  * 自動抽出するため、入力フォーム側には持たせない（次の「ブロック承認」画面で編集する）。
- *
- * 送信時は `onSubmit` callback に `ProtocolSubmissionInput` を渡し、
- * 実呼び出し（features/protocol パーサ → extract-protocol skill →
- * blocksDraft 更新 → /blocks ナビ）は bootstrap.ts 側で組み立てる。
  */
 
 export interface ProtocolViewCallbacks {
   onSubmit?: (input: ProtocolSubmissionInput) => void | Promise<void>;
 }
+
+type SourceMode = 'manual' | 'file';
+
+const FILE_ACCEPT = '.md,.markdown,.docx';
 
 export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): RenderView {
   return (container, ctx) => {
@@ -34,7 +36,7 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
     const lead = doc.createElement('p');
     lead.className = 'protocol__lead';
     lead.textContent =
-      '最初にレビュー対象のプロトコルを入力します。手入力、Markdown、Word (.docx) のいずれでも開始できます。';
+      '最初にレビュー対象のプロトコルを入力します。手入力、または Markdown / Word (.docx) ファイルのアップロードで開始できます。';
     container.appendChild(lead);
 
     if (!ctx.state.project) {
@@ -53,7 +55,7 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
     const form = doc.createElement('form');
     form.className = 'protocol__form';
 
-    const sourceSection = buildSection(doc, '入力形式', buildSourceTypeRadios);
+    const sourceSection = buildSection(doc, '入力形式', buildSourceModeRadios);
     form.appendChild(sourceSection);
 
     const manualSection = buildSection(doc, '手入力', (sectionDoc) => {
@@ -71,13 +73,13 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
     form.appendChild(manualSection);
 
     const fileField = buildFileInput(doc, 'file', 'プロトコルファイル');
-    const fileInput = fileField.querySelector<HTMLInputElement>('input[type=file]')!;
-    const fileSection = buildSection(doc, 'ファイル入力', (sectionDoc) => {
+    const fileSection = buildSection(doc, 'ファイルアップロード', (sectionDoc) => {
       const wrap = sectionDoc.createElement('div');
       wrap.className = 'protocol__section';
       const hint = sectionDoc.createElement('p');
       hint.className = 'protocol__hint';
-      hint.dataset.role = 'file-hint';
+      hint.textContent =
+        'Markdown (.md / .markdown) または Word (.docx) ファイルを選択してください。形式は拡張子で自動判定します。';
       wrap.appendChild(hint);
       wrap.appendChild(fileField);
       return wrap;
@@ -96,32 +98,16 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
     form.appendChild(errorBox);
 
     const syncMode = (): void => {
-      const sourceType = readSourceType(form);
-      const isManual = sourceType === 'manual';
-      manualSection.hidden = !isManual;
-      fileSection.hidden = isManual;
-      const hint = form.querySelector<HTMLElement>('[data-role=file-hint]');
-      if (sourceType === 'markdown') {
-        fileInput.accept = '.md,.markdown';
-        if (hint) {
-          hint.textContent = '解析したい Markdown のプロトコルファイルを選択してください。';
-        }
-        submit.textContent = 'Markdown を解析してブロック抽出へ';
-        return;
-      }
-      if (sourceType === 'docx') {
-        fileInput.accept = '.docx';
-        if (hint) {
-          hint.textContent = '解析したい Word (.docx) のプロトコルファイルを選択してください。';
-        }
-        submit.textContent = 'Word ファイルを解析してブロック抽出へ';
-        return;
-      }
-      fileInput.accept = '.md,.markdown,.docx';
-      submit.textContent = '入力内容を解析してブロック抽出へ';
+      const mode = readSourceMode(form);
+      manualSection.hidden = mode !== 'manual';
+      fileSection.hidden = mode !== 'file';
+      submit.textContent =
+        mode === 'manual'
+          ? 'プロトコル本文を解析してブロック抽出へ'
+          : 'ファイルを解析してブロック抽出へ';
     };
 
-    const sourceInputs = form.querySelectorAll<HTMLInputElement>('input[name=sourceType]');
+    const sourceInputs = form.querySelectorAll<HTMLInputElement>('input[name=sourceMode]');
     sourceInputs.forEach((input) => input.addEventListener('change', syncMode));
     syncMode();
 
@@ -154,36 +140,46 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
 export const renderProtocolView: RenderView = createProtocolView();
 
 function collectFormInput(form: HTMLFormElement): ProtocolSubmissionInput {
-  const sourceType = readSourceType(form);
-  if (sourceType === 'manual') {
+  const mode = readSourceMode(form);
+  if (mode === 'manual') {
     const inline = readField(form, 'inline');
     if (!inline.trim()) {
       throw new Error('プロトコル全文を入力してください');
     }
-    return { sourceType, inlineText: inline };
+    return { sourceType: 'manual', inlineText: inline };
   }
   const fileInput = form.querySelector<HTMLInputElement>('input[type=file]');
   const file = fileInput?.files?.[0] ?? null;
-  if (sourceType === 'markdown') {
-    if (!file) {
-      throw new Error('markdown ファイルを選択してください');
-    }
-    return { sourceType, markdownFile: { name: file.name, text: () => file.text() } };
-  }
   if (!file) {
-    throw new Error('.docx ファイルを選択してください');
+    throw new Error('プロトコルファイルを選択してください');
   }
-  return {
-    sourceType,
-    docxFile: { name: file.name, arrayBuffer: () => file.arrayBuffer() },
-  };
+  const detected = inferSourceTypeFromName(file.name);
+  if (detected === 'markdown') {
+    return {
+      sourceType: 'markdown',
+      markdownFile: { name: file.name, text: () => file.text() },
+    };
+  }
+  if (detected === 'docx') {
+    return {
+      sourceType: 'docx',
+      docxFile: { name: file.name, arrayBuffer: () => file.arrayBuffer() },
+    };
+  }
+  throw new Error('対応形式は .md / .markdown / .docx です');
 }
 
-function readSourceType(form: HTMLFormElement): ProtocolSubmissionInput['sourceType'] {
-  const checked = form.querySelector<HTMLInputElement>('input[name=sourceType]:checked');
-  const value = checked?.value;
-  if (value === 'markdown' || value === 'docx') return value;
-  return 'manual';
+function readSourceMode(form: HTMLFormElement): SourceMode {
+  const checked = form.querySelector<HTMLInputElement>('input[name=sourceMode]:checked');
+  return checked?.value === 'file' ? 'file' : 'manual';
+}
+
+/** 拡張子から内部 sourceType を推定。未知の拡張子は null。大文字拡張子も許容。 */
+function inferSourceTypeFromName(name: string): 'markdown' | 'docx' | null {
+  const lower = name.toLowerCase();
+  if (lower.endsWith('.md') || lower.endsWith('.markdown')) return 'markdown';
+  if (lower.endsWith('.docx')) return 'docx';
+  return null;
 }
 
 function readField(form: HTMLFormElement, id: string): string {
@@ -208,20 +204,19 @@ function buildSection(
   return fs;
 }
 
-function buildSourceTypeRadios(doc: Document): HTMLElement {
+function buildSourceModeRadios(doc: Document): HTMLElement {
   const wrap = doc.createElement('div');
   wrap.className = 'protocol__source-types';
-  const labels: Record<'manual' | 'markdown' | 'docx', string> = {
+  const labels: Record<SourceMode, string> = {
     manual: '手入力',
-    markdown: 'Markdown (.md)',
-    docx: 'Word (.docx)',
+    file: 'ファイルアップロード (.md / .docx)',
   };
-  for (const value of ['manual', 'markdown', 'docx'] as const) {
+  for (const value of ['manual', 'file'] as const) {
     const label = doc.createElement('label');
     label.className = 'protocol__source-option';
     const input = doc.createElement('input');
     input.type = 'radio';
-    input.name = 'sourceType';
+    input.name = 'sourceMode';
     input.value = value;
     if (value === 'manual') {
       input.checked = true;
@@ -259,7 +254,7 @@ function buildFileInput(doc: Document, id: string, label: string): HTMLElement {
   const input = doc.createElement('input');
   input.type = 'file';
   input.id = id;
-  input.accept = '.md,.markdown,.docx';
+  input.accept = FILE_ACCEPT;
   wrap.appendChild(input);
   return wrap;
 }

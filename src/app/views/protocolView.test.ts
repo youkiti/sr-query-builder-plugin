@@ -27,11 +27,12 @@ describe('renderProtocolView (callback 無し)', () => {
     const container = buildContainer();
     renderProtocolView(container, { state: stateWithProject, navigate: jest.fn() });
     expect(container.querySelector('form')).not.toBeNull();
-    expect(container.querySelectorAll('input[type=radio]')).toHaveLength(3);
+    // 入力モードは manual / file の 2 系統
+    expect(container.querySelectorAll('input[type=radio]')).toHaveLength(2);
     // manual が既定: プロトコル全文用の textarea#inline だけ
     expect(container.querySelectorAll('textarea')).toHaveLength(1);
     expect(container.querySelector('textarea#inline')).not.toBeNull();
-    // manual モードではファイル入力は非表示（hidden）
+    // manual モードではファイル入力 fieldset は非表示
     const fileSection = container.querySelector('fieldset + fieldset + fieldset');
     expect(fileSection?.hasAttribute('hidden')).toBe(true);
   });
@@ -43,20 +44,14 @@ describe('renderProtocolView (callback 無し)', () => {
     expect(manual?.checked).toBe(true);
   });
 
-  test('source を markdown に切替えると file input の accept が .md のみ', () => {
+  test('file モードではファイル input が表示され、accept は .md/.markdown/.docx', () => {
     const container = buildContainer();
     renderProtocolView(container, { state: stateWithProject, navigate: jest.fn() });
-    selectSourceType(container, 'markdown');
+    selectSourceMode(container, 'file');
     const fileInput = container.querySelector<HTMLInputElement>('input[type=file]')!;
-    expect(fileInput.accept).toBe('.md,.markdown');
-  });
-
-  test('source を docx に切替えると file input の accept が .docx のみ', () => {
-    const container = buildContainer();
-    renderProtocolView(container, { state: stateWithProject, navigate: jest.fn() });
-    selectSourceType(container, 'docx');
-    const fileInput = container.querySelector<HTMLInputElement>('input[type=file]')!;
-    expect(fileInput.accept).toBe('.docx');
+    expect(fileInput.accept).toBe('.md,.markdown,.docx');
+    const fileSection = container.querySelector('fieldset + fieldset + fieldset');
+    expect(fileSection?.hasAttribute('hidden')).toBe(false);
   });
 
   test('submit イベントは preventDefault され、ページ遷移しない', () => {
@@ -113,13 +108,13 @@ describe('createProtocolView - manual モード', () => {
   });
 });
 
-describe('createProtocolView - markdown モード', () => {
-  test('ファイル選択ありで MarkdownFileInput を渡し、text() で本文を取得できる', async () => {
+describe('createProtocolView - file モード（拡張子で判定）', () => {
+  test('.md を選ぶと sourceType=markdown で markdownFile を渡す', async () => {
     const onSubmit = jest.fn();
     const view = createProtocolView({ onSubmit });
     const container = buildContainer();
     view(container, { state: stateWithProject, navigate: jest.fn() });
-    selectSourceType(container, 'markdown');
+    selectSourceMode(container, 'file');
     attachFile(container, makeFakeFile('protocol.md', '# md'));
     container.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }));
     expect(onSubmit).toHaveBeenCalled();
@@ -132,25 +127,23 @@ describe('createProtocolView - markdown モード', () => {
     await expect(passed.markdownFile?.text()).resolves.toBe('# md');
   });
 
-  test('ファイル未選択ならエラー表示 + onSubmit 未呼び出し', () => {
+  test('.markdown 拡張子も markdown と判定される', () => {
     const onSubmit = jest.fn();
     const view = createProtocolView({ onSubmit });
     const container = buildContainer();
     view(container, { state: stateWithProject, navigate: jest.fn() });
-    selectSourceType(container, 'markdown');
+    selectSourceMode(container, 'file');
+    attachFile(container, makeFakeFile('p.markdown', '# md'));
     container.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }));
-    expect(onSubmit).not.toHaveBeenCalled();
-    expect(container.querySelector('#protocol-error')?.textContent).toContain('markdown');
+    expect((onSubmit.mock.calls[0][0] as { sourceType: string }).sourceType).toBe('markdown');
   });
-});
 
-describe('createProtocolView - docx モード', () => {
-  test('ファイル選択ありで DocxFileInput を渡し、arrayBuffer() で取得できる', async () => {
+  test('.docx を選ぶと sourceType=docx で docxFile を渡す', async () => {
     const onSubmit = jest.fn();
     const view = createProtocolView({ onSubmit });
     const container = buildContainer();
     view(container, { state: stateWithProject, navigate: jest.fn() });
-    selectSourceType(container, 'docx');
+    selectSourceMode(container, 'file');
     const buf = new ArrayBuffer(3);
     attachFile(container, makeFakeFile('p.docx', '', buf));
     container.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }));
@@ -164,15 +157,38 @@ describe('createProtocolView - docx モード', () => {
     await expect(passed.docxFile?.arrayBuffer()).resolves.toBe(buf);
   });
 
-  test('ファイル未選択ならエラー', () => {
+  test('大文字拡張子（.DOCX）も許容される', () => {
     const onSubmit = jest.fn();
     const view = createProtocolView({ onSubmit });
     const container = buildContainer();
     view(container, { state: stateWithProject, navigate: jest.fn() });
-    selectSourceType(container, 'docx');
+    selectSourceMode(container, 'file');
+    attachFile(container, makeFakeFile('P.DOCX', '', new ArrayBuffer(0)));
+    container.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }));
+    expect((onSubmit.mock.calls[0][0] as { sourceType: string }).sourceType).toBe('docx');
+  });
+
+  test('ファイル未選択ならエラー表示 + onSubmit 未呼び出し', () => {
+    const onSubmit = jest.fn();
+    const view = createProtocolView({ onSubmit });
+    const container = buildContainer();
+    view(container, { state: stateWithProject, navigate: jest.fn() });
+    selectSourceMode(container, 'file');
     container.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }));
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(container.querySelector('#protocol-error')?.textContent).toContain('.docx');
+    expect(container.querySelector('#protocol-error')?.textContent).toContain('ファイル');
+  });
+
+  test('未対応拡張子はエラー表示 + onSubmit 未呼び出し', () => {
+    const onSubmit = jest.fn();
+    const view = createProtocolView({ onSubmit });
+    const container = buildContainer();
+    view(container, { state: stateWithProject, navigate: jest.fn() });
+    selectSourceMode(container, 'file');
+    attachFile(container, makeFakeFile('protocol.txt', 'plain'));
+    container.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(container.querySelector('#protocol-error')?.textContent).toContain('.md');
   });
 });
 
@@ -222,9 +238,9 @@ function setText(container: HTMLElement, id: string, value: string): void {
   textarea.value = value;
 }
 
-function selectSourceType(container: HTMLElement, value: 'manual' | 'markdown' | 'docx'): void {
+function selectSourceMode(container: HTMLElement, value: 'manual' | 'file'): void {
   const radio = container.querySelector<HTMLInputElement>(
-    `input[name=sourceType][value=${value}]`
+    `input[name=sourceMode][value=${value}]`
   )!;
   radio.checked = true;
   radio.dispatchEvent(new Event('change', { bubbles: true }));
