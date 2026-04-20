@@ -1,4 +1,5 @@
 import type { FormulaVersion } from '@/domain/formulaVersion';
+import { buildCodeBlockPreview } from '@/utils/markdown';
 import { ROUTE_LABELS } from '../router';
 import type { RenderView } from './types';
 
@@ -110,7 +111,7 @@ function buildItem(
 
   const preview = doc.createElement('pre');
   preview.className = 'history__preview';
-  preview.textContent = buildPreview(version.formulaMd);
+  preview.textContent = buildCodeBlockPreview(version.formulaMd);
   li.appendChild(preview);
 
   const btn = doc.createElement('button');
@@ -124,12 +125,6 @@ function buildItem(
   });
   li.appendChild(btn);
   return li;
-}
-
-function buildPreview(md: string): string {
-  const lines = md.split('\n');
-  const head = lines.slice(0, 10).join('\n');
-  return lines.length > 10 ? `${head}\n…` : head;
 }
 
 function formatError(err: unknown): string {

@@ -1,0 +1,7 @@
+# LLM レスポンスのキャッシュや生 API 出力（機密を含みうるので push しない）
+responses/
+*.raw.json
+*.raw.txt
+
+# 実プロトコル（匿名化前）のバックアップ
+fixtures/private/

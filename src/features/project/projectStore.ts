@@ -1,7 +1,15 @@
 /**
  * `chrome.storage.local` に現在のプロジェクトと最近のプロジェクト一覧を保存する
  * 薄いラッパ。requirements.md §3.2 の `currentProject` / `recentProjects` を担当。
+ *
+ * Chrome storage アクセスの基盤は `lib/storage/chromeStorage.ts` に移動したので、
+ * ここでは「プロジェクトリストというドメインの読み書きロジック」だけを残す。
  */
+
+import {
+  createChromeStorageDeps,
+  type ChromeStorageDeps,
+} from '@/lib/storage';
 
 export interface CurrentProjectEntry {
   projectId: string;
@@ -14,22 +22,16 @@ const CURRENT_KEY = 'currentProject';
 const RECENT_KEY = 'recentProjects';
 const RECENT_MAX = 10;
 
-export interface ProjectStoreDeps {
-  read: <T>(key: string) => Promise<T | undefined>;
-  write: (items: Record<string, unknown>) => Promise<void>;
-}
+/**
+ * @deprecated `ChromeStorageDeps` を直接使うことを推奨。
+ * 既存コードとの後方互換のため別名で残す。
+ */
+export type ProjectStoreDeps = ChromeStorageDeps;
 
-export function createChromeStoreDeps(): ProjectStoreDeps {
-  return {
-    read: async <T>(key: string): Promise<T | undefined> => {
-      const result = await chrome.storage.local.get(key);
-      return result[key] as T | undefined;
-    },
-    write: async (items) => {
-      await chrome.storage.local.set(items);
-    },
-  };
-}
+/**
+ * @deprecated `createChromeStorageDeps` を直接使うことを推奨。
+ */
+export const createChromeStoreDeps = createChromeStorageDeps;
 
 export async function setCurrentProject(
   entry: CurrentProjectEntry,

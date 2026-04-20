@@ -11,6 +11,7 @@ import {
   withLogging,
   type LLMProvider,
 } from '@/lib/llm';
+import { SECRET_KEYS, readSecret } from '@/lib/storage';
 
 /**
  * LLM プロバイダ生成サービス。
@@ -23,7 +24,8 @@ import {
  * の形で提供する（LLMProvider 自体は purpose を持たないという §4.9 の方針に従う）。
  */
 
-export const STORAGE_KEY_GEMINI = 'apiKeys.gemini';
+/** @deprecated `SECRET_KEYS.gemini` を使うこと。後方互換で残す */
+export const STORAGE_KEY_GEMINI = SECRET_KEYS.gemini;
 const LLM_LOG_HEADER = SHEET_HEADERS.LLMApiLog;
 
 export class LlmApiKeyMissingError extends Error {
@@ -55,11 +57,7 @@ export interface LlmProviderFactory {
  * chrome.storage から Gemini API キーを取得する（無ければ null）。
  */
 export async function getGeminiApiKey(store: ProjectStoreDeps): Promise<string | null> {
-  const value = await store.read<string>(STORAGE_KEY_GEMINI);
-  if (value === undefined || value === '') {
-    return null;
-  }
-  return value;
+  return readSecret(store, 'gemini');
 }
 
 /**

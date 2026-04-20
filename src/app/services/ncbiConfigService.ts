@@ -1,6 +1,7 @@
 import type { EutilsDeps } from '@/lib/ncbi';
 import type { ProjectStoreDeps } from '@/features/project';
 import type { GoogleApiDeps } from '@/lib/google';
+import { SECRET_KEYS, readSecret } from '@/lib/storage';
 
 /**
  * NCBI E-utilities 用の設定サービス。
@@ -13,14 +14,11 @@ import type { GoogleApiDeps } from '@/lib/google';
  * ここ経由で取得する。
  */
 
-export const STORAGE_KEY_NCBI = 'apiKeys.ncbi';
+/** @deprecated `SECRET_KEYS.ncbi` を使うこと。後方互換で残す */
+export const STORAGE_KEY_NCBI = SECRET_KEYS.ncbi;
 
 export async function getNcbiApiKey(store: ProjectStoreDeps): Promise<string | null> {
-  const value = await store.read<string>(STORAGE_KEY_NCBI);
-  if (value === undefined || value === '') {
-    return null;
-  }
-  return value;
+  return readSecret(store, 'ncbi');
 }
 
 export interface BuildEutilsDepsOptions {

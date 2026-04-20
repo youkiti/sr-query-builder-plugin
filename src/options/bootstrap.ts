@@ -1,3 +1,5 @@
+import { SECRET_KEYS, createChromeStorageDeps } from '@/lib/storage';
+
 /**
  * Options 画面の起動ロジック。
  *
@@ -6,6 +8,11 @@
  *
  * をそれぞれ chrome.storage.local に保存する。両者は 1 つの「保存」ボタンで
  * まとめて書き込み、UI 上はステータス文字列にまとめて結果を出す。
+ *
+ * 実際の chrome.storage アクセスは `lib/storage/chromeStorage.ts` に集約してあり、
+ * ここでは「string 値の read/write に限定した細い API」を上に被せているだけ。
+ * 既存テストがこの OptionsDeps インタフェースでモックしているため、互換性のために
+ * シグネチャを維持している。
  */
 
 export interface OptionsDeps {
@@ -15,18 +22,18 @@ export interface OptionsDeps {
   writeKey: (key: string, value: string) => Promise<void>;
 }
 
-export const STORAGE_KEY_GEMINI = 'apiKeys.gemini';
-export const STORAGE_KEY_NCBI = 'apiKeys.ncbi';
+export const STORAGE_KEY_GEMINI = SECRET_KEYS.gemini;
+export const STORAGE_KEY_NCBI = SECRET_KEYS.ncbi;
 
 export function createChromeOptionsDeps(): OptionsDeps {
+  const storage = createChromeStorageDeps();
   return {
     readKey: async (key) => {
-      const result = await chrome.storage.local.get(key);
-      const value = result[key];
+      const value = await storage.read<string>(key);
       return typeof value === 'string' ? value : undefined;
     },
     writeKey: async (key, value) => {
-      await chrome.storage.local.set({ [key]: value });
+      await storage.write({ [key]: value });
     },
   };
 }
