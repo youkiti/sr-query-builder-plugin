@@ -88,11 +88,16 @@
   padding: var(--space-5);
 }
 
+.home__summary {
+  color: var(--color-text-muted);
+  margin: var(--space-2) 0 var(--space-4);
+}
+
 .home__status {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: var(--space-1) var(--space-3);
-  margin: var(--space-2) 0 var(--space-4);
+  margin: 0;
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
 }
@@ -104,6 +109,97 @@
 .home__status dd {
   margin: 0;
   font-variant-numeric: tabular-nums;
+}
+
+.protocol__lead,
+.protocol__project,
+.protocol__hint {
+  color: var(--color-text-muted);
+}
+
+.protocol__form {
+  display: grid;
+  gap: var(--space-4);
+  max-width: 760px;
+}
+
+.protocol__form fieldset {
+  margin: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  background: var(--color-bg);
+}
+
+.protocol__form legend {
+  padding: 0 var(--space-2);
+  font-weight: 600;
+}
+
+.protocol__section {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.protocol__source-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.protocol__source-option {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.protocol__field,
+.protocol__file {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.protocol__field span,
+.protocol__file span {
+  font-weight: 600;
+}
+
+.protocol__field textarea,
+.protocol__file input[type=file] {
+  width: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.protocol__field textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+
+.protocol__submit {
+  justify-self: start;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.protocol__submit:hover {
+  background: var(--color-primary-hover);
+}
+
+.protocol__error {
+  color: var(--color-danger);
+  margin: 0;
+}
+
+.protocol__warning {
+  color: var(--color-warning);
 }
 
 /* /expand 画面: キーボード操作の対象を視覚化 */

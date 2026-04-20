@@ -1,5 +1,5 @@
 import type { CurrentProjectEntry } from '@/features/project';
-import type { RouteName } from './router';
+import { DEFAULT_ROUTE, type RouteName } from './router';
 
 /**
  * メインビューの中央ストア。
@@ -67,7 +67,7 @@ export interface AppState {
 }
 
 export const INITIAL_STATE: AppState = {
-  route: 'home',
+  route: DEFAULT_ROUTE,
   project: null,
   cumulativeCostUsd: null,
   blocksDraft: null,

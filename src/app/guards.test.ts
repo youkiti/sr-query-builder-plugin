@@ -24,11 +24,12 @@ const protocolDraft: AppState['protocolDraft'] = {
 };
 
 describe('evaluateGuards', () => {
-  test('project 未選択時: home だけ enabled、他は全て「プロジェクトを選択」', () => {
+  test('project 未選択時: home / protocol は enabled、他は全て「プロジェクトを選択」', () => {
     const g = evaluateGuards(buildState({}));
     expect(g.home.enabled).toBe(true);
+    expect(g.protocol.enabled).toBe(true);
+    expect(g.protocol.reason).toBe('');
     for (const route of [
-      'protocol',
       'blocks',
       'seeds',
       'draft',

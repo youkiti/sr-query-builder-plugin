@@ -24,13 +24,10 @@ import type { AppStore, BlockDraft, BlocksDraft, ProtocolDraft } from '../store'
 
 export interface ProtocolSubmissionInput {
   sourceType: 'manual' | 'markdown' | 'docx';
-  /** 手入力時の RQ。省略可 */
-  researchQuestion?: string;
-  /** 手入力時の組入基準（改行区切り） */
-  inclusionCriteria?: string;
-  /** 手入力時の除外基準（改行区切り） */
-  exclusionCriteria?: string;
-  /** 手入力時のプロトコル本文。markdown/docx 時は無視される */
+  /**
+   * 手入力時のプロトコル全文。markdown/docx 時は無視される。
+   * RQ / 組入/除外基準は `extract-protocol` skill が本文から抽出する。
+   */
   inlineText?: string;
   /** markdown ファイル入力。markdown 時必須 */
   markdownFile?: MarkdownFileInput;
@@ -63,19 +60,16 @@ export async function submitProtocol(
   deps: ProtocolServiceDeps
 ): Promise<ProtocolSubmissionResult> {
   const parsed = await parseInput(input);
-  const protocolText = composeProtocolText(input, parsed.plainText);
-  const draft = await extractProtocol(protocolText, deps.provider);
+  const draft = await extractProtocol(parsed.plainText, deps.provider);
   const blocksDraft: BlocksDraft = {
     blocks: draft.blocks.map(toBlockDraft),
     combinationExpression: draft.combinationExpression,
   };
   const protocolDraft: ProtocolDraft = {
     frameworkType: draft.frameworkType,
-    researchQuestion: draft.researchQuestion || (input.researchQuestion?.trim() ?? ''),
-    inclusionCriteria:
-      draft.inclusionCriteria || (input.inclusionCriteria?.trim() ?? ''),
-    exclusionCriteria:
-      draft.exclusionCriteria || (input.exclusionCriteria?.trim() ?? ''),
+    researchQuestion: draft.researchQuestion,
+    inclusionCriteria: draft.inclusionCriteria,
+    exclusionCriteria: draft.exclusionCriteria,
     studyDesign: draft.studyDesign,
     sourceType: parsed.sourceType,
     sourceFilename: parsed.sourceFilename === '' ? null : parsed.sourceFilename,
@@ -107,31 +101,6 @@ async function parseInput(input: ProtocolSubmissionInput): Promise<ParsedProtoco
       return parseDocxFile(input.docxFile, input.docxExtractor);
     }
   }
-}
-
-/**
- * 手入力のフォームフィールド（RQ / inclusion / exclusion）を本文に合体させて
- * extract-protocol へ渡す 1 つのテキストにする。
- * markdown/docx は元テキストをそのまま使う（フォーム側のフィールドは無視）。
- */
-function composeProtocolText(input: ProtocolSubmissionInput, plainText: string): string {
-  if (input.sourceType !== 'manual') {
-    return plainText;
-  }
-  const parts: string[] = [];
-  if (input.researchQuestion?.trim()) {
-    parts.push(`# Research Question\n${input.researchQuestion.trim()}`);
-  }
-  if (input.inclusionCriteria?.trim()) {
-    parts.push(`## Inclusion Criteria\n${input.inclusionCriteria.trim()}`);
-  }
-  if (input.exclusionCriteria?.trim()) {
-    parts.push(`## Exclusion Criteria\n${input.exclusionCriteria.trim()}`);
-  }
-  if (plainText.trim()) {
-    parts.push(`## Protocol Body\n${plainText.trim()}`);
-  }
-  return parts.join('\n\n');
 }
 
 function toBlockDraft(block: { blockLabel: string; description: string }): BlockDraft {

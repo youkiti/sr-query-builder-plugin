@@ -3,7 +3,15 @@ import { ROUTE_LABELS } from '../router';
 import type { RenderView } from './types';
 
 /**
- * プロトコル入力フォーム（手入力 / .md / .docx）。
+ * プロトコル入力フォーム。
+ *
+ * 要件 §4.2 に基づき、入力形式は 3 系統で排他：
+ *   - manual   : プロトコル全文の 1 つのテキストエリア
+ *   - markdown : `.md` ファイル 1 つ
+ *   - docx     : `.docx` ファイル 1 つ
+ *
+ * RQ / 組入 / 除外基準は LLM (`extract-protocol` skill) が元テキストから
+ * 自動抽出するため、入力フォーム側には持たせない（次の「ブロック承認」画面で編集する）。
  *
  * 送信時は `onSubmit` callback に `ProtocolSubmissionInput` を渡し、
  * 実呼び出し（features/protocol パーサ → extract-protocol skill →
@@ -17,33 +25,68 @@ export interface ProtocolViewCallbacks {
 export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): RenderView {
   return (container, ctx) => {
     container.innerHTML = '';
+    const doc = container.ownerDocument;
 
-    const heading = container.ownerDocument.createElement('h2');
+    const heading = doc.createElement('h2');
     heading.textContent = ROUTE_LABELS.protocol;
     container.appendChild(heading);
 
+    const lead = doc.createElement('p');
+    lead.className = 'protocol__lead';
+    lead.textContent =
+      '最初にレビュー対象のプロトコルを入力します。手入力、Markdown、Word (.docx) のいずれでも開始できます。';
+    container.appendChild(lead);
+
     if (!ctx.state.project) {
-      const warn = container.ownerDocument.createElement('p');
+      const warn = doc.createElement('p');
       warn.className = 'protocol__warning';
       warn.textContent = '先にプロジェクトを選択してください。';
       container.appendChild(warn);
       return;
     }
 
-    const doc = container.ownerDocument;
+    const project = doc.createElement('p');
+    project.className = 'protocol__project';
+    project.textContent = `現在のプロジェクト: ${ctx.state.project.title}`;
+    container.appendChild(project);
+
     const form = doc.createElement('form');
     form.className = 'protocol__form';
 
-    form.appendChild(buildSection(doc, '入力形式', buildSourceTypeRadios));
-    form.appendChild(buildField(doc, 'rq', 'RQ（リサーチクエスチョン）'));
-    form.appendChild(buildField(doc, 'inclusion', '組入基準（改行区切り）'));
-    form.appendChild(buildField(doc, 'exclusion', '除外基準（改行区切り）'));
-    form.appendChild(buildField(doc, 'inline', '元テキスト（手入力時のみ）'));
-    form.appendChild(buildFileInput(doc, 'file', '.md / .docx アップロード'));
+    const sourceSection = buildSection(doc, '入力形式', buildSourceTypeRadios);
+    form.appendChild(sourceSection);
+
+    const manualSection = buildSection(doc, '手入力', (sectionDoc) => {
+      const wrap = sectionDoc.createElement('div');
+      wrap.className = 'protocol__section';
+      const hint = sectionDoc.createElement('p');
+      hint.className = 'protocol__hint';
+      hint.textContent =
+        'プロトコル全文を貼り付けてください。RQ・組入/除外基準・ブロックは AI が自動抽出し、' +
+        '次の「ブロック承認」画面で編集できます。';
+      wrap.appendChild(hint);
+      wrap.appendChild(buildField(sectionDoc, 'inline', 'プロトコル全文'));
+      return wrap;
+    });
+    form.appendChild(manualSection);
+
+    const fileField = buildFileInput(doc, 'file', 'プロトコルファイル');
+    const fileInput = fileField.querySelector<HTMLInputElement>('input[type=file]')!;
+    const fileSection = buildSection(doc, 'ファイル入力', (sectionDoc) => {
+      const wrap = sectionDoc.createElement('div');
+      wrap.className = 'protocol__section';
+      const hint = sectionDoc.createElement('p');
+      hint.className = 'protocol__hint';
+      hint.dataset.role = 'file-hint';
+      wrap.appendChild(hint);
+      wrap.appendChild(fileField);
+      return wrap;
+    });
+    form.appendChild(fileSection);
 
     const submit = doc.createElement('button');
     submit.type = 'submit';
-    submit.textContent = '次へ（ブロック抽出）';
+    submit.className = 'protocol__submit';
     form.appendChild(submit);
 
     const errorBox = doc.createElement('p');
@@ -51,6 +94,36 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
     errorBox.id = 'protocol-error';
     errorBox.setAttribute('aria-live', 'polite');
     form.appendChild(errorBox);
+
+    const syncMode = (): void => {
+      const sourceType = readSourceType(form);
+      const isManual = sourceType === 'manual';
+      manualSection.hidden = !isManual;
+      fileSection.hidden = isManual;
+      const hint = form.querySelector<HTMLElement>('[data-role=file-hint]');
+      if (sourceType === 'markdown') {
+        fileInput.accept = '.md,.markdown';
+        if (hint) {
+          hint.textContent = '解析したい Markdown のプロトコルファイルを選択してください。';
+        }
+        submit.textContent = 'Markdown を解析してブロック抽出へ';
+        return;
+      }
+      if (sourceType === 'docx') {
+        fileInput.accept = '.docx';
+        if (hint) {
+          hint.textContent = '解析したい Word (.docx) のプロトコルファイルを選択してください。';
+        }
+        submit.textContent = 'Word ファイルを解析してブロック抽出へ';
+        return;
+      }
+      fileInput.accept = '.md,.markdown,.docx';
+      submit.textContent = '入力内容を解析してブロック抽出へ';
+    };
+
+    const sourceInputs = form.querySelectorAll<HTMLInputElement>('input[name=sourceType]');
+    sourceInputs.forEach((input) => input.addEventListener('change', syncMode));
+    syncMode();
 
     form.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -82,35 +155,28 @@ export const renderProtocolView: RenderView = createProtocolView();
 
 function collectFormInput(form: HTMLFormElement): ProtocolSubmissionInput {
   const sourceType = readSourceType(form);
-  const rq = readField(form, 'rq');
-  const inclusion = readField(form, 'inclusion');
-  const exclusion = readField(form, 'exclusion');
-  const inline = readField(form, 'inline');
+  if (sourceType === 'manual') {
+    const inline = readField(form, 'inline');
+    if (!inline.trim()) {
+      throw new Error('プロトコル全文を入力してください');
+    }
+    return { sourceType, inlineText: inline };
+  }
   const fileInput = form.querySelector<HTMLInputElement>('input[type=file]');
   const file = fileInput?.files?.[0] ?? null;
-  const base: ProtocolSubmissionInput = {
-    sourceType,
-    researchQuestion: rq,
-    inclusionCriteria: inclusion,
-    exclusionCriteria: exclusion,
-    inlineText: inline,
-  };
   if (sourceType === 'markdown') {
     if (!file) {
       throw new Error('markdown ファイルを選択してください');
     }
-    return { ...base, markdownFile: { name: file.name, text: () => file.text() } };
+    return { sourceType, markdownFile: { name: file.name, text: () => file.text() } };
   }
-  if (sourceType === 'docx') {
-    if (!file) {
-      throw new Error('.docx ファイルを選択してください');
-    }
-    return {
-      ...base,
-      docxFile: { name: file.name, arrayBuffer: () => file.arrayBuffer() },
-    };
+  if (!file) {
+    throw new Error('.docx ファイルを選択してください');
   }
-  return base;
+  return {
+    sourceType,
+    docxFile: { name: file.name, arrayBuffer: () => file.arrayBuffer() },
+  };
 }
 
 function readSourceType(form: HTMLFormElement): ProtocolSubmissionInput['sourceType'] {
@@ -144,8 +210,15 @@ function buildSection(
 
 function buildSourceTypeRadios(doc: Document): HTMLElement {
   const wrap = doc.createElement('div');
+  wrap.className = 'protocol__source-types';
+  const labels: Record<'manual' | 'markdown' | 'docx', string> = {
+    manual: '手入力',
+    markdown: 'Markdown (.md)',
+    docx: 'Word (.docx)',
+  };
   for (const value of ['manual', 'markdown', 'docx'] as const) {
     const label = doc.createElement('label');
+    label.className = 'protocol__source-option';
     const input = doc.createElement('input');
     input.type = 'radio';
     input.name = 'sourceType';
@@ -154,7 +227,7 @@ function buildSourceTypeRadios(doc: Document): HTMLElement {
       input.checked = true;
     }
     label.appendChild(input);
-    label.appendChild(doc.createTextNode(` ${value}`));
+    label.appendChild(doc.createTextNode(` ${labels[value]}`));
     wrap.appendChild(label);
   }
   return wrap;
@@ -168,6 +241,11 @@ function buildField(doc: Document, id: string, label: string): HTMLElement {
   wrap.appendChild(span);
   const control = doc.createElement('textarea');
   control.id = id;
+  if (id === 'inline') {
+    control.rows = 14;
+    control.placeholder =
+      'RQ・対象集団・介入/曝露・アウトカム・組入/除外基準などを含むプロトコルを貼り付けてください';
+  }
   wrap.appendChild(control);
   return wrap;
 }

@@ -31,17 +31,11 @@ const skillResponse = JSON.stringify({
 });
 
 describe('submitProtocol - manual', () => {
-  test('inline + RQ + inclusion + exclusion を結合して LLM に渡し、blocksDraft を更新', async () => {
+  test('inlineText を LLM に渡し、blocksDraft / protocolDraft を更新', async () => {
     const { provider, calls } = fakeProvider(skillResponse);
     const store = createStore();
-    const { blocksDraft, parsed } = await submitProtocol(
-      {
-        sourceType: 'manual',
-        researchQuestion: 'rq text',
-        inclusionCriteria: 'inc text',
-        exclusionCriteria: 'exc text',
-        inlineText: '本文',
-      },
+    const { blocksDraft, protocolDraft, parsed } = await submitProtocol(
+      { sourceType: 'manual', inlineText: '本文' },
       { store, provider }
     );
     expect(parsed.sourceType).toBe('manual');
@@ -53,28 +47,17 @@ describe('submitProtocol - manual', () => {
       note: '',
     });
     expect(blocksDraft.combinationExpression).toBe('#1 AND #2');
+    // RQ / 組入 / 除外基準は LLM 抽出結果がそのまま protocolDraft に入る
+    expect(protocolDraft.researchQuestion).toBe('RQ');
+    expect(protocolDraft.inclusionCriteria).toBe('inc');
+    expect(protocolDraft.exclusionCriteria).toBe('exc');
     expect(store.getState().blocksDraft).toEqual(blocksDraft);
 
     const userMsg = calls[0]!.find((m) => m.role === 'user')?.content ?? '';
-    expect(userMsg).toContain('rq text');
-    expect(userMsg).toContain('inc text');
-    expect(userMsg).toContain('exc text');
     expect(userMsg).toContain('本文');
   });
 
-  test('空文字フィールドは合体テキストから除外される', async () => {
-    const { provider, calls } = fakeProvider(skillResponse);
-    const store = createStore();
-    await submitProtocol(
-      { sourceType: 'manual', inlineText: '本文だけ', researchQuestion: '   ' },
-      { store, provider }
-    );
-    const userMsg = calls[0]!.find((m) => m.role === 'user')?.content ?? '';
-    expect(userMsg).toContain('本文だけ');
-    expect(userMsg).not.toContain('Research Question');
-  });
-
-  test('全フィールド空でもクラッシュしない（extract-protocol が空入力で empty draft を返す）', async () => {
+  test('空入力でもクラッシュしない（extract-protocol が空入力で empty draft を返す）', async () => {
     const { provider } = fakeProvider(''); // 呼ばれないはず
     const store = createStore();
     const result = await submitProtocol({ sourceType: 'manual' }, { store, provider });

@@ -102,6 +102,15 @@ describe('startApp', () => {
     expect(setHash).toHaveBeenCalledWith('#/protocol');
   });
 
+  test('サイドバーに「ホーム」は出さない', () => {
+    const doc = buildDocument();
+    startApp(doc, noopHashOptions('#/protocol'));
+    const labels = Array.from(doc.querySelectorAll<HTMLButtonElement>('#app-sidebar nav button')).map(
+      (button) => button.textContent
+    );
+    expect(labels).not.toContain('ホーム');
+  });
+
   test('ガード未達のサイドバーボタンは is-disabled 付きで、クリック時は status に理由を表示', () => {
     const doc = buildDocument();
     const setHash = jest.fn();
@@ -132,18 +141,13 @@ describe('startApp', () => {
     expect(setHash).not.toHaveBeenCalled();
   });
 
-  test('ホーム画面のステップボタンもガードを通り、未達ルートは setHash されない', () => {
+  test('空ハッシュでは protocol を初期表示する', () => {
     const doc = buildDocument();
-    const setHash = jest.fn();
-    // project 無しなら protocol も未達
-    startApp(doc, { ...noopHashOptions('#/home'), setHash });
-    const homeProtocolBtn = Array.from(
-      doc.querySelectorAll<HTMLButtonElement>('#app-content button')
-    ).find((b) => b.textContent === 'プロトコル入力');
-    expect(homeProtocolBtn).toBeTruthy();
-    homeProtocolBtn!.click();
-    expect(setHash).not.toHaveBeenCalled();
-    expect(doc.getElementById('app-status')?.textContent).toContain('プロジェクト');
+    startApp(doc, noopHashOptions(''));
+    expect(doc.getElementById('app-status')?.textContent).toContain('プロトコル入力');
+    expect(doc.getElementById('app-content')?.querySelector('h2')?.textContent).toBe(
+      'プロトコル入力'
+    );
   });
 
   test('ハッシュで直接未達ルートに入った場合は guard placeholder を描画し、view は呼ばない', () => {

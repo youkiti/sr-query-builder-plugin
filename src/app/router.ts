@@ -19,7 +19,11 @@ export const ROUTES = [
 
 export type RouteName = (typeof ROUTES)[number];
 
-export const DEFAULT_ROUTE: RouteName = 'home';
+export const DEFAULT_ROUTE: RouteName = 'protocol';
+
+export const SIDEBAR_ROUTES: readonly RouteName[] = ROUTES.filter(
+  (route): route is RouteName => route !== 'home'
+);
 
 export const ROUTE_LABELS: Record<RouteName, string> = {
   home: 'ホーム',

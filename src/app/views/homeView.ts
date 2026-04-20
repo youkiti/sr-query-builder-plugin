@@ -3,8 +3,8 @@ import { formatFormulaVersionShort } from './formatHelpers';
 import type { RenderView } from './types';
 
 /**
- * ホーム画面。プロジェクトの選択状況、現在の Protocol / Formula バージョン、
- * 各ステップへのリンクを表示する（docs/ui-flow.md §2 / §4）。
+ * ホーム画面。プロジェクト概要と、既に採番済みの Protocol / Formula バージョンだけを
+ * 要約表示する。初回導線は protocol に寄せるため、未確定の状態はここでは強調しない。
  */
 export const renderHomeView: RenderView = (container, ctx) => {
   container.innerHTML = '';
@@ -22,35 +22,42 @@ export const renderHomeView: RenderView = (container, ctx) => {
   }
   container.appendChild(projectInfo);
 
-  container.appendChild(buildStatusList(doc, ctx.state));
-
-  const list = doc.createElement('ul');
-  list.className = 'home__steps';
-  for (const step of ['protocol', 'blocks', 'seeds', 'draft', 'validate'] as const) {
-    const li = doc.createElement('li');
-    const btn = doc.createElement('button');
-    btn.type = 'button';
-    btn.textContent = ROUTE_LABELS[step];
-    btn.addEventListener('click', () => ctx.navigate(step));
-    li.appendChild(btn);
-    list.appendChild(li);
+  const summary = doc.createElement('p');
+  summary.className = 'home__summary';
+  if (!ctx.state.project) {
+    summary.textContent = '最初に Popup でプロジェクトを選択すると、プロトコル入力から開始できます。';
+  } else if (
+    ctx.state.currentProtocolVersion === null &&
+    ctx.state.currentFormulaVersionId === null
+  ) {
+    summary.textContent = 'この画面は概要のみです。作業は左の「プロトコル入力」から始めてください。';
+  } else {
+    summary.textContent = '現在採番済みのバージョン概要です。';
   }
-  container.appendChild(list);
+  container.appendChild(summary);
+
+  const statusList = buildStatusList(doc, ctx.state);
+  if (statusList) {
+    container.appendChild(statusList);
+  }
 };
 
-function buildStatusList(doc: Document, state: Parameters<RenderView>[1]['state']): HTMLElement {
+function buildStatusList(
+  doc: Document,
+  state: Parameters<RenderView>[1]['state']
+): HTMLElement | null {
   const dl = doc.createElement('dl');
   dl.className = 'home__status';
 
-  appendEntry(
-    doc,
-    dl,
-    'Protocol version',
-    state.currentProtocolVersion !== null ? `v${state.currentProtocolVersion}` : '未確定'
-  );
+  if (state.currentProtocolVersion !== null) {
+    appendEntry(doc, dl, 'Protocol version', `v${state.currentProtocolVersion}`);
+  }
   const formulaShort = formatFormulaVersionShort(state.currentFormulaVersionId);
-  appendEntry(doc, dl, 'Formula version', formulaShort ?? '未生成');
-  return dl;
+  if (formulaShort !== null) {
+    appendEntry(doc, dl, 'Formula version', formulaShort);
+  }
+
+  return dl.childElementCount > 0 ? dl : null;
 }
 
 function appendEntry(doc: Document, dl: HTMLElement, label: string, value: string): void {

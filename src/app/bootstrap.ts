@@ -41,7 +41,13 @@ import { listFormulaVersions } from '@/features/formula';
 import type { FormulaVersion } from '@/domain/formulaVersion';
 import { getCurrentProject } from '@/features/project';
 import { evaluateGuards } from './guards';
-import { ROUTE_LABELS, ROUTES, buildHash, parseRoute, type RouteName } from './router';
+import {
+  ROUTE_LABELS,
+  SIDEBAR_ROUTES,
+  buildHash,
+  parseRoute,
+  type RouteName,
+} from './router';
 import { createStore, type AppState, type AppStore } from './store';
 import { buildViews, type BuildViewsOptions, type ViewContext } from './views';
 import { formatFormulaVersionShort } from './views/formatHelpers';
@@ -413,7 +419,7 @@ function renderSidebar(
   const guards = evaluateGuards(state);
   const ul = nav.ownerDocument.createElement('ul');
   ul.className = 'app__nav-list';
-  for (const route of ROUTES) {
+  for (const route of SIDEBAR_ROUTES) {
     const li = nav.ownerDocument.createElement('li');
     const btn = nav.ownerDocument.createElement('button');
     btn.type = 'button';

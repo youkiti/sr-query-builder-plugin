@@ -1,6 +1,7 @@
 import {
   DEFAULT_ROUTE,
   ROUTES,
+  SIDEBAR_ROUTES,
   ROUTE_LABELS,
   buildHash,
   createLocationRouterDeps,
@@ -36,6 +37,13 @@ describe('ROUTE_LABELS', () => {
     for (const route of ROUTES) {
       expect(ROUTE_LABELS[route].length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('SIDEBAR_ROUTES', () => {
+  test('home はサイドバーに含めない', () => {
+    expect(SIDEBAR_ROUTES).not.toContain('home');
+    expect(SIDEBAR_ROUTES).toContain('protocol');
   });
 });
 
