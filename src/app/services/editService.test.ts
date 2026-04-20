@@ -62,6 +62,18 @@ function makeState(overrides: Partial<AppState> = {}): AppState {
 
 const VALID_MD = '## PubMed/MEDLINE\n\n```\n#1 asthma[tiab]\n#2 children[tiab]\n#3 #1 AND #2\n```\n';
 
+function getAppendBody(fetchMock: jest.Mock): {
+  values: (string | number | boolean | null)[][];
+} {
+  const appendCall = fetchMock.mock.calls.find((c) =>
+    (c[0] as string).includes('FormulaVersions') && (c[0] as string).includes(':append')
+  );
+  expect(appendCall).toBeTruthy();
+  return JSON.parse((appendCall![1] as RequestInit).body as string) as {
+    values: (string | number | boolean | null)[][];
+  };
+}
+
 describe('saveEditedFormula', () => {
   test('プロジェクト未選択なら例外', async () => {
     const store = createStore(makeState({ project: null }));
@@ -72,7 +84,9 @@ describe('saveEditedFormula', () => {
   });
 
   test('protocolDraft 未設定なら例外', async () => {
-    const store = createStore(makeState({ protocolDraft: null }));
+    const store = createStore(
+      makeState({ protocolDraft: null, currentFormulaVersionId: null })
+    );
     const google = { fetch: jest.fn(), getAccessToken: jest.fn().mockResolvedValue('t') };
     await expect(
       saveEditedFormula({ formulaMd: VALID_MD, note: '' }, { google, store })
@@ -104,11 +118,11 @@ describe('saveEditedFormula', () => {
       { google, store, newUuid: () => 'new-id', now: () => '2026-04-19T00:00:00.000Z' }
     );
     expect(result).toEqual({ versionId: 'new-id', parentVersionId: 'parent-v' });
-    const [url, init] = fetchMock.mock.calls[0];
+    const [url] = fetchMock.mock.calls.find((c) =>
+      (c[0] as string).includes('FormulaVersions') && (c[0] as string).includes(':append')
+    )!;
     expect(url).toContain('FormulaVersions');
-    const body = JSON.parse((init as RequestInit).body as string) as {
-      values: (string | number | boolean | null)[][];
-    };
+    const body = getAppendBody(fetchMock);
     const row = body.values[0]!;
     const map: Record<string, string | number | boolean | null> = {};
     SHEET_HEADERS.FormulaVersions.forEach((key, i) => {
@@ -132,9 +146,7 @@ describe('saveEditedFormula', () => {
       { formulaMd: VALID_MD, note: '   ' },
       { google, store, newUuid: () => 'n', now: () => 'now' }
     );
-    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string) as {
-      values: (string | number | boolean | null)[][];
-    };
+    const body = getAppendBody(fetchMock);
     const row = body.values[0]!;
     const noteIdx = SHEET_HEADERS.FormulaVersions.indexOf('note');
     expect(row[noteIdx]).toBe('');
@@ -148,12 +160,52 @@ describe('saveEditedFormula', () => {
       { formulaMd: VALID_MD, note: '' },
       { google, store, newUuid: () => 'n', now: () => 'now' }
     );
-    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string) as {
-      values: (string | number | boolean | null)[][];
-    };
+    const body = getAppendBody(fetchMock);
     const row = body.values[0]!;
     const pvIdx = SHEET_HEADERS.FormulaVersions.indexOf('protocol_version');
     expect(row[pvIdx]).toBe(0);
+  });
+
+  test('親 FormulaVersion があれば protocolDraft 未設定でも親の系譜を引き継ぐ', async () => {
+    const store = createStore(
+      makeState({
+        protocolDraft: null,
+        currentProtocolVersion: null,
+        currentFormulaVersionId: 'parent-v',
+      })
+    );
+    const fetchMock = jest.fn().mockImplementation(async (url: string) => {
+      if ((url as string).includes('/values/FormulaVersions')) {
+        const header = [...SHEET_HEADERS.FormulaVersions];
+        const row = header.map((key) => {
+          if (key === 'version_id') return 'parent-v';
+          if (key === 'protocol_version') return '7';
+          if (key === 'protocol_snapshot_ref') return 'https://drive/parent';
+          if (key === 'formula_md') return VALID_MD;
+          if (key === 'created_by') return 'ai_draft';
+          if (key === 'created_at') return '2026';
+          return '';
+        });
+        return jsonResponse({ values: [header, row] });
+      }
+      return jsonResponse({});
+    });
+    const google = { fetch: fetchMock, getAccessToken: jest.fn().mockResolvedValue('t') };
+    await saveEditedFormula(
+      { formulaMd: VALID_MD, note: '' },
+      { google, store, newUuid: () => 'n', now: () => 'now' }
+    );
+    const appendCall = fetchMock.mock.calls.find((c) =>
+      (c[0] as string).includes('FormulaVersions') && (c[0] as string).includes(':append')
+    )!;
+    const body = JSON.parse((appendCall[1] as RequestInit).body as string) as {
+      values: (string | number | boolean | null)[][];
+    };
+    const row = body.values[0]!;
+    expect(row[SHEET_HEADERS.FormulaVersions.indexOf('protocol_version')]).toBe(7);
+    expect(row[SHEET_HEADERS.FormulaVersions.indexOf('protocol_snapshot_ref')]).toBe(
+      'https://drive/parent'
+    );
   });
 
   test('rawTextRef があれば protocol_snapshot_ref に使う', async () => {
@@ -168,9 +220,7 @@ describe('saveEditedFormula', () => {
       { formulaMd: VALID_MD, note: '' },
       { google, store, newUuid: () => 'n', now: () => 'now' }
     );
-    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string) as {
-      values: (string | number | boolean | null)[][];
-    };
+    const body = getAppendBody(fetchMock);
     const row = body.values[0]!;
     const ref = row[SHEET_HEADERS.FormulaVersions.indexOf('protocol_snapshot_ref')];
     expect(ref).toBe('https://drive/snap');
@@ -188,9 +238,7 @@ describe('saveEditedFormula', () => {
       { formulaMd: VALID_MD, note: '' },
       { google, store, newUuid: () => 'n', now: () => 'now' }
     );
-    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string) as {
-      values: (string | number | boolean | null)[][];
-    };
+    const body = getAppendBody(fetchMock);
     const row = body.values[0]!;
     const ref = row[SHEET_HEADERS.FormulaVersions.indexOf('protocol_snapshot_ref')];
     expect(ref).toBe('');

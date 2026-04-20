@@ -130,6 +130,42 @@ function seedRowWithPmid(pmid: string, isValid = true): string[] {
   return row;
 }
 
+function formulaVersionRow(
+  versionId: string,
+  protocolVersion: string,
+  formulaMd: string
+): string[] {
+  return SHEET_HEADERS.FormulaVersions.map((key) => {
+    if (key === 'version_id') return versionId;
+    if (key === 'protocol_version') return protocolVersion;
+    if (key === 'formula_md') return formulaMd;
+    if (key === 'created_by') return 'ai_draft';
+    if (key === 'created_at') return '2026';
+    return '';
+  });
+}
+
+function protocolRow(version: string, overrides: Partial<Record<string, string>> = {}): string[] {
+  const base: Record<string, string> = {
+    version,
+    framework_type: 'pico',
+    research_question: 'RQ from sheet',
+    inclusion_criteria: 'inc from sheet',
+    exclusion_criteria: 'exc from sheet',
+    study_design: 'RCT',
+    block_count: '1',
+    combination_expression: '#1',
+    source_type: 'manual',
+    source_filename: '',
+    raw_text_ref: '',
+    raw_text_preview: '',
+    raw_text_inline: '',
+    created_at: '2026',
+    created_by: 'me@example.com',
+  };
+  return SHEET_HEADERS.Protocol.map((key) => overrides[key] ?? base[key] ?? '');
+}
+
 describe('fetchBoundaryCandidates', () => {
   test('プロジェクト未選択なら例外', async () => {
     const store = createStore(makeState({ project: null }));
@@ -137,7 +173,9 @@ describe('fetchBoundaryCandidates', () => {
   });
 
   test('protocolDraft 未設定なら例外', async () => {
-    const store = createStore(makeState({ protocolDraft: null }));
+    const store = createStore(
+      makeState({ protocolDraft: null, currentFormulaVersionId: null, currentProtocolVersion: null })
+    );
     await expect(fetchBoundaryCandidates(emptyDeps(store))).rejects.toThrow('protocolDraft');
   });
 
@@ -339,6 +377,79 @@ describe('fetchBoundaryCandidates', () => {
       retmax: 5,
       skillCandidateLimit: 2,
     });
+  });
+
+  test('protocolDraft が無くても親 FormulaVersion と Protocol 行から候補取得できる', async () => {
+    const store = createStore(
+      makeState({
+        protocolDraft: null,
+        currentProtocolVersion: null,
+        currentFormulaVersionId: 'v-from-history',
+      })
+    );
+    const googleFetch = jest.fn().mockImplementation(async (url: string) => {
+      if (url.includes('/values/SeedPapers')) {
+        return jsonResponse({ values: [SHEET_HEADERS.SeedPapers] });
+      }
+      if (url.includes('/values/FormulaVersions')) {
+        return jsonResponse({
+          values: [
+            SHEET_HEADERS.FormulaVersions,
+            formulaVersionRow(
+              'v-from-history',
+              '7',
+              '## PubMed/MEDLINE\n\n```\n#1 asthma[tiab]\n#2 children[tiab]\n#3 #1 AND #2\n```\n'
+            ),
+          ],
+        });
+      }
+      if (url.includes('/values/Protocol')) {
+        return jsonResponse({
+          values: [SHEET_HEADERS.Protocol, protocolRow('7')],
+        });
+      }
+      return jsonResponse({});
+    });
+    const eutilsFetch = jest.fn().mockImplementation(async (url: string) => {
+      if (url.includes('esearch.fcgi')) {
+        return jsonResponse({
+          esearchresult: { count: '10', idlist: ['222'] },
+        });
+      }
+      return textResponse(buildEfetchXml([{ pmid: '222', title: 'Sheet-backed candidate' }]));
+    });
+    const provider: LLMProvider = {
+      providerId: 'gemini',
+      model: 'test',
+      chat: jest.fn().mockResolvedValue({
+        text: JSON.stringify({ picks: [{ pmid: '222', reason: 'sheet protocol used' }] }),
+        tokensIn: null,
+        tokensOut: null,
+        raw: {},
+      }),
+    };
+    const result = await fetchBoundaryCandidates({
+      google: {
+        fetch: googleFetch as unknown as typeof fetch,
+        getAccessToken: jest.fn().mockResolvedValue('t'),
+      },
+      eutils: {
+        fetch: eutilsFetch as unknown as typeof fetch,
+        sleep: async () => undefined,
+        maxRetries: 0,
+      },
+      store,
+      llmFactory: { forPurpose: () => provider },
+    });
+    expect(result.candidates).toEqual([
+      {
+        pmid: '222',
+        title: 'Sheet-backed candidate',
+        year: 2020,
+        reason: 'sheet protocol used',
+      },
+    ]);
+    expect(provider.chat).toHaveBeenCalled();
   });
 });
 

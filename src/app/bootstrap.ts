@@ -187,6 +187,7 @@ function buildDefaultViewOptions(
       onLoad: (version) => {
         store.setState((s) => ({
           ...s,
+          currentProtocolVersion: version.protocolVersion,
           currentFormulaVersionId: version.versionId,
           currentFormulaMarkdown: version.formulaMd,
         }));

@@ -1,9 +1,11 @@
 import type { SeedPaper, SeedUserDecision } from '@/domain/seedPaper';
+import { getFormulaVersionById } from '@/features/formula';
 import {
   pickBoundaryCases,
   type BoundaryPick,
   type BoundaryCandidate,
 } from '@/features/formula/skills';
+import { getProtocolByVersion } from '@/features/protocol';
 import { appendSeedPaper, listSeedPapers } from '@/features/seeds';
 import { expandFormula } from '@/features/validation';
 import type { GoogleApiDeps } from '@/lib/google';
@@ -63,12 +65,10 @@ export async function fetchBoundaryCandidates(
   if (state.project === null) {
     throw new Error('プロジェクトが選択されていません');
   }
-  if (state.protocolDraft === null) {
-    throw new Error('protocolDraft が未設定です。プロトコル入力を先に行ってください');
-  }
   if (!state.currentFormulaMarkdown) {
     throw new Error('検索式ドラフトが未生成です。先に /draft で生成してください');
   }
+  const protocol = await resolveBoundaryProtocol(deps);
   const formula = parsePubmedFormulaMd(state.currentFormulaMarkdown);
   const query = expandFormula(formula).trim();
   if (query === '') {
@@ -111,9 +111,9 @@ export async function fetchBoundaryCandidates(
   const provider = deps.llmFactory.forPurpose('pick_boundary');
   const picks = await pickBoundaryCases(
     {
-      researchQuestion: state.protocolDraft.researchQuestion,
-      inclusionCriteria: state.protocolDraft.inclusionCriteria,
-      exclusionCriteria: state.protocolDraft.exclusionCriteria,
+      researchQuestion: protocol.researchQuestion,
+      inclusionCriteria: protocol.inclusionCriteria,
+      exclusionCriteria: protocol.exclusionCriteria,
       candidates,
     },
     provider
@@ -186,4 +186,53 @@ function picksToViews(
       reason: pick.reason,
     };
   });
+}
+
+async function resolveBoundaryProtocol(
+  deps: ExpandServiceDeps
+): Promise<{
+  researchQuestion: string;
+  inclusionCriteria: string;
+  exclusionCriteria: string;
+}> {
+  const state = deps.store.getState();
+  if (state.project === null) {
+    throw new Error('プロジェクトが選択されていません');
+  }
+  if (state.protocolDraft !== null) {
+    return {
+      researchQuestion: state.protocolDraft.researchQuestion,
+      inclusionCriteria: state.protocolDraft.inclusionCriteria,
+      exclusionCriteria: state.protocolDraft.exclusionCriteria,
+    };
+  }
+
+  let protocolVersion: number | null = state.currentProtocolVersion;
+  if (state.currentFormulaVersionId) {
+    const version = await getFormulaVersionById(
+      state.project.spreadsheetId,
+      state.currentFormulaVersionId,
+      deps.google
+    );
+    if (version !== null) {
+      protocolVersion = version.protocolVersion;
+    }
+  }
+  if (protocolVersion === null) {
+    throw new Error('protocolDraft が未設定です。プロトコル入力を先に行ってください');
+  }
+
+  const protocol = await getProtocolByVersion(
+    state.project.spreadsheetId,
+    protocolVersion,
+    deps.google
+  );
+  if (protocol === null) {
+    throw new Error(`Protocol version ${protocolVersion} が見つかりません`);
+  }
+  return {
+    researchQuestion: protocol.researchQuestion,
+    inclusionCriteria: protocol.inclusionCriteria ?? '',
+    exclusionCriteria: protocol.exclusionCriteria ?? '',
+  };
 }

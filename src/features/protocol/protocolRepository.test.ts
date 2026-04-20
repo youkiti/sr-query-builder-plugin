@@ -3,6 +3,8 @@ import {
   appendProtocol,
   appendProtocolBlocks,
   getNextProtocolVersion,
+  getLatestProtocol,
+  getProtocolByVersion,
 } from './protocolRepository';
 import type { Protocol, ProtocolBlock } from '@/domain/protocol';
 
@@ -102,6 +104,93 @@ describe('appendProtocol', () => {
     // null は appendRow 側で空文字に変換される
     expect(map['source_filename']).toBe('');
     expect(map['raw_text_ref']).toBe('');
+  });
+});
+
+describe('getLatestProtocol', () => {
+  test('末尾の Protocol 行を返す', async () => {
+    const row = (version: string, overrides: Partial<Record<string, string>> = {}): string[] => {
+      const base: Record<string, string> = {
+        version,
+        framework_type: 'pico',
+        research_question: `RQ-${version}`,
+        inclusion_criteria: 'inc',
+        exclusion_criteria: 'exc',
+        study_design: 'RCT',
+        block_count: '2',
+        combination_expression: '#1 AND #2',
+        source_type: 'manual',
+        source_filename: '',
+        raw_text_ref: '',
+        raw_text_preview: 'preview',
+        raw_text_inline: 'inline',
+        created_at: '2026-04-20T00:00:00.000Z',
+        created_by: 'me@example.com',
+      };
+      return SHEET_HEADERS.Protocol.map((key) => overrides[key] ?? base[key] ?? '');
+    };
+    const d = deps([[...SHEET_HEADERS.Protocol], row('1'), row('2', { source_type: 'docx' })]);
+    await expect(getLatestProtocol('sid', d)).resolves.toEqual({
+      version: 2,
+      frameworkType: 'pico',
+      researchQuestion: 'RQ-2',
+      inclusionCriteria: 'inc',
+      exclusionCriteria: 'exc',
+      studyDesign: 'RCT',
+      blockCount: 2,
+      combinationExpression: '#1 AND #2',
+      sourceType: 'docx',
+      sourceFilename: null,
+      rawTextRef: null,
+      rawTextPreview: 'preview',
+      rawTextInline: 'inline',
+      createdAt: '2026-04-20T00:00:00.000Z',
+      createdBy: 'me@example.com',
+    });
+  });
+
+  test('データ行が無ければ null', async () => {
+    const d = deps([[...SHEET_HEADERS.Protocol]]);
+    await expect(getLatestProtocol('sid', d)).resolves.toBeNull();
+  });
+});
+
+describe('getProtocolByVersion', () => {
+  test('指定 version の Protocol 行を返す', async () => {
+    const row = (version: string, rq: string): string[] =>
+      SHEET_HEADERS.Protocol.map((key) => {
+        if (key === 'version') return version;
+        if (key === 'framework_type') return 'peco';
+        if (key === 'research_question') return rq;
+        if (key === 'block_count') return '3';
+        if (key === 'source_type') return 'markdown';
+        if (key === 'created_at') return '2026';
+        if (key === 'created_by') return 'tester';
+        return '';
+      });
+    const d = deps([[...SHEET_HEADERS.Protocol], row('1', 'RQ-1'), row('7', 'RQ-7')]);
+    await expect(getProtocolByVersion('sid', 7, d)).resolves.toEqual({
+      version: 7,
+      frameworkType: 'peco',
+      researchQuestion: 'RQ-7',
+      inclusionCriteria: null,
+      exclusionCriteria: null,
+      studyDesign: null,
+      blockCount: 3,
+      combinationExpression: '',
+      sourceType: 'markdown',
+      sourceFilename: null,
+      rawTextRef: null,
+      rawTextPreview: null,
+      rawTextInline: null,
+      createdAt: '2026',
+      createdBy: 'tester',
+    });
+  });
+
+  test('存在しない version は null', async () => {
+    const d = deps([[...SHEET_HEADERS.Protocol]]);
+    await expect(getProtocolByVersion('sid', 9, d)).resolves.toBeNull();
   });
 });
 

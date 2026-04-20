@@ -1,4 +1,4 @@
-import { appendFormulaVersion } from '@/features/formula';
+import { appendFormulaVersion, getFormulaVersionById } from '@/features/formula';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
 import type { GoogleApiDeps } from '@/lib/google';
 import { nowIso } from '@/utils/iso8601';
@@ -41,9 +41,6 @@ export async function saveEditedFormula(
   if (state.project === null) {
     throw new Error('プロジェクトが選択されていません');
   }
-  if (state.protocolDraft === null) {
-    throw new Error('protocolDraft が未設定です。プロトコル入力を先に行ってください');
-  }
   const trimmed = input.formulaMd.trim();
   if (trimmed === '') {
     throw new Error('検索式が空です');
@@ -54,15 +51,15 @@ export async function saveEditedFormula(
   const versionId = (deps.newUuid ?? newUuid)();
   const createdAt = (deps.now ?? nowIso)();
   const parentVersionId = state.currentFormulaVersionId;
+  const protocolContext = await resolveProtocolContext(deps);
 
   await appendFormulaVersion(
     state.project.spreadsheetId,
     {
       versionId,
       parentVersionId,
-      protocolVersion: state.currentProtocolVersion ?? 0,
-      protocolSnapshotRef:
-        state.protocolDraft.rawTextRef ?? state.protocolDraft.rawTextInline ?? '',
+      protocolVersion: protocolContext.protocolVersion,
+      protocolSnapshotRef: protocolContext.protocolSnapshotRef,
       formulaMd: input.formulaMd,
       createdBy: 'user_edit',
       createdAt,
@@ -78,4 +75,33 @@ export async function saveEditedFormula(
   }));
 
   return { versionId, parentVersionId };
+}
+
+async function resolveProtocolContext(
+  deps: EditServiceDeps
+): Promise<{ protocolVersion: number; protocolSnapshotRef: string }> {
+  const state = deps.store.getState();
+  if (state.project === null) {
+    throw new Error('プロジェクトが選択されていません');
+  }
+  if (state.currentFormulaVersionId) {
+    const currentVersion = await getFormulaVersionById(
+      state.project.spreadsheetId,
+      state.currentFormulaVersionId,
+      deps.google
+    );
+    if (currentVersion !== null) {
+      return {
+        protocolVersion: currentVersion.protocolVersion,
+        protocolSnapshotRef: currentVersion.protocolSnapshotRef,
+      };
+    }
+  }
+  if (state.protocolDraft === null) {
+    throw new Error('protocolDraft が未設定です。プロトコル入力を先に行ってください');
+  }
+  return {
+    protocolVersion: state.currentProtocolVersion ?? 0,
+    protocolSnapshotRef: state.protocolDraft.rawTextRef ?? state.protocolDraft.rawTextInline ?? '',
+  };
 }

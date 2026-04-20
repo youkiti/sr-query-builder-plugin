@@ -468,7 +468,7 @@ describe('startApp - wiring 層', () => {
         const row = (versionId: string): string[] =>
           header.map((k) => {
             if (k === 'version_id') return versionId;
-            if (k === 'protocol_version') return '1';
+            if (k === 'protocol_version') return versionId === 'v2' ? '7' : '1';
             if (k === 'formula_md') return `## PubMed/MEDLINE\n\n\`\`\`\n#1 md-${versionId}\n\`\`\`\n`;
             if (k === 'created_by') return 'ai_draft';
             if (k === 'created_at') return '2026';
@@ -494,6 +494,7 @@ describe('startApp - wiring 層', () => {
     // 上の方（最新）は v2
     const loadBtn = items[0]!.querySelector<HTMLButtonElement>('.history__load')!;
     loadBtn.click();
+    expect(handle.store.getState().currentProtocolVersion).toBe(7);
     expect(handle.store.getState().currentFormulaVersionId).toBe('v2');
     expect(handle.store.getState().currentFormulaMarkdown).toContain('md-v2');
   });

@@ -6,4 +6,6 @@ export {
   appendProtocol,
   appendProtocolBlocks,
   getNextProtocolVersion,
+  getLatestProtocol,
+  getProtocolByVersion,
 } from './protocolRepository';
