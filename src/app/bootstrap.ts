@@ -202,6 +202,7 @@ function buildDefaultViewOptions(
         runFetchBoundary(store, runtime, llmFactoryDepsBase()),
       onDecide: async (input: RecordDecisionInput): Promise<RecordDecisionResult> =>
         runRecordDecision(store, runtime, input),
+      onRoundComplete: async (): Promise<ValidationSummary> => runValidate(store, runtime),
     },
   };
 }

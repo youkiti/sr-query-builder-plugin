@@ -33,3 +33,48 @@
   flex: 1;
   padding: var(--space-5);
 }
+
+/* /expand 画面: キーボード操作の対象を視覚化 */
+.expand__candidates {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  outline: none;
+}
+
+.expand__candidate {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-3);
+  background: var(--color-bg);
+}
+
+.expand__candidate--focused {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(42, 99, 214, 0.2);
+}
+
+.expand__candidate--decided {
+  background: var(--color-bg-muted);
+  opacity: 0.85;
+}
+
+.expand__shortcuts {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  margin: 0 0 var(--space-3);
+}
+
+.expand__round {
+  margin-top: var(--space-5);
+}
+
+.expand__round-summary {
+  border-left: 4px solid var(--color-success);
+  padding-left: var(--space-3);
+}
+
+.expand__round-error {
+  color: var(--color-danger);
+}
