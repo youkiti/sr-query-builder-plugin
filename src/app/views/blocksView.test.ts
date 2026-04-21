@@ -151,6 +151,80 @@ describe('createBlocksView', () => {
     )!;
     expect(approve.disabled).toBe(true);
     expect(container.querySelectorAll('.blocks__combination-errors li').length).toBeGreaterThan(0);
+    // エラー時は status バッジ・承認ブロック理由・アクションサマリがエラーを示す
+    expect(container.querySelector('.blocks__combination-status--error')?.textContent).toContain(
+      '件のエラー'
+    );
+    expect(container.querySelector('.blocks__approve-reason')?.textContent).toContain('解消');
+    expect(container.querySelector('.blocks__actions-summary')?.textContent).toContain('⚠');
+  });
+
+  test('構文 OK のときは「✓ 構文 OK」ステータスと警告無しでアクションが表示される', () => {
+    const store = createStore({ ...withProject(), blocksDraft: draftOf(2, '#1 AND #2') });
+    const view = createBlocksView(store);
+    const container = buildContainer();
+    view(container, { state: store.getState(), navigate: jest.fn() });
+    expect(container.querySelector('.blocks__combination-status--ok')?.textContent).toContain(
+      '構文 OK'
+    );
+    expect(container.querySelector('.blocks__approve-reason')).toBeNull();
+    expect(container.querySelector('.blocks__actions-summary')?.textContent).toContain('✓ OK');
+  });
+
+  test('画面冒頭にガイド文とステッパー（3 ステップ）が表示される', () => {
+    const store = createStore({ ...withProject(), blocksDraft: draftOf(2, '#1 AND #2') });
+    const view = createBlocksView(store);
+    const container = buildContainer();
+    view(container, { state: store.getState(), navigate: jest.fn() });
+    expect(container.querySelector('.blocks__lede')?.textContent).toContain('検索ブロック');
+    const steps = container.querySelectorAll('.blocks__step');
+    expect(steps).toHaveLength(3);
+    expect(steps[0]?.textContent).toContain('ブロックを確認');
+    expect(steps[1]?.textContent).toContain('結合式');
+    expect(steps[2]?.textContent).toContain('承認');
+  });
+
+  test('各ブロックにラベル/メモ/説明の見出しと説明テキストが出る', () => {
+    const store = createStore({ ...withProject(), blocksDraft: draftOf(1, '#1') });
+    const view = createBlocksView(store);
+    const container = buildContainer();
+    view(container, { state: store.getState(), navigate: jest.fn() });
+    const titles = Array.from(container.querySelectorAll('.blocks__field-title')).map(
+      (n) => n.textContent
+    );
+    expect(titles).toEqual(expect.arrayContaining(['ブロック名', 'メモ', '説明', '結合式を編集']));
+  });
+
+  test('先頭ブロックの ↑ と末尾ブロックの ↓ は disabled', () => {
+    const store = createStore({ ...withProject(), blocksDraft: draftOf(2, '#1 AND #2') });
+    const view = createBlocksView(store);
+    const container = buildContainer();
+    view(container, { state: store.getState(), navigate: jest.fn() });
+    const ups = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).filter(
+      (b) => b.textContent === '↑'
+    );
+    const downs = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).filter(
+      (b) => b.textContent === '↓'
+    );
+    expect(ups[0]?.disabled).toBe(true); // 先頭 ↑
+    expect(ups[1]?.disabled).toBe(false);
+    expect(downs[0]?.disabled).toBe(false);
+    expect(downs[1]?.disabled).toBe(true); // 末尾 ↓
+  });
+
+  test('結合式エラーメッセージは「N 文字目:」形式で表示される', () => {
+    const store = createStore({
+      ...withProject(),
+      blocksDraft: draftOf(2, '#99 AND #2'),
+    });
+    const view = createBlocksView(store);
+    const container = buildContainer();
+    view(container, { state: store.getState(), navigate: jest.fn() });
+    const errorItems = Array.from(
+      container.querySelectorAll<HTMLLIElement>('.blocks__combination-errors li')
+    );
+    expect(errorItems.length).toBeGreaterThan(0);
+    expect(errorItems[0]?.textContent).toMatch(/^\d+ 文字目: /);
   });
 
   test('「下書きとして保存」「承認して検索式生成へ」で callback が呼ばれる', () => {
