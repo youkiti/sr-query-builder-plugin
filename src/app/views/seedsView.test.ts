@@ -1,6 +1,7 @@
 import type { IngestSummary } from '@/app/services';
+import type { EfetchArticle } from '@/lib/ncbi';
 import { INITIAL_STATE, type AppState } from '../store';
-import { createSeedsView } from './seedsView';
+import { createSeedsView, detectFileMode } from './seedsView';
 
 function buildContainer(): HTMLElement {
   const doc = document.implementation.createHTMLDocument('test');
@@ -13,6 +14,23 @@ const stateWithProject: AppState = {
   ...INITIAL_STATE,
   project: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'd', title: 'T' },
 };
+
+function sampleArticle(overrides: Partial<EfetchArticle> = {}): EfetchArticle {
+  return {
+    pmid: '111',
+    title: 'Sample title',
+    year: 2020,
+    meshHeadings: [],
+    abstract: null,
+    journal: null,
+    authors: [],
+    volume: null,
+    issue: null,
+    pages: null,
+    doi: null,
+    ...overrides,
+  };
+}
 
 function sampleSummary(overrides: Partial<IngestSummary> = {}): IngestSummary {
   return {
@@ -37,12 +55,20 @@ function sampleSummary(overrides: Partial<IngestSummary> = {}): IngestSummary {
         note: null,
       },
     ],
+    articles: {},
     ...overrides,
   };
 }
 
 async function flushAsync(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function makeFakeFile(name: string, body: string): File {
+  return {
+    name,
+    text: async () => body,
+  } as unknown as File;
 }
 
 describe('createSeedsView', () => {
@@ -54,21 +80,53 @@ describe('createSeedsView', () => {
     expect(container.querySelector('fieldset')).toBeNull();
   });
 
-  test('3 つのセクション（PMID / NBIB / RIS）を描画する', () => {
+  test('PMID 入力 / ファイルアップロードの 2 セクションだけを描画する', () => {
     const view = createSeedsView();
     const container = buildContainer();
     view(container, { state: stateWithProject, navigate: jest.fn() });
     const legends = Array.from(container.querySelectorAll('legend')).map((l) => l.textContent);
-    expect(legends).toEqual(['PMID を直接入力', 'NBIB アップロード', 'RIS アップロード']);
+    expect(legends).toEqual(['PMID を直接入力', 'ファイルアップロード（NBIB / RIS）']);
   });
 
-  test('PMID 登録で onIngest が呼ばれ、サマリが表示される', async () => {
+  test('PMID 登録で onIngest が呼ばれ、サマリと書誌詳細が表示される', async () => {
     const onIngest = jest.fn().mockResolvedValue(
       sampleSummary({
         registered: 3,
         valid: 2,
         invalid: 1,
         reasons: { pmid_not_found: 1, duplicate_pmid: 0, no_pmid_resolved: 0, other: 0 },
+        added: [
+          {
+            pmid: '111',
+            title: 'T',
+            year: 2020,
+            source: 'initial',
+            ingestFormat: 'pmid_direct',
+            originalDb: null,
+            isValid: true,
+            exclusionReason: null,
+            originalPayloadRef: null,
+            userDecision: null,
+            decidedAt: null,
+            decidedBy: null,
+            note: null,
+          },
+        ],
+        articles: {
+          '111': sampleArticle({
+            pmid: '111',
+            title: 'Diabetes RCT',
+            year: 2020,
+            journal: 'The Lancet',
+            authors: ['Smith J', 'Doe JA'],
+            volume: '395',
+            issue: '10222',
+            pages: '123-130',
+            abstract: 'BACKGROUND: ...\n\nMETHODS: ...',
+            meshHeadings: ['Diabetes Mellitus', 'Metformin'],
+            doi: '10.1016/abc',
+          }),
+        },
       })
     );
     const view = createSeedsView({ onIngest });
@@ -86,12 +144,54 @@ describe('createSeedsView', () => {
     });
     expect(container.querySelector('.seeds__status')?.textContent).toContain('3 件登録');
     expect(container.querySelector('.seeds__reasons')?.textContent).toContain('PMID 不在: 1');
-    expect(container.querySelectorAll('.seeds__added li')).toHaveLength(1);
+    // 書誌詳細カード
+    const card = container.querySelector('.seeds__article')!;
+    expect(card).not.toBeNull();
+    expect(card.querySelector('.seeds__article-title')?.textContent).toBe('Diabetes RCT');
+    expect(card.querySelector<HTMLAnchorElement>('.seeds__article-link')?.href).toBe(
+      'https://pubmed.ncbi.nlm.nih.gov/111/'
+    );
+    expect(card.querySelector('.seeds__article-meta')?.textContent).toContain('The Lancet');
+    expect(card.querySelector('.seeds__article-meta')?.textContent).toContain('395(10222)');
+    expect(card.querySelector('.seeds__article-meta')?.textContent).toContain('123-130');
+    expect(card.querySelector('.seeds__article-authors')?.textContent).toContain('Smith J');
+    expect(card.querySelector('.seeds__article-doi')?.textContent).toContain('10.1016/abc');
+    expect(card.querySelector('.seeds__article-abstract-body')?.textContent).toContain('BACKGROUND');
+    const meshItems = Array.from(card.querySelectorAll('.seeds__article-mesh-item')).map(
+      (n) => n.textContent
+    );
+    expect(meshItems).toEqual(['Diabetes Mellitus', 'Metformin']);
   });
 
-  test('登録件数 0 ならサマリ内訳は描画しない', async () => {
+  test('articles に該当 PMID が無くても fallback タイトルとリンクは描画する', async () => {
     const onIngest = jest.fn().mockResolvedValue(
-      sampleSummary({ registered: 0, valid: 0, invalid: 0, added: [] })
+      sampleSummary({
+        registered: 1,
+        valid: 1,
+        invalid: 0,
+        articles: {},
+      })
+    );
+    const view = createSeedsView({ onIngest });
+    const container = buildContainer();
+    view(container, { state: stateWithProject, navigate: jest.fn() });
+    const pmidBtn = Array.from(container.querySelectorAll('fieldset'))[0]!.querySelector('button')!;
+    pmidBtn.click();
+    await flushAsync();
+    await flushAsync();
+    const card = container.querySelector('.seeds__article')!;
+    expect(card.querySelector('.seeds__article-title')?.textContent).toBe('T');
+    expect(card.querySelector<HTMLAnchorElement>('.seeds__article-link')?.href).toBe(
+      'https://pubmed.ncbi.nlm.nih.gov/111/'
+    );
+    // optional セクションは無い
+    expect(card.querySelector('.seeds__article-abstract-body')).toBeNull();
+    expect(card.querySelector('.seeds__article-mesh-list')).toBeNull();
+  });
+
+  test('登録件数 0 ならサマリ内訳も書誌詳細も描画しない', async () => {
+    const onIngest = jest.fn().mockResolvedValue(
+      sampleSummary({ registered: 0, valid: 0, invalid: 0, added: [], articles: {} })
     );
     const view = createSeedsView({ onIngest });
     const container = buildContainer();
@@ -104,9 +204,10 @@ describe('createSeedsView', () => {
     await flushAsync();
     expect(container.querySelector('.seeds__reasons')).toBeNull();
     expect(container.querySelector('.seeds__added')).toBeNull();
+    expect(container.querySelector('.seeds__article')).toBeNull();
   });
 
-  test('pmid=null かつ title=null / exclusionReason=null でも表示が壊れない', async () => {
+  test('無効シードはサマリには出るが書誌詳細カードには出ない', async () => {
     const onIngest = jest.fn().mockResolvedValue(
       sampleSummary({
         registered: 1,
@@ -130,6 +231,7 @@ describe('createSeedsView', () => {
             note: null,
           },
         ],
+        articles: {},
       })
     );
     const view = createSeedsView({ onIngest });
@@ -142,91 +244,50 @@ describe('createSeedsView', () => {
     const li = container.querySelector('.seeds__added li')?.textContent ?? '';
     expect(li).toContain('(PMID 無し)');
     expect(li).toContain('無効');
+    expect(container.querySelector('.seeds__article')).toBeNull();
   });
 
-  test('各内訳を含むサマリも描画される', async () => {
-    const onIngest = jest.fn().mockResolvedValue(
-      sampleSummary({
-        registered: 4,
-        valid: 0,
-        invalid: 4,
-        reasons: { pmid_not_found: 1, duplicate_pmid: 1, no_pmid_resolved: 1, other: 1 },
-        added: [
-          {
-            pmid: null,
-            title: 'Non PubMed',
-            year: null,
-            source: 'initial',
-            ingestFormat: 'ris_no_pmid',
-            originalDb: 'Embase',
-            isValid: false,
-            exclusionReason: 'no_pmid_resolved',
-            originalPayloadRef: null,
-            userDecision: null,
-            decidedAt: null,
-            decidedBy: null,
-            note: null,
-          },
-        ],
-      })
-    );
-    const view = createSeedsView({ onIngest });
-    const container = buildContainer();
-    view(container, { state: stateWithProject, navigate: jest.fn() });
-    const pmidBtn = Array.from(container.querySelectorAll('fieldset'))[0]!.querySelector('button')!;
-    pmidBtn.click();
-    await flushAsync();
-    await flushAsync();
-    const text = container.querySelector('.seeds__reasons')?.textContent ?? '';
-    expect(text).toContain('重複: 1');
-    expect(text).toContain('PMID 解決不能: 1');
-    expect(text).toContain('その他: 1');
-    expect(container.querySelector('.seeds__added li')?.textContent).toContain('Non PubMed');
-  });
-
-  test('NBIB セクションでファイルをアップロードすると onIngest に text が渡る', async () => {
+  test('ファイルセクション: .nbib をアップロードすると mode=nbib が渡る', async () => {
     const onIngest = jest.fn().mockResolvedValue(sampleSummary());
     const view = createSeedsView({ onIngest });
     const container = buildContainer();
     view(container, { state: stateWithProject, navigate: jest.fn() });
-    const nbibFieldset = Array.from(container.querySelectorAll('fieldset'))[1]!;
-    const fileInput = nbibFieldset.querySelector('input[type=file]') as HTMLInputElement;
-    const fakeFile = {
-      name: 'seed.nbib',
-      text: async () => 'PMID- 111\n',
-    } as unknown as File;
-    Object.defineProperty(fileInput, 'files', { value: [fakeFile], configurable: true });
-    nbibFieldset.querySelector('button')!.click();
+    const fileFieldset = Array.from(container.querySelectorAll('fieldset'))[1]!;
+    const fileInput = fileFieldset.querySelector('input[type=file]') as HTMLInputElement;
+    Object.defineProperty(fileInput, 'files', {
+      value: [makeFakeFile('seed.nbib', 'PMID- 111\n')],
+      configurable: true,
+    });
+    fileFieldset.querySelector('button')!.click();
     await flushAsync();
     await flushAsync();
     expect(onIngest).toHaveBeenCalledWith({ mode: 'nbib', text: 'PMID- 111\n' });
   });
 
-  test('RIS セクションでファイルをアップロードすると onIngest に text が渡る', async () => {
+  test('ファイルセクション: .ris をアップロードすると mode=ris が渡る', async () => {
     const onIngest = jest.fn().mockResolvedValue(sampleSummary());
     const view = createSeedsView({ onIngest });
     const container = buildContainer();
     view(container, { state: stateWithProject, navigate: jest.fn() });
-    const risFieldset = Array.from(container.querySelectorAll('fieldset'))[2]!;
-    const fileInput = risFieldset.querySelector('input[type=file]') as HTMLInputElement;
-    const fakeFile = {
-      name: 'seed.ris',
-      text: async () => 'TY  - JOUR\n',
-    } as unknown as File;
-    Object.defineProperty(fileInput, 'files', { value: [fakeFile], configurable: true });
-    risFieldset.querySelector('button')!.click();
+    const fileFieldset = Array.from(container.querySelectorAll('fieldset'))[1]!;
+    const fileInput = fileFieldset.querySelector('input[type=file]') as HTMLInputElement;
+    Object.defineProperty(fileInput, 'files', {
+      value: [makeFakeFile('seed.ris', 'TY  - JOUR\n')],
+      configurable: true,
+    });
+    fileFieldset.querySelector('button')!.click();
     await flushAsync();
     await flushAsync();
     expect(onIngest).toHaveBeenCalledWith({ mode: 'ris', text: 'TY  - JOUR\n' });
   });
 
-  test('ファイル未選択のファイルフォームはクリックしても何もしない', async () => {
+  test('ファイル未選択でクリックしても何も起きない', async () => {
     const onIngest = jest.fn().mockResolvedValue(sampleSummary());
     const view = createSeedsView({ onIngest });
     const container = buildContainer();
     view(container, { state: stateWithProject, navigate: jest.fn() });
-    const nbibFieldset = Array.from(container.querySelectorAll('fieldset'))[1]!;
-    nbibFieldset.querySelector('button')!.click();
+    const fileFieldset = Array.from(container.querySelectorAll('fieldset'))[1]!;
+    fileFieldset.querySelector('button')!.click();
     await flushAsync();
     expect(onIngest).not.toHaveBeenCalled();
   });
@@ -264,5 +325,64 @@ describe('createSeedsView', () => {
     view(container, { state: stateWithProject, navigate: jest.fn() });
     const pmidBtn = Array.from(container.querySelectorAll('fieldset'))[0]!.querySelector('button')!;
     expect(() => pmidBtn.click()).not.toThrow();
+  });
+
+  test('著者 7 名以上は先頭 6 名 + 「ほか N 名」表記', async () => {
+    const authors = Array.from({ length: 9 }, (_, i) => `Author ${i + 1}`);
+    const onIngest = jest.fn().mockResolvedValue(
+      sampleSummary({
+        articles: {
+          '111': sampleArticle({ authors }),
+        },
+      })
+    );
+    const view = createSeedsView({ onIngest });
+    const container = buildContainer();
+    view(container, { state: stateWithProject, navigate: jest.fn() });
+    const pmidBtn = Array.from(container.querySelectorAll('fieldset'))[0]!.querySelector('button')!;
+    pmidBtn.click();
+    await flushAsync();
+    await flushAsync();
+    const text = container.querySelector('.seeds__article-authors')?.textContent ?? '';
+    expect(text).toContain('Author 6');
+    expect(text).toContain('ほか 3 名');
+    expect(text).not.toContain('Author 7');
+  });
+});
+
+describe('detectFileMode', () => {
+  test('.nbib 拡張子なら nbib', async () => {
+    await expect(detectFileMode(makeFakeFile('a.nbib', 'PMID- 1'))).resolves.toEqual({
+      mode: 'nbib',
+      text: 'PMID- 1',
+    });
+  });
+
+  test('.ris 拡張子なら ris', async () => {
+    await expect(detectFileMode(makeFakeFile('a.ris', 'TY  - JOUR'))).resolves.toEqual({
+      mode: 'ris',
+      text: 'TY  - JOUR',
+    });
+  });
+
+  test('.txt + 中身が TY - 始まりなら ris', async () => {
+    await expect(detectFileMode(makeFakeFile('a.txt', 'TY  - JOUR\nTI  - X'))).resolves.toEqual({
+      mode: 'ris',
+      text: 'TY  - JOUR\nTI  - X',
+    });
+  });
+
+  test('.txt + 中身に TY - が無ければ nbib にフォールバック', async () => {
+    await expect(detectFileMode(makeFakeFile('a.txt', 'PMID- 9\nTI  - Foo'))).resolves.toEqual({
+      mode: 'nbib',
+      text: 'PMID- 9\nTI  - Foo',
+    });
+  });
+
+  test('大文字拡張子も認識する', async () => {
+    await expect(detectFileMode(makeFakeFile('A.RIS', 'TY  - JOUR'))).resolves.toEqual({
+      mode: 'ris',
+      text: 'TY  - JOUR',
+    });
   });
 });

@@ -2,8 +2,9 @@ import {
   normalizeCombinationExpression,
   validateCombinationExpression,
 } from '@/lib/combination-expression';
+import { designDefaultFilters } from '@/features/formula/skills';
 import { ROUTE_LABELS } from '../router';
-import type { AppStore, BlockDraft, BlocksDraft } from '../store';
+import type { AppStore, BlockDraft, BlocksDraft, ProtocolDraft } from '../store';
 import {
   MAX_BLOCKS,
   MIN_BLOCKS,
@@ -25,7 +26,7 @@ import type { RenderView } from './types';
  * - 並び替え（↑↓ ボタン）
  * - 追加 / 削除
  * - combination_expression の編集 + ライブ構文チェック
- * - 「下書きとして保存」「承認して検索式生成へ」の 2 種類のボタン
+ * - 「下書きとして保存」「承認してシード論文へ」の 2 種類のボタン
  *
  * MVP では LLM 再生成 / 統合 / 分割は省略（後続セッションで追加）。
  *
@@ -36,7 +37,7 @@ import type { RenderView } from './types';
 export interface BlocksViewCallbacks {
   /** 「下書きとして保存」ボタンが押されたとき */
   onSaveDraft?: (draft: BlocksDraft) => void | Promise<void>;
-  /** 「承認して検索式生成へ」が押されたとき */
+  /** 「承認してシード論文へ」が押されたとき */
   onApprove?: (draft: BlocksDraft) => void | Promise<void>;
 }
 
@@ -60,6 +61,9 @@ export function createBlocksView(
     }
 
     const draft = ensureDraft(store);
+    container.appendChild(
+      buildProtocolReference(container.ownerDocument, ctx.state.protocolDraft)
+    );
     container.appendChild(buildSummary(container.ownerDocument, draft));
     container.appendChild(buildBlockList(container.ownerDocument, draft, store));
     container.appendChild(buildAddRow(container.ownerDocument, draft, store));
@@ -79,6 +83,70 @@ function ensureDraft(store: AppStore): BlocksDraft {
   };
   store.setState((s) => ({ ...s, blocksDraft: initial }));
   return initial;
+}
+
+function buildProtocolReference(doc: Document, protocol: ProtocolDraft | null): HTMLElement {
+  const section = doc.createElement('section');
+  section.className = 'blocks__protocol-ref';
+
+  const title = doc.createElement('h3');
+  title.className = 'blocks__protocol-ref-title';
+  title.textContent = 'プロトコル';
+  section.appendChild(title);
+
+  if (!protocol) {
+    const empty = doc.createElement('p');
+    empty.className = 'blocks__protocol-ref-empty';
+    empty.textContent = 'プロトコルが入力されていません。';
+    section.appendChild(empty);
+    return section;
+  }
+
+  const body = doc.createElement('div');
+  body.className = 'blocks__protocol-ref-body';
+
+  appendRefField(doc, body, 'Framework', protocol.frameworkType.toUpperCase());
+  appendRefField(doc, body, 'RQ', protocol.researchQuestion);
+  appendRefField(doc, body, 'Study design', protocol.studyDesign);
+  appendRefField(doc, body, '組入基準', protocol.inclusionCriteria);
+  appendRefField(doc, body, '除外基準', protocol.exclusionCriteria);
+
+  const rawText = protocol.rawTextInline ?? protocol.rawTextPreview;
+  if (rawText) {
+    const sourceLabel =
+      protocol.sourceType === 'manual'
+        ? '元テキスト'
+        : `元テキスト（${protocol.sourceFilename ?? protocol.sourceType}・先頭 500 文字）`;
+    appendRefField(doc, body, sourceLabel, rawText);
+  }
+
+  section.appendChild(body);
+  return section;
+}
+
+function appendRefField(
+  doc: Document,
+  parent: HTMLElement,
+  label: string,
+  value: string
+): void {
+  if (!value) {
+    return;
+  }
+  const wrap = doc.createElement('div');
+  wrap.className = 'blocks__protocol-ref-field';
+
+  const dt = doc.createElement('div');
+  dt.className = 'blocks__protocol-ref-label';
+  dt.textContent = label;
+  wrap.appendChild(dt);
+
+  const dd = doc.createElement('div');
+  dd.className = 'blocks__protocol-ref-value';
+  dd.textContent = value;
+  wrap.appendChild(dd);
+
+  parent.appendChild(wrap);
 }
 
 function buildSummary(doc: Document, draft: BlocksDraft): HTMLElement {
@@ -216,6 +284,11 @@ function buildCombinationEditor(
   }
   fieldset.appendChild(errorList);
 
+  const autoFilter = buildAutoFilterPreview(doc, draft, store.getState().protocolDraft);
+  if (autoFilter) {
+    fieldset.appendChild(autoFilter);
+  }
+
   const resetBtn = doc.createElement('button');
   resetBtn.type = 'button';
   resetBtn.textContent = '全 AND に戻す';
@@ -223,6 +296,46 @@ function buildCombinationEditor(
   fieldset.appendChild(resetBtn);
 
   return fieldset;
+}
+
+/**
+ * 検索式生成時に filter-designer が決定論的に自動付与するブロック（#RCTfilter / #DateFilter）の
+ * プレビューを返す。study_design / yearRange のいずれも該当しない場合は null。
+ */
+function buildAutoFilterPreview(
+  doc: Document,
+  draft: BlocksDraft,
+  protocol: ProtocolDraft | null
+): HTMLElement | null {
+  if (!protocol) {
+    return null;
+  }
+  const filterResult = designDefaultFilters({ studyDesign: protocol.studyDesign });
+  if (filterResult.filters.length === 0) {
+    return null;
+  }
+
+  const wrap = doc.createElement('div');
+  wrap.className = 'blocks__autofilter';
+
+  const finalLine = doc.createElement('div');
+  finalLine.className = 'blocks__autofilter-final';
+  const finalExpr =
+    normalizeCombinationExpression(draft.combinationExpression) +
+    filterResult.appendToCombination;
+  finalLine.textContent = `検索式生成後: ${finalExpr}`;
+  wrap.appendChild(finalLine);
+
+  const list = doc.createElement('ul');
+  list.className = 'blocks__autofilter-list';
+  for (const f of filterResult.filters) {
+    const li = doc.createElement('li');
+    li.textContent = `#${f.blockId}: ${f.comment}`;
+    list.appendChild(li);
+  }
+  wrap.appendChild(list);
+
+  return wrap;
 }
 
 function buildActionRow(
@@ -259,7 +372,7 @@ function buildActionRow(
 
   const approveBtn = doc.createElement('button');
   approveBtn.type = 'button';
-  approveBtn.textContent = '承認して検索式生成へ →';
+  approveBtn.textContent = '承認してシード論文へ →';
   approveBtn.disabled = hasErrors;
   approveBtn.addEventListener('click', () => {
     runAction(

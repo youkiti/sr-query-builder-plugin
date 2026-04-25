@@ -97,6 +97,13 @@ export interface EfetchArticle {
   title: string | null;
   year: number | null;
   meshHeadings: string[];
+  abstract: string | null;
+  journal: string | null;
+  authors: string[];
+  volume: string | null;
+  issue: string | null;
+  pages: string | null;
+  doi: string | null;
 }
 
 /**
@@ -152,11 +159,93 @@ export function parsePubmedXml(xml: string): EfetchArticle[] {
         meshHeadings.push(descriptor);
       }
     }
+    const abstract = collectAbstract(article);
+    const journal =
+      article.getElementsByTagName('Title')[0]?.textContent?.trim() ??
+      article.getElementsByTagName('ISOAbbreviation')[0]?.textContent?.trim() ??
+      null;
+    const authors = collectAuthors(article);
+    const journalIssue = article.getElementsByTagName('JournalIssue')[0];
+    const volume = journalIssue?.getElementsByTagName('Volume')[0]?.textContent?.trim() ?? null;
+    const issue = journalIssue?.getElementsByTagName('Issue')[0]?.textContent?.trim() ?? null;
+    const pages =
+      article.getElementsByTagName('MedlinePgn')[0]?.textContent?.trim() ?? null;
+    const doi = collectDoi(article);
     if (pmid !== '') {
-      articles.push({ pmid, title, year, meshHeadings });
+      articles.push({
+        pmid,
+        title,
+        year,
+        meshHeadings,
+        abstract,
+        journal,
+        authors,
+        volume,
+        issue,
+        pages,
+        doi,
+      });
     }
   }
   return articles;
+}
+
+function collectAbstract(article: Element): string | null {
+  const parts: string[] = [];
+  for (const node of Array.from(article.getElementsByTagName('AbstractText'))) {
+    const text = node.textContent?.trim();
+    if (!text) {
+      continue;
+    }
+    const label = node.getAttribute('Label');
+    parts.push(label ? `${label}: ${text}` : text);
+  }
+  if (parts.length === 0) {
+    return null;
+  }
+  return parts.join('\n\n');
+}
+
+function collectAuthors(article: Element): string[] {
+  const authors: string[] = [];
+  for (const author of Array.from(article.getElementsByTagName('Author'))) {
+    const collective = author.getElementsByTagName('CollectiveName')[0]?.textContent?.trim();
+    if (collective) {
+      authors.push(collective);
+      continue;
+    }
+    const last = author.getElementsByTagName('LastName')[0]?.textContent?.trim();
+    const initials = author.getElementsByTagName('Initials')[0]?.textContent?.trim();
+    const fore = author.getElementsByTagName('ForeName')[0]?.textContent?.trim();
+    if (last && initials) {
+      authors.push(`${last} ${initials}`);
+    } else if (last && fore) {
+      authors.push(`${last} ${fore}`);
+    } else if (last) {
+      authors.push(last);
+    }
+  }
+  return authors;
+}
+
+function collectDoi(article: Element): string | null {
+  for (const id of Array.from(article.getElementsByTagName('ArticleId'))) {
+    if (id.getAttribute('IdType') === 'doi') {
+      const value = id.textContent?.trim();
+      if (value) {
+        return value;
+      }
+    }
+  }
+  for (const id of Array.from(article.getElementsByTagName('ELocationID'))) {
+    if (id.getAttribute('EIdType') === 'doi') {
+      const value = id.textContent?.trim();
+      if (value) {
+        return value;
+      }
+    }
+  }
+  return null;
 }
 
 function parseYear(text: string): number | null {

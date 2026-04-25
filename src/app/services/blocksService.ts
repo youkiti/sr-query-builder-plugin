@@ -9,11 +9,11 @@ import { nowIso } from '@/utils/iso8601';
 import type { AppStore, BlocksDraft, ProtocolDraft } from '../store';
 
 /**
- * ブロック承認画面の「承認して検索式生成へ」ボタンが押されたときの処理。
+ * ブロック承認画面の「承認してシード論文へ」ボタンが押されたときの処理。
  *
  * 1. store の protocolDraft + blocksDraft を Sheets `Protocol` / `ProtocolBlocks` に追記
  * 2. version は Protocol タブの既存最大 + 1
- * 3. 完了したら（呼び出し側で）`/draft` 画面へナビ。本サービスはナビ自体は持たない
+ * 3. 完了したら（呼び出し側で）`/seeds` 画面へナビ。本サービスはナビ自体は持たない
  */
 
 export interface BlocksServiceDeps {

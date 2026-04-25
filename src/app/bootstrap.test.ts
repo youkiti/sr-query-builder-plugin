@@ -435,7 +435,7 @@ describe('startApp - wiring 層', () => {
     // approveBlocks は :append を呼ぶ
     const calls = fetchMock.mock.calls.map((c) => c[0] as string);
     expect(calls.some((u) => u.includes(':append'))).toBe(true);
-    expect(setHash).toHaveBeenCalledWith('#/draft');
+    expect(setHash).toHaveBeenCalledWith('#/seeds');
   });
 
   test('draft view 既定 onGenerate が generateDraft を呼び FormulaVersions に追記する', async () => {

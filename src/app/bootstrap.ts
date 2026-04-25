@@ -179,7 +179,7 @@ async function hydrateCurrentProject(store: AppStore, runtime: ChromeRuntimeDeps
 /**
  * runtime が利用可能なときの既定 view options。
  * - protocol.onSubmit → submitProtocol（LLM 呼び出し）→ blocksDraft 更新 → /blocks ナビ
- * - blocks.onApprove → approveBlocks（Sheets 書き込み）→ /draft ナビ（暫定）
+ * - blocks.onApprove → approveBlocks（Sheets 書き込み）→ /seeds ナビ（シード論文収集を先行させる）
  * - blocks.onSaveDraft → 何もしない（store にのみ残す）
  */
 function buildDefaultViewOptions(
@@ -212,7 +212,7 @@ function buildDefaultViewOptions(
     blocks: {
       onApprove: async () => {
         await runApprove(store, runtime);
-        navigate('draft');
+        navigate('seeds');
       },
     },
     draft: {
