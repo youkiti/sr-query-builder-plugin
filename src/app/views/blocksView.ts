@@ -1,4 +1,5 @@
 import {
+  formatCombinationError,
   normalizeCombinationExpression,
   validateCombinationExpression,
 } from '@/lib/combination-expression';
@@ -21,17 +22,20 @@ import {
 import type { RenderView } from './types';
 
 /**
- * ブロック承認画面（docs/ui-block-approval.md 準拠）。
+ * ブロック承認画面（docs/ui-block-approval.md 準拠・案 B レイアウト）。
  * - 1〜5 個のブロック（label / description / note）の編集
- * - 並び替え（↑↓ ボタン）
- * - 追加 / 削除
- * - combination_expression の編集 + ライブ構文チェック
+ * - 並び替え（↑↓ ボタン）/ 追加 / 削除
+ * - combination_expression の編集 + ライブ構文チェック + 自動フィルタプレビュー
  * - 「下書きとして保存」「承認してシード論文へ」の 2 種類のボタン
  *
- * MVP では LLM 再生成 / 統合 / 分割は省略（後続セッションで追加）。
+ * 画面の 3 つの活動をローカルステッパーで可視化する:
+ *   ① ブロックを確認・編集
+ *   ② 結合式 (combination_expression) を確認
+ *   ③ 承認してシード論文へ
  *
- * 編集状態は app/store の blocksDraft に持つ。store を必要とするため
- * createBlocksView(store) でファクトリ経由で生成する。
+ * 各ブロックは「ヘッダ行（番号・バッジ・並び替え/削除）」と
+ * 「本体（ラベル・説明・メモ）」に分けてカード表示する。
+ * アクション行は sticky にし、スクロールしても操作できる。
  */
 
 export interface BlocksViewCallbacks {
@@ -47,6 +51,7 @@ export function createBlocksView(
 ): RenderView {
   return (container, ctx) => {
     container.innerHTML = '';
+    container.classList.add('blocks__view');
 
     const heading = container.ownerDocument.createElement('h2');
     heading.textContent = ROUTE_LABELS.blocks;
@@ -61,12 +66,13 @@ export function createBlocksView(
     }
 
     const draft = ensureDraft(store);
+
+    container.appendChild(buildLede(container.ownerDocument));
+    container.appendChild(buildStepper(container.ownerDocument));
     container.appendChild(
       buildProtocolReference(container.ownerDocument, ctx.state.protocolDraft)
     );
-    container.appendChild(buildSummary(container.ownerDocument, draft));
-    container.appendChild(buildBlockList(container.ownerDocument, draft, store));
-    container.appendChild(buildAddRow(container.ownerDocument, draft, store));
+    container.appendChild(buildBlocksSection(container.ownerDocument, draft, store));
     container.appendChild(buildCombinationEditor(container.ownerDocument, draft, store));
     container.appendChild(buildActionRow(container.ownerDocument, draft, store, callbacks));
   };
@@ -83,6 +89,46 @@ function ensureDraft(store: AppStore): BlocksDraft {
   };
   store.setState((s) => ({ ...s, blocksDraft: initial }));
   return initial;
+}
+
+function buildLede(doc: Document): HTMLElement {
+  const p = doc.createElement('p');
+  p.className = 'blocks__lede';
+  p.textContent =
+    'プロトコルから抽出された検索ブロック（PICO などの概念グループ）を確認してください。内容を承認するとシード論文の登録へ進み、その後 AI が PubMed 検索式のドラフトを生成します。';
+  return p;
+}
+
+function buildStepper(doc: Document): HTMLElement {
+  const ol = doc.createElement('ol');
+  ol.className = 'blocks__stepper';
+  ol.setAttribute('aria-label', '画面内の作業ステップ');
+  const steps: Array<{ num: string; title: string; desc: string }> = [
+    { num: '1', title: 'ブロックを確認・編集', desc: '名称と説明を見直す' },
+    { num: '2', title: '結合式を確認', desc: 'AND / OR の組み合わせ' },
+    { num: '3', title: '承認して次へ', desc: 'シード論文の登録へ進む' },
+  ];
+  steps.forEach((s) => {
+    const li = doc.createElement('li');
+    li.className = 'blocks__step';
+    const num = doc.createElement('span');
+    num.className = 'blocks__step-num';
+    num.textContent = s.num;
+    const body = doc.createElement('span');
+    body.className = 'blocks__step-body';
+    const title = doc.createElement('span');
+    title.className = 'blocks__step-title';
+    title.textContent = s.title;
+    const desc = doc.createElement('span');
+    desc.className = 'blocks__step-desc';
+    desc.textContent = s.desc;
+    body.appendChild(title);
+    body.appendChild(desc);
+    li.appendChild(num);
+    li.appendChild(body);
+    ol.appendChild(li);
+  });
+  return ol;
 }
 
 function buildProtocolReference(doc: Document, protocol: ProtocolDraft | null): HTMLElement {
@@ -153,11 +199,37 @@ function appendRefField(
   parent.appendChild(wrap);
 }
 
-function buildSummary(doc: Document, draft: BlocksDraft): HTMLElement {
-  const p = doc.createElement('p');
-  p.className = 'blocks__summary';
-  p.textContent = `ブロック数: ${draft.blocks.length} / ${MAX_BLOCKS}`;
-  return p;
+function buildBlocksSection(doc: Document, draft: BlocksDraft, store: AppStore): HTMLElement {
+  const section = doc.createElement('section');
+  section.className = 'blocks__section';
+  section.setAttribute('aria-labelledby', 'blocks-section-heading');
+
+  const header = doc.createElement('div');
+  header.className = 'blocks__section-header';
+
+  const h3 = doc.createElement('h3');
+  h3.id = 'blocks-section-heading';
+  h3.className = 'blocks__section-title';
+  h3.textContent = '① ブロック一覧';
+  header.appendChild(h3);
+
+  const summary = doc.createElement('span');
+  summary.className = 'blocks__summary';
+  summary.textContent = `${draft.blocks.length} / ${MAX_BLOCKS} ブロック`;
+  header.appendChild(summary);
+
+  section.appendChild(header);
+
+  const hint = doc.createElement('p');
+  hint.className = 'blocks__section-hint';
+  hint.textContent =
+    '各ブロックの「ブロック名」と「説明」を確認・修正してください。説明が具体的なほど AI が良い検索語を提案できます。';
+  section.appendChild(hint);
+
+  section.appendChild(buildBlockList(doc, draft, store));
+  section.appendChild(buildAddRow(doc, draft, store));
+
+  return section;
 }
 
 function buildBlockList(doc: Document, draft: BlocksDraft, store: AppStore): HTMLElement {
@@ -193,9 +265,20 @@ function buildBlockItem(
   badge.textContent = block.aiGenerated ? '🤖 AI 生成' : '✏️ ユーザー編集';
   header.appendChild(badge);
 
-  header.appendChild(buildIconButton(doc, '↑', () => mutateDraft(store, (d) => moveBlock(d, index, -1))));
-  header.appendChild(buildIconButton(doc, '↓', () => mutateDraft(store, (d) => moveBlock(d, index, 1))));
-  header.appendChild(
+  const controls = doc.createElement('div');
+  controls.className = 'blocks__item-controls';
+  controls.appendChild(
+    buildIconButton(doc, '↑', () => mutateDraft(store, (d) => moveBlock(d, index, -1)), index === 0)
+  );
+  controls.appendChild(
+    buildIconButton(
+      doc,
+      '↓',
+      () => mutateDraft(store, (d) => moveBlock(d, index, 1)),
+      index === draft.blocks.length - 1
+    )
+  );
+  controls.appendChild(
     buildIconButton(
       doc,
       '削除',
@@ -203,41 +286,106 @@ function buildBlockItem(
       draft.blocks.length <= MIN_BLOCKS
     )
   );
+  header.appendChild(controls);
 
   li.appendChild(header);
 
-  const labelInput = doc.createElement('input');
-  labelInput.type = 'text';
-  labelInput.value = block.blockLabel;
-  labelInput.placeholder = 'Label (例: Population)';
-  labelInput.className = 'blocks__label-input';
-  labelInput.setAttribute('aria-label', `ブロック ${index + 1} のラベル`);
-  labelInput.addEventListener('input', () => {
-    mutateDraft(store, (d) => updateBlock(d, index, { blockLabel: labelInput.value }));
-  });
-  li.appendChild(labelInput);
+  const body = doc.createElement('div');
+  body.className = 'blocks__item-body';
 
-  const descArea = doc.createElement('textarea');
-  descArea.value = block.description;
-  descArea.placeholder = 'このブロックで捉えたい概念を 1-3 文で';
-  descArea.className = 'blocks__desc';
-  descArea.setAttribute('aria-label', `ブロック ${index + 1} の説明`);
-  descArea.addEventListener('input', () => {
-    mutateDraft(store, (d) => updateBlock(d, index, { description: descArea.value }));
-  });
-  li.appendChild(descArea);
+  body.appendChild(
+    buildLabeledInput(doc, {
+      className: 'blocks__field blocks__field--label',
+      title: 'ブロック名',
+      hint: '例: Population / Intervention / Outcome',
+      value: block.blockLabel,
+      placeholder: '例: Population',
+      kind: 'input',
+      inputClass: 'blocks__label-input',
+      ariaLabel: `ブロック ${index + 1} のラベル`,
+      onInput: (v) => mutateDraft(store, (d) => updateBlock(d, index, { blockLabel: v })),
+    })
+  );
 
-  const noteArea = doc.createElement('textarea');
-  noteArea.value = block.note;
-  noteArea.placeholder = 'note（任意）';
-  noteArea.className = 'blocks__note';
-  noteArea.setAttribute('aria-label', `ブロック ${index + 1} のノート`);
-  noteArea.addEventListener('input', () => {
-    mutateDraft(store, (d) => updateBlock(d, index, { note: noteArea.value }));
-  });
-  li.appendChild(noteArea);
+  body.appendChild(
+    buildLabeledInput(doc, {
+      className: 'blocks__field blocks__field--note',
+      title: 'メモ',
+      hint: '任意。検索式には使われません',
+      value: block.note,
+      placeholder: '例: 高齢の定義は 65 歳で固定',
+      kind: 'textarea',
+      inputClass: 'blocks__note',
+      ariaLabel: `ブロック ${index + 1} のノート`,
+      onInput: (v) => mutateDraft(store, (d) => updateBlock(d, index, { note: v })),
+    })
+  );
+
+  body.appendChild(
+    buildLabeledInput(doc, {
+      className: 'blocks__field blocks__field--desc',
+      title: '説明',
+      hint: 'このブロックで拾いたい概念を 1〜3 文で',
+      value: block.description,
+      placeholder: '例: 65 歳以上の慢性心不全患者。NYHA II〜IV。',
+      kind: 'textarea',
+      inputClass: 'blocks__desc',
+      ariaLabel: `ブロック ${index + 1} の説明`,
+      onInput: (v) => mutateDraft(store, (d) => updateBlock(d, index, { description: v })),
+    })
+  );
+
+  li.appendChild(body);
 
   return li;
+}
+
+interface LabeledInputOptions {
+  className: string;
+  title: string;
+  hint: string;
+  value: string;
+  placeholder: string;
+  kind: 'input' | 'textarea';
+  inputClass: string;
+  ariaLabel: string;
+  onInput: (value: string) => void;
+}
+
+function buildLabeledInput(doc: Document, opts: LabeledInputOptions): HTMLElement {
+  const wrapper = doc.createElement('label');
+  wrapper.className = opts.className;
+
+  const title = doc.createElement('span');
+  title.className = 'blocks__field-title';
+  title.textContent = opts.title;
+  wrapper.appendChild(title);
+
+  const hint = doc.createElement('span');
+  hint.className = 'blocks__field-hint';
+  hint.textContent = opts.hint;
+  wrapper.appendChild(hint);
+
+  if (opts.kind === 'input') {
+    const input = doc.createElement('input');
+    input.type = 'text';
+    input.value = opts.value;
+    input.placeholder = opts.placeholder;
+    input.className = opts.inputClass;
+    input.setAttribute('aria-label', opts.ariaLabel);
+    input.addEventListener('input', () => opts.onInput(input.value));
+    wrapper.appendChild(input);
+  } else {
+    const area = doc.createElement('textarea');
+    area.value = opts.value;
+    area.placeholder = opts.placeholder;
+    area.className = opts.inputClass;
+    area.setAttribute('aria-label', opts.ariaLabel);
+    area.addEventListener('input', () => opts.onInput(area.value));
+    wrapper.appendChild(area);
+  }
+
+  return wrapper;
 }
 
 function buildAddRow(doc: Document, draft: BlocksDraft, store: AppStore): HTMLElement {
@@ -245,10 +393,18 @@ function buildAddRow(doc: Document, draft: BlocksDraft, store: AppStore): HTMLEl
   wrap.className = 'blocks__add-row';
   const addBtn = doc.createElement('button');
   addBtn.type = 'button';
+  addBtn.className = 'blocks__btn-secondary';
   addBtn.textContent = '＋ ブロックを追加';
   addBtn.disabled = draft.blocks.length >= MAX_BLOCKS;
   addBtn.addEventListener('click', () => mutateDraft(store, addBlock));
   wrap.appendChild(addBtn);
+
+  if (draft.blocks.length >= MAX_BLOCKS) {
+    const note = doc.createElement('span');
+    note.className = 'blocks__add-row-note';
+    note.textContent = `ブロックは最大 ${MAX_BLOCKS} 個までです`;
+    wrap.appendChild(note);
+  }
   return wrap;
 }
 
@@ -260,30 +416,66 @@ function buildCombinationEditor(
   const fieldset = doc.createElement('fieldset');
   fieldset.className = 'blocks__combination';
   const legend = doc.createElement('legend');
-  legend.textContent = '結合式 (combination_expression)';
+  legend.textContent = '② 結合式 (combination_expression)';
   fieldset.appendChild(legend);
+
+  const hint = doc.createElement('p');
+  hint.className = 'blocks__section-hint';
+  hint.textContent =
+    'ブロック同士をどう組み合わせて検索するかを決めます。通常はすべて AND で問題ありません。';
+  fieldset.appendChild(hint);
 
   const preview = doc.createElement('div');
   preview.className = 'blocks__combination-preview';
-  preview.textContent = `プレビュー: ${normalizeCombinationExpression(draft.combinationExpression)}`;
+  const previewLabel = doc.createElement('span');
+  previewLabel.className = 'blocks__combination-preview-label';
+  previewLabel.textContent = 'プレビュー:';
+  const previewCode = doc.createElement('code');
+  previewCode.textContent = normalizeCombinationExpression(draft.combinationExpression) || '(空)';
+  preview.appendChild(previewLabel);
+  preview.appendChild(previewCode);
   fieldset.appendChild(preview);
+
+  const inputWrap = doc.createElement('label');
+  inputWrap.className = 'blocks__combination-edit';
+  const inputTitle = doc.createElement('span');
+  inputTitle.className = 'blocks__field-title';
+  inputTitle.textContent = '結合式を編集';
+  inputWrap.appendChild(inputTitle);
+  const inputHint = doc.createElement('span');
+  inputHint.className = 'blocks__field-hint';
+  inputHint.textContent = '例: #1 AND #2 ・ (#1 OR #2) AND #3 ・ 使える記号: AND / OR / NOT / ( )';
+  inputWrap.appendChild(inputHint);
 
   const input = doc.createElement('input');
   input.type = 'text';
   input.value = draft.combinationExpression;
   input.className = 'blocks__combination-input';
-  input.setAttribute('aria-label', '結合式 (combination_expression)');
   input.addEventListener('input', () => {
     mutateDraft(store, (d) => setCombinationExpression(d, input.value));
   });
-  fieldset.appendChild(input);
+  inputWrap.appendChild(input);
+  fieldset.appendChild(inputWrap);
+
+  const validation = validateCombinationExpression(draft.combinationExpression, blockIdsOf(draft));
+  const status = doc.createElement('div');
+  status.className = `blocks__combination-status ${
+    validation.errors.length === 0
+      ? 'blocks__combination-status--ok'
+      : 'blocks__combination-status--error'
+  }`;
+  status.setAttribute('aria-live', 'polite');
+  status.textContent =
+    validation.errors.length === 0
+      ? '✓ 構文 OK'
+      : `⚠ ${validation.errors.length} 件のエラーがあります`;
+  fieldset.appendChild(status);
 
   const errorList = doc.createElement('ul');
   errorList.className = 'blocks__combination-errors';
-  const validation = validateCombinationExpression(draft.combinationExpression, blockIdsOf(draft));
   for (const err of validation.errors) {
     const li = doc.createElement('li');
-    li.textContent = `pos ${err.position}: ${err.message}`;
+    li.textContent = formatCombinationError(err);
     errorList.appendChild(li);
   }
   fieldset.appendChild(errorList);
@@ -293,11 +485,15 @@ function buildCombinationEditor(
     fieldset.appendChild(autoFilter);
   }
 
+  const actions = doc.createElement('div');
+  actions.className = 'blocks__combination-actions';
   const resetBtn = doc.createElement('button');
   resetBtn.type = 'button';
+  resetBtn.className = 'blocks__btn-secondary';
   resetBtn.textContent = '全 AND に戻す';
   resetBtn.addEventListener('click', () => mutateDraft(store, resetCombinationToAllAnd));
-  fieldset.appendChild(resetBtn);
+  actions.appendChild(resetBtn);
+  fieldset.appendChild(actions);
 
   return fieldset;
 }
@@ -354,8 +550,19 @@ function buildActionRow(
   const validation = validateCombinationExpression(draft.combinationExpression, blockIdsOf(draft));
   const hasErrors = validation.errors.length > 0;
 
+  const summary = doc.createElement('div');
+  summary.className = 'blocks__actions-summary';
+  summary.textContent = `ブロック数: ${draft.blocks.length} / ${MAX_BLOCKS} ・ 結合式: ${
+    hasErrors ? '⚠ エラー有り' : '✓ OK'
+  }`;
+  wrap.appendChild(summary);
+
+  const buttons = doc.createElement('div');
+  buttons.className = 'blocks__actions-buttons';
+
   const draftBtn = doc.createElement('button');
   draftBtn.type = 'button';
+  draftBtn.className = 'blocks__btn-secondary';
   draftBtn.textContent = '下書きとして保存';
   draftBtn.addEventListener('click', () => {
     runAction(
@@ -372,12 +579,16 @@ function buildActionRow(
       }
     );
   });
-  wrap.appendChild(draftBtn);
+  buttons.appendChild(draftBtn);
 
   const approveBtn = doc.createElement('button');
   approveBtn.type = 'button';
+  approveBtn.className = 'blocks__btn-primary';
   approveBtn.textContent = '承認してシード論文へ →';
   approveBtn.disabled = hasErrors;
+  if (hasErrors) {
+    approveBtn.title = '結合式のエラーを解消してください';
+  }
   approveBtn.addEventListener('click', () => {
     runAction(
       callbacks.onApprove,
@@ -393,7 +604,16 @@ function buildActionRow(
       }
     );
   });
-  wrap.appendChild(approveBtn);
+  buttons.appendChild(approveBtn);
+
+  wrap.appendChild(buttons);
+
+  if (hasErrors) {
+    const reason = doc.createElement('p');
+    reason.className = 'blocks__approve-reason';
+    reason.textContent = '⚠ 結合式のエラーを解消すると承認できます';
+    wrap.appendChild(reason);
+  }
 
   const errorBox = doc.createElement('p');
   errorBox.className = 'blocks__error';
@@ -412,6 +632,7 @@ function buildIconButton(
 ): HTMLButtonElement {
   const btn = doc.createElement('button');
   btn.type = 'button';
+  btn.className = 'blocks__item-control';
   btn.textContent = label;
   btn.disabled = disabled;
   btn.addEventListener('click', onClick);

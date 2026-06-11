@@ -190,3 +190,11 @@ export function validateCombinationExpression(
 export function normalizeCombinationExpression(input: string): string {
   return input.replace(/\s+/g, ' ').trim();
 }
+
+/**
+ * パースエラーを UI 向けに整形する。position は 0 起点なので、
+ * 「N 文字目」表記に変換する。
+ */
+export function formatCombinationError(err: ParseError): string {
+  return `${err.position + 1} 文字目: ${err.message}`;
+}
