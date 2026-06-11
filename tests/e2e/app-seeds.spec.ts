@@ -17,14 +17,14 @@ test.describe('app-seeds (#/seeds)', () => {
     await expect(page.locator('#app-content .view__placeholder')).toBeVisible();
   });
 
-  test('プロジェクト有り: 3 セクション（PMID / NBIB / RIS）が並ぶ', async ({ page }) => {
+  test('プロジェクト有り: 2 セクション（PMID 直接入力 / NBIB・RIS 統合アップロード）が並ぶ', async ({ page }) => {
     await injectAppStub(page, scenarioWithProject());
     await page.goto(APP_URL);
 
-    await expect(page.locator('.seeds__section')).toHaveCount(3);
+    // NBIB / RIS は 1 つのアップロードセクションに統合され、形式は内容から自動判別する（seedsView.ts buildFileForm）
+    await expect(page.locator('.seeds__section')).toHaveCount(2);
     await expect(page.locator('textarea.seeds__pmid-input')).toBeVisible();
-    await expect(page.locator('input[type="file"][accept*=".nbib"]')).toHaveCount(1);
-    await expect(page.locator('input[type="file"][accept*=".ris"]')).toHaveCount(1);
+    await expect(page.locator('input[type="file"][accept*=".nbib"][accept*=".ris"]')).toHaveCount(1);
     // summary 枠は初期時は空（aria-live は常設でも内容は空）
     await expect(page.locator('.seeds__summary')).toBeEmpty();
   });

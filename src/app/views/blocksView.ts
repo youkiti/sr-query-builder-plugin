@@ -104,6 +104,10 @@ function buildProtocolReference(doc: Document, protocol: ProtocolDraft | null): 
 
   const body = doc.createElement('div');
   body.className = 'blocks__protocol-ref-body';
+  // overflow-y: auto のスクロール領域はキーボードで到達できる必要がある（axe: scrollable-region-focusable）
+  body.tabIndex = 0;
+  body.setAttribute('role', 'region');
+  body.setAttribute('aria-label', 'プロトコル参照');
 
   appendRefField(doc, body, 'Framework', protocol.frameworkType.toUpperCase());
   appendRefField(doc, body, 'RQ', protocol.researchQuestion);

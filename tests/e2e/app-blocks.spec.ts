@@ -6,7 +6,7 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { injectAppStub, scenarioWithProject } from './fixtures/appStub';
-import { fullStateScenario, FULL_BLOCKS_DRAFT, FULL_PROTOCOL_DRAFT } from './fixtures/scenarios/fullState';
+import { fullStateScenario, FULL_PROTOCOL_DRAFT } from './fixtures/scenarios/fullState';
 
 const APP_URL = '/app/app.html#/blocks';
 
