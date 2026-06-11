@@ -109,10 +109,23 @@ describe('parsePubmedXml / efetchArticles', () => {
       <Article>
         <ArticleTitle>Study of A</ArticleTitle>
         <Journal>
+          <Title>The Lancet</Title>
           <JournalIssue>
+            <Volume>395</Volume>
+            <Issue>10222</Issue>
             <PubDate><Year>2020</Year></PubDate>
           </JournalIssue>
         </Journal>
+        <Pagination><MedlinePgn>123-130</MedlinePgn></Pagination>
+        <Abstract>
+          <AbstractText Label="BACKGROUND">Diabetes is common.</AbstractText>
+          <AbstractText Label="METHODS">RCT of metformin.</AbstractText>
+        </Abstract>
+        <AuthorList>
+          <Author><LastName>Smith</LastName><ForeName>John</ForeName><Initials>J</Initials></Author>
+          <Author><LastName>Doe</LastName><Initials>JA</Initials></Author>
+        </AuthorList>
+        <ELocationID EIdType="doi" ValidYN="Y">10.1016/abc</ELocationID>
       </Article>
       <MeshHeadingList>
         <MeshHeading>
@@ -123,6 +136,12 @@ describe('parsePubmedXml / efetchArticles', () => {
         </MeshHeading>
       </MeshHeadingList>
     </MedlineCitation>
+    <PubmedData>
+      <ArticleIdList>
+        <ArticleId IdType="pubmed">123</ArticleId>
+        <ArticleId IdType="doi">10.1016/abc</ArticleId>
+      </ArticleIdList>
+    </PubmedData>
   </PubmedArticle>
   <PubmedArticle>
     <MedlineCitation>
@@ -130,6 +149,7 @@ describe('parsePubmedXml / efetchArticles', () => {
       <Article>
         <ArticleTitle>Study of B</ArticleTitle>
         <Journal>
+          <ISOAbbreviation>J Med</ISOAbbreviation>
           <JournalIssue>
             <PubDate><MedlineDate>2019 Fall</MedlineDate></PubDate>
           </JournalIssue>
@@ -139,7 +159,7 @@ describe('parsePubmedXml / efetchArticles', () => {
   </PubmedArticle>
 </PubmedArticleSet>`;
 
-  test('title / year / MeSH を抽出できる', () => {
+  test('title / year / MeSH / abstract / 著者 / 雑誌 / 巻号頁 / DOI を抽出できる', () => {
     const articles = parsePubmedXml(sampleXml);
     expect(articles).toHaveLength(2);
     expect(articles[0]).toEqual({
@@ -147,13 +167,47 @@ describe('parsePubmedXml / efetchArticles', () => {
       title: 'Study of A',
       year: 2020,
       meshHeadings: ['Diabetes Mellitus', 'Metformin'],
+      abstract: 'BACKGROUND: Diabetes is common.\n\nMETHODS: RCT of metformin.',
+      journal: 'The Lancet',
+      authors: ['Smith J', 'Doe JA'],
+      volume: '395',
+      issue: '10222',
+      pages: '123-130',
+      doi: '10.1016/abc',
     });
     expect(articles[1]).toEqual({
       pmid: '456',
       title: 'Study of B',
       year: 2019,
       meshHeadings: [],
+      abstract: null,
+      journal: 'J Med',
+      authors: [],
+      volume: null,
+      issue: null,
+      pages: null,
+      doi: null,
     });
+  });
+
+  test('AbstractText に Label が無い場合はラベル無しで連結', () => {
+    const xml = `<?xml version="1.0"?><PubmedArticleSet><PubmedArticle><MedlineCitation><PMID>9</PMID><Article><Abstract><AbstractText>One.</AbstractText><AbstractText>Two.</AbstractText></Abstract></Article></MedlineCitation></PubmedArticle></PubmedArticleSet>`;
+    expect(parsePubmedXml(xml)[0]?.abstract).toBe('One.\n\nTwo.');
+  });
+
+  test('CollectiveName 著者は単独で採用される', () => {
+    const xml = `<?xml version="1.0"?><PubmedArticleSet><PubmedArticle><MedlineCitation><PMID>9</PMID><Article><AuthorList><Author><CollectiveName>WHO Study Group</CollectiveName></Author></AuthorList></Article></MedlineCitation></PubmedArticle></PubmedArticleSet>`;
+    expect(parsePubmedXml(xml)[0]?.authors).toEqual(['WHO Study Group']);
+  });
+
+  test('Initials が無く ForeName だけの著者も採用される', () => {
+    const xml = `<?xml version="1.0"?><PubmedArticleSet><PubmedArticle><MedlineCitation><PMID>9</PMID><Article><AuthorList><Author><LastName>Smith</LastName><ForeName>John</ForeName></Author><Author><LastName>OnlyLast</LastName></Author></AuthorList></Article></MedlineCitation></PubmedArticle></PubmedArticleSet>`;
+    expect(parsePubmedXml(xml)[0]?.authors).toEqual(['Smith John', 'OnlyLast']);
+  });
+
+  test('PubmedData の ArticleId からも DOI を拾える', () => {
+    const xml = `<?xml version="1.0"?><PubmedArticleSet><PubmedArticle><MedlineCitation><PMID>9</PMID><Article><ArticleTitle>X</ArticleTitle></Article></MedlineCitation><PubmedData><ArticleIdList><ArticleId IdType="pubmed">9</ArticleId><ArticleId IdType="doi">10.9/xyz</ArticleId></ArticleIdList></PubmedData></PubmedArticle></PubmedArticleSet>`;
+    expect(parsePubmedXml(xml)[0]?.doi).toBe('10.9/xyz');
   });
 
   test('PMID が欠けた article は無視する', () => {

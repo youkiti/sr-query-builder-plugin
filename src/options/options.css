@@ -32,6 +32,10 @@
   margin: 0;
 }
 
+.options__muted a {
+  text-decoration: underline;
+}
+
 .options__field {
   display: flex;
   flex-direction: column;

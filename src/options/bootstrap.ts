@@ -13,10 +13,16 @@ export interface OptionsDeps {
   readKey: (key: string) => Promise<string | undefined>;
   /** chrome.storage.local へ書き込む */
   writeKey: (key: string, value: string) => Promise<void>;
+  /** chrome.storage.local からキーを削除する（pending フラグのクリア用） */
+  removeKey: (key: string) => Promise<void>;
+  /** メインビュー（app.html）を新規タブで開く。pending フラグが立っているときのみ呼ばれる */
+  openAppTab: () => void;
 }
 
 export const STORAGE_KEY_GEMINI = 'apiKeys.gemini';
 export const STORAGE_KEY_NCBI = 'apiKeys.ncbi';
+/** Popup で API キー未設定を検知したときに立てるフラグ。保存成功で畳む。 */
+export const STORAGE_KEY_PENDING_APP_TAB = 'pendingOpenAppTab';
 
 export function createChromeOptionsDeps(): OptionsDeps {
   return {
@@ -27,6 +33,12 @@ export function createChromeOptionsDeps(): OptionsDeps {
     },
     writeKey: async (key, value) => {
       await chrome.storage.local.set({ [key]: value });
+    },
+    removeKey: async (key) => {
+      await chrome.storage.local.remove(key);
+    },
+    openAppTab: () => {
+      chrome.tabs.create({ url: chrome.runtime.getURL('app/app.html') });
     },
   };
 }
@@ -55,11 +67,21 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
     void Promise.all([
       deps.writeKey(STORAGE_KEY_GEMINI, gemini),
       deps.writeKey(STORAGE_KEY_NCBI, ncbi),
-    ]).then(() => {
-      if (status) {
-        status.textContent = '保存しました。';
-      }
-    });
+    ])
+      .then(async () => {
+        const pendingNow = await deps.readKey(STORAGE_KEY_PENDING_APP_TAB);
+        if (pendingNow === '1' && gemini.trim() !== '') {
+          await deps.removeKey(STORAGE_KEY_PENDING_APP_TAB);
+          if (status) {
+            status.textContent = '保存しました。トップ画面に戻ります…';
+          }
+          deps.openAppTab();
+          return;
+        }
+        if (status) {
+          status.textContent = '保存しました。';
+        }
+      });
   });
 }
 

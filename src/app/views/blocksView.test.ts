@@ -1,5 +1,27 @@
-import { INITIAL_STATE, createStore, type AppState, type BlocksDraft } from '../store';
+import {
+  INITIAL_STATE,
+  createStore,
+  type AppState,
+  type BlocksDraft,
+  type ProtocolDraft,
+} from '../store';
 import { createBlocksView } from './blocksView';
+
+function protocolOf(overrides: Partial<ProtocolDraft> = {}): ProtocolDraft {
+  return {
+    frameworkType: 'pico',
+    researchQuestion: 'RQ',
+    inclusionCriteria: '',
+    exclusionCriteria: '',
+    studyDesign: '',
+    sourceType: 'manual',
+    sourceFilename: null,
+    rawTextRef: null,
+    rawTextPreview: '',
+    rawTextInline: null,
+    ...overrides,
+  };
+}
 
 function buildContainer(): HTMLElement {
   const doc = document.implementation.createHTMLDocument('test');
@@ -138,7 +160,7 @@ describe('createBlocksView', () => {
     expect(store.getState().blocksDraft?.combinationExpression).toBe('#1 AND #2 AND #3');
   });
 
-  test('構文エラーがあると「承認して検索式生成へ」が disabled になる', () => {
+  test('構文エラーがあると「承認してシード論文へ」が disabled になる', () => {
     const store = createStore({
       ...withProject(),
       blocksDraft: draftOf(2, '#99 AND #2'), // 未定義 ID
@@ -153,7 +175,7 @@ describe('createBlocksView', () => {
     expect(container.querySelectorAll('.blocks__combination-errors li').length).toBeGreaterThan(0);
   });
 
-  test('「下書きとして保存」「承認して検索式生成へ」で callback が呼ばれる', () => {
+  test('「下書きとして保存」「承認してシード論文へ」で callback が呼ばれる', () => {
     const onSaveDraft = jest.fn();
     const onApprove = jest.fn();
     const store = createStore({ ...withProject(), blocksDraft: draftOf(2, '#1 AND #2') });
@@ -267,6 +289,46 @@ describe('createBlocksView', () => {
     note.dispatchEvent(new Event('input'));
     expect(store.getState().blocksDraft?.blocks[0]?.description).toBe('新しい説明');
     expect(store.getState().blocksDraft?.blocks[0]?.note).toBe('メモ');
+  });
+
+  test('study_design=RCT のとき #RCTfilter の自動付与プレビューが表示される', () => {
+    const store = createStore({
+      ...withProject(),
+      blocksDraft: draftOf(2, '#1 AND #2'),
+      protocolDraft: protocolOf({ studyDesign: 'RCT' }),
+    });
+    const view = createBlocksView(store);
+    const container = buildContainer();
+    view(container, { state: store.getState(), navigate: jest.fn() });
+    const final = container.querySelector('.blocks__autofilter-final');
+    expect(final?.textContent).toBe('検索式生成後: #1 AND #2 AND #RCTfilter');
+    const items = container.querySelectorAll('.blocks__autofilter-list li');
+    expect(items).toHaveLength(1);
+    expect(items[0]?.textContent).toContain('RCTfilter');
+  });
+
+  test('study_design が RCT 以外なら自動付与プレビューを出さない', () => {
+    const store = createStore({
+      ...withProject(),
+      blocksDraft: draftOf(2, '#1 AND #2'),
+      protocolDraft: protocolOf({ studyDesign: 'observational' }),
+    });
+    const view = createBlocksView(store);
+    const container = buildContainer();
+    view(container, { state: store.getState(), navigate: jest.fn() });
+    expect(container.querySelector('.blocks__autofilter')).toBeNull();
+  });
+
+  test('protocolDraft が無ければ自動付与プレビューを出さない', () => {
+    const store = createStore({
+      ...withProject(),
+      blocksDraft: draftOf(2, '#1 AND #2'),
+      protocolDraft: null,
+    });
+    const view = createBlocksView(store);
+    const container = buildContainer();
+    view(container, { state: store.getState(), navigate: jest.fn() });
+    expect(container.querySelector('.blocks__autofilter')).toBeNull();
   });
 
   test('blocksDraft が render 中に消えると mutateDraft は何もしない', () => {

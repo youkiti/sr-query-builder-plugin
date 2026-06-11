@@ -85,7 +85,8 @@ flowchart TD
 
 - **左サイドバー**: ステップナビ（Home → Protocol → Blocks → Seeds → Draft → Validate → Expand → Edit → Export）。現在地ハイライト、未充足ステップはディム
 - **トップバー**:
-  - プロジェクト名（クリックで Popup に戻る）
+  - アプリタイトル（"SR Query Builder"）をクリックで `#/home`（プロジェクト概要）に戻る。そこから「別のプロジェクトを開く」ボタンで Popup を新規タブで起動できる。Chrome 拡張仕様上、Popup を直接再表示することはできないため二段遷移としている
+  - 現在のプロジェクト名は右上の status ラベル（`ROUTE_LABELS[route] / projectName`）に含めて表示する
   - 現在の `Protocol.version` と `FormulaVersions.version_id`（短縮表示）
   - LLM プロバイダ + 累積コスト（`LLMApiLog.cost_estimate_usd` の合計）
   - ヘルプアイコン
