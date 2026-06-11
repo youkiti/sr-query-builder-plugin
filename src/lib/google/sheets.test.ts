@@ -1,4 +1,4 @@
-import { appendRow, createSpreadsheet, getSheetValues, writeHeaderRow } from './sheets';
+import { appendRow, createSpreadsheet, getSheetValues, updateRow, writeHeaderRow } from './sheets';
 
 function okJson(body: unknown): Response {
   return {
@@ -56,6 +56,20 @@ describe('appendRow', () => {
     expect(url).toContain(':append?valueInputOption=RAW');
     const body = JSON.parse((init as RequestInit).body as string);
     expect(body.values).toEqual([['a', 1, true, '']]);
+  });
+});
+
+describe('updateRow', () => {
+  test('PUT /values/{tab}!A{n}:Z{n}?valueInputOption=RAW で行を上書き、null は空文字に変換', async () => {
+    const d = deps();
+    await updateRow('sid', 'SeedPapers', 3, ['x', null, true], d);
+    const [url, init] = d.fetch.mock.calls[0];
+    expect(url).toContain('/sid/values/');
+    // range は SeedPapers!A3:Z3（encodeURIComponent 済み）
+    expect(decodeURIComponent(url as string)).toContain('SeedPapers!A3:Z3?valueInputOption=RAW');
+    expect((init as RequestInit).method).toBe('PUT');
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.values).toEqual([['x', '', true]]);
   });
 });
 

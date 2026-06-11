@@ -1,6 +1,13 @@
 import { SHEET_HEADERS } from '@/domain/sheetsSchema';
 import { createStore, type AppState } from '../store';
-import { ingestSeeds, type IngestInput, type SeedServiceDeps } from './seedService';
+import {
+  ingestSeeds,
+  invalidateSeed,
+  listSeeds,
+  retrySeed,
+  type IngestInput,
+  type SeedServiceDeps,
+} from './seedService';
 
 function jsonResponse(body: unknown): Response {
   return {
@@ -181,7 +188,9 @@ describe('ingestSeeds - PMID direct', () => {
     expect(map['year']).toBe('');
   });
 
-  test('同リクエスト内の重複は先頭だけ残して後続スキップ（空文字も除外）', async () => {
+  // §4.3: 同一バッチ内の重複も監査用に duplicate_pmid 行として残す（先頭だけ残す挙動から変更）。
+  // 空文字・空白のみは引き続き除外する。
+  test('同リクエスト内の重複は 2 件目以降を duplicate_pmid で追記（空文字は除外）', async () => {
     const { sheetsFetchMock, eutilsFetchMock, deps } = setupDeps();
     sheetsFetchMock.mockImplementation(async (url: string) => {
       if (typeof url === 'string' && url.includes('/values/SeedPapers')) {
@@ -200,7 +209,14 @@ describe('ingestSeeds - PMID direct', () => {
       { mode: 'pmid_direct', pmids: ['111', '111', '', '   '] },
       deps
     );
-    expect(summary.registered).toBe(1);
+    // 1 件目=有効、2 件目=duplicate_pmid。空文字 2 件は除外。
+    expect(summary.registered).toBe(2);
+    expect(summary.valid).toBe(1);
+    expect(summary.invalid).toBe(1);
+    expect(summary.reasons.duplicate_pmid).toBe(1);
+    // duplicate 行も added に含まれる
+    expect(summary.added).toHaveLength(2);
+    expect(summary.added[1]?.exclusionReason).toBe('duplicate_pmid');
   });
 });
 
@@ -356,5 +372,98 @@ describe('ingestSeeds - エラーケース', () => {
     await expect(
       ingestSeeds({ mode: 'pmid_direct', pmids: ['1'] }, withoutNow)
     ).resolves.toBeDefined();
+  });
+});
+
+describe('listSeeds / invalidateSeed / retrySeed', () => {
+  function rowFor(overrides: Partial<Record<string, string>>): string[] {
+    const base: Record<string, string> = {
+      pmid: '111',
+      title: 'T',
+      year: '2020',
+      source: 'initial',
+      ingest_format: 'pmid_direct',
+      original_db: '',
+      is_valid: 'true',
+      exclusion_reason: '',
+      original_payload_ref: '',
+      user_decision: '',
+      decided_at: '',
+      decided_by: '',
+      note: '',
+    };
+    return header.map((key) => overrides[key] ?? base[key] ?? '');
+  }
+
+  test('listSeeds は行番号付きで一覧を返す', async () => {
+    const { sheetsFetchMock, deps } = setupDeps();
+    sheetsFetchMock.mockResolvedValue(
+      jsonResponse({
+        values: [
+          header,
+          rowFor({ pmid: '111' }),
+          rowFor({ pmid: '222', is_valid: 'false', exclusion_reason: 'pmid_not_found' }),
+        ],
+      })
+    );
+    const rows = await listSeeds(deps);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.rowIndex).toBe(2);
+    expect(rows[1]?.rowIndex).toBe(3);
+    expect(rows[1]?.seed.exclusionReason).toBe('pmid_not_found');
+  });
+
+  test('invalidateSeed は当該行を user_removed へ PUT する', async () => {
+    const { sheetsFetchMock, deps } = setupDeps();
+    sheetsFetchMock.mockResolvedValue(jsonResponse({}));
+    const seed = {
+      pmid: '111',
+      title: 'T',
+      year: 2020,
+      source: 'initial' as const,
+      ingestFormat: 'pmid_direct' as const,
+      originalDb: null,
+      isValid: true,
+      exclusionReason: null,
+      originalPayloadRef: null,
+      userDecision: null,
+      decidedAt: null,
+      decidedBy: null,
+      note: null,
+    };
+    const updated = await invalidateSeed(2, seed, deps);
+    expect(updated.isValid).toBe(false);
+    expect(updated.exclusionReason).toBe('user_removed');
+    const putCall = sheetsFetchMock.mock.calls.find(
+      (c) => (c[1] as RequestInit | undefined)?.method === 'PUT'
+    );
+    expect(putCall).toBeDefined();
+    expect(decodeURIComponent(putCall![0] as string)).toContain('SeedPapers!A2:Z2');
+  });
+
+  test('retrySeed は 1 PMID で再 ingest する（見つかれば有効行追記）', async () => {
+    const { sheetsFetchMock, eutilsFetchMock, deps } = setupDeps();
+    sheetsFetchMock.mockImplementation(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/values/SeedPapers')) {
+        return jsonResponse(emptySheetsListResponse);
+      }
+      return jsonResponse({});
+    });
+    eutilsFetchMock
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '1', idlist: ['111'] } }))
+      .mockResolvedValueOnce(
+        xmlResponse(
+          `<?xml version="1.0"?><PubmedArticleSet><PubmedArticle><MedlineCitation><PMID>111</PMID><Article><ArticleTitle>X</ArticleTitle></Article></MedlineCitation></PubmedArticle></PubmedArticleSet>`
+        )
+      );
+    const summary = await retrySeed('111', deps);
+    expect(summary.registered).toBe(1);
+    expect(summary.valid).toBe(1);
+  });
+
+  test('プロジェクト未選択時 listSeeds はエラー', async () => {
+    const { store, deps } = setupDeps();
+    store.setState((s) => ({ ...s, project: null }));
+    await expect(listSeeds(deps)).rejects.toThrow(/プロジェクト/);
   });
 });

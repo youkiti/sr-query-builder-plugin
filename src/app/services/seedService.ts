@@ -2,6 +2,8 @@ import type { SeedPaper } from '@/domain/seedPaper';
 import {
   appendSeedPaper,
   hasValidSeedPmid,
+  invalidateSeedRow,
+  listSeedPapersWithRows,
   parseNbib,
   parseRis,
   resolveRisEntry,
@@ -9,6 +11,7 @@ import {
   type NbibEntry,
   type RisEntry,
   type ResolvedRisEntry,
+  type SeedPaperWithRow,
 } from '@/features/seeds';
 import type { EfetchArticle, EutilsDeps } from '@/lib/ncbi';
 import { ensureChildFolder, uploadTextFile, type GoogleApiDeps } from '@/lib/google';
@@ -142,6 +145,10 @@ async function ingestPmidBatch(
   // `now` は §4.5 の interactive ingest で decided_at を埋めるために予約。
   // 初期登録（source=initial）では decided_at は常に null なので現時点では使わない。
   void deps.now;
+  // バッチ内の出現順を保ったまま、空白を除いた全 PMID を取り出す（重複も保持する）。
+  // §4.3「監査用に入力履歴を残すため、上書きや完全スキップはしない」に従い、
+  // 同一バッチ内の 2 件目以降も duplicate_pmid 行として追記する。
+  const orderedInput = pmids.map((p) => p.trim()).filter((p) => p !== '');
   const uniqueInput = dedupePreserveOrder(pmids);
   const existing = new Set<string>();
   // 既に有効 PMID が存在する場合は duplicate_pmid で記録（§4.3）
@@ -154,7 +161,36 @@ async function ingestPmidBatch(
   const verifications = await verifyPmids(toVerify, deps.eutils);
   const results = new Map(verifications.map((v) => [v.pmid, v]));
 
-  for (const pmid of uniqueInput) {
+  // バッチ内で 2 回目以降に登場した PMID を duplicate として扱うための既出セット。
+  const seenInBatch = new Set<string>();
+
+  for (const pmid of orderedInput) {
+    // バッチ内重複（同一バッチで既に 1 件追記済み）は duplicate_pmid 行として残す
+    if (seenInBatch.has(pmid)) {
+      const seed: SeedPaper = {
+        pmid,
+        title: null,
+        year: null,
+        source: 'initial',
+        ingestFormat,
+        originalDb,
+        isValid: false,
+        exclusionReason: 'duplicate_pmid',
+        originalPayloadRef: null,
+        userDecision: null,
+        decidedAt: null,
+        decidedBy: null,
+        note: null,
+      };
+      await appendSeedPaper(spreadsheetId, seed, deps.google);
+      summary.registered += 1;
+      summary.invalid += 1;
+      summary.reasons.duplicate_pmid += 1;
+      summary.added.push(seed);
+      continue;
+    }
+    seenInBatch.add(pmid);
+
     if (existing.has(pmid)) {
       const seed: SeedPaper = {
         pmid,
@@ -284,6 +320,44 @@ function dedupePreserveOrder(pmids: readonly string[]): string[] {
     out.push(trimmed);
   }
   return out;
+}
+
+/**
+ * 登録済み SeedPapers を行番号付きで一覧する（§4.3 ingest サマリ UI の一覧表示用）。
+ * デフォルトの「有効のみ表示」「無効行も表示」トグルは UI 側で seed.isValid を見て出し分ける。
+ */
+export async function listSeeds(deps: SeedServiceDeps): Promise<SeedPaperWithRow[]> {
+  const state = deps.store.getState();
+  if (state.project === null) {
+    throw new Error('プロジェクトが選択されていません');
+  }
+  return listSeedPapersWithRows(state.project.spreadsheetId, deps.google);
+}
+
+/**
+ * 有効行を論理削除する（§4.3）。当該行を `is_valid=false, exclusion_reason=user_removed`
+ * へ書き換えるだけで、行自体は SeedPapers に残す（監査性のため物理削除しない）。
+ */
+export async function invalidateSeed(
+  rowIndex: number,
+  seed: SeedPaper,
+  deps: SeedServiceDeps
+): Promise<SeedPaper> {
+  const state = deps.store.getState();
+  if (state.project === null) {
+    throw new Error('プロジェクトが選択されていません');
+  }
+  return invalidateSeedRow(state.project.spreadsheetId, rowIndex, seed, deps.google);
+}
+
+/**
+ * `pmid_not_found` の無効行に対する「再試行」（§4.3）。
+ * 当該 PMID で存在確認をやり直し、見つかれば通常 ingest と同じく新規有効行を追記する。
+ * 既存の ingestSeeds を 1 PMID で呼び直すだけの薄いラッパ。
+ * （今回も見つからなければ pmid_not_found の新規行が増えるのは §4.3 の追記型方針として許容）
+ */
+export async function retrySeed(pmid: string, deps: SeedServiceDeps): Promise<IngestSummary> {
+  return ingestSeeds({ mode: 'pmid_direct', pmids: [pmid] }, deps);
 }
 
 /** 将来の API 拡張用。NbibEntry を expose したいので domain をまとめて参照できるように型だけ持ち出す */

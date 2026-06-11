@@ -1,6 +1,16 @@
 import type { SeedPaper } from '@/domain/seedPaper';
 import { SHEET_HEADERS } from '@/domain/sheetsSchema';
-import { appendRow, getSheetValues, type GoogleApiDeps } from '@/lib/google';
+import { appendRow, getSheetValues, updateRow, type GoogleApiDeps } from '@/lib/google';
+
+/**
+ * SeedPapers の 1 行に、シート上の行番号（1 始まり。ヘッダが 1 行目）を添えたもの。
+ * 論理削除（user_removed への書き換え）で行番号を指定するために使う。§4.3。
+ */
+export interface SeedPaperWithRow {
+  seed: SeedPaper;
+  /** シート上の行番号（1 始まり）。ヘッダ行が 1 なので、データ 1 件目は 2 */
+  rowIndex: number;
+}
 
 /**
  * SeedPapers タブの読み書き。requirements.md §3.1 / §4.3 に準拠。
@@ -33,6 +43,54 @@ export async function listSeedPapers(
     return [];
   }
   return rows.slice(1).map(fromRow).filter((seed): seed is SeedPaper => seed !== null);
+}
+
+/**
+ * 既存 SeedPapers を、シート上の行番号付きで全件読み出す（ヘッダ除く）。
+ * §4.3 の無効化（user_removed）で行番号を指定して書き換えるために使う。
+ *
+ * 行番号はヘッダ（1 行目）を含めた 1 始まりで、データ 1 件目は 2 になる。
+ * `fromRow` で SeedPaper に変換できなかった行（空行など）はスキップする。
+ */
+export async function listSeedPapersWithRows(
+  spreadsheetId: string,
+  deps: GoogleApiDeps
+): Promise<SeedPaperWithRow[]> {
+  const rows = await getSheetValues(spreadsheetId, 'SeedPapers', deps);
+  if (rows.length <= 1) {
+    return [];
+  }
+  const out: SeedPaperWithRow[] = [];
+  for (let i = 1; i < rows.length; i += 1) {
+    const seed = fromRow(rows[i] ?? []);
+    if (seed !== null) {
+      // rows のインデックス i は 0 始まり。シート行番号は 1 始まりなので i + 1。
+      out.push({ seed, rowIndex: i + 1 });
+    }
+  }
+  return out;
+}
+
+/**
+ * 指定行番号の seed を `is_valid=false, exclusion_reason=user_removed` に書き換える（論理削除）。
+ * §4.3「押下時の挙動は当該行を書き換えるだけで、行自体は残す」。
+ *
+ * 行追加ではなく既存行の上書きなので、呼び出し側は `listSeedPapersWithRows` の
+ * rowIndex を渡すこと。書き換え後の seed をそのまま返す。
+ */
+export async function invalidateSeedRow(
+  spreadsheetId: string,
+  rowIndex: number,
+  seed: SeedPaper,
+  deps: GoogleApiDeps
+): Promise<SeedPaper> {
+  const updated: SeedPaper = {
+    ...seed,
+    isValid: false,
+    exclusionReason: 'user_removed',
+  };
+  await updateRow(spreadsheetId, 'SeedPapers', rowIndex, toRow(updated), deps);
+  return updated;
 }
 
 /**

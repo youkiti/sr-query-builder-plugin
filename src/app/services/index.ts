@@ -48,10 +48,14 @@ export {
 } from './exportService';
 export {
   ingestSeeds,
+  listSeeds,
+  invalidateSeed,
+  retrySeed,
   type IngestInput,
   type IngestSummary,
   type SeedServiceDeps,
 } from './seedService';
+export type { SeedPaperWithRow } from '@/features/seeds';
 export {
   runValidation,
   type ValidationServiceDeps,

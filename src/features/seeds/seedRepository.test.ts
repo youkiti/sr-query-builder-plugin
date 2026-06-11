@@ -1,6 +1,12 @@
 import type { SeedPaper } from '@/domain/seedPaper';
 import { SHEET_HEADERS } from '@/domain/sheetsSchema';
-import { appendSeedPaper, hasValidSeedPmid, listSeedPapers } from './seedRepository';
+import {
+  appendSeedPaper,
+  hasValidSeedPmid,
+  invalidateSeedRow,
+  listSeedPapers,
+  listSeedPapersWithRows,
+} from './seedRepository';
 
 function jsonResponse(body: unknown): Response {
   return {
@@ -194,6 +200,72 @@ describe('listSeedPapers', () => {
     expect(seeds[0]?.pmid).toBe('999');
     expect(seeds[0]?.title).toBeNull();
     expect(seeds[0]?.year).toBeNull();
+  });
+});
+
+describe('listSeedPapersWithRows', () => {
+  const header = [...SHEET_HEADERS.SeedPapers];
+  function row(overrides: Partial<Record<string, string>> = {}): string[] {
+    const base: Record<string, string> = {
+      pmid: '111',
+      title: 'T',
+      year: '2020',
+      source: 'initial',
+      ingest_format: 'pmid_direct',
+      original_db: '',
+      is_valid: 'true',
+      exclusion_reason: '',
+      original_payload_ref: '',
+      user_decision: '',
+      decided_at: '',
+      decided_by: '',
+      note: '',
+    };
+    return header.map((key) => overrides[key] ?? base[key] ?? '');
+  }
+
+  test('ヘッダのみなら []', async () => {
+    const d = deps({ values: [header] });
+    await expect(listSeedPapersWithRows('sid', d)).resolves.toEqual([]);
+  });
+
+  test('各行に 1 始まりのシート行番号を添える（ヘッダ=1、データ 1 件目=2）', async () => {
+    const d = deps({
+      values: [
+        header,
+        row({ pmid: '111' }),
+        row({ pmid: '222', is_valid: 'false', exclusion_reason: 'pmid_not_found' }),
+      ],
+    });
+    const rows = await listSeedPapersWithRows('sid', d);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.rowIndex).toBe(2);
+    expect(rows[0]?.seed.pmid).toBe('111');
+    expect(rows[1]?.rowIndex).toBe(3);
+    expect(rows[1]?.seed.exclusionReason).toBe('pmid_not_found');
+  });
+});
+
+describe('invalidateSeedRow', () => {
+  test('指定行番号を A{n}:Z{n} に PUT し、is_valid=false / user_removed に書き換える', async () => {
+    const d = deps();
+    const updated = await invalidateSeedRow('sid', 4, seedFixture({ pmid: '111' }), d);
+    const [url, init] = d.fetch.mock.calls[0];
+    expect(decodeURIComponent(url as string)).toContain('SeedPapers!A4:Z4?valueInputOption=RAW');
+    expect((init as RequestInit).method).toBe('PUT');
+    const body = JSON.parse((init as RequestInit).body as string) as {
+      values: (string | number | boolean | null)[][];
+    };
+    const map: Record<string, string | number | boolean | null> = {};
+    SHEET_HEADERS.SeedPapers.forEach((k, i) => {
+      map[k] = body.values[0]![i] as string | number | boolean | null;
+    });
+    expect(map['is_valid']).toBe(false);
+    expect(map['exclusion_reason']).toBe('user_removed');
+    expect(map['pmid']).toBe('111');
+    // 戻り値も書き換え後の seed
+    expect(updated.isValid).toBe(false);
+    expect(updated.exclusionReason).toBe('user_removed');
   });
 });
 

@@ -1419,3 +1419,84 @@
   opacity: 0.6;
   cursor: progress;
 }
+
+/* 登録済みシード一覧（§4.3 ingest サマリ UI） */
+.seeds__list-section {
+  margin-top: var(--space-5);
+}
+
+.seeds__list-section:empty {
+  margin-top: 0;
+}
+
+.seeds__list-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-md);
+}
+
+.seeds__list-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.seeds__list-empty {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.seeds__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.seeds__list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.seeds__list-item--invalid {
+  background: var(--color-surface-muted, #f7f7f7);
+}
+
+.seeds__list-label {
+  font-size: var(--font-size-sm);
+}
+
+.seeds__list-controls {
+  display: inline-flex;
+  gap: var(--space-1);
+}
+
+.seeds__list-invalidate,
+.seeds__list-retry {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface, #fff);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+}
+
+.seeds__list-invalidate:hover:not(:disabled),
+.seeds__list-retry:hover:not(:disabled) {
+  background: var(--color-surface-muted, #f0f0f0);
+}
+
+.seeds__list-invalidate:disabled,
+.seeds__list-retry:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}

@@ -15,7 +15,10 @@ import {
   fetchBoundaryCandidates,
   generateDraft,
   ingestSeeds,
+  invalidateSeed,
+  listSeeds,
   recordDecision,
+  retrySeed,
   requestBlockImprovement,
   runValidation,
   saveEditedFormula,
@@ -35,8 +38,10 @@ import {
   type RequestBlockImprovementInput,
   type SaveEditedFormulaInput,
   type SaveEditedFormulaResult,
+  type SeedPaperWithRow,
   type ValidationSummary,
 } from './services';
+import type { SeedPaper } from '@/domain/seedPaper';
 import { listFormulaVersions } from '@/features/formula';
 import type { FormulaVersion } from '@/domain/formulaVersion';
 import { getCurrentProject } from '@/features/project';
@@ -227,6 +232,11 @@ function buildDefaultViewOptions(
     seeds: {
       onIngest: async (input: IngestInput): Promise<IngestSummary> =>
         runIngestSeeds(store, runtime, input),
+      onListSeeds: async (): Promise<SeedPaperWithRow[]> => runListSeeds(store, runtime),
+      onInvalidate: async (rowIndex: number, seed: SeedPaper): Promise<SeedPaper> =>
+        runInvalidateSeed(store, runtime, rowIndex, seed),
+      onRetry: async (pmid: string): Promise<IngestSummary> =>
+        runRetrySeed(store, runtime, pmid),
     },
     validate: {
       onRun: async (): Promise<ValidationSummary> => runValidate(store, runtime),
@@ -357,6 +367,33 @@ async function runIngestSeeds(
     eutils,
     store,
   });
+}
+
+async function runListSeeds(
+  store: AppStore,
+  runtime: ChromeRuntimeDeps
+): Promise<SeedPaperWithRow[]> {
+  const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
+  return listSeeds({ google: runtime.google, eutils, store });
+}
+
+async function runInvalidateSeed(
+  store: AppStore,
+  runtime: ChromeRuntimeDeps,
+  rowIndex: number,
+  seed: SeedPaper
+): Promise<SeedPaper> {
+  const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
+  return invalidateSeed(rowIndex, seed, { google: runtime.google, eutils, store });
+}
+
+async function runRetrySeed(
+  store: AppStore,
+  runtime: ChromeRuntimeDeps,
+  pmid: string
+): Promise<IngestSummary> {
+  const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
+  return retrySeed(pmid, { google: runtime.google, eutils, store });
 }
 
 async function runValidate(
