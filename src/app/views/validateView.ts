@@ -1,4 +1,4 @@
-import type { ValidationSummary } from '@/app/services';
+import type { AnalyzeMissedSeedsResult, ValidationSummary } from '@/app/services';
 import { ROUTE_LABELS } from '../router';
 import type { RenderView } from './types';
 
@@ -7,11 +7,14 @@ import type { RenderView } from './types';
  *
  * - 「検証を実行する」ボタンで 3 検証（line_hits / final_query / mesh）を順に実行
  * - 行ごとのヒット数 / 捕捉率 / MeSH 出現頻度をそれぞれセクションで表示
+ * - 未捕捉 PMID があれば「AI で原因を分析する」ボタンを出し、原因・改善候補語・関連ブロックを列挙
  * - ValidationLog への追記は service 側が担当
  */
 
 export interface ValidateViewCallbacks {
   onRun?: () => Promise<ValidationSummary>;
+  /** 未捕捉 PMID の原因を AI に分析させる（requirements.md §4.6） */
+  onAnalyzeMissed?: (missedPmids: string[]) => Promise<AnalyzeMissedSeedsResult>;
 }
 
 export function createValidateView(callbacks: ValidateViewCallbacks = {}): RenderView {
@@ -71,7 +74,7 @@ export function createValidateView(callbacks: ValidateViewCallbacks = {}): Rende
         .onRun()
         .then((summary) => {
           status.textContent = `検証完了（有効 seed ${summary.eligibleSeedCount}/${summary.totalSeedCount} 件）`;
-          renderResults(doc, results, summary);
+          renderResults(doc, results, summary, callbacks);
         })
         .catch((err: unknown) => {
           errorBox.textContent = formatError(err);
@@ -84,9 +87,14 @@ export function createValidateView(callbacks: ValidateViewCallbacks = {}): Rende
   };
 }
 
-function renderResults(doc: Document, container: HTMLElement, summary: ValidationSummary): void {
+function renderResults(
+  doc: Document,
+  container: HTMLElement,
+  summary: ValidationSummary,
+  callbacks: ValidateViewCallbacks
+): void {
   container.appendChild(renderLineHits(doc, summary));
-  container.appendChild(renderFinalQuery(doc, summary));
+  container.appendChild(renderFinalQuery(doc, summary, callbacks));
   container.appendChild(renderMesh(doc, summary));
 }
 
@@ -112,7 +120,11 @@ function renderLineHits(doc: Document, summary: ValidationSummary): HTMLElement 
   return section;
 }
 
-function renderFinalQuery(doc: Document, summary: ValidationSummary): HTMLElement {
+function renderFinalQuery(
+  doc: Document,
+  summary: ValidationSummary,
+  callbacks: ValidateViewCallbacks
+): HTMLElement {
   const section = doc.createElement('section');
   section.className = 'validate__final';
   const h3 = doc.createElement('h3');
@@ -153,8 +165,113 @@ function renderFinalQuery(doc: Document, summary: ValidationSummary): HTMLElemen
       missedList.appendChild(li);
     }
     section.appendChild(missedList);
+    section.appendChild(
+      renderMissedAnalysis(doc, summary.finalQuery.missedPmids, callbacks)
+    );
   }
   return section;
+}
+
+/**
+ * 未捕捉 PMID の原因分析セクション（requirements.md §4.6）。
+ * 「AI で原因を分析する」ボタンを出し、押下で onAnalyzeMissed を呼んで
+ * PMID ごとの原因・改善候補語・関連ブロックを列挙する。自動実行はしない。
+ */
+function renderMissedAnalysis(
+  doc: Document,
+  missedPmids: string[],
+  callbacks: ValidateViewCallbacks
+): HTMLElement {
+  const wrap = doc.createElement('div');
+  wrap.className = 'validate__missed-analysis';
+
+  const btn = doc.createElement('button');
+  btn.type = 'button';
+  btn.className = 'validate__analyze-missed';
+  btn.textContent = 'AI で原因を分析する';
+  wrap.appendChild(btn);
+
+  const status = doc.createElement('p');
+  status.className = 'validate__analyze-status';
+  status.setAttribute('aria-live', 'polite');
+  wrap.appendChild(status);
+
+  const errorBox = doc.createElement('p');
+  errorBox.className = 'validate__analyze-error';
+  errorBox.setAttribute('aria-live', 'polite');
+  wrap.appendChild(errorBox);
+
+  const list = doc.createElement('ul');
+  list.className = 'validate__analysis-results';
+  wrap.appendChild(list);
+
+  btn.addEventListener('click', () => {
+    if (!callbacks.onAnalyzeMissed) {
+      return;
+    }
+    btn.disabled = true;
+    status.textContent = '原因を分析中…';
+    errorBox.textContent = '';
+    list.innerHTML = '';
+    callbacks
+      .onAnalyzeMissed(missedPmids)
+      .then((result) => {
+        if (result.analyses.length === 0) {
+          status.textContent = '分析結果が得られませんでした。';
+          return;
+        }
+        status.textContent = `${result.analyses.length} 件の原因を分析しました。`;
+        for (const analysis of result.analyses) {
+          list.appendChild(renderAnalysisItem(doc, analysis));
+        }
+      })
+      .catch((err: unknown) => {
+        status.textContent = '';
+        errorBox.textContent = formatError(err);
+      })
+      .finally(() => {
+        btn.disabled = false;
+      });
+  });
+
+  return wrap;
+}
+
+function renderAnalysisItem(
+  doc: Document,
+  analysis: { pmid: string; cause: string; suggestedTerms: string[]; relatedBlock: string | null }
+): HTMLElement {
+  const li = doc.createElement('li');
+  li.className = 'validate__analysis-item';
+
+  const head = doc.createElement('p');
+  head.className = 'validate__analysis-pmid';
+  const block = analysis.relatedBlock === null ? '不明' : `#${analysis.relatedBlock}`;
+  head.textContent = `PMID ${analysis.pmid}（推定ブロック: ${block}）`;
+  li.appendChild(head);
+
+  const cause = doc.createElement('p');
+  cause.className = 'validate__analysis-cause';
+  cause.textContent = analysis.cause;
+  li.appendChild(cause);
+
+  if (analysis.suggestedTerms.length > 0) {
+    const termsLabel = doc.createElement('p');
+    termsLabel.className = 'validate__analysis-terms-label';
+    termsLabel.textContent = '改善候補語:';
+    li.appendChild(termsLabel);
+
+    const termsList = doc.createElement('ul');
+    termsList.className = 'validate__analysis-terms';
+    for (const term of analysis.suggestedTerms) {
+      const termLi = doc.createElement('li');
+      termLi.textContent = term;
+      termsList.appendChild(termLi);
+    }
+    li.appendChild(termsList);
+  }
+
+  return li;
 }
 
 function renderMesh(doc: Document, summary: ValidationSummary): HTMLElement {

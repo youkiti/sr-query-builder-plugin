@@ -1,6 +1,13 @@
 import { SHEET_HEADERS } from '@/domain/sheetsSchema';
+import type { ChatMessage, LLMProvider } from '@/lib/llm';
 import { createStore, type AppState } from '../store';
-import { runValidation, type ValidationServiceDeps } from './validationService';
+import {
+  analyzeMissedSeeds,
+  runValidation,
+  type AnalyzeMissedSeedsDeps,
+  type ValidationServiceDeps,
+} from './validationService';
+import type { LlmProviderFactory } from './llmProviderService';
 
 function jsonResponse(body: unknown): Response {
   return {
@@ -403,5 +410,125 @@ describe('runValidation', () => {
     delete (withoutHelpers as { newUuid?: unknown }).newUuid;
     delete (withoutHelpers as { now?: unknown }).now;
     await expect(runValidation(withoutHelpers)).resolves.toBeDefined();
+  });
+});
+
+describe('analyzeMissedSeeds', () => {
+  function llmFactory(text: string): {
+    factory: LlmProviderFactory;
+    calls: ChatMessage[][];
+    purposes: string[];
+  } {
+    const calls: ChatMessage[][] = [];
+    const purposes: string[] = [];
+    const provider: LLMProvider = {
+      providerId: 'gemini',
+      model: 'test',
+      chat: async (messages) => {
+        calls.push([...messages]);
+        return { text, tokensIn: null, tokensOut: null, raw: {} };
+      },
+    };
+    return {
+      calls,
+      purposes,
+      factory: {
+        forPurpose: (purpose) => {
+          purposes.push(purpose);
+          return provider;
+        },
+      },
+    };
+  }
+
+  function efetchXml(): string {
+    return [
+      '<?xml version="1.0"?><PubmedArticleSet>',
+      '<PubmedArticle><MedlineCitation><PMID>444</PMID>',
+      '<Article><ArticleTitle>Acute lung injury support</ArticleTitle>',
+      '<Abstract><AbstractText>A trial of ECMO.</AbstractText></Abstract></Article>',
+      '<MeshHeadingList><MeshHeading><DescriptorName>Acute Lung Injury</DescriptorName></MeshHeading></MeshHeadingList>',
+      '</MedlineCitation></PubmedArticle></PubmedArticleSet>',
+    ].join('');
+  }
+
+  function makeDeps(
+    text: string,
+    eutilsXml: string
+  ): {
+    deps: AnalyzeMissedSeedsDeps;
+    calls: ChatMessage[][];
+    purposes: string[];
+    eutilsFetchMock: jest.Mock;
+  } {
+    const store = createStore(makeState());
+    const { factory, calls, purposes } = llmFactory(text);
+    const eutilsFetchMock = jest.fn().mockResolvedValue(xmlResponse(eutilsXml));
+    const deps: AnalyzeMissedSeedsDeps = {
+      eutils: {
+        fetch: eutilsFetchMock as unknown as typeof fetch,
+        sleep: async () => undefined,
+        maxRetries: 0,
+      },
+      store,
+      llmFactory: factory,
+      missedPmids: ['444'],
+    };
+    return { deps, calls, purposes, eutilsFetchMock };
+  }
+
+  test('efetch で書誌を取り、interpret_result purpose で skill を呼んで結果を返す', async () => {
+    const skillJson = JSON.stringify({
+      analyses: [
+        {
+          pmid: '444',
+          cause: 'acute lung injury が #1 に無いため。',
+          suggested_terms: ['"acute lung injury"[tiab]'],
+          related_block: '1',
+        },
+      ],
+    });
+    const { deps, calls, purposes } = makeDeps(skillJson, efetchXml());
+    const result = await analyzeMissedSeeds(deps);
+    expect(purposes).toEqual(['interpret_result']);
+    expect(result.fetchedPmids).toEqual(['444']);
+    expect(result.analyses).toEqual([
+      {
+        pmid: '444',
+        cause: 'acute lung injury が #1 に無いため。',
+        suggestedTerms: ['"acute lung injury"[tiab]'],
+        relatedBlock: '1',
+      },
+    ]);
+    // プロンプトに書誌（title / abstract / MeSH）と検索式の行が入る
+    const userMsg = calls[0]!.find((m) => m.role === 'user')?.content ?? '';
+    expect(userMsg).toContain('Acute lung injury support');
+    expect(userMsg).toContain('A trial of ECMO.');
+    expect(userMsg).toContain('Acute Lung Injury');
+    expect(userMsg).toContain('#1: diabetes[tiab]');
+  });
+
+  test('missedPmids が空ならエラー', async () => {
+    const { deps } = makeDeps('{}', efetchXml());
+    await expect(
+      analyzeMissedSeeds({ ...deps, missedPmids: [] })
+    ).rejects.toThrow(/漏れ PMID/);
+  });
+
+  test('formula 未設定ならエラー', async () => {
+    const { deps } = makeDeps('{}', efetchXml());
+    deps.store.setState((s) => ({ ...s, currentFormulaMarkdown: null }));
+    await expect(analyzeMissedSeeds(deps)).rejects.toThrow(/ドラフト/);
+  });
+
+  test('efetch が 0 件を返したら LLM を呼ばず空で返す', async () => {
+    const { deps, purposes } = makeDeps(
+      '{}',
+      '<?xml version="1.0"?><PubmedArticleSet></PubmedArticleSet>'
+    );
+    const result = await analyzeMissedSeeds(deps);
+    expect(result.analyses).toEqual([]);
+    expect(result.fetchedPmids).toEqual([]);
+    expect(purposes).toEqual([]);
   });
 });

@@ -21,8 +21,10 @@ import {
   retrySeed,
   requestBlockImprovement,
   runValidation,
+  analyzeMissedSeeds,
   saveEditedFormula,
   submitProtocol,
+  type AnalyzeMissedSeedsResult,
   type BlockImprovementResult,
   type BoundaryCasesResult,
   type ChromeRuntimeDeps,
@@ -240,6 +242,10 @@ function buildDefaultViewOptions(
     },
     validate: {
       onRun: async (): Promise<ValidationSummary> => runValidate(store, runtime),
+      onAnalyzeMissed: async (
+        missedPmids: string[]
+      ): Promise<AnalyzeMissedSeedsResult> =>
+        runAnalyzeMissedSeeds(store, runtime, llmFactoryDepsBase(), missedPmids),
     },
     history: {
       onList: async (): Promise<FormulaVersion[]> => runListHistory(store, runtime),
@@ -405,6 +411,31 @@ async function runValidate(
     google: runtime.google,
     eutils,
     store,
+  });
+}
+
+async function runAnalyzeMissedSeeds(
+  store: AppStore,
+  runtime: ChromeRuntimeDeps,
+  baseDeps: Omit<LlmFactoryDeps, 'llmLogFolderId' | 'spreadsheetId'>,
+  missedPmids: string[]
+): Promise<AnalyzeMissedSeedsResult> {
+  const project = store.getState().project;
+  /* istanbul ignore if -- validate view は project + 検証結果有り時しか onAnalyzeMissed を呼ばない */
+  if (!project) {
+    throw new Error('プロジェクトが選択されていません');
+  }
+  const factory = await buildLlmProviderFactory({
+    ...baseDeps,
+    llmLogFolderId: project.driveFolderId,
+    spreadsheetId: project.spreadsheetId,
+  });
+  const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
+  return analyzeMissedSeeds({
+    eutils,
+    store,
+    llmFactory: factory,
+    missedPmids,
   });
 }
 

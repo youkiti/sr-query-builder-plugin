@@ -14,12 +14,18 @@ import {
   type MeshForSeed,
   type MeshHierarchyNode,
 } from '@/features/validation';
-import { fetchMeshTreeNumbers, type EutilsDeps } from '@/lib/ncbi';
+import {
+  interpretResult,
+  type FormulaLineInput,
+  type MissedSeedAnalysis,
+} from '@/features/formula/skills';
+import { efetchArticles, fetchMeshTreeNumbers, type EutilsDeps } from '@/lib/ncbi';
 import { ensureChildFolder, uploadTextFile, type GoogleApiDeps } from '@/lib/google';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
 import { nowIso } from '@/utils/iso8601';
 import { newUuid } from '@/utils/uuid';
 import type { AppStore } from '../store';
+import type { LlmProviderFactory } from './llmProviderService';
 
 /**
  * 検証サービス。requirements.md §4.6 の P0 3 機能を統一インターフェースで
@@ -195,6 +201,79 @@ export async function runValidation(deps: ValidationServiceDeps): Promise<Valida
     totalSeedCount: seeds.length,
     loggedValidationIds,
   };
+}
+
+/**
+ * 漏れ PMID 原因分析サービス（requirements.md §4.6）の依存。
+ * runValidation とは別に、ユーザー操作（validate 画面のボタン）起点で呼ばれる。
+ */
+export interface AnalyzeMissedSeedsDeps {
+  eutils: EutilsDeps;
+  store: AppStore;
+  /** interpret-result skill 呼び出しに使う LLM プロバイダファクトリ */
+  llmFactory: LlmProviderFactory;
+  /** 検証で得た未捕捉 PMID 一覧 */
+  missedPmids: string[];
+}
+
+export interface AnalyzeMissedSeedsResult {
+  analyses: MissedSeedAnalysis[];
+  /** 書誌取得（efetch）に失敗した PMID 一覧（分析対象から落ちたもの） */
+  fetchedPmids: string[];
+}
+
+/**
+ * シード捕捉率検証で漏れた PMID について、原因と改善候補語を AI に推定させる。
+ *
+ * 1. efetch で漏れ PMID の書誌（title / abstract / MeSH）を取得
+ * 2. 現在の検索式の行（blockId + expression）と合わせて interpret-result skill を実行
+ * 3. PMID ごとの原因分析を返す
+ *
+ * LLM 呼び出しは llmFactory.forPurpose('interpret_result') 経由で、apiLogger が
+ * LLMApiLog + Drive に記録する（draftService の forPurpose 使用例と同じ配線）。
+ *
+ * @throws missedPmids が空のときは呼び出し側のバグなので明示的なエラー
+ * @throws LlmApiKeyMissingError（factory 生成側）は呼び出し側で案内する
+ */
+export async function analyzeMissedSeeds(
+  deps: AnalyzeMissedSeedsDeps
+): Promise<AnalyzeMissedSeedsResult> {
+  const state = deps.store.getState();
+  if (!state.currentFormulaMarkdown) {
+    throw new Error('検索式ドラフトが未生成です。先に /draft で生成してください');
+  }
+  if (deps.missedPmids.length === 0) {
+    throw new Error('漏れ PMID がありません');
+  }
+
+  const formula = parsePubmedFormulaMd(state.currentFormulaMarkdown);
+  const lines: FormulaLineInput[] = formula.blocks.map((block) => ({
+    blockId: block.id,
+    expression: block.expression,
+  }));
+
+  const articles = await efetchArticles(deps.missedPmids, deps.eutils);
+  const missedArticles = articles.map((article) => ({
+    pmid: article.pmid,
+    title: article.title,
+    abstract: article.abstract,
+    meshHeadings: article.meshHeadings,
+  }));
+
+  if (missedArticles.length === 0) {
+    return { analyses: [], fetchedPmids: [] };
+  }
+
+  const analyses = await interpretResult(
+    {
+      finalQuery: state.currentFormulaMarkdown,
+      lines,
+      missedArticles,
+    },
+    deps.llmFactory.forPurpose('interpret_result')
+  );
+
+  return { analyses, fetchedPmids: missedArticles.map((a) => a.pmid) };
 }
 
 function buildEmptyFinalQuery(): FinalQueryResult {
