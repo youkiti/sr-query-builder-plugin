@@ -958,6 +958,26 @@ describe('buildContextLabel', () => {
       })
     ).toBe('Formula short');
   });
+
+  test('cumulativeCostUsd が非 null なら累積コストを末尾に表示する', () => {
+    expect(
+      buildContextLabel({
+        ...INITIAL_STATE,
+        cumulativeCostUsd: 0.0123,
+      })
+    ).toBe('累積 $0.0123');
+  });
+
+  test('Protocol / Formula / コストをすべて連結する', () => {
+    expect(
+      buildContextLabel({
+        ...INITIAL_STATE,
+        currentProtocolVersion: 2,
+        currentFormulaVersionId: 'abcdef01-2345-6789-abcd-ef0123456789',
+        cumulativeCostUsd: 0.005,
+      })
+    ).toBe('Protocol v2 / Formula abcdef01 / 累積 $0.0050');
+  });
 });
 
 describe('createLocationOptions', () => {

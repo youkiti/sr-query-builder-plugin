@@ -1,6 +1,7 @@
 import { SHEET_HEADERS } from '@/domain/sheetsSchema';
 import { createStore, type AppState } from '../store';
 import {
+  fillPmidForRisRow,
   ingestSeeds,
   invalidateSeed,
   listSeeds,
@@ -545,5 +546,54 @@ describe('listSeeds / invalidateSeed / retrySeed', () => {
     const { store, deps } = setupDeps();
     store.setState((s) => ({ ...s, project: null }));
     await expect(listSeeds(deps)).rejects.toThrow(/プロジェクト/);
+  });
+
+  test('fillPmidForRisRow は手入力 PMID を pmid_direct で ingest する（見つかれば有効行追記）', async () => {
+    const { sheetsFetchMock, eutilsFetchMock, deps } = setupDeps();
+    sheetsFetchMock.mockImplementation(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/values/SeedPapers')) {
+        return jsonResponse(emptySheetsListResponse);
+      }
+      return jsonResponse({});
+    });
+    eutilsFetchMock
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '1', idlist: ['99999'] } }))
+      .mockResolvedValueOnce(
+        xmlResponse(
+          `<?xml version="1.0"?><PubmedArticleSet><PubmedArticle><MedlineCitation><PMID>99999</PMID><Article><ArticleTitle>RIS Supplement</ArticleTitle></Article></MedlineCitation></PubmedArticle></PubmedArticleSet>`
+        )
+      );
+    const summary = await fillPmidForRisRow('99999', deps);
+    expect(summary.registered).toBe(1);
+    expect(summary.valid).toBe(1);
+    const appendBody = JSON.parse(
+      (sheetsFetchMock.mock.calls.find((c) => (c[0] as string).includes(':append'))![1] as RequestInit)
+        .body as string
+    ) as { values: (string | number | boolean | null)[][] };
+    const row = appendBody.values[0]!;
+    const map: Record<string, string | number | boolean | null> = {};
+    header.forEach((k, i) => { map[k] = row[i] as string | number | boolean | null; });
+    expect(map['pmid']).toBe('99999');
+    expect(map['is_valid']).toBe(true);
+    expect(map['ingest_format']).toBe('pmid_direct');
+  });
+
+  test('fillPmidForRisRow は前後の空白をトリムする', async () => {
+    const { sheetsFetchMock, eutilsFetchMock, deps } = setupDeps();
+    sheetsFetchMock.mockImplementation(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/values/SeedPapers')) {
+        return jsonResponse(emptySheetsListResponse);
+      }
+      return jsonResponse({});
+    });
+    eutilsFetchMock
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '1', idlist: ['12345'] } }))
+      .mockResolvedValueOnce(
+        xmlResponse(
+          `<?xml version="1.0"?><PubmedArticleSet><PubmedArticle><MedlineCitation><PMID>12345</PMID><Article><ArticleTitle>T</ArticleTitle></Article></MedlineCitation></PubmedArticle></PubmedArticleSet>`
+        )
+      );
+    const summary = await fillPmidForRisRow('  12345  ', deps);
+    expect(summary.valid).toBe(1);
   });
 });

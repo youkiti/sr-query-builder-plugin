@@ -1,6 +1,7 @@
 import type { PubmedFormula } from '@/lib/search-formula-md';
 import type { ConversionResult } from './types';
 import { appendResidualTagWarning } from './residualPubmedTags';
+import { DIALOG_RCT_FILTER, PUBMED_RCT_PT_REGEX } from './dialogRctFilter';
 
 /**
  * PubMed 検索式を Dialog/Embase 向けに変換する。
@@ -33,6 +34,13 @@ export function convertToDialog(formula: PubmedFormula): ConversionResult {
 }
 
 function convertDialogExpression(src: string): { expression: string; warnings: string[] } {
+  // RCT 出版タイプフィルタを検知した場合は Cochrane Dialog RCT フィルタで代替する。
+  // 元の PubMed 式（`"Randomized Controlled Trial"[pt]` 等）はブロックごと置換し、
+  // 残存タグ警告は出さない。
+  if (PUBMED_RCT_PT_REGEX.test(src)) {
+    return { expression: DIALOG_RCT_FILTER, warnings: [] };
+  }
+
   const warnings: string[] = [];
   let out = src;
 

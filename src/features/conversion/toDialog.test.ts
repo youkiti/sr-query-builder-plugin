@@ -1,5 +1,6 @@
 import type { PubmedFormula } from '@/lib/search-formula-md';
 import { convertToDialog } from './toDialog';
+import { DIALOG_RCT_FILTER } from './dialogRctFilter';
 
 function makeFormula(blocks: Array<{ id: string; expression: string }>): PubmedFormula {
   return {
@@ -52,19 +53,38 @@ describe('convertToDialog', () => {
     expect(result.warnings[0]).toContain('近接演算子');
   });
 
-  test('HSSS 風 RCT フィルタの PubMed 固有タグ ([pt]/[sh]/[mh]) が残ると警告する', () => {
+  test('RCT [pt] を含むブロックは Cochrane Dialog RCT フィルタで代替し警告なし', () => {
     const result = convertToDialog(
-      makeFormula([
-        {
-          id: '1',
-          expression:
-            'randomized controlled trial[pt] OR drug therapy[sh] OR animals[mh]',
-        },
-      ])
+      makeFormula([{ id: '1', expression: 'randomized controlled trial[pt] OR "controlled clinical trial"[pt]' }])
+    );
+    expect(result.convertedFormula).toBe(`S1 ${DIALOG_RCT_FILTER}`);
+    expect(result.warnings).toHaveLength(0);
+  });
+
+  test('"Randomized Controlled Trial"[pt] のクォート付きでも代替する', () => {
+    const result = convertToDialog(
+      makeFormula([{ id: '1', expression: '"Randomized Controlled Trial"[pt] OR random*[tiab]' }])
+    );
+    expect(result.convertedFormula).toBe(`S1 ${DIALOG_RCT_FILTER}`);
+    expect(result.warnings).toHaveLength(0);
+  });
+
+  test('[pt] が RCT 以外（例: "letter"[pt]）なら残存タグ警告を出す', () => {
+    const result = convertToDialog(
+      makeFormula([{ id: '1', expression: '"letter"[pt]' }])
     );
     const tagWarning = result.warnings.find((w) => w.includes('PubMed 固有タグ'));
     expect(tagWarning).toBeDefined();
     expect(tagWarning).toContain('[pt]');
+    expect(tagWarning).toContain('Embase (Dialog)');
+  });
+
+  test('[sh]/[mh] タグが残ると警告する', () => {
+    const result = convertToDialog(
+      makeFormula([{ id: '1', expression: 'drug therapy[sh] OR animals[mh]' }])
+    );
+    const tagWarning = result.warnings.find((w) => w.includes('PubMed 固有タグ'));
+    expect(tagWarning).toBeDefined();
     expect(tagWarning).toContain('[sh]');
     expect(tagWarning).toContain('[mh]');
     expect(tagWarning).toContain('Embase (Dialog)');

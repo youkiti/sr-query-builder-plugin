@@ -363,5 +363,17 @@ export async function retrySeed(pmid: string, deps: SeedServiceDeps): Promise<In
   return ingestSeeds({ mode: 'pmid_direct', pmids: [pmid] }, deps);
 }
 
+/**
+ * ris_no_pmid 行への手動 PMID 補完（§4.3）。
+ * ユーザーが手入力した PMID を E-utilities で検証し、有効なら新規 pmid_direct 行として追記する。
+ * 元の ris_no_pmid 行は is_valid=false のまま残す（監査性のため）。
+ */
+export async function fillPmidForRisRow(
+  pmid: string,
+  deps: SeedServiceDeps
+): Promise<IngestSummary> {
+  return ingestSeeds({ mode: 'pmid_direct', pmids: [pmid.trim()] }, deps);
+}
+
 /** 将来の API 拡張用。NbibEntry を expose したいので domain をまとめて参照できるように型だけ持ち出す */
 export type { NbibEntry };

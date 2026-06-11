@@ -23,6 +23,8 @@ export interface SeedsViewCallbacks {
   onInvalidate?: (rowIndex: number, seed: SeedPaper) => Promise<SeedPaper>;
   /** pmid_not_found 行の再試行（1 PMID で再 ingest。§4.3） */
   onRetry?: (pmid: string) => Promise<IngestSummary>;
+  /** ris_no_pmid 行への手動 PMID 補完（§4.3）。成功時は新規 pmid_direct 行を追記する */
+  onFillPmid?: (rowIndex: number, pmid: string) => Promise<IngestSummary>;
 }
 
 export function createSeedsView(callbacks: SeedsViewCallbacks = {}): RenderView {
@@ -107,6 +109,16 @@ export function createSeedsView(callbacks: SeedsViewCallbacks = {}): RenderView 
               errorBox.textContent = formatError(err);
             }
           },
+          onFillPmid: async (rowIndex, pmid) => {
+            if (!callbacks.onFillPmid) return;
+            errorBox.textContent = '';
+            try {
+              await callbacks.onFillPmid(rowIndex, pmid);
+              await refreshList();
+            } catch (err) {
+              errorBox.textContent = formatError(err);
+            }
+          },
         });
       } catch (err) {
         errorBox.textContent = formatError(err);
@@ -140,6 +152,7 @@ interface SeedListActions {
   onToggleShowInvalid: (next: boolean) => void;
   onInvalidate: (rowIndex: number, seed: SeedPaper) => void | Promise<void>;
   onRetry: (pmid: string) => void | Promise<void>;
+  onFillPmid: (rowIndex: number, pmid: string) => void | Promise<void>;
 }
 
 /**
@@ -254,6 +267,70 @@ function buildSeedRow(
       });
     });
     controls.appendChild(retryBtn);
+  } else if (seed.exclusionReason === 'no_pmid_resolved') {
+    // ris_no_pmid 行: 「PMIDを入力する」ボタン → インライン入力 → 補完
+    const fillBtn = doc.createElement('button');
+    fillBtn.type = 'button';
+    fillBtn.className = 'seeds__list-fill-pmid';
+    fillBtn.textContent = 'PMIDを入力する';
+
+    const inputEl = doc.createElement('input');
+    inputEl.type = 'text';
+    inputEl.className = 'seeds__fill-pmid-input';
+    inputEl.placeholder = 'PMID';
+    inputEl.hidden = true;
+    inputEl.setAttribute('aria-label', 'PMID 入力');
+
+    const confirmBtn = doc.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = 'seeds__fill-pmid-confirm';
+    confirmBtn.textContent = '確定';
+    confirmBtn.hidden = true;
+
+    const cancelBtn = doc.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'seeds__fill-pmid-cancel';
+    cancelBtn.textContent = 'キャンセル';
+    cancelBtn.hidden = true;
+
+    fillBtn.addEventListener('click', () => {
+      fillBtn.hidden = true;
+      inputEl.hidden = false;
+      confirmBtn.hidden = false;
+      cancelBtn.hidden = false;
+      inputEl.focus();
+    });
+
+    cancelBtn.addEventListener('click', () => {
+      fillBtn.hidden = false;
+      inputEl.hidden = true;
+      confirmBtn.hidden = true;
+      cancelBtn.hidden = true;
+      inputEl.value = '';
+    });
+
+    const doFill = (): void => {
+      const val = inputEl.value.trim();
+      if (!val) return;
+      confirmBtn.disabled = true;
+      cancelBtn.disabled = true;
+      void Promise.resolve(actions.onFillPmid(rowIndex, val)).finally(() => {
+        confirmBtn.disabled = false;
+        cancelBtn.disabled = false;
+      });
+    };
+
+    confirmBtn.addEventListener('click', doFill);
+    inputEl.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        doFill();
+      }
+    });
+
+    controls.appendChild(fillBtn);
+    controls.appendChild(inputEl);
+    controls.appendChild(confirmBtn);
+    controls.appendChild(cancelBtn);
   }
 
   li.appendChild(controls);

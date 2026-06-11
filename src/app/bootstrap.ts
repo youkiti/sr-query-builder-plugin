@@ -13,6 +13,7 @@ import {
   createChromeRuntimeDeps,
   exportToAllDatabases,
   fetchBoundaryCandidates,
+  fillPmidForRisRow,
   generateDraft,
   ingestSeeds,
   invalidateSeed,
@@ -202,6 +203,12 @@ function buildDefaultViewOptions(
   const llmFactoryDepsBase = (): Omit<LlmFactoryDeps, 'llmLogFolderId' | 'spreadsheetId'> => ({
     google: runtime.google,
     store: runtime.store,
+    onCostAccumulate: (costUsd) => {
+      store.setState((s) => ({
+        ...s,
+        cumulativeCostUsd: (s.cumulativeCostUsd ?? 0) + costUsd,
+      }));
+    },
   });
   return {
     home: {
@@ -239,6 +246,8 @@ function buildDefaultViewOptions(
         runInvalidateSeed(store, runtime, rowIndex, seed),
       onRetry: async (pmid: string): Promise<IngestSummary> =>
         runRetrySeed(store, runtime, pmid),
+      onFillPmid: async (_rowIndex: number, pmid: string): Promise<IngestSummary> =>
+        runFillPmidForRisRow(store, runtime, pmid),
     },
     validate: {
       onRun: async (): Promise<ValidationSummary> => runValidate(store, runtime),
@@ -402,6 +411,15 @@ async function runRetrySeed(
   return retrySeed(pmid, { google: runtime.google, eutils, store });
 }
 
+async function runFillPmidForRisRow(
+  store: AppStore,
+  runtime: ChromeRuntimeDeps,
+  pmid: string
+): Promise<IngestSummary> {
+  const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
+  return fillPmidForRisRow(pmid, { google: runtime.google, eutils, store });
+}
+
 async function runValidate(
   store: AppStore,
   runtime: ChromeRuntimeDeps
@@ -545,6 +563,9 @@ export function buildContextLabel(state: AppState): string {
   const formulaShort = formatFormulaVersionShort(state.currentFormulaVersionId);
   if (formulaShort !== null) {
     parts.push(`Formula ${formulaShort}`);
+  }
+  if (state.cumulativeCostUsd !== null) {
+    parts.push(`累積 $${state.cumulativeCostUsd.toFixed(4)}`);
   }
   return parts.join(' / ');
 }

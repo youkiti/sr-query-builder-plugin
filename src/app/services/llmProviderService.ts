@@ -44,6 +44,8 @@ export interface LlmFactoryDeps {
   spreadsheetId: string;
   /** 任意: GeminiProvider のモデル指定 */
   model?: string;
+  /** 任意: LLM 呼び出しごとに概算コストを通知するコールバック（§ cumulativeCostUsd 集計用）。 */
+  onCostAccumulate?: (costUsd: number) => void;
 }
 
 export interface LlmProviderFactory {
@@ -93,6 +95,9 @@ export async function buildLlmProviderFactory(deps: LlmFactoryDeps): Promise<Llm
         },
         appendLogEntry: async (entry) => {
           await appendRow(deps.spreadsheetId, 'LLMApiLog', toLogRow(entry), deps.google);
+          if (entry.costEstimateUsd !== null) {
+            deps.onCostAccumulate?.(entry.costEstimateUsd);
+          }
         },
       }),
   };

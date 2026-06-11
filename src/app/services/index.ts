@@ -51,6 +51,7 @@ export {
   listSeeds,
   invalidateSeed,
   retrySeed,
+  fillPmidForRisRow,
   type IngestInput,
   type IngestSummary,
   type SeedServiceDeps,
