@@ -147,10 +147,10 @@ export const renderProtocolView: RenderView = createProtocolView();
 function collectFormInput(form: HTMLFormElement): ProtocolSubmissionInput {
   const mode = readSourceMode(form);
   if (mode === 'manual') {
+    // 手入力かつ空文字の場合もエラーにしない（§4.2）。
+    // extract-protocol skill が空ドラフト（空ブロック 1 行 / combination '#1'）を返し、
+    // ユーザーは #/blocks でゼロからブロックを編集できる。
     const inline = readField(form, 'inline');
-    if (!inline.trim()) {
-      throw new Error('プロトコル全文を入力してください');
-    }
     return { sourceType: 'manual', inlineText: inline };
   }
   const fileInput = form.querySelector<HTMLInputElement>('input[type=file]');

@@ -42,12 +42,37 @@ test.describe('app-protocol (#/protocol)', () => {
     await expect(page.locator('textarea#inline')).toBeHidden();
   });
 
-  test('未入力で submit: error 文言が aria-live 領域に出る', async ({ page }) => {
+  test('file モードでファイル未選択 submit: error 文言が aria-live 領域に出る', async ({
+    page,
+  }) => {
+    // manual の空文字は §4.2 で許容されるため、バリデーション失敗は file モードで起こす
     await injectAppStub(page, scenarioWithProject());
     await page.goto(APP_URL);
 
+    await page.locator('input[name=sourceMode][value=file]').check();
     await page.locator('button.protocol__submit').click();
     await expect(page.locator('#protocol-error')).not.toBeEmpty();
+  });
+
+  test('manual モードで空のまま submit: §4.2 に従い LLM をスキップして空ブロックで #/blocks へ', async ({
+    page,
+  }) => {
+    // 空文字 → extract-protocol skill は LLM を呼ばず空ドラフト（空ブロック 1 行）を返す。
+    // provider.chat は呼ばれないが buildLlmProviderFactory が API キーを要求するため seed する。
+    await injectAppStub(
+      page,
+      scenarioWithProject({ extraStorage: { 'apiKeys.gemini': 'dummy-key' } })
+    );
+    await page.goto(APP_URL);
+
+    // 何も入力せず submit
+    await page.locator('button.protocol__submit').click();
+
+    // #/blocks へ遷移し、空ブロックが 1 件だけ表示される
+    await expect(page).toHaveURL(/#\/blocks$/);
+    await expect(page.locator('.blocks__item')).toHaveCount(1);
+    // エラーは出ていない
+    await expect(page.locator('#protocol-error')).toHaveCount(0);
   });
 
   test('a11y: axe violation zero', async ({ page }) => {

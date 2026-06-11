@@ -63,6 +63,20 @@ describe('submitProtocol - manual', () => {
     const result = await submitProtocol({ sourceType: 'manual' }, { store, provider });
     expect(result.blocksDraft.blocks).toHaveLength(1);
     expect(result.blocksDraft.blocks[0]?.blockLabel).toBe('');
+    // §4.2: 空ドラフトは combination '#1'、aiGenerated=true の空ブロック 1 件
+    expect(result.blocksDraft.combinationExpression).toBe('#1');
+    expect(store.getState().blocksDraft?.blocks).toHaveLength(1);
+  });
+
+  test('inlineText="" でも空ドラフト経路を通る', async () => {
+    const { provider } = fakeProvider('');
+    const store = createStore();
+    const result = await submitProtocol(
+      { sourceType: 'manual', inlineText: '' },
+      { store, provider }
+    );
+    expect(result.blocksDraft.blocks).toHaveLength(1);
+    expect(result.blocksDraft.combinationExpression).toBe('#1');
   });
 });
 

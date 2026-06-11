@@ -87,14 +87,16 @@ describe('createProtocolView - manual モード', () => {
     expect(container.querySelector('#protocol-error')?.textContent).toBe('');
   });
 
-  test('空入力でサブミットするとエラー + onSubmit 未呼び出し', () => {
+  // §4.2: 手入力かつ空文字でもエラーにせず、空 inlineText で onSubmit を呼ぶ。
+  // 後段の extract-protocol skill が空ドラフトを返し、ユーザーはブロックをゼロから編集する。
+  test('空入力でサブミットしてもエラーにならず inlineText="" で onSubmit を呼ぶ', () => {
     const onSubmit = jest.fn();
     const view = createProtocolView({ onSubmit });
     const container = buildContainer();
     view(container, { state: stateWithProject, navigate: jest.fn() });
     container.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }));
-    expect(onSubmit).not.toHaveBeenCalled();
-    expect(container.querySelector('#protocol-error')?.textContent).toContain('プロトコル');
+    expect(onSubmit).toHaveBeenCalledWith({ sourceType: 'manual', inlineText: '' });
+    expect(container.querySelector('#protocol-error')?.textContent).toBe('');
   });
 
   test('callback が無くても例外にならない', () => {
@@ -266,10 +268,13 @@ describe('createProtocolView - 送信中の進捗表示', () => {
   });
 
   test('入力バリデーション失敗時は進捗表示を出さない', () => {
+    // file モードでファイル未選択にしてバリデーション失敗を起こす
+    // （manual の空文字は §4.2 で許容されるため失敗ケースにならない）
     const onSubmit = jest.fn();
     const view = createProtocolView({ onSubmit });
     const container = buildContainer();
     view(container, { state: stateWithProject, navigate: jest.fn() });
+    selectSourceMode(container, 'file');
     container.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }));
     const progress = container.querySelector<HTMLElement>('#protocol-progress')!;
     expect(progress.hidden).toBe(true);
