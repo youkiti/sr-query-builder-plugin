@@ -1,7 +1,7 @@
 import type { SeedPaper } from '@/domain/seedPaper';
 import {
   appendSeedPaper,
-  hasValidSeedPmid,
+  hasDuplicateSeedPmid,
   invalidateSeedRow,
   listSeedPapersWithRows,
   parseNbib,
@@ -151,9 +151,12 @@ async function ingestPmidBatch(
   const orderedInput = pmids.map((p) => p.trim()).filter((p) => p !== '');
   const uniqueInput = dedupePreserveOrder(pmids);
   const existing = new Set<string>();
-  // 既に有効 PMID が存在する場合は duplicate_pmid で記録（§4.3）
+  // 既に有効行、または user_removed 行を持つ PMID は duplicate_pmid で記録（§4.3）。
+  // 「ユーザーが一度無効化した事実」を監査ログに残すため、user_removed 済み PMID の
+  // 再 ingest も新規有効行として復活させず、duplicate_pmid 行を追記する。
+  // pmid_not_found 行のみの PMID は重複扱いにしない（「再試行」で再 ingest する前提）。
   for (const pmid of uniqueInput) {
-    if (await hasValidSeedPmid(spreadsheetId, pmid, deps.google)) {
+    if (await hasDuplicateSeedPmid(spreadsheetId, pmid, deps.google)) {
       existing.add(pmid);
     }
   }

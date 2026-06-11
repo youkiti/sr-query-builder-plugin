@@ -2,6 +2,7 @@ import type { SeedPaper } from '@/domain/seedPaper';
 import { SHEET_HEADERS } from '@/domain/sheetsSchema';
 import {
   appendSeedPaper,
+  hasDuplicateSeedPmid,
   hasValidSeedPmid,
   invalidateSeedRow,
   listSeedPapers,
@@ -305,5 +306,58 @@ describe('hasValidSeedPmid', () => {
   test('該当 PMID が無ければ false', async () => {
     const d = deps({ values: [header, row({ pmid: '999' })] });
     await expect(hasValidSeedPmid('sid', '12345', d)).resolves.toBe(false);
+  });
+});
+
+describe('hasDuplicateSeedPmid', () => {
+  const header = [...SHEET_HEADERS.SeedPapers];
+  function row(overrides: Partial<Record<string, string>> = {}): string[] {
+    const base: Record<string, string> = {
+      pmid: '111',
+      title: 'T',
+      year: '2020',
+      source: 'initial',
+      ingest_format: 'pmid_direct',
+      original_db: '',
+      is_valid: 'true',
+      exclusion_reason: '',
+      original_payload_ref: '',
+      user_decision: '',
+      decided_at: '',
+      decided_by: '',
+      note: '',
+    };
+    return header.map((key) => overrides[key] ?? base[key] ?? '');
+  }
+
+  test('有効行があれば true', async () => {
+    const d = deps({ values: [header, row({ pmid: '12345' })] });
+    await expect(hasDuplicateSeedPmid('sid', '12345', d)).resolves.toBe(true);
+  });
+
+  test('user_removed 行があれば true（一度無効化した事実を重複扱いにする）', async () => {
+    const d = deps({
+      values: [header, row({ pmid: '12345', is_valid: 'false', exclusion_reason: 'user_removed' })],
+    });
+    await expect(hasDuplicateSeedPmid('sid', '12345', d)).resolves.toBe(true);
+  });
+
+  test('pmid_not_found 行のみなら false（再試行で再 ingest する前提）', async () => {
+    const d = deps({
+      values: [header, row({ pmid: '12345', is_valid: 'false', exclusion_reason: 'pmid_not_found' })],
+    });
+    await expect(hasDuplicateSeedPmid('sid', '12345', d)).resolves.toBe(false);
+  });
+
+  test('duplicate_pmid 行のみなら false（二重カウントしない）', async () => {
+    const d = deps({
+      values: [header, row({ pmid: '12345', is_valid: 'false', exclusion_reason: 'duplicate_pmid' })],
+    });
+    await expect(hasDuplicateSeedPmid('sid', '12345', d)).resolves.toBe(false);
+  });
+
+  test('該当 PMID が無ければ false', async () => {
+    const d = deps({ values: [header, row({ pmid: '999' })] });
+    await expect(hasDuplicateSeedPmid('sid', '12345', d)).resolves.toBe(false);
   });
 });

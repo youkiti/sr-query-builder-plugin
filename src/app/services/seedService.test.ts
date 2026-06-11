@@ -157,6 +157,86 @@ describe('ingestSeeds - PMID direct', () => {
     expect(eutilsFetchMock).not.toHaveBeenCalled();
   });
 
+  // §4.3: user_removed 済み PMID の再 ingest は新規有効行として復活させず、
+  // duplicate_pmid 行を追記する（「一度無効化した事実」を監査ログに残す）。
+  test('user_removed 行がある PMID の再 ingest は duplicate_pmid で追記（有効行は作らない）', async () => {
+    const { sheetsFetchMock, eutilsFetchMock, deps } = setupDeps();
+    // 既存に user_removed の行を持たせる
+    const removedRow: string[] = header.map(() => '');
+    removedRow[header.indexOf('pmid')] = '111';
+    removedRow[header.indexOf('is_valid')] = 'false';
+    removedRow[header.indexOf('exclusion_reason')] = 'user_removed';
+    removedRow[header.indexOf('source')] = 'initial';
+    removedRow[header.indexOf('ingest_format')] = 'pmid_direct';
+    sheetsFetchMock.mockImplementation(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/values/SeedPapers')) {
+        return jsonResponse({ values: [header, removedRow] });
+      }
+      return jsonResponse({});
+    });
+    const summary = await ingestSeeds({ mode: 'pmid_direct', pmids: ['111'] }, deps);
+    expect(summary.valid).toBe(0);
+    expect(summary.invalid).toBe(1);
+    expect(summary.reasons.duplicate_pmid).toBe(1);
+    // 重複扱いなので E-utilities 検証は走らない
+    expect(eutilsFetchMock).not.toHaveBeenCalled();
+    // 追記された 1 行は duplicate_pmid（有効行ではない）
+    const appendBody = JSON.parse(
+      (sheetsFetchMock.mock.calls.find((c) => (c[0] as string).includes(':append'))![1] as RequestInit)
+        .body as string
+    ) as { values: (string | number | boolean | null)[][] };
+    const row = appendBody.values[0]!;
+    const map: Record<string, string | number | boolean | null> = {};
+    header.forEach((k, i) => {
+      map[k] = row[i] as string | number | boolean | null;
+    });
+    expect(map['pmid']).toBe('111');
+    expect(map['is_valid']).toBe(false);
+    expect(map['exclusion_reason']).toBe('duplicate_pmid');
+  });
+
+  // §4.3: pmid_not_found 行のみの PMID は重複扱いにしない。
+  // 「再試行」経路（retrySeed）と同じく、再 ingest で見つかれば新規有効行を作る。
+  test('pmid_not_found 行のみの PMID の再 ingest は通常どおり有効行を作る（再試行経路）', async () => {
+    const { sheetsFetchMock, eutilsFetchMock, deps } = setupDeps();
+    const notFoundRow: string[] = header.map(() => '');
+    notFoundRow[header.indexOf('pmid')] = '111';
+    notFoundRow[header.indexOf('is_valid')] = 'false';
+    notFoundRow[header.indexOf('exclusion_reason')] = 'pmid_not_found';
+    notFoundRow[header.indexOf('source')] = 'initial';
+    notFoundRow[header.indexOf('ingest_format')] = 'pmid_direct';
+    sheetsFetchMock.mockImplementation(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/values/SeedPapers')) {
+        return jsonResponse({ values: [header, notFoundRow] });
+      }
+      return jsonResponse({});
+    });
+    eutilsFetchMock
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '1', idlist: ['111'] } }))
+      .mockResolvedValueOnce(
+        xmlResponse(
+          `<?xml version="1.0"?><PubmedArticleSet><PubmedArticle><MedlineCitation><PMID>111</PMID><Article><ArticleTitle>X</ArticleTitle></Article></MedlineCitation></PubmedArticle></PubmedArticleSet>`
+        )
+      );
+    const summary = await ingestSeeds({ mode: 'pmid_direct', pmids: ['111'] }, deps);
+    // 重複扱いされず、新規有効行が作られる
+    expect(summary.valid).toBe(1);
+    expect(summary.reasons.duplicate_pmid).toBe(0);
+    expect(eutilsFetchMock).toHaveBeenCalled();
+    const appendBody = JSON.parse(
+      (sheetsFetchMock.mock.calls.find((c) => (c[0] as string).includes(':append'))![1] as RequestInit)
+        .body as string
+    ) as { values: (string | number | boolean | null)[][] };
+    const row = appendBody.values[0]!;
+    const map: Record<string, string | number | boolean | null> = {};
+    header.forEach((k, i) => {
+      map[k] = row[i] as string | number | boolean | null;
+    });
+    expect(map['pmid']).toBe('111');
+    expect(map['is_valid']).toBe(true);
+    expect(map['exclusion_reason']).toBe('');
+  });
+
   test('esearch で有効だが efetch に現れない PMID でも title/year=null で保存', async () => {
     const { sheetsFetchMock, eutilsFetchMock, deps } = setupDeps();
     sheetsFetchMock.mockImplementation(async (url: string) => {

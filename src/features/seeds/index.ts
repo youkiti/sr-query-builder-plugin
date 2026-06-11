@@ -12,5 +12,6 @@ export {
   listSeedPapersWithRows,
   invalidateSeedRow,
   hasValidSeedPmid,
+  hasDuplicateSeedPmid,
   type SeedPaperWithRow,
 } from './seedRepository';

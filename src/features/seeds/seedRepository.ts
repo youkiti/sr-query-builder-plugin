@@ -106,6 +106,32 @@ export async function hasValidSeedPmid(
   return seeds.some((seed) => seed.isValid && seed.pmid === pmid);
 }
 
+/**
+ * 同 PMID が「重複扱い」になる行を既に持っているか確認。§4.3 の重複判定。
+ *
+ * 重複と見なすのは次のいずれかの行が存在する場合：
+ * - `is_valid=true` の同 PMID 行（既に有効登録済み）
+ * - `exclusion_reason=user_removed` の同 PMID 行（ユーザーが一度無効化した事実を監査ログに残すため）
+ *
+ * 一方、次の無効行は重複判定に含めない（既存挙動を維持）：
+ * - `exclusion_reason=pmid_not_found`: 「再試行」で同 PMID を再 ingest し、見つかれば
+ *   新規有効行を作る前提のため。これを重複扱いにすると再試行が常に duplicate_pmid 化してしまう
+ * - `exclusion_reason=duplicate_pmid`: 重複行自体を起点に二重カウントしないため
+ * - `exclusion_reason=no_pmid_resolved`（pmid=null）: そもそも PMID を持たない
+ */
+export async function hasDuplicateSeedPmid(
+  spreadsheetId: string,
+  pmid: string,
+  deps: GoogleApiDeps
+): Promise<boolean> {
+  const seeds = await listSeedPapers(spreadsheetId, deps);
+  return seeds.some(
+    (seed) =>
+      seed.pmid === pmid &&
+      (seed.isValid || seed.exclusionReason === 'user_removed')
+  );
+}
+
 function toRow(seed: SeedPaper): (string | number | boolean | null)[] {
   const map: Record<string, string | number | boolean | null> = {
     pmid: seed.pmid,
