@@ -1,5 +1,6 @@
 import type { PubmedFormula } from '@/lib/search-formula-md';
 import type { ConversionResult } from './types';
+import { appendResidualTagWarning } from './residualPubmedTags';
 
 /**
  * PubMed 検索式を Dialog/Embase 向けに変換する。
@@ -22,11 +23,13 @@ export function convertToDialog(formula: PubmedFormula): ConversionResult {
     }
     return `S${block.id} ${expression}`;
   });
-  return {
+  const result: ConversionResult = {
     targetDb: 'dialog',
     convertedFormula: lines.join('\n'),
     warnings: dedupe(warnings),
   };
+  // MVP では [pt]/[sh]/[mh] 等の PubMed 固有タグは未変換で残るため、残存していれば警告する。
+  return appendResidualTagWarning(result, 'Embase (Dialog)');
 }
 
 function convertDialogExpression(src: string): { expression: string; warnings: string[] } {
