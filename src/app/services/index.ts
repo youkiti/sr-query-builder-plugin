@@ -48,15 +48,23 @@ export {
 } from './exportService';
 export {
   ingestSeeds,
+  listSeeds,
+  invalidateSeed,
+  retrySeed,
   type IngestInput,
   type IngestSummary,
   type SeedServiceDeps,
 } from './seedService';
+export type { SeedPaperWithRow } from '@/features/seeds';
 export {
   runValidation,
+  analyzeMissedSeeds,
   type ValidationServiceDeps,
   type ValidationSummary,
+  type AnalyzeMissedSeedsDeps,
+  type AnalyzeMissedSeedsResult,
 } from './validationService';
+export type { MissedSeedAnalysis } from '@/features/formula/skills';
 export {
   applyBlockImprovement,
   requestBlockImprovement,

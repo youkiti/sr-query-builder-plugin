@@ -15,11 +15,16 @@ import {
   fetchBoundaryCandidates,
   generateDraft,
   ingestSeeds,
+  invalidateSeed,
+  listSeeds,
   recordDecision,
+  retrySeed,
   requestBlockImprovement,
   runValidation,
+  analyzeMissedSeeds,
   saveEditedFormula,
   submitProtocol,
+  type AnalyzeMissedSeedsResult,
   type BlockImprovementResult,
   type BoundaryCasesResult,
   type ChromeRuntimeDeps,
@@ -35,11 +40,14 @@ import {
   type RequestBlockImprovementInput,
   type SaveEditedFormulaInput,
   type SaveEditedFormulaResult,
+  type SeedPaperWithRow,
   type ValidationSummary,
 } from './services';
+import type { SeedPaper } from '@/domain/seedPaper';
 import { listFormulaVersions } from '@/features/formula';
 import type { FormulaVersion } from '@/domain/formulaVersion';
 import { getCurrentProject } from '@/features/project';
+import { getCurrentUserEmail } from '@/lib/google';
 import { evaluateGuards } from './guards';
 import {
   ROUTE_LABELS,
@@ -226,9 +234,18 @@ function buildDefaultViewOptions(
     seeds: {
       onIngest: async (input: IngestInput): Promise<IngestSummary> =>
         runIngestSeeds(store, runtime, input),
+      onListSeeds: async (): Promise<SeedPaperWithRow[]> => runListSeeds(store, runtime),
+      onInvalidate: async (rowIndex: number, seed: SeedPaper): Promise<SeedPaper> =>
+        runInvalidateSeed(store, runtime, rowIndex, seed),
+      onRetry: async (pmid: string): Promise<IngestSummary> =>
+        runRetrySeed(store, runtime, pmid),
     },
     validate: {
       onRun: async (): Promise<ValidationSummary> => runValidate(store, runtime),
+      onAnalyzeMissed: async (
+        missedPmids: string[]
+      ): Promise<AnalyzeMissedSeedsResult> =>
+        runAnalyzeMissedSeeds(store, runtime, llmFactoryDepsBase(), missedPmids),
     },
     history: {
       onList: async (): Promise<FormulaVersion[]> => runListHistory(store, runtime),
@@ -328,10 +345,13 @@ async function runRecordDecision(
   input: RecordDecisionInput
 ): Promise<RecordDecisionResult> {
   const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
+  // Protocol.created_by と同じ経路（chrome.identity 由来）で判定者メールを取得する
+  const userEmail = await getCurrentUserEmail(runtime.profile);
   return recordDecision(input, {
     google: runtime.google,
     eutils,
     store,
+    userEmail,
     // recordDecision は LLM を呼ばないので forPurpose は呼ばれない（guard）
     llmFactory: { forPurpose: neverCalledProvider },
   });
@@ -355,6 +375,33 @@ async function runIngestSeeds(
   });
 }
 
+async function runListSeeds(
+  store: AppStore,
+  runtime: ChromeRuntimeDeps
+): Promise<SeedPaperWithRow[]> {
+  const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
+  return listSeeds({ google: runtime.google, eutils, store });
+}
+
+async function runInvalidateSeed(
+  store: AppStore,
+  runtime: ChromeRuntimeDeps,
+  rowIndex: number,
+  seed: SeedPaper
+): Promise<SeedPaper> {
+  const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
+  return invalidateSeed(rowIndex, seed, { google: runtime.google, eutils, store });
+}
+
+async function runRetrySeed(
+  store: AppStore,
+  runtime: ChromeRuntimeDeps,
+  pmid: string
+): Promise<IngestSummary> {
+  const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
+  return retrySeed(pmid, { google: runtime.google, eutils, store });
+}
+
 async function runValidate(
   store: AppStore,
   runtime: ChromeRuntimeDeps
@@ -364,6 +411,31 @@ async function runValidate(
     google: runtime.google,
     eutils,
     store,
+  });
+}
+
+async function runAnalyzeMissedSeeds(
+  store: AppStore,
+  runtime: ChromeRuntimeDeps,
+  baseDeps: Omit<LlmFactoryDeps, 'llmLogFolderId' | 'spreadsheetId'>,
+  missedPmids: string[]
+): Promise<AnalyzeMissedSeedsResult> {
+  const project = store.getState().project;
+  /* istanbul ignore if -- validate view は project + 検証結果有り時しか onAnalyzeMissed を呼ばない */
+  if (!project) {
+    throw new Error('プロジェクトが選択されていません');
+  }
+  const factory = await buildLlmProviderFactory({
+    ...baseDeps,
+    llmLogFolderId: project.driveFolderId,
+    spreadsheetId: project.spreadsheetId,
+  });
+  const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
+  return analyzeMissedSeeds({
+    eutils,
+    store,
+    llmFactory: factory,
+    missedPmids,
   });
 }
 
@@ -410,9 +482,11 @@ async function runGenerateDraft(
     llmLogFolderId: project.driveFolderId,
     spreadsheetId: project.spreadsheetId,
   });
+  const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
   await generateDraft({
     google: runtime.google,
     store,
+    eutils,
     llmFactory: factory,
     onProgress,
   });

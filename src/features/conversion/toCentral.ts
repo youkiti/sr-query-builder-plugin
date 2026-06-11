@@ -1,5 +1,6 @@
 import type { FormulaBlock, PubmedFormula } from '@/lib/search-formula-md';
 import type { ConversionResult } from './types';
+import { appendResidualTagWarning } from './residualPubmedTags';
 
 /**
  * PubMed 検索式を Cochrane CENTRAL 向けに変換する。
@@ -21,11 +22,13 @@ export function convertToCentral(formula: PubmedFormula): ConversionResult {
     }
     return formatBlock(block, expression);
   });
-  return {
+  const result: ConversionResult = {
     targetDb: 'central',
     convertedFormula: lines.join('\n'),
     warnings: dedupe(warnings),
   };
+  // MVP では [pt]/[sh]/[mh] 等の PubMed 固有タグは未変換で残るため、残存していれば警告する。
+  return appendResidualTagWarning(result, 'Cochrane CENTRAL');
 }
 
 function formatBlock(block: FormulaBlock, expression: string): string {

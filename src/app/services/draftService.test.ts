@@ -88,6 +88,11 @@ function setupDeps(extra: { onProgress?: (p: DraftProgress) => void } = {}): {
       getAccessToken: jest.fn().mockResolvedValue('t'),
     },
     store,
+    eutils: {
+      fetch: fetchMock as unknown as typeof fetch,
+      tool: 'test',
+      email: 'test@example.com',
+    },
     llmFactory: {
       forPurpose: (purpose) => {
         purposes.push(purpose);
@@ -240,6 +245,86 @@ describe('generateDraft', () => {
       blocksDraft: { blocks: [], combinationExpression: '' },
     }));
     await expect(generateDraft(deps)).rejects.toThrow(/blocksDraft/);
+  });
+
+  test('seed あり → suggestMesh に seed MeSH 頻度が渡る（§4.4）', async () => {
+    // SeedPapers に適格 seed 1 件、efetch でその論文の MeSH を返すように fetch を分岐する
+    const seedRow = [
+      '111', 'Seed title', '2020', 'initial', 'pmid_direct', '',
+      'true', '', '', '', '', '', '',
+    ];
+    const efetchXml =
+      '<PubmedArticleSet><PubmedArticle><MedlineCitation><PMID>111</PMID>' +
+      '<Article><ArticleTitle>Seed title</ArticleTitle></Article>' +
+      '<MeshHeadingList><MeshHeading><DescriptorName>Stroke</DescriptorName></MeshHeading>' +
+      '<MeshHeading><DescriptorName>Thrombolytic Therapy</DescriptorName></MeshHeading>' +
+      '</MeshHeadingList></MedlineCitation></PubmedArticle></PubmedArticleSet>';
+    const fetchMock = jest.fn((input: string) => {
+      const url = String(input);
+      if (url.includes('/values/SeedPapers')) {
+        return Promise.resolve(jsonResponse({ values: [SHEET_HEADERS.SeedPapers, seedRow] }));
+      }
+      if (url.includes('efetch.fcgi')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({}),
+          text: async () => efetchXml,
+        } as Response);
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+    const meshPrompts: string[] = [];
+    const store = createStore(makeState());
+    const deps: Parameters<typeof generateDraft>[0] = {
+      google: {
+        fetch: fetchMock as unknown as typeof fetch,
+        getAccessToken: jest.fn().mockResolvedValue('t'),
+      },
+      store,
+      eutils: { fetch: fetchMock as unknown as typeof fetch, tool: 'test' },
+      llmFactory: {
+        forPurpose: (purpose) => {
+          const base = skillProviderFor(purpose);
+          if (purpose !== 'suggest_mesh') return base;
+          return {
+            ...base,
+            chat: async (messages) => {
+              meshPrompts.push(messages.map((m) => m.content).join('\n'));
+              return base.chat(messages);
+            },
+          };
+        },
+      },
+      newUuid: () => 'v',
+      now: () => '2026-04-19T00:00:00.000Z',
+    };
+    await generateDraft(deps);
+    // suggest_mesh プロンプトに seed の MeSH 頻度行が含まれる
+    expect(meshPrompts.length).toBeGreaterThan(0);
+    expect(meshPrompts[0]).toContain('Stroke');
+    expect(meshPrompts[0]).not.toContain('(seed 論文の MeSH なし)');
+  });
+
+  test('seed なし → suggestMesh に空配列が渡る（プロンプトは「MeSH なし」）', async () => {
+    const meshPrompts: string[] = [];
+    const { store, deps } = setupDeps();
+    deps.llmFactory = {
+      forPurpose: (purpose) => {
+        const base = skillProviderFor(purpose);
+        if (purpose !== 'suggest_mesh') return base;
+        return {
+          ...base,
+          chat: async (messages) => {
+            meshPrompts.push(messages.map((m) => m.content).join('\n'));
+            return base.chat(messages);
+          },
+        };
+      },
+    };
+    await generateDraft(deps);
+    expect(store.getState().currentFormulaVersionId).toBe('new-version-id');
+    expect(meshPrompts[0]).toContain('(seed 論文の MeSH なし)');
   });
 
   test('newUuid / now を省略しても動く', async () => {

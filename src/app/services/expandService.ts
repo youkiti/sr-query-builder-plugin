@@ -31,6 +31,8 @@ export interface ExpandServiceDeps {
   eutils: EutilsDeps;
   store: AppStore;
   llmFactory: LlmProviderFactory;
+  /** 判定者メールアドレス（SeedPapers.decided_by に記録する）。取得できなければ null */
+  userEmail?: string | null;
   /** esearch で取得する上位件数。既定 50 */
   retmax?: number;
   /** pick-boundary-cases に渡す候補件数上限。既定 20 */
@@ -141,7 +143,12 @@ export interface RecordDecisionResult {
 
 /**
  * 対話判定を SeedPapers に追記する。
- * include は is_valid=true、exclude / maybe は is_valid=false（user_removed）。
+ *
+ * is_valid は「E-utilities で存在確認できたか」を表す列なので、境界事例候補は
+ * すべて efetch 済み = 存在確認済みのため判定によらず is_valid=true で保存する
+ * （requirements.md §4.5）。検証ロジックからの除外は user_decision 列のフィルタ
+ * （isSeedEligibleForValidation が exclude / maybe を除外）で行い、is_valid を
+ * 二重に落とさない。user_removed はユーザーが行を手動無効化したとき専用。
  */
 export async function recordDecision(
   input: RecordDecisionInput,
@@ -152,7 +159,6 @@ export async function recordDecision(
     throw new Error('プロジェクトが選択されていません');
   }
   const nowFn = deps.now ?? nowIso;
-  const isInclude = input.decision === 'include';
   const seed: SeedPaper = {
     pmid: input.pmid,
     title: input.title,
@@ -160,12 +166,13 @@ export async function recordDecision(
     source: 'interactive',
     ingestFormat: 'interactive',
     originalDb: null,
-    isValid: isInclude,
-    exclusionReason: isInclude ? null : 'user_removed',
+    // 候補は efetch 済み = 存在確認済みなので判定によらず is_valid=true。
+    isValid: true,
+    exclusionReason: null,
     originalPayloadRef: null,
     userDecision: input.decision,
     decidedAt: nowFn(),
-    decidedBy: null,
+    decidedBy: deps.userEmail ?? null,
     note: input.reason === '' ? null : input.reason,
   };
   await appendSeedPaper(state.project.spreadsheetId, seed, deps.google);

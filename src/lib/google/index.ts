@@ -14,6 +14,7 @@ export {
   createSpreadsheet,
   writeHeaderRow,
   appendRow,
+  updateRow,
   getSheetValues,
   type CreatedSpreadsheet,
 } from './sheets';

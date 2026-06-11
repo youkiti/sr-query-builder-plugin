@@ -42,17 +42,22 @@ export async function checkFinalQuery(
 
   const uidClause = seedPmids.map((p) => `${p}[uid]`).join(' OR ');
   const capturedQuery = `(${finalQuery}) AND (${uidClause})`;
-  const { pmids: capturedPmids } = await esearch(capturedQuery, deps, {
+  const { pmids: esearchPmids } = await esearch(capturedQuery, deps, {
     retmax: seedPmids.length,
   });
+  // esearch は理論上 seed 以外の PMID を返さないはずだが、クエリ展開や API の
+  // 揺らぎで seed 外 PMID が混ざると capture_rate と missed_pmids が矛盾する。
+  // capturedPmids を必ず seed 集合との積集合に限定し、捕捉率・未捕捉を一貫して計算する。
+  const esearchSet = new Set(esearchPmids);
+  const capturedPmids = seedPmids.filter((p) => esearchSet.has(p));
   const capturedSet = new Set(capturedPmids);
   const missedPmids = seedPmids.filter((p) => !capturedSet.has(p));
 
   return {
     finalQuery,
     totalHits,
-    captureRate: capturedPmids.length / seedPmids.length,
-    capturedPmids: Array.from(capturedSet),
+    captureRate: capturedSet.size / seedPmids.length,
+    capturedPmids,
     missedPmids,
   };
 }

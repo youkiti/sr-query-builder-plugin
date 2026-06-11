@@ -75,6 +75,31 @@ describe('convertToCentral', () => {
     expect(result.warnings).toHaveLength(1);
   });
 
+  test('HSSS 風 RCT フィルタの PubMed 固有タグ ([pt]/[sh]/[mh]) が残ると警告する', () => {
+    const result = convertToCentral(
+      makeFormula([
+        {
+          id: '1',
+          expression:
+            'randomized controlled trial[pt] OR drug therapy[sh] OR animals[mh]',
+        },
+      ])
+    );
+    const tagWarning = result.warnings.find((w) => w.includes('PubMed 固有タグ'));
+    expect(tagWarning).toBeDefined();
+    expect(tagWarning).toContain('[pt]');
+    expect(tagWarning).toContain('[sh]');
+    expect(tagWarning).toContain('[mh]');
+    expect(tagWarning).toContain('Cochrane CENTRAL');
+  });
+
+  test('Cochrane 形 [mh "X"] のみなら残存タグ警告は出ない', () => {
+    const result = convertToCentral(
+      makeFormula([{ id: '1', expression: '"Diabetes Mellitus"[Mesh] OR "Aspirin"[Mesh]' }])
+    );
+    expect(result.warnings.some((w) => w.includes('PubMed 固有タグ'))).toBe(false);
+  });
+
   test('複数ブロックを改行で結合する', () => {
     const result = convertToCentral(
       makeFormula([

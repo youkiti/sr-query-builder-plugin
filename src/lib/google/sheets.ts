@@ -88,6 +88,38 @@ export async function appendRow(
 }
 
 /**
+ * 指定タブの 1 行を丸ごと上書きする（論理削除などの行書き換え用）。
+ *
+ * - 範囲は `{tab}!A{rowIndex}:Z{rowIndex}`（rowIndex は 1 始まりのシート行番号。
+ *   ヘッダ行が 1 行目なので、データ 1 件目は通常 2 を渡す）
+ * - valueInputOption=RAW で PUT する。null は空文字に変換する（appendRow と同じ挙動）
+ *
+ * 行の追加ではなく既存セルの上書きなので、行番号は呼び出し側が
+ * `getSheetValues` の並び順から算出する前提（§4.3 の user_removed 論理削除で使う）。
+ */
+export async function updateRow(
+  spreadsheetId: string,
+  tab: string,
+  rowIndex: number,
+  row: readonly (string | number | boolean | null)[],
+  deps: GoogleApiDeps
+): Promise<void> {
+  const range = `${tab}!A${rowIndex}:Z${rowIndex}`;
+  const url = `${API_BASE}/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`;
+  await googleFetch(
+    url,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        values: [row.map((v) => (v === null ? '' : v))],
+      }),
+    },
+    deps
+  );
+}
+
+/**
  * 指定タブの全行を 2 次元配列で取得する。`majorDimension=ROWS`。
  */
 export async function getSheetValues(

@@ -9,3 +9,4 @@ export {
 export { GeminiProvider, type GeminiProviderOptions } from './GeminiProvider';
 export { createProvider, type ProviderConfig } from './providerFactory';
 export { withLogging, buildPromptSummary, type ApiLoggerDeps } from './apiLogger';
+export { estimateCostUsd, MODEL_PRICING, type ModelPricing } from './pricing';

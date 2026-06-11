@@ -1,6 +1,16 @@
 import type { SeedPaper } from '@/domain/seedPaper';
 import { SHEET_HEADERS } from '@/domain/sheetsSchema';
-import { appendRow, getSheetValues, type GoogleApiDeps } from '@/lib/google';
+import { appendRow, getSheetValues, updateRow, type GoogleApiDeps } from '@/lib/google';
+
+/**
+ * SeedPapers の 1 行に、シート上の行番号（1 始まり。ヘッダが 1 行目）を添えたもの。
+ * 論理削除（user_removed への書き換え）で行番号を指定するために使う。§4.3。
+ */
+export interface SeedPaperWithRow {
+  seed: SeedPaper;
+  /** シート上の行番号（1 始まり）。ヘッダ行が 1 なので、データ 1 件目は 2 */
+  rowIndex: number;
+}
 
 /**
  * SeedPapers タブの読み書き。requirements.md §3.1 / §4.3 に準拠。
@@ -36,6 +46,54 @@ export async function listSeedPapers(
 }
 
 /**
+ * 既存 SeedPapers を、シート上の行番号付きで全件読み出す（ヘッダ除く）。
+ * §4.3 の無効化（user_removed）で行番号を指定して書き換えるために使う。
+ *
+ * 行番号はヘッダ（1 行目）を含めた 1 始まりで、データ 1 件目は 2 になる。
+ * `fromRow` で SeedPaper に変換できなかった行（空行など）はスキップする。
+ */
+export async function listSeedPapersWithRows(
+  spreadsheetId: string,
+  deps: GoogleApiDeps
+): Promise<SeedPaperWithRow[]> {
+  const rows = await getSheetValues(spreadsheetId, 'SeedPapers', deps);
+  if (rows.length <= 1) {
+    return [];
+  }
+  const out: SeedPaperWithRow[] = [];
+  for (let i = 1; i < rows.length; i += 1) {
+    const seed = fromRow(rows[i] ?? []);
+    if (seed !== null) {
+      // rows のインデックス i は 0 始まり。シート行番号は 1 始まりなので i + 1。
+      out.push({ seed, rowIndex: i + 1 });
+    }
+  }
+  return out;
+}
+
+/**
+ * 指定行番号の seed を `is_valid=false, exclusion_reason=user_removed` に書き換える（論理削除）。
+ * §4.3「押下時の挙動は当該行を書き換えるだけで、行自体は残す」。
+ *
+ * 行追加ではなく既存行の上書きなので、呼び出し側は `listSeedPapersWithRows` の
+ * rowIndex を渡すこと。書き換え後の seed をそのまま返す。
+ */
+export async function invalidateSeedRow(
+  spreadsheetId: string,
+  rowIndex: number,
+  seed: SeedPaper,
+  deps: GoogleApiDeps
+): Promise<SeedPaper> {
+  const updated: SeedPaper = {
+    ...seed,
+    isValid: false,
+    exclusionReason: 'user_removed',
+  };
+  await updateRow(spreadsheetId, 'SeedPapers', rowIndex, toRow(updated), deps);
+  return updated;
+}
+
+/**
  * 同 PMID の有効行が既に存在するか確認。
  * §4.3 の重複判定で呼ぶ。
  */
@@ -46,6 +104,32 @@ export async function hasValidSeedPmid(
 ): Promise<boolean> {
   const seeds = await listSeedPapers(spreadsheetId, deps);
   return seeds.some((seed) => seed.isValid && seed.pmid === pmid);
+}
+
+/**
+ * 同 PMID が「重複扱い」になる行を既に持っているか確認。§4.3 の重複判定。
+ *
+ * 重複と見なすのは次のいずれかの行が存在する場合：
+ * - `is_valid=true` の同 PMID 行（既に有効登録済み）
+ * - `exclusion_reason=user_removed` の同 PMID 行（ユーザーが一度無効化した事実を監査ログに残すため）
+ *
+ * 一方、次の無効行は重複判定に含めない（既存挙動を維持）：
+ * - `exclusion_reason=pmid_not_found`: 「再試行」で同 PMID を再 ingest し、見つかれば
+ *   新規有効行を作る前提のため。これを重複扱いにすると再試行が常に duplicate_pmid 化してしまう
+ * - `exclusion_reason=duplicate_pmid`: 重複行自体を起点に二重カウントしないため
+ * - `exclusion_reason=no_pmid_resolved`（pmid=null）: そもそも PMID を持たない
+ */
+export async function hasDuplicateSeedPmid(
+  spreadsheetId: string,
+  pmid: string,
+  deps: GoogleApiDeps
+): Promise<boolean> {
+  const seeds = await listSeedPapers(spreadsheetId, deps);
+  return seeds.some(
+    (seed) =>
+      seed.pmid === pmid &&
+      (seed.isValid || seed.exclusionReason === 'user_removed')
+  );
 }
 
 function toRow(seed: SeedPaper): (string | number | boolean | null)[] {

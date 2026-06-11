@@ -194,6 +194,116 @@ describe('createValidateView', () => {
     expect(container.querySelector('.validate__mesh')?.textContent).toContain('集計できません');
   });
 
+  test('未捕捉 PMID があると「AI で原因を分析する」ボタンを出し、結果を描画する', async () => {
+    const onRun = jest.fn().mockResolvedValue(sampleSummary());
+    const onAnalyzeMissed = jest.fn().mockResolvedValue({
+      analyses: [
+        {
+          pmid: '444',
+          cause: 'acute lung injury が #1 に無いため取りこぼしています。',
+          suggestedTerms: ['"acute lung injury"[tiab]'],
+          relatedBlock: '1',
+        },
+      ],
+      fetchedPmids: ['444'],
+    });
+    const view = createValidateView({ onRun, onAnalyzeMissed });
+    const container = buildContainer();
+    view(container, { state: stateReady(), navigate: jest.fn() });
+    container.querySelector('button')!.click();
+    await flushAsync();
+    await flushAsync();
+
+    const analyzeBtn = container.querySelector<HTMLButtonElement>('.validate__analyze-missed');
+    expect(analyzeBtn).not.toBeNull();
+    analyzeBtn!.click();
+    await flushAsync();
+    await flushAsync();
+
+    expect(onAnalyzeMissed).toHaveBeenCalledWith(['444']);
+    const items = container.querySelectorAll('.validate__analysis-item');
+    expect(items).toHaveLength(1);
+    expect(items[0]!.textContent).toContain('PMID 444');
+    expect(items[0]!.textContent).toContain('推定ブロック: #1');
+    expect(items[0]!.textContent).toContain('acute lung injury');
+    expect(container.querySelector('.validate__analysis-terms li')?.textContent).toContain(
+      'acute lung injury'
+    );
+    expect(container.querySelector('.validate__analyze-status')?.textContent).toContain(
+      '1 件'
+    );
+  });
+
+  test('未捕捉 PMID が無いと分析ボタンを出さない', async () => {
+    const onRun = jest.fn().mockResolvedValue(
+      sampleSummary({
+        finalQuery: {
+          finalQuery: 'x',
+          totalHits: 100,
+          captureRate: 1,
+          capturedPmids: ['111', '222'],
+          missedPmids: [],
+        },
+      })
+    );
+    const onAnalyzeMissed = jest.fn();
+    const view = createValidateView({ onRun, onAnalyzeMissed });
+    const container = buildContainer();
+    view(container, { state: stateReady(), navigate: jest.fn() });
+    container.querySelector('button')!.click();
+    await flushAsync();
+    await flushAsync();
+    expect(container.querySelector('.validate__analyze-missed')).toBeNull();
+  });
+
+  test('分析が空結果なら status に「得られませんでした」', async () => {
+    const onRun = jest.fn().mockResolvedValue(sampleSummary());
+    const onAnalyzeMissed = jest
+      .fn()
+      .mockResolvedValue({ analyses: [], fetchedPmids: [] });
+    const view = createValidateView({ onRun, onAnalyzeMissed });
+    const container = buildContainer();
+    view(container, { state: stateReady(), navigate: jest.fn() });
+    container.querySelector('button')!.click();
+    await flushAsync();
+    await flushAsync();
+    container.querySelector<HTMLButtonElement>('.validate__analyze-missed')!.click();
+    await flushAsync();
+    await flushAsync();
+    expect(container.querySelector('.validate__analyze-status')?.textContent).toContain(
+      '得られませんでした'
+    );
+  });
+
+  test('分析が reject したらエラー表示し status をクリア', async () => {
+    const onRun = jest.fn().mockResolvedValue(sampleSummary());
+    const onAnalyzeMissed = jest.fn().mockRejectedValue(new Error('鍵が未設定'));
+    const view = createValidateView({ onRun, onAnalyzeMissed });
+    const container = buildContainer();
+    view(container, { state: stateReady(), navigate: jest.fn() });
+    container.querySelector('button')!.click();
+    await flushAsync();
+    await flushAsync();
+    container.querySelector<HTMLButtonElement>('.validate__analyze-missed')!.click();
+    await flushAsync();
+    await flushAsync();
+    expect(container.querySelector('.validate__analyze-error')?.textContent).toBe('鍵が未設定');
+    expect(container.querySelector('.validate__analyze-status')?.textContent).toBe('');
+  });
+
+  test('onAnalyzeMissed 未指定でも分析ボタンのクリックで例外にならない', async () => {
+    const onRun = jest.fn().mockResolvedValue(sampleSummary());
+    const view = createValidateView({ onRun });
+    const container = buildContainer();
+    view(container, { state: stateReady(), navigate: jest.fn() });
+    container.querySelector('button')!.click();
+    await flushAsync();
+    await flushAsync();
+    const analyzeBtn = container.querySelector<HTMLButtonElement>('.validate__analyze-missed');
+    expect(analyzeBtn).not.toBeNull();
+    expect(() => analyzeBtn!.click()).not.toThrow();
+  });
+
   test('onRun が reject したらエラー表示', async () => {
     const onRun = jest.fn().mockRejectedValue(new Error('boom'));
     const view = createValidateView({ onRun });

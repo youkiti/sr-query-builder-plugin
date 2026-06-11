@@ -55,9 +55,10 @@ describe('renderDoneView', () => {
     expect(pubmedLink!.target).toBe('_blank');
     expect(pubmedLink!.rel).toBe('noopener noreferrer');
     const links = Array.from(container.querySelectorAll<HTMLAnchorElement>('.done__links a'));
-    expect(links).toHaveLength(3);
+    expect(links).toHaveLength(4);
     expect(links.map((a) => a.textContent)).toEqual([
       'Cochrane CENTRAL で開く',
+      'Embase (Dialog) で開く',
       'ClinicalTrials.gov で開く',
       'ICTRP で開く',
     ]);
@@ -76,7 +77,7 @@ describe('renderDoneView', () => {
     });
     expect(container.querySelector('.done__pubmed-link')).toBeNull();
     // 外部リンクは出る
-    expect(container.querySelectorAll('.done__links a')).toHaveLength(3);
+    expect(container.querySelectorAll('.done__links a')).toHaveLength(4);
   });
 
   test('空のコードブロックなら PubMed リンクを出さない', () => {

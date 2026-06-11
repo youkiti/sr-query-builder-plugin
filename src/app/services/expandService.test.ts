@@ -619,7 +619,10 @@ describe('recordDecision', () => {
     expect(map['is_valid']).toBe(true);
   });
 
-  test('exclude は is_valid=false + user_removed', async () => {
+  // 仕様変更（§4.5）: is_valid は「E-utilities で存在確認できたか」を表す列であり、
+  // exclude / maybe でも候補は efetch 済み = 存在確認済みなので is_valid=true で保存する。
+  // 検証からの除外は user_decision 列のフィルタ（isSeedEligibleForValidation）が担う。
+  test('exclude でも is_valid=true、exclusion_reason=null（検証除外は user_decision で）', async () => {
     const store = createStore(makeState());
     const fetchMock = jest.fn().mockResolvedValue(jsonResponse({}));
     const result = await recordDecision(
@@ -638,12 +641,13 @@ describe('recordDecision', () => {
         llmFactory: { forPurpose: () => mockProvider('{}') },
       }
     );
-    expect(result.seed.isValid).toBe(false);
-    expect(result.seed.exclusionReason).toBe('user_removed');
+    expect(result.seed.isValid).toBe(true);
+    expect(result.seed.exclusionReason).toBeNull();
+    expect(result.seed.userDecision).toBe('exclude');
     expect(result.seed.note).toBeNull();
   });
 
-  test('maybe も is_valid=false + note 反映', async () => {
+  test('maybe も is_valid=true + note 反映', async () => {
     const store = createStore(makeState());
     const fetchMock = jest.fn().mockResolvedValue(jsonResponse({}));
     const result = await recordDecision(
@@ -662,9 +666,61 @@ describe('recordDecision', () => {
         llmFactory: { forPurpose: () => mockProvider('{}') },
       }
     );
-    expect(result.seed.isValid).toBe(false);
+    expect(result.seed.isValid).toBe(true);
+    expect(result.seed.exclusionReason).toBeNull();
     expect(result.seed.userDecision).toBe('maybe');
     expect(result.seed.note).toBe('unsure');
+  });
+
+  test('userEmail を渡すと decided_by に記録される（§4.5）', async () => {
+    const store = createStore(makeState());
+    const fetchMock = jest.fn().mockResolvedValue(jsonResponse({}));
+    const result = await recordDecision(
+      { pmid: '666', title: null, year: null, decision: 'include', reason: '' },
+      {
+        google: {
+          fetch: fetchMock as unknown as typeof fetch,
+          getAccessToken: jest.fn().mockResolvedValue('t'),
+        },
+        eutils: {
+          fetch: jest.fn() as unknown as typeof fetch,
+          sleep: async () => undefined,
+          maxRetries: 0,
+        },
+        store,
+        userEmail: 'reviewer@example.com',
+        llmFactory: { forPurpose: () => mockProvider('{}') },
+      }
+    );
+    expect(result.seed.decidedBy).toBe('reviewer@example.com');
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string) as {
+      values: (string | number | boolean | null)[][];
+    };
+    const row = body.values[0]!;
+    const idx = SHEET_HEADERS.SeedPapers.indexOf('decided_by');
+    expect(row[idx]).toBe('reviewer@example.com');
+  });
+
+  test('userEmail 未指定なら decided_by は null', async () => {
+    const store = createStore(makeState());
+    const fetchMock = jest.fn().mockResolvedValue(jsonResponse({}));
+    const result = await recordDecision(
+      { pmid: '777', title: null, year: null, decision: 'include', reason: '' },
+      {
+        google: {
+          fetch: fetchMock as unknown as typeof fetch,
+          getAccessToken: jest.fn().mockResolvedValue('t'),
+        },
+        eutils: {
+          fetch: jest.fn() as unknown as typeof fetch,
+          sleep: async () => undefined,
+          maxRetries: 0,
+        },
+        store,
+        llmFactory: { forPurpose: () => mockProvider('{}') },
+      }
+    );
+    expect(result.seed.decidedBy).toBeNull();
   });
 
   test('now / newUuid 未指定でも動く（既定実装）', async () => {

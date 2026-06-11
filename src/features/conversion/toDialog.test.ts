@@ -52,6 +52,31 @@ describe('convertToDialog', () => {
     expect(result.warnings[0]).toContain('近接演算子');
   });
 
+  test('HSSS 風 RCT フィルタの PubMed 固有タグ ([pt]/[sh]/[mh]) が残ると警告する', () => {
+    const result = convertToDialog(
+      makeFormula([
+        {
+          id: '1',
+          expression:
+            'randomized controlled trial[pt] OR drug therapy[sh] OR animals[mh]',
+        },
+      ])
+    );
+    const tagWarning = result.warnings.find((w) => w.includes('PubMed 固有タグ'));
+    expect(tagWarning).toBeDefined();
+    expect(tagWarning).toContain('[pt]');
+    expect(tagWarning).toContain('[sh]');
+    expect(tagWarning).toContain('[mh]');
+    expect(tagWarning).toContain('Embase (Dialog)');
+  });
+
+  test('変換可能なタグのみなら残存タグ警告は出ない', () => {
+    const result = convertToDialog(
+      makeFormula([{ id: '1', expression: '"heart failure"[tiab] OR "Diabetes"[Mesh]' }])
+    );
+    expect(result.warnings.some((w) => w.includes('PubMed 固有タグ'))).toBe(false);
+  });
+
   test('#N 参照は SN に変換する', () => {
     const result = convertToDialog(
       makeFormula([

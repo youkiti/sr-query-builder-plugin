@@ -1,4 +1,5 @@
-import type { IngestSummary } from '@/app/services';
+import type { IngestSummary, SeedPaperWithRow } from '@/app/services';
+import type { SeedPaper } from '@/domain/seedPaper';
 import type { EfetchArticle } from '@/lib/ncbi';
 import { INITIAL_STATE, type AppState } from '../store';
 import { createSeedsView, detectFileMode } from './seedsView';
@@ -347,6 +348,106 @@ describe('createSeedsView', () => {
     expect(text).toContain('Author 6');
     expect(text).toContain('ほか 3 名');
     expect(text).not.toContain('Author 7');
+  });
+});
+
+describe('createSeedsView - 登録済みシード一覧（§4.3）', () => {
+  function seedRow(rowIndex: number, overrides: Partial<SeedPaper> = {}): SeedPaperWithRow {
+    return {
+      rowIndex,
+      seed: {
+        pmid: '111',
+        title: 'T',
+        year: 2020,
+        source: 'initial',
+        ingestFormat: 'pmid_direct',
+        originalDb: null,
+        isValid: true,
+        exclusionReason: null,
+        originalPayloadRef: null,
+        userDecision: null,
+        decidedAt: null,
+        decidedBy: null,
+        note: null,
+        ...overrides,
+      },
+    };
+  }
+
+  test('デフォルトは有効行のみ表示、トグルで無効行も表示', async () => {
+    const onListSeeds = jest.fn().mockResolvedValue([
+      seedRow(2, { pmid: '111', isValid: true }),
+      seedRow(3, { pmid: '222', isValid: false, exclusionReason: 'pmid_not_found' }),
+    ]);
+    const view = createSeedsView({ onListSeeds });
+    const container = buildContainer();
+    view(container, { state: stateWithProject, navigate: jest.fn() });
+    await flushAsync();
+    await flushAsync();
+    // 初期は有効 1 件のみ
+    expect(container.querySelectorAll('.seeds__list-item')).toHaveLength(1);
+    expect(container.querySelector('.seeds__list-item--valid')).not.toBeNull();
+    expect(container.querySelector('.seeds__list-item--invalid')).toBeNull();
+    // トグル ON
+    const toggle = container.querySelector<HTMLInputElement>('.seeds__show-invalid')!;
+    toggle.checked = true;
+    toggle.dispatchEvent(new Event('change'));
+    await flushAsync();
+    await flushAsync();
+    expect(container.querySelectorAll('.seeds__list-item')).toHaveLength(2);
+    expect(container.querySelector('.seeds__list-item--invalid')?.textContent).toContain(
+      'pmid_not_found'
+    );
+  });
+
+  test('有効行の「無効化」ボタンで onInvalidate が行番号付きで呼ばれる', async () => {
+    const onListSeeds = jest.fn().mockResolvedValue([seedRow(2, { pmid: '111', isValid: true })]);
+    const onInvalidate = jest.fn().mockResolvedValue({});
+    const view = createSeedsView({ onListSeeds, onInvalidate });
+    const container = buildContainer();
+    view(container, { state: stateWithProject, navigate: jest.fn() });
+    await flushAsync();
+    await flushAsync();
+    const btn = container.querySelector<HTMLButtonElement>('.seeds__list-invalidate')!;
+    btn.click();
+    await flushAsync();
+    await flushAsync();
+    expect(onInvalidate).toHaveBeenCalledTimes(1);
+    expect(onInvalidate.mock.calls[0][0]).toBe(2);
+    expect((onInvalidate.mock.calls[0][1] as SeedPaper).pmid).toBe('111');
+  });
+
+  test('pmid_not_found 行の「再試行」ボタンで onRetry が呼ばれる', async () => {
+    const onListSeeds = jest
+      .fn()
+      .mockResolvedValue([
+        seedRow(2, { pmid: '999', isValid: false, exclusionReason: 'pmid_not_found' }),
+      ]);
+    const onRetry = jest.fn().mockResolvedValue(sampleSummary());
+    const view = createSeedsView({ onListSeeds, onRetry });
+    const container = buildContainer();
+    view(container, { state: stateWithProject, navigate: jest.fn() });
+    await flushAsync();
+    await flushAsync();
+    // 無効行を見るためトグル ON
+    const toggle = container.querySelector<HTMLInputElement>('.seeds__show-invalid')!;
+    toggle.checked = true;
+    toggle.dispatchEvent(new Event('change'));
+    await flushAsync();
+    await flushAsync();
+    const retryBtn = container.querySelector<HTMLButtonElement>('.seeds__list-retry')!;
+    expect(retryBtn).not.toBeNull();
+    retryBtn.click();
+    await flushAsync();
+    await flushAsync();
+    expect(onRetry).toHaveBeenCalledWith('999');
+  });
+
+  test('onListSeeds 未指定なら一覧は描画されない（既存挙動を壊さない）', () => {
+    const view = createSeedsView({ onIngest: jest.fn() });
+    const container = buildContainer();
+    view(container, { state: stateWithProject, navigate: jest.fn() });
+    expect(container.querySelector('.seeds__list-item')).toBeNull();
   });
 });
 
