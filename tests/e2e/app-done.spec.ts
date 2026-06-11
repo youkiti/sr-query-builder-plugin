@@ -11,16 +11,19 @@ import { fullStateScenario } from './fixtures/scenarios/fullState';
 const APP_URL = '/app/app.html#/done';
 
 test.describe('app-done (#/done)', () => {
-  test('外部 DB リンクが target=_blank で 3 件出る', async ({ page }) => {
+  test('外部 DB リンクが target=_blank で 4 件出る', async ({ page }) => {
     await injectAppStub(page, fullStateScenario());
     await page.goto(APP_URL);
 
     await expect(page.locator('#app-content h2')).toHaveText('完了');
     const links = page.locator('.done__links a');
-    await expect(links).toHaveCount(3);
-    for (let i = 0; i < 3; i++) {
+    await expect(links).toHaveCount(4);
+    const count = await links.count();
+    for (let i = 0; i < count; i++) {
       await expect(links.nth(i)).toHaveAttribute('target', '_blank');
     }
+    // Embase (Dialog) 案内が含まれる
+    await expect(page.locator('.done__links a', { hasText: 'Embase (Dialog)' })).toHaveCount(1);
     // nbib DL 誘導メッセージ（PubMed リンクも出る）
     await expect(page.locator('.done__pubmed-link a')).toBeVisible();
   });

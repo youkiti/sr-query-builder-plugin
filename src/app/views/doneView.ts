@@ -8,10 +8,11 @@ import type { RenderView } from './types';
  * 完了画面（#/done）。
  *
  * - PubMed で検索式を直接開くリンク
- * - CENTRAL / ClinicalTrials.gov / ICTRP の検索ページへの誘導（実 DL はユーザー操作）
+ * - CENTRAL / Embase (Dialog) / ClinicalTrials.gov / ICTRP の検索ページへの誘導（実 DL はユーザー操作）
  * - 「検索 → nbib ダウンロード」の手順を簡単に案内
  *
- * MVP では Embase（Dialog）リンクは割愛（有料 DB のため URL が利用環境依存）。
+ * Embase (Dialog) は契約制でディープリンクできないため、トップページへ誘導し
+ * Advanced Search への手入力手順を案内する。
  */
 
 const EXTERNAL_LINKS: Array<{ label: string; url: string; note: string }> = [
@@ -19,6 +20,11 @@ const EXTERNAL_LINKS: Array<{ label: string; url: string; note: string }> = [
     label: 'Cochrane CENTRAL で開く',
     url: 'https://www.cochranelibrary.com/central/',
     note: 'Advanced search → 変換後の検索式を貼り付け',
+  },
+  {
+    label: 'Embase (Dialog) で開く',
+    url: 'https://dialog.proquest.com/',
+    note: '契約機関のアカウントでログイン → Advanced Search に変換後の検索式（S1〜）を 1 行ずつ入力',
   },
   {
     label: 'ClinicalTrials.gov で開く',
