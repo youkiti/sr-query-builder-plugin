@@ -2,7 +2,7 @@
 
 研究プロトコル（RQ / PICO / PECO / PCC / SPIDER / custom など）から PubMed 検索式を生成・検証し、CENTRAL / Embase(Dialog) / ClinicalTrials.gov / ICTRP 向けに変換する MIT ライセンスの OSS Chrome 拡張です。
 
-> **ステータス**: 要件定義完了、実装スケルトン構築中。詳細は [docs/requirements.md](docs/requirements.md) と [docs/architecture.md](docs/architecture.md) を参照してください。
+> **ステータス**: MVP 実装中。プロトコル入力 → ブロック承認 → シード論文 → 検索式ドラフト → 検証 → エクスポートの全 11 画面と unit / E2E テストスイートを実装済み（.docx パースの本配線・P1 分析ロジックなどが残タスク）。詳細は [docs/requirements.md](docs/requirements.md) と [docs/architecture.md](docs/architecture.md) を参照してください。
 
 ## 主なドキュメント
 
@@ -36,7 +36,7 @@ npm run test:e2e      # Playwright スモーク（事前に `npx playwright inst
 
 ### UI レビュー層（[docs/ui-review-strategy.md](docs/ui-review-strategy.md)）
 
-`npm run lint:css` は CSS の `[hidden]` リセット規約を固定化する Tier 0、`npm run test:e2e` は実 Chromium で popup の可視状態と axe a11y 監査を回す Tier 2 / Tier 3。`tests/e2e/popup.spec.ts` の各ケースは [docs/ui-states.md](docs/ui-states.md) の状態 ID に対応する。
+`npm run lint:css` は CSS の `[hidden]` リセット規約を固定化する Tier 0、`npm run test:e2e` は実 Chromium で app 全 11 ルート + popup + options の可視状態・ガード・ジャーニー・axe a11y 監査を回す Tier 2 / Tier 3（[docs/ui-deep-test-plan.md](docs/ui-deep-test-plan.md) Phase A〜G）。各ケースは [docs/ui-states.md](docs/ui-states.md) の状態 ID に対応する。
 
 CI 投入は MVP 直前の予定（要件 §11.1）。それまではローカルで以下を一通り通す:
 
