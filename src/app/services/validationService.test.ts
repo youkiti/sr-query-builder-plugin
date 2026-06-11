@@ -293,6 +293,89 @@ describe('runValidation', () => {
     expect(summary.meshError).toBe('mesh error');
   });
 
+  test('行ごと内訳を Drive に保存して detail_ref を全 ValidationLog 行に埋める（§3.1 / §3.3）', async () => {
+    const { sheetsFetchMock, eutilsFetchMock, deps } = setupDeps();
+    // Drive のフォルダ GET / アップロード POST を webViewLink 付きで返す
+    sheetsFetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (typeof url === 'string' && url.includes('/values/SeedPapers')) {
+        return jsonResponse({ values: [seedHeader, seedRow()] });
+      }
+      if (typeof url === 'string' && url.includes('/upload/drive/v3/files')) {
+        return jsonResponse({ id: 'detail-file', webViewLink: 'https://drive/detail.json' });
+      }
+      if (typeof url === 'string' && url.includes('/drive/v3/files')) {
+        // ensureChildFolder の GET（既存なし）→ POST（作成）
+        if (init?.method === 'POST') {
+          return jsonResponse({ id: 'folder-1', webViewLink: 'https://drive/folder' });
+        }
+        return jsonResponse({ files: [] });
+      }
+      return jsonResponse({});
+    });
+    eutilsFetchMock
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '100', idlist: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '200', idlist: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '50', idlist: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '500', idlist: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '1', idlist: ['111'] } }))
+      .mockResolvedValueOnce(
+        xmlResponse(`<?xml version="1.0"?><PubmedArticleSet></PubmedArticleSet>`)
+      );
+    await runValidation(deps);
+    const appendCalls = sheetsFetchMock.mock.calls.filter((c) =>
+      (c[0] as string).includes('ValidationLog') && (c[0] as string).includes(':append')
+    );
+    expect(appendCalls).toHaveLength(5);
+    const detailRefIdx = SHEET_HEADERS.ValidationLog.indexOf('detail_ref');
+    for (const call of appendCalls) {
+      const body = JSON.parse((call[1] as RequestInit).body as string) as {
+        values: (string | number | boolean | null)[][];
+      };
+      expect(body.values[0]![detailRefIdx]).toBe('https://drive/detail.json');
+    }
+    // 行ごと内訳 JSON が Drive にアップロードされている
+    const uploadCall = sheetsFetchMock.mock.calls.find((c) =>
+      (c[0] as string).includes('/upload/drive/v3/files')
+    );
+    expect(uploadCall).toBeTruthy();
+  });
+
+  test('Drive 保存に失敗しても検証は継続し detail_ref は null（§3.3）', async () => {
+    const { sheetsFetchMock, eutilsFetchMock, deps } = setupDeps();
+    sheetsFetchMock.mockImplementation(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/values/SeedPapers')) {
+        return jsonResponse({ values: [seedHeader, seedRow()] });
+      }
+      if (typeof url === 'string' && url.includes('/drive/v3/files')) {
+        // フォルダ確保で失敗させる
+        throw new Error('drive down');
+      }
+      return jsonResponse({});
+    });
+    eutilsFetchMock
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '100', idlist: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '200', idlist: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '50', idlist: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '500', idlist: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '1', idlist: ['111'] } }))
+      .mockResolvedValueOnce(
+        xmlResponse(`<?xml version="1.0"?><PubmedArticleSet></PubmedArticleSet>`)
+      );
+    const summary = await runValidation(deps);
+    expect(summary.loggedValidationIds).toHaveLength(5);
+    const appendCalls = sheetsFetchMock.mock.calls.filter((c) =>
+      (c[0] as string).includes('ValidationLog') && (c[0] as string).includes(':append')
+    );
+    const detailRefIdx = SHEET_HEADERS.ValidationLog.indexOf('detail_ref');
+    for (const call of appendCalls) {
+      const body = JSON.parse((call[1] as RequestInit).body as string) as {
+        values: (string | number | boolean | null)[][];
+      };
+      // null は append 時に空文字へ変換される
+      expect(body.values[0]![detailRefIdx]).toBe('');
+    }
+  });
+
   test('プロジェクト未選択ならエラー', async () => {
     const { store, deps } = setupDeps();
     store.setState((s) => ({ ...s, project: null }));

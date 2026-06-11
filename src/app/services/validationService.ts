@@ -15,7 +15,7 @@ import {
   type MeshHierarchyNode,
 } from '@/features/validation';
 import { fetchMeshTreeNumbers, type EutilsDeps } from '@/lib/ncbi';
-import type { GoogleApiDeps } from '@/lib/google';
+import { ensureChildFolder, uploadTextFile, type GoogleApiDeps } from '@/lib/google';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
 import { nowIso } from '@/utils/iso8601';
 import { newUuid } from '@/utils/uuid';
@@ -123,6 +123,23 @@ export async function runValidation(deps: ValidationServiceDeps): Promise<Valida
   const loggedValidationIds: string[] = [];
   const version = state.currentFormulaVersionId;
 
+  // 行ごと内訳を Drive に 1 ファイル保存し、全 ValidationLog 行の detail_ref に紐づける
+  // （requirements.md §3.1 / §3.3）。アップロードに失敗しても検証は止めず detail_ref=null で続行。
+  const detailRef = await uploadValidationDetail(
+    {
+      driveFolderId: state.project.driveFolderId,
+      validationId: uuidFn(),
+      versionId: version,
+      executedAt: nowFn(),
+      lineHits,
+      finalQuery,
+      finalQueryError,
+      meshFrequency,
+      meshError,
+    },
+    deps.google
+  );
+
   const logEntry = async (entry: Omit<ValidationLogEntry, 'validationId' | 'versionId' | 'executedAt'>): Promise<void> => {
     const full: ValidationLogEntry = {
       validationId: uuidFn(),
@@ -142,7 +159,7 @@ export async function runValidation(deps: ValidationServiceDeps): Promise<Valida
       captureRate: null,
       capturedPmids: null,
       missedPmids: null,
-      detailRef: null,
+      detailRef,
     });
   }
 
@@ -152,7 +169,7 @@ export async function runValidation(deps: ValidationServiceDeps): Promise<Valida
     captureRate: finalQueryError === null ? finalQuery.captureRate : null,
     capturedPmids: finalQueryError === null ? finalQuery.capturedPmids.join(',') : null,
     missedPmids: finalQueryError === null ? finalQuery.missedPmids.join(',') : null,
-    detailRef: null,
+    detailRef,
   });
 
   await logEntry({
@@ -161,7 +178,7 @@ export async function runValidation(deps: ValidationServiceDeps): Promise<Valida
     captureRate: null,
     capturedPmids: null,
     missedPmids: null,
-    detailRef: null,
+    detailRef,
   });
 
   return {
@@ -192,4 +209,73 @@ function buildEmptyFinalQuery(): FinalQueryResult {
 
 function formatError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+interface ValidationDetailInput {
+  driveFolderId: string;
+  validationId: string;
+  versionId: string;
+  executedAt: string;
+  lineHits: LineHitResult[];
+  finalQuery: FinalQueryResult;
+  finalQueryError: string | null;
+  meshFrequency: Array<{ descriptor: string; count: number }>;
+  meshError: string | null;
+}
+
+/**
+ * 検証ランの行ごと内訳を JSON 1 ファイルにまとめ、Drive の
+ * `{drive_folder_id}/logs/validation/{validation_id}.json` に保存して webViewLink を返す。
+ * これを全 ValidationLog 行の detail_ref に紐づけることで、後から行ごとの件数や
+ * 捕捉/未捕捉 PMID を監査できるようにする（requirements.md §3.1 / §3.3）。
+ *
+ * アップロードに失敗しても検証自体は失敗させず、null を返して detail_ref=null で続行する。
+ */
+async function uploadValidationDetail(
+  input: ValidationDetailInput,
+  google: GoogleApiDeps
+): Promise<string | null> {
+  try {
+    const logsFolder = await ensureChildFolder('logs', input.driveFolderId, google);
+    const validationFolder = await ensureChildFolder('validation', logsFolder.id, google);
+    const detail = {
+      validation_id: input.validationId,
+      version_id: input.versionId,
+      executed_at: input.executedAt,
+      line_hits: input.lineHits.map((line) => ({
+        block_id: line.blockId,
+        expression: line.expression,
+        expanded_query: line.expandedQuery,
+        hit_count: line.error === null ? line.hitCount : null,
+        error: line.error,
+      })),
+      final_query:
+        input.finalQueryError === null
+          ? {
+              final_query: input.finalQuery.finalQuery,
+              total_hits: input.finalQuery.totalHits,
+              capture_rate: input.finalQuery.captureRate,
+              captured_pmids: input.finalQuery.capturedPmids,
+              missed_pmids: input.finalQuery.missedPmids,
+            }
+          : { error: input.finalQueryError },
+      mesh:
+        input.meshError === null
+          ? { frequency: input.meshFrequency }
+          : { error: input.meshError },
+    };
+    const file = await uploadTextFile(
+      {
+        name: `${input.validationId}.json`,
+        content: JSON.stringify(detail, null, 2),
+        parentId: validationFolder.id,
+        mimeType: 'application/json',
+      },
+      google
+    );
+    return file.webViewLink ?? null;
+  } catch (err) {
+    console.warn('[validation] 行ごと内訳の Drive 保存に失敗したため detail_ref=null で続行します', err);
+    return null;
+  }
 }
