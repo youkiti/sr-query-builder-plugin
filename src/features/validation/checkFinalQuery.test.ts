@@ -77,6 +77,23 @@ describe('checkFinalQuery', () => {
     });
   });
 
+  test('esearch が seed 外 PMID を含む idlist を返しても rate と missed が整合する（§4.6）', async () => {
+    // idlist に seed(111,222) に加えて seed 外の 999 が混ざるケース。
+    // capturedPmids は seed 集合との積集合に限定され、rate=1/2 と missed=['222'] が矛盾しない。
+    const fetch = jest
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '5000', idlist: [] } }))
+      .mockResolvedValueOnce(
+        jsonResponse({ esearchresult: { count: '2', idlist: ['111', '999'] } })
+      );
+    const result = await checkFinalQuery(f, ['111', '222'], { fetch });
+    expect(result.captureRate).toBe(0.5);
+    expect(result.capturedPmids).toEqual(['111']);
+    expect(result.missedPmids).toEqual(['222']);
+    // seed 外の 999 は capturedPmids に含まれない
+    expect(result.capturedPmids).not.toContain('999');
+  });
+
   test('capturedQuery には seed PMID が [uid] 形式で入る', async () => {
     const fetch = jest
       .fn()
