@@ -10,6 +10,7 @@ import { SHEET_HEADERS } from '@/domain/sheetsSchema';
 function buildDocument(): Document {
   const doc = document.implementation.createHTMLDocument('test');
   doc.body.innerHTML = `
+    <h1 class="app__title"><button type="button" id="app-home-link">SR Query Builder</button></h1>
     <span id="app-status"></span>
     <span id="app-context"></span>
     <aside id="app-sidebar"><nav></nav></aside>
@@ -100,6 +101,27 @@ describe('startApp', () => {
     expect(protocolBtn).toBeTruthy();
     protocolBtn!.click();
     expect(setHash).toHaveBeenCalledWith('#/protocol');
+  });
+
+  test('ヘッダーのアプリタイトル（SR Query Builder）は常に表示される', () => {
+    const doc = buildDocument();
+    startApp(doc, noopHashOptions('#/home'));
+    const btn = doc.getElementById('app-home-link') as HTMLButtonElement | null;
+    expect(btn).toBeTruthy();
+    expect(btn!.textContent).toContain('SR Query Builder');
+  });
+
+  test('ヘッダーのアプリタイトルをクリックすると #/home へ遷移する', () => {
+    const doc = buildDocument();
+    const setHash = jest.fn();
+    const store = createStore({
+      ...INITIAL_STATE,
+      project: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'd', title: 'My SR' },
+    });
+    startApp(doc, { ...noopHashOptions('#/protocol'), setHash, store });
+    const btn = doc.getElementById('app-home-link') as HTMLButtonElement;
+    btn.click();
+    expect(setHash).toHaveBeenCalledWith('#/home');
   });
 
   test('サイドバーに「ホーム」は出さない', () => {
@@ -413,7 +435,7 @@ describe('startApp - wiring 層', () => {
     // approveBlocks は :append を呼ぶ
     const calls = fetchMock.mock.calls.map((c) => c[0] as string);
     expect(calls.some((u) => u.includes(':append'))).toBe(true);
-    expect(setHash).toHaveBeenCalledWith('#/draft');
+    expect(setHash).toHaveBeenCalledWith('#/seeds');
   });
 
   test('draft view 既定 onGenerate が generateDraft を呼び FormulaVersions に追記する', async () => {

@@ -68,6 +68,7 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
     textarea.className = 'edit__formula';
     textarea.rows = 20;
     textarea.value = ctx.state.currentFormulaMarkdown;
+    textarea.setAttribute('aria-label', '検索式 Markdown');
     container.appendChild(textarea);
 
     const blocksSection = doc.createElement('section');

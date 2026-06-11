@@ -10,7 +10,7 @@ import {
   type RisEntry,
   type ResolvedRisEntry,
 } from '@/features/seeds';
-import type { EutilsDeps } from '@/lib/ncbi';
+import type { EfetchArticle, EutilsDeps } from '@/lib/ncbi';
 import { ensureChildFolder, uploadTextFile, type GoogleApiDeps } from '@/lib/google';
 import { newUuid } from '@/utils/uuid';
 import type { AppStore } from '../store';
@@ -50,6 +50,12 @@ export interface IngestSummary {
   invalid: number;
   reasons: Record<'pmid_not_found' | 'duplicate_pmid' | 'no_pmid_resolved' | 'other', number>;
   added: SeedPaper[];
+  /**
+   * 有効 PMID として確認できた文献の詳細書誌情報。
+   * シード論文画面でタイトル / アブスト / MeSH / リンク等を即時表示するために載せる。
+   * SeedPapers タブには保存しない（容量・スキーマの安定性を優先）。
+   */
+  articles: Record<string, EfetchArticle>;
 }
 
 export interface SeedServiceDeps {
@@ -66,6 +72,7 @@ const INITIAL_SUMMARY = (): IngestSummary => ({
   invalid: 0,
   reasons: { pmid_not_found: 0, duplicate_pmid: 0, no_pmid_resolved: 0, other: 0 },
   added: [],
+  articles: {},
 });
 
 /**
@@ -215,6 +222,9 @@ async function ingestPmidBatch(
     summary.registered += 1;
     summary.valid += 1;
     summary.added.push(seed);
+    if (article) {
+      summary.articles[pmid] = article;
+    }
   }
 }
 

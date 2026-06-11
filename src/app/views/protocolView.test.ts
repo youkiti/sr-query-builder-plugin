@@ -192,6 +192,91 @@ describe('createProtocolView - file モード（拡張子で判定）', () => {
   });
 });
 
+describe('createProtocolView - 送信中の進捗表示', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  test('onSubmit 実行中は spinner + 段階ラベル + 経過秒が見える', async () => {
+    let resolveSubmit: () => void = () => {
+      // placeholder
+    };
+    const onSubmit = jest.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSubmit = resolve;
+        })
+    );
+    const view = createProtocolView({ onSubmit });
+    const container = buildContainer();
+    view(container, { state: stateWithProject, navigate: jest.fn() });
+    setText(container, 'inline', '本文');
+
+    const progress = container.querySelector<HTMLElement>('#protocol-progress')!;
+    expect(progress.hidden).toBe(true);
+
+    container.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }));
+    expect(progress.hidden).toBe(false);
+    expect(progress.querySelector('.protocol__spinner')).not.toBeNull();
+    expect(progress.getAttribute('aria-live')).toBe('polite');
+    expect(progress.querySelector('.protocol__progress-stage')?.textContent).toContain('読み取り');
+    expect(progress.querySelector('.protocol__progress-elapsed')?.textContent).toBe('0s');
+
+    jest.advanceTimersByTime(4000);
+    expect(progress.querySelector('.protocol__progress-stage')?.textContent).toContain('ブロック');
+    expect(progress.querySelector('.protocol__progress-elapsed')?.textContent).toBe('4s');
+
+    jest.advanceTimersByTime(12000);
+    expect(progress.querySelector('.protocol__progress-stage')?.textContent).toContain('まだ処理中');
+
+    resolveSubmit();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(progress.hidden).toBe(true);
+  });
+
+  test('onSubmit が reject しても進捗表示は隠れる', async () => {
+    let rejectSubmit: (err: Error) => void = () => {
+      // placeholder
+    };
+    const onSubmit = jest.fn(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectSubmit = reject;
+        })
+    );
+    const view = createProtocolView({ onSubmit });
+    const container = buildContainer();
+    view(container, { state: stateWithProject, navigate: jest.fn() });
+    setText(container, 'inline', '本文');
+    container.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }));
+
+    const progress = container.querySelector<HTMLElement>('#protocol-progress')!;
+    expect(progress.hidden).toBe(false);
+
+    rejectSubmit(new Error('boom'));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(progress.hidden).toBe(true);
+    expect(container.querySelector('#protocol-error')?.textContent).toBe('boom');
+  });
+
+  test('入力バリデーション失敗時は進捗表示を出さない', () => {
+    const onSubmit = jest.fn();
+    const view = createProtocolView({ onSubmit });
+    const container = buildContainer();
+    view(container, { state: stateWithProject, navigate: jest.fn() });
+    container.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }));
+    const progress = container.querySelector<HTMLElement>('#protocol-progress')!;
+    expect(progress.hidden).toBe(true);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+});
+
 describe('createProtocolView - エラー表示', () => {
   async function flushAsync(): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 0));

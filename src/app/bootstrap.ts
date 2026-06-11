@@ -93,6 +93,7 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
   const contextEl = doc.getElementById('app-context');
   const content = doc.getElementById('app-content');
   const sidebar = doc.querySelector('#app-sidebar nav');
+  const homeLinkBtn = doc.getElementById('app-home-link') as HTMLButtonElement | null;
   /**
    * ガード判定付きナビゲーション。サイドバー / ホーム画面 / サービス層からの遷移すべてが
    * これを経由するので、前提条件を満たさないルートへは setHash を発行せず、
@@ -110,6 +111,11 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
   };
   const viewOptions = opts.viewOptions ?? buildDefaultViewOptions(store, runtime, navigate);
   const views = buildViews(store, viewOptions);
+
+  // ヘッダーのアプリタイトル: クリックで #/home へ戻す（docs/ui-flow.md §4）
+  if (homeLinkBtn) {
+    homeLinkBtn.addEventListener('click', () => navigate('home'));
+  }
 
   const render = (): void => {
     const route = parseRoute(opts.getHash());
@@ -173,7 +179,7 @@ async function hydrateCurrentProject(store: AppStore, runtime: ChromeRuntimeDeps
 /**
  * runtime が利用可能なときの既定 view options。
  * - protocol.onSubmit → submitProtocol（LLM 呼び出し）→ blocksDraft 更新 → /blocks ナビ
- * - blocks.onApprove → approveBlocks（Sheets 書き込み）→ /draft ナビ（暫定）
+ * - blocks.onApprove → approveBlocks（Sheets 書き込み）→ /seeds ナビ（シード論文収集を先行させる）
  * - blocks.onSaveDraft → 何もしない（store にのみ残す）
  */
 function buildDefaultViewOptions(
@@ -190,6 +196,13 @@ function buildDefaultViewOptions(
     store: runtime.store,
   });
   return {
+    home: {
+      onOpenPopup: () => {
+        // 別プロジェクトへ切り替えたいユーザーを Popup に誘導する。
+        // 拡張コンテキストでは chrome.tabs/chrome.runtime が存在する前提。
+        chrome.tabs.create({ url: chrome.runtime.getURL('popup/popup.html') });
+      },
+    },
     protocol: {
       onSubmit: async (input: ProtocolSubmissionInput) => {
         await runProtocolSubmit(store, runtime, llmFactoryDepsBase(), llmFactoryPromise, input);
@@ -199,7 +212,7 @@ function buildDefaultViewOptions(
     blocks: {
       onApprove: async () => {
         await runApprove(store, runtime);
-        navigate('draft');
+        navigate('seeds');
       },
     },
     draft: {
@@ -429,6 +442,9 @@ function renderSidebar(
     if (route === current) classes.push('is-active');
     if (!guard.enabled) classes.push('is-disabled');
     btn.className = classes.join(' ');
+    if (route === current) {
+      btn.setAttribute('aria-current', 'page');
+    }
     if (!guard.enabled) {
       btn.title = guard.reason;
       btn.setAttribute('aria-disabled', 'true');

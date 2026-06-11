@@ -2,6 +2,7 @@
 
 - **作成日**: 2026-04-20
 - **位置付け**: [docs/ui-review-strategy.md](ui-review-strategy.md) §3 Tier 1。各画面 × 各状態 × 受入基準を網羅し、目視レビューと AI レビュー（Claude / Codex 等）の共通スペックとする。
+- **本ドキュメントの status（重要）**: **一部 target spec（未実装含む / 実装より先行）** である。現実装の写しではない箇所があり、Playwright 等で固定化する前に必ず実装と照合すること。実装と乖離が見つかった場合は「spec と実装のどちらを正とするか」を明示してから両方を直す（ここを曖昧にすると stale spec がテストで固定化される）。既知ドリフトは各節の **⚠️ drift** 注記で示す。
 - **使い方**: 新規画面・新規状態を実装したら、必ずこの spec に状態を追加してから着手する。AI にレビューを頼むときは「`docs/ui-states.md` の状態 X が満たされているか」を依頼の起点にする。
 - **更新ルール**: 表示／非表示・ステータス文言・`hidden` 属性の真偽は **画面ごとの章で 1 行 1 状態** にし、後続の Playwright (Tier 2) で `expect(locator).toBeVisible()` / `toBeHidden()` の根拠として参照する。
 
@@ -71,24 +72,35 @@
 
 設定画面は単一状態。BYOK のキー入力のみ。
 
-### 状態 A: 通常表示
+> ⚠️ **drift（実装との乖離）**: 本節のうち「マスク表示」「起動時 `読み込み中…`」「保存中の一時 disabled」「保存失敗時の赤系 UI」「`trim()` で空文字保存を抑止」「`type="password"` + `autocomplete="off"`」は **target spec（未実装）**。現実装（[src/options/bootstrap.ts](../src/options/bootstrap.ts)）は以下のみ：
+> - 起動時に `chrome.storage.local` から Gemini / NCBI の値を読み、**生値を input に復元**（マスクなし）
+> - `#options-status` は `"Gemini: 保存済み / NCBI: 未設定（3 req/s 枠）"` 形式で、`保存済み` or `未設定` の 2 値のみ。`読み込み中…` は出さない
+> - 「保存」クリックで `chrome.storage.local.set` を 2 本並列発行し、成功時のみ `#options-status` を `"保存しました。"` に書き換える
+> - `trim()` は行わない。空文字でも保存される。失敗時の UI は無い（`.catch` なし）
+> - ボタンは保存中も disabled にならない
+>
+> Phase G（[ui-deep-test-plan.md](ui-deep-test-plan.md)）は **現実装に合わせたスモーク**を優先し、上記 target spec を満たす実装を追加するタイミングで本節と Phase G を同時更新する。
+
+### 状態 A: 通常表示（現実装）
 
 - **可視**: `.options__section` 全部 / `#gemini-api-key` / `#ncbi-api-key` / `#save-keys`
-- **`#options-status`**: 起動時 `読み込み中…`、`chrome.storage.local` 読込完了後は **保存済キーがあれば** マスク表示メッセージ、無ければ案内文
-- **`type="password"`**: 両 input が必ず password 型（`autocomplete="off"`）
-- **回帰観点**: `Gemini API Key` が空のまま「保存」してもクラッシュしない
+- **`#options-status`**: 起動完了後 `Gemini: 保存済み|未設定 / NCBI: 保存済み|未設定（3 req/s 枠）` のいずれかの組合せ
+- **回帰観点**: `Gemini API Key` が空のまま「保存」してもクラッシュしない（成功ハンドラで `"保存しました。"` になる）
 
-### 状態 B: 保存実行中 / 完了
+### 状態 B: 保存完了（現実装）
 
-- **遷移**: `#save-keys` クリック → 一時的に disabled → 保存後に `#options-status` を成功メッセージに更新
-- **エラー**: `chrome.storage.local.set` が失敗したら `#options-status` を赤系（`.options__error` クラス相当）にし、ボタンは押し直せる
+- **遷移**: `#save-keys` クリック → 2 本の `writeKey` 完了後に `#options-status` → `"保存しました。"`
+
+### 状態 C（target / 未実装）: 保存実行中 / エラー
+
+- 保存中ボタン disabled、失敗時赤系 UI、`trim()` 済み保存、空文字抑止 — 実装時にここを 1 節にまとめて昇格する
 
 ### エッジ
 
-| ID | 入力例 | 期待される挙動 |
-|---|---|---|
-| E-Opt-1 | API Key に空白文字を含む長文 | `trim()` した上で保存。空文字保存はしない |
-| E-Opt-2 | NCBI Key だけ未入力 | OK。Gemini Key のみ保存される |
+| ID | 入力例 | 期待される挙動 | status |
+|---|---|---|---|
+| E-Opt-1 | API Key に空白文字を含む長文 | `trim()` した上で保存、空文字抑止 | ⚠️ target |
+| E-Opt-2 | NCBI Key だけ未入力 | OK。Gemini Key のみ保存される | 現実装で達成 |
 
 ---
 
@@ -96,11 +108,13 @@
 
 ハッシュルートで切り替わる。ルートは [src/app/router.ts](../src/app/router.ts) の `ROUTES` を正典とする。
 
-共通レイアウト:
+共通レイアウト（[src/app/app.html](../src/app/app.html) 正典）:
 
-- `header.app__header`: タイトル + `#app-status` + `#app-context`（aria-live=polite）
+- `header.app__header`: タイトル + `#app-status`（起動状態テキスト）+ `#app-context`（`aria-live="polite"`、ルート/プロジェクト文脈を読み上げる領域）
 - `aside.app__sidebar > nav.app__nav`: SIDEBAR_ROUTES の各リンク
 - `section#app-content`: 現在のビューがここに描画される
+
+> `aria-live="polite"` は **`#app-context` にのみ** 付与されている。`#app-status` に aria-live を期待する記述は誤り。ルート遷移時のスクリーンリーダ通知は `#app-context` の更新で検証する。
 
 ### 状態 A: プロジェクト未選択（不正アクセス）
 
@@ -117,7 +131,7 @@
 
 | ルート | 主な可視要素 | エッジ |
 |---|---|---|
-| `#/protocol` | 手入力タブ / `protocol.md` アップロード / `.docx` アップロードの 3 ソース選択。組入除外基準入力 | docx パース失敗で UI が固まらない |
+| `#/protocol` | **入力形式ラジオは 2 モード**（`manual` / `file`）。`file` モードは `.md` / `.markdown` / `.docx` を同一 input（`accept=".md,.markdown,.docx"`）で受け、内部で拡張子 → `sourceType: markdown \| docx` に振り分ける。組入/除外基準は AI が元テキストから抽出するためこの画面では入力しない（[src/app/views/protocolView.ts:8-13](../src/app/views/protocolView.ts#L8-L13) 参照） | docx パース失敗で UI が固まらない |
 | `#/blocks` | LLM 抽出のブロック候補一覧。承認 / 編集ボタン | 0 ブロックでも空状態 UI を出す |
 | `#/seeds` | PMID リスト + include/exclude/maybe ボタン + interactive 拡張ログ | 0 件と N 件で見た目が分岐する |
 | `#/draft` | LLM ドラフト検索式の表示 + 再生成ボタン | エラー時はスケルトンを残しエラーメッセージを別領域に出す |
@@ -128,7 +142,7 @@
 | `#/done` | PubMed nbib DL 案内 + 次ステップ（tiab-review-plugin への引き継ぎ） | 「もう一度エクスポート」リンクで `#/export` に戻る |
 | `#/history` | FormulaVersions の一覧 | 0 件のとき「まだバージョンがありません」を出す |
 
-すべての状態で、サイドバーから別ルートへ遷移しても `#app-status` のラベルが正しく更新される（aria-live=polite）。
+すべての状態で、サイドバーから別ルートへ遷移すると `#app-context`（aria-live=polite）のテキストが更新され、スクリーンリーダに現在地が通知される。`#app-status` は aria-live を持たないので、ポライトネス検証の対象は `#app-context` 側。
 
 ---
 

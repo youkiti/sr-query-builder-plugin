@@ -30,7 +30,19 @@ describe('verifyPmids', () => {
       {
         pmid: '111',
         isValid: true,
-        article: { pmid: '111', title: 'T', year: 2022, meshHeadings: [] },
+        article: {
+          pmid: '111',
+          title: 'T',
+          year: 2022,
+          meshHeadings: [],
+          abstract: null,
+          journal: null,
+          authors: [],
+          volume: null,
+          issue: null,
+          pages: null,
+          doi: null,
+        },
       },
     ]);
   });

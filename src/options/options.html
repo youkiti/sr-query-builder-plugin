@@ -11,19 +11,20 @@
   <body>
     <main class="options">
       <h1 class="options__title">設定</h1>
+      <p class="options__muted">APIキーは Chrome ローカルストレージに保存されます。</p>
       <p class="options__status" id="options-status">読み込み中…</p>
       <section class="options__section">
         <h2>LLM プロバイダ</h2>
-        <p class="options__muted">MVP は Gemini のみ対応。API キーは Chrome ローカルストレージに保存されます。</p>
+        <p class="options__muted">MVP は Gemini のみ対応。APIキーを設定してください。</p>
         <label class="options__field">
-          <span>Gemini API Key</span>
+          <span>Gemini APIキー</span>
           <input type="password" id="gemini-api-key" autocomplete="off" />
         </label>
       </section>
       <section class="options__section">
         <h2>NCBI E-utilities</h2>
         <p class="options__muted">
-          NCBI API キー（任意）。登録すると PubMed API のレート上限が 3 req/s → 10 req/s
+          APIキーを設定してください（任意）。登録すると PubMed API のレート上限が 3 req/s → 10 req/s
           に上がります。未設定でも動作しますが、検証フェーズで rate limit に当たる場合は
           <a href="https://www.ncbi.nlm.nih.gov/account/settings/" target="_blank" rel="noreferrer">
             NCBI アカウント設定</a
@@ -31,7 +32,7 @@
           で取得して設定してください。
         </p>
         <label class="options__field">
-          <span>NCBI API Key</span>
+          <span>NCBI APIキー</span>
           <input type="password" id="ncbi-api-key" autocomplete="off" />
         </label>
       </section>

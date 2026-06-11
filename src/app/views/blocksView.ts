@@ -3,8 +3,9 @@ import {
   normalizeCombinationExpression,
   validateCombinationExpression,
 } from '@/lib/combination-expression';
+import { designDefaultFilters } from '@/features/formula/skills';
 import { ROUTE_LABELS } from '../router';
-import type { AppStore, BlockDraft, BlocksDraft } from '../store';
+import type { AppStore, BlockDraft, BlocksDraft, ProtocolDraft } from '../store';
 import {
   MAX_BLOCKS,
   MIN_BLOCKS,
@@ -22,11 +23,15 @@ import type { RenderView } from './types';
 
 /**
  * ブロック承認画面（docs/ui-block-approval.md 準拠・案 B レイアウト）。
+ * - 1〜5 個のブロック（label / description / note）の編集
+ * - 並び替え（↑↓ ボタン）/ 追加 / 削除
+ * - combination_expression の編集 + ライブ構文チェック + 自動フィルタプレビュー
+ * - 「下書きとして保存」「承認してシード論文へ」の 2 種類のボタン
  *
  * 画面の 3 つの活動をローカルステッパーで可視化する:
  *   ① ブロックを確認・編集
  *   ② 結合式 (combination_expression) を確認
- *   ③ 承認して検索式生成へ
+ *   ③ 承認してシード論文へ
  *
  * 各ブロックは「ヘッダ行（番号・バッジ・並び替え/削除）」と
  * 「本体（ラベル・説明・メモ）」に分けてカード表示する。
@@ -36,7 +41,7 @@ import type { RenderView } from './types';
 export interface BlocksViewCallbacks {
   /** 「下書きとして保存」ボタンが押されたとき */
   onSaveDraft?: (draft: BlocksDraft) => void | Promise<void>;
-  /** 「承認して検索式生成へ」が押されたとき */
+  /** 「承認してシード論文へ」が押されたとき */
   onApprove?: (draft: BlocksDraft) => void | Promise<void>;
 }
 
@@ -64,6 +69,9 @@ export function createBlocksView(
 
     container.appendChild(buildLede(container.ownerDocument));
     container.appendChild(buildStepper(container.ownerDocument));
+    container.appendChild(
+      buildProtocolReference(container.ownerDocument, ctx.state.protocolDraft)
+    );
     container.appendChild(buildBlocksSection(container.ownerDocument, draft, store));
     container.appendChild(buildCombinationEditor(container.ownerDocument, draft, store));
     container.appendChild(buildActionRow(container.ownerDocument, draft, store, callbacks));
@@ -87,7 +95,7 @@ function buildLede(doc: Document): HTMLElement {
   const p = doc.createElement('p');
   p.className = 'blocks__lede';
   p.textContent =
-    'プロトコルから抽出された検索ブロック（PICO などの概念グループ）を確認してください。内容を承認すると、次の画面で PubMed 検索式のドラフトが自動生成されます。';
+    'プロトコルから抽出された検索ブロック（PICO などの概念グループ）を確認してください。内容を承認するとシード論文の登録へ進み、その後 AI が PubMed 検索式のドラフトを生成します。';
   return p;
 }
 
@@ -98,7 +106,7 @@ function buildStepper(doc: Document): HTMLElement {
   const steps: Array<{ num: string; title: string; desc: string }> = [
     { num: '1', title: 'ブロックを確認・編集', desc: '名称と説明を見直す' },
     { num: '2', title: '結合式を確認', desc: 'AND / OR の組み合わせ' },
-    { num: '3', title: '承認して次へ', desc: '検索式ドラフトを生成' },
+    { num: '3', title: '承認して次へ', desc: 'シード論文の登録へ進む' },
   ];
   steps.forEach((s) => {
     const li = doc.createElement('li');
@@ -121,6 +129,74 @@ function buildStepper(doc: Document): HTMLElement {
     ol.appendChild(li);
   });
   return ol;
+}
+
+function buildProtocolReference(doc: Document, protocol: ProtocolDraft | null): HTMLElement {
+  const section = doc.createElement('section');
+  section.className = 'blocks__protocol-ref';
+
+  const title = doc.createElement('h3');
+  title.className = 'blocks__protocol-ref-title';
+  title.textContent = 'プロトコル';
+  section.appendChild(title);
+
+  if (!protocol) {
+    const empty = doc.createElement('p');
+    empty.className = 'blocks__protocol-ref-empty';
+    empty.textContent = 'プロトコルが入力されていません。';
+    section.appendChild(empty);
+    return section;
+  }
+
+  const body = doc.createElement('div');
+  body.className = 'blocks__protocol-ref-body';
+  // overflow-y: auto のスクロール領域はキーボードで到達できる必要がある（axe: scrollable-region-focusable）
+  body.tabIndex = 0;
+  body.setAttribute('role', 'region');
+  body.setAttribute('aria-label', 'プロトコル参照');
+
+  appendRefField(doc, body, 'Framework', protocol.frameworkType.toUpperCase());
+  appendRefField(doc, body, 'RQ', protocol.researchQuestion);
+  appendRefField(doc, body, 'Study design', protocol.studyDesign);
+  appendRefField(doc, body, '組入基準', protocol.inclusionCriteria);
+  appendRefField(doc, body, '除外基準', protocol.exclusionCriteria);
+
+  const rawText = protocol.rawTextInline ?? protocol.rawTextPreview;
+  if (rawText) {
+    const sourceLabel =
+      protocol.sourceType === 'manual'
+        ? '元テキスト'
+        : `元テキスト（${protocol.sourceFilename ?? protocol.sourceType}・先頭 500 文字）`;
+    appendRefField(doc, body, sourceLabel, rawText);
+  }
+
+  section.appendChild(body);
+  return section;
+}
+
+function appendRefField(
+  doc: Document,
+  parent: HTMLElement,
+  label: string,
+  value: string
+): void {
+  if (!value) {
+    return;
+  }
+  const wrap = doc.createElement('div');
+  wrap.className = 'blocks__protocol-ref-field';
+
+  const dt = doc.createElement('div');
+  dt.className = 'blocks__protocol-ref-label';
+  dt.textContent = label;
+  wrap.appendChild(dt);
+
+  const dd = doc.createElement('div');
+  dd.className = 'blocks__protocol-ref-value';
+  dd.textContent = value;
+  wrap.appendChild(dd);
+
+  parent.appendChild(wrap);
 }
 
 function buildBlocksSection(doc: Document, draft: BlocksDraft, store: AppStore): HTMLElement {
@@ -226,6 +302,7 @@ function buildBlockItem(
       placeholder: '例: Population',
       kind: 'input',
       inputClass: 'blocks__label-input',
+      ariaLabel: `ブロック ${index + 1} のラベル`,
       onInput: (v) => mutateDraft(store, (d) => updateBlock(d, index, { blockLabel: v })),
     })
   );
@@ -239,6 +316,7 @@ function buildBlockItem(
       placeholder: '例: 高齢の定義は 65 歳で固定',
       kind: 'textarea',
       inputClass: 'blocks__note',
+      ariaLabel: `ブロック ${index + 1} のノート`,
       onInput: (v) => mutateDraft(store, (d) => updateBlock(d, index, { note: v })),
     })
   );
@@ -252,6 +330,7 @@ function buildBlockItem(
       placeholder: '例: 65 歳以上の慢性心不全患者。NYHA II〜IV。',
       kind: 'textarea',
       inputClass: 'blocks__desc',
+      ariaLabel: `ブロック ${index + 1} の説明`,
       onInput: (v) => mutateDraft(store, (d) => updateBlock(d, index, { description: v })),
     })
   );
@@ -269,6 +348,7 @@ interface LabeledInputOptions {
   placeholder: string;
   kind: 'input' | 'textarea';
   inputClass: string;
+  ariaLabel: string;
   onInput: (value: string) => void;
 }
 
@@ -292,6 +372,7 @@ function buildLabeledInput(doc: Document, opts: LabeledInputOptions): HTMLElemen
     input.value = opts.value;
     input.placeholder = opts.placeholder;
     input.className = opts.inputClass;
+    input.setAttribute('aria-label', opts.ariaLabel);
     input.addEventListener('input', () => opts.onInput(input.value));
     wrapper.appendChild(input);
   } else {
@@ -299,6 +380,7 @@ function buildLabeledInput(doc: Document, opts: LabeledInputOptions): HTMLElemen
     area.value = opts.value;
     area.placeholder = opts.placeholder;
     area.className = opts.inputClass;
+    area.setAttribute('aria-label', opts.ariaLabel);
     area.addEventListener('input', () => opts.onInput(area.value));
     wrapper.appendChild(area);
   }
@@ -398,6 +480,11 @@ function buildCombinationEditor(
   }
   fieldset.appendChild(errorList);
 
+  const autoFilter = buildAutoFilterPreview(doc, draft, store.getState().protocolDraft);
+  if (autoFilter) {
+    fieldset.appendChild(autoFilter);
+  }
+
   const actions = doc.createElement('div');
   actions.className = 'blocks__combination-actions';
   const resetBtn = doc.createElement('button');
@@ -409,6 +496,46 @@ function buildCombinationEditor(
   fieldset.appendChild(actions);
 
   return fieldset;
+}
+
+/**
+ * 検索式生成時に filter-designer が決定論的に自動付与するブロック（#RCTfilter / #DateFilter）の
+ * プレビューを返す。study_design / yearRange のいずれも該当しない場合は null。
+ */
+function buildAutoFilterPreview(
+  doc: Document,
+  draft: BlocksDraft,
+  protocol: ProtocolDraft | null
+): HTMLElement | null {
+  if (!protocol) {
+    return null;
+  }
+  const filterResult = designDefaultFilters({ studyDesign: protocol.studyDesign });
+  if (filterResult.filters.length === 0) {
+    return null;
+  }
+
+  const wrap = doc.createElement('div');
+  wrap.className = 'blocks__autofilter';
+
+  const finalLine = doc.createElement('div');
+  finalLine.className = 'blocks__autofilter-final';
+  const finalExpr =
+    normalizeCombinationExpression(draft.combinationExpression) +
+    filterResult.appendToCombination;
+  finalLine.textContent = `検索式生成後: ${finalExpr}`;
+  wrap.appendChild(finalLine);
+
+  const list = doc.createElement('ul');
+  list.className = 'blocks__autofilter-list';
+  for (const f of filterResult.filters) {
+    const li = doc.createElement('li');
+    li.textContent = `#${f.blockId}: ${f.comment}`;
+    list.appendChild(li);
+  }
+  wrap.appendChild(list);
+
+  return wrap;
 }
 
 function buildActionRow(
@@ -457,7 +584,7 @@ function buildActionRow(
   const approveBtn = doc.createElement('button');
   approveBtn.type = 'button';
   approveBtn.className = 'blocks__btn-primary';
-  approveBtn.textContent = '承認して検索式生成へ →';
+  approveBtn.textContent = '承認してシード論文へ →';
   approveBtn.disabled = hasErrors;
   if (hasErrors) {
     approveBtn.title = '結合式のエラーを解消してください';
