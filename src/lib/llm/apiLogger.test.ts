@@ -87,6 +87,8 @@ describe('withLogging', () => {
     expect(entry.purpose).toBe('draft_block');
     expect(entry.tokensIn).toBe(5);
     expect(entry.tokensOut).toBe(7);
+    // gemini-2.5-pro: 入力 $1.25 / 出力 $10.00 per 1M → 5*1.25/1e6 + 7*10/1e6
+    expect(entry.costEstimateUsd).toBeCloseTo(5 * 1.25e-6 + 7 * 10e-6, 12);
     expect(entry.error).toBeNull();
     expect(entry.promptRef).toBe('https://drive/log-1.prompt.json');
     expect(entry.responseRef).toBe('https://drive/log-1.response.json');
@@ -141,6 +143,31 @@ describe('withLogging', () => {
     const logged = withLogging(provider, 'other', deps);
     await expect(logged.chat([{ role: 'user', content: 'q' }])).rejects.toThrow('unhandled');
     expect(recorded.entries[0]?.error).toBe('unhandled');
+  });
+
+  test('未知モデルは cost_estimate_usd が null（§10）', async () => {
+    const provider: LLMProvider = {
+      providerId: 'gemini',
+      model: 'unknown-model-x',
+      chat: async () => ({ text: 'ok', tokensIn: 100, tokensOut: 50, raw: {} }),
+    };
+    const { deps, recorded } = makeDeps();
+    const logged = withLogging(provider, 'other', deps);
+    await logged.chat([{ role: 'user', content: 'q' }]);
+    expect(recorded.entries[0]?.costEstimateUsd).toBeNull();
+  });
+
+  test('トークン数が両方 null なら cost_estimate_usd も null（§10）', async () => {
+    const provider = makeProvider(async () => ({
+      text: 'ok',
+      tokensIn: null,
+      tokensOut: null,
+      raw: {},
+    }));
+    const { deps, recorded } = makeDeps();
+    const logged = withLogging(provider, 'other', deps);
+    await logged.chat([{ role: 'user', content: 'q' }]);
+    expect(recorded.entries[0]?.costEstimateUsd).toBeNull();
   });
 
   test('既定 newUuid / now を使うラッパも作れる（差し替えなし）', async () => {

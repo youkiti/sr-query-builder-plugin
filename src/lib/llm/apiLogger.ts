@@ -8,6 +8,7 @@ import {
   type ChatResponse,
   type LLMProvider,
 } from './LLMProvider';
+import { estimateCostUsd } from './pricing';
 
 /**
  * 任意の LLMProvider をラップして、各 chat() 呼び出し時に
@@ -99,7 +100,12 @@ export function withLogging(
           tokensIn: response?.tokensIn ?? null,
           tokensOut: response?.tokensOut ?? null,
           latencyMs,
-          costEstimateUsd: null,
+          // モデル単価表（pricing.ts）から概算コストを算出。未知モデルは null。
+          costEstimateUsd: estimateCostUsd(
+            provider.model,
+            response?.tokensIn ?? null,
+            response?.tokensOut ?? null
+          ),
           error: errorMessage,
         };
         await deps.appendLogEntry(entry);
