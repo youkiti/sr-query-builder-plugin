@@ -40,6 +40,7 @@ import {
 import { listFormulaVersions } from '@/features/formula';
 import type { FormulaVersion } from '@/domain/formulaVersion';
 import { getCurrentProject } from '@/features/project';
+import { getCurrentUserEmail } from '@/lib/google';
 import { evaluateGuards } from './guards';
 import {
   ROUTE_LABELS,
@@ -328,10 +329,13 @@ async function runRecordDecision(
   input: RecordDecisionInput
 ): Promise<RecordDecisionResult> {
   const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
+  // Protocol.created_by と同じ経路（chrome.identity 由来）で判定者メールを取得する
+  const userEmail = await getCurrentUserEmail(runtime.profile);
   return recordDecision(input, {
     google: runtime.google,
     eutils,
     store,
+    userEmail,
     // recordDecision は LLM を呼ばないので forPurpose は呼ばれない（guard）
     llmFactory: { forPurpose: neverCalledProvider },
   });
@@ -410,9 +414,11 @@ async function runGenerateDraft(
     llmLogFolderId: project.driveFolderId,
     spreadsheetId: project.spreadsheetId,
   });
+  const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
   await generateDraft({
     google: runtime.google,
     store,
+    eutils,
     llmFactory: factory,
     onProgress,
   });

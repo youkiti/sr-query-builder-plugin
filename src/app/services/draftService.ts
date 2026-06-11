@@ -15,7 +15,11 @@ import {
   type FreewordSuggestion,
   type MeshSuggestion,
 } from '@/features/formula/skills';
+import { isSeedEligibleForValidation } from '@/domain/seedPaper';
+import { listSeedPapers } from '@/features/seeds';
+import { aggregateMeshFrequency, extractMeshForSeeds } from '@/features/validation';
 import type { GoogleApiDeps } from '@/lib/google';
+import type { EutilsDeps } from '@/lib/ncbi';
 import { nowIso } from '@/utils/iso8601';
 import { newUuid } from '@/utils/uuid';
 import type { LlmProviderFactory } from './llmProviderService';
@@ -51,6 +55,8 @@ export interface DraftProgress {
 export interface DraftServiceDeps {
   google: GoogleApiDeps;
   store: AppStore;
+  /** seed 論文の MeSH を NCBI efetch で取得するための E-utilities deps */
+  eutils: EutilsDeps;
   /** skill 呼び出しに使う LLM プロバイダファクトリ */
   llmFactory: LlmProviderFactory;
   /** 進捗通知 callback（UI が prog バーを進める用） */
@@ -97,6 +103,10 @@ export async function generateDraft(deps: DraftServiceDeps): Promise<DraftResult
   const meshes: MeshSuggestion[][] = [];
   const freewords: FreewordSuggestion[][] = [];
 
+  // seed 論文の MeSH 頻度を mesh-suggester へ渡す（requirements.md §4.4）。
+  // 取得に失敗しても／seed 0 件でもドラフト生成は止めず、空配列で続行する。
+  const seedMeshFrequency = await collectSeedMeshFrequency(project.spreadsheetId, deps);
+
   for (let i = 0; i < blockCount; i += 1) {
     const block = blocks.blocks[i];
     /* istanbul ignore if -- index は blockCount 範囲内 */
@@ -119,7 +129,7 @@ export async function generateDraft(deps: DraftServiceDeps): Promise<DraftResult
       {
         conceptSummary: skeleton.conceptSummary,
         meshRequirements: skeleton.meshRequirements,
-        seedMeshFrequency: [],
+        seedMeshFrequency,
       },
       deps.llmFactory.forPurpose('suggest_mesh')
     );
@@ -194,5 +204,34 @@ export async function generateDraft(deps: DraftServiceDeps): Promise<DraftResult
     meshSuggestions: meshes,
     freewordSuggestions: freewords,
   };
+}
+
+/**
+ * 適格 seed 論文（isSeedEligibleForValidation）の PMID 群を NCBI efetch で引き、
+ * MeSH 記述子の頻度表を返す。mesh-suggester のプロンプトに渡す（requirements.md §4.4）。
+ *
+ * seed 0 件や efetch 失敗時はドラフト生成を止めず、空配列で続行する
+ * （MeSH 取得失敗は警告ログ程度に留める）。
+ */
+async function collectSeedMeshFrequency(
+  spreadsheetId: string,
+  deps: DraftServiceDeps
+): Promise<Array<{ descriptor: string; count: number }>> {
+  try {
+    const seeds = await listSeedPapers(spreadsheetId, deps.google);
+    const eligiblePmids = seeds
+      .filter((seed) => isSeedEligibleForValidation(seed))
+      .map((seed) => seed.pmid)
+      .filter((pmid): pmid is string => pmid !== null);
+    if (eligiblePmids.length === 0) {
+      return [];
+    }
+    const mesh = await extractMeshForSeeds(eligiblePmids, deps.eutils);
+    return aggregateMeshFrequency(mesh);
+  } catch (err) {
+    // MeSH 取得に失敗してもドラフト生成は継続する（seed なし扱い）。
+    console.warn('[draft] seed 論文の MeSH 取得に失敗したため空で続行します', err);
+    return [];
+  }
 }
 
