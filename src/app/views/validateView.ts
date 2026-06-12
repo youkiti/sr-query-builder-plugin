@@ -1,4 +1,5 @@
 import type { AnalyzeMissedSeedsResult, ValidationSummary } from '@/app/services';
+import type { AppState } from '../store';
 import { ROUTE_LABELS } from '../router';
 import type { RenderView } from './types';
 
@@ -9,6 +10,8 @@ import type { RenderView } from './types';
  * - 行ごとのヒット数 / 捕捉率 / MeSH 出現頻度をそれぞれセクションで表示
  * - 未捕捉 PMID があれば「AI で原因を分析する」ボタンを出し、原因・改善候補語・関連ブロックを列挙
  * - ValidationLog への追記は service 側が担当
+ * - 結果は store（state.validationResult / state.missedAnalysis）にも保存されるため、
+ *   再描画（LLM コスト集計の setState 等）後も state から復元して表示する
  */
 
 export interface ValidateViewCallbacks {
@@ -62,6 +65,13 @@ export function createValidateView(callbacks: ValidateViewCallbacks = {}): Rende
     results.className = 'validate__results';
     container.appendChild(results);
 
+    // store に保存済みの結果があれば復元する（formula バージョンが一致するときだけ）
+    const storedSummary = readStoredSummary(ctx.state);
+    if (storedSummary) {
+      status.textContent = summaryStatusText(storedSummary);
+      renderResults(doc, results, storedSummary, callbacks, readStoredAnalysis(ctx.state));
+    }
+
     runBtn.addEventListener('click', () => {
       if (!callbacks.onRun) {
         return;
@@ -73,8 +83,8 @@ export function createValidateView(callbacks: ValidateViewCallbacks = {}): Rende
       callbacks
         .onRun()
         .then((summary) => {
-          status.textContent = `検証完了（有効 seed ${summary.eligibleSeedCount}/${summary.totalSeedCount} 件）`;
-          renderResults(doc, results, summary, callbacks);
+          status.textContent = summaryStatusText(summary);
+          renderResults(doc, results, summary, callbacks, null);
         })
         .catch((err: unknown) => {
           errorBox.textContent = formatError(err);
@@ -87,14 +97,43 @@ export function createValidateView(callbacks: ValidateViewCallbacks = {}): Rende
   };
 }
 
+/** state.validationResult が現在の formula バージョンの結果なら返す（stale は null） */
+function readStoredSummary(state: AppState): ValidationSummary | null {
+  if (
+    state.validationResult === null ||
+    state.currentFormulaVersionId === null ||
+    state.validationResult.formulaVersionId !== state.currentFormulaVersionId
+  ) {
+    return null;
+  }
+  return state.validationResult.summary;
+}
+
+/** state.missedAnalysis が現在の formula バージョンの結果なら返す（stale は null） */
+function readStoredAnalysis(state: AppState): AnalyzeMissedSeedsResult | null {
+  if (
+    state.missedAnalysis === null ||
+    state.currentFormulaVersionId === null ||
+    state.missedAnalysis.formulaVersionId !== state.currentFormulaVersionId
+  ) {
+    return null;
+  }
+  return state.missedAnalysis.result;
+}
+
+function summaryStatusText(summary: ValidationSummary): string {
+  return `検証完了（有効 seed ${summary.eligibleSeedCount}/${summary.totalSeedCount} 件）`;
+}
+
 function renderResults(
   doc: Document,
   container: HTMLElement,
   summary: ValidationSummary,
-  callbacks: ValidateViewCallbacks
+  callbacks: ValidateViewCallbacks,
+  initialAnalysis: AnalyzeMissedSeedsResult | null
 ): void {
   container.appendChild(renderLineHits(doc, summary));
-  container.appendChild(renderFinalQuery(doc, summary, callbacks));
+  container.appendChild(renderFinalQuery(doc, summary, callbacks, initialAnalysis));
   container.appendChild(renderMesh(doc, summary));
 }
 
@@ -123,7 +162,8 @@ function renderLineHits(doc: Document, summary: ValidationSummary): HTMLElement 
 function renderFinalQuery(
   doc: Document,
   summary: ValidationSummary,
-  callbacks: ValidateViewCallbacks
+  callbacks: ValidateViewCallbacks,
+  initialAnalysis: AnalyzeMissedSeedsResult | null
 ): HTMLElement {
   const section = doc.createElement('section');
   section.className = 'validate__final';
@@ -166,7 +206,7 @@ function renderFinalQuery(
     }
     section.appendChild(missedList);
     section.appendChild(
-      renderMissedAnalysis(doc, summary.finalQuery.missedPmids, callbacks)
+      renderMissedAnalysis(doc, summary.finalQuery.missedPmids, callbacks, initialAnalysis)
     );
   }
   return section;
@@ -180,7 +220,8 @@ function renderFinalQuery(
 function renderMissedAnalysis(
   doc: Document,
   missedPmids: string[],
-  callbacks: ValidateViewCallbacks
+  callbacks: ValidateViewCallbacks,
+  initialAnalysis: AnalyzeMissedSeedsResult | null
 ): HTMLElement {
   const wrap = doc.createElement('div');
   wrap.className = 'validate__missed-analysis';
@@ -205,6 +246,22 @@ function renderMissedAnalysis(
   list.className = 'validate__analysis-results';
   wrap.appendChild(list);
 
+  const showResult = (result: AnalyzeMissedSeedsResult): void => {
+    if (result.analyses.length === 0) {
+      status.textContent = '分析結果が得られませんでした。';
+      return;
+    }
+    status.textContent = `${result.analyses.length} 件の原因を分析しました。`;
+    for (const analysis of result.analyses) {
+      list.appendChild(renderAnalysisItem(doc, analysis));
+    }
+  };
+
+  // store に保存済みの分析結果があれば復元する
+  if (initialAnalysis) {
+    showResult(initialAnalysis);
+  }
+
   btn.addEventListener('click', () => {
     if (!callbacks.onAnalyzeMissed) {
       return;
@@ -215,16 +272,7 @@ function renderMissedAnalysis(
     list.innerHTML = '';
     callbacks
       .onAnalyzeMissed(missedPmids)
-      .then((result) => {
-        if (result.analyses.length === 0) {
-          status.textContent = '分析結果が得られませんでした。';
-          return;
-        }
-        status.textContent = `${result.analyses.length} 件の原因を分析しました。`;
-        for (const analysis of result.analyses) {
-          list.appendChild(renderAnalysisItem(doc, analysis));
-        }
-      })
+      .then(showResult)
       .catch((err: unknown) => {
         status.textContent = '';
         errorBox.textContent = formatError(err);

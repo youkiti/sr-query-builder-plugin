@@ -63,6 +63,8 @@ function makeState(overrides: Partial<AppState> = {}): AppState {
     currentProtocolVersion: 3,
     currentFormulaVersionId: 'parent-v',
     currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 old\n```\n',
+    validationResult: null,
+    missedAnalysis: null,
     ...overrides,
   };
 }

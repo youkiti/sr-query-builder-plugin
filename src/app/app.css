@@ -1758,6 +1758,33 @@
   text-decoration: none;
 }
 
+.settings__tier-badge {
+  font-size: var(--font-size-sm);
+  font-weight: normal;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.settings__tier-badge:empty {
+  display: none;
+}
+
+.settings__tier-badge--checking {
+  color: var(--color-text-muted);
+}
+
+.settings__tier-badge--paid {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.settings__tier-badge--free {
+  color: #92400e;
+  background: #fef3c7;
+}
+
 .settings__field {
   display: flex;
   flex-direction: column;

@@ -16,6 +16,8 @@ describe('createStore', () => {
       currentProtocolVersion: null,
       currentFormulaVersionId: null,
       currentFormulaMarkdown: null,
+      validationResult: null,
+      missedAnalysis: null,
     });
     expect(store.getState().route).toBe('protocol');
   });

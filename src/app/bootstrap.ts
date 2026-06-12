@@ -170,9 +170,12 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
     }
   };
 
-  // 起動時に chrome.storage から currentProject を取り込む（runtime が無い場合はスキップ）
+  // 起動時に chrome.storage から currentProject を取り込む（runtime が無い場合はスキップ）。
+  // 再描画は hydrate 内の setState → store.subscribe(render) 経由で起きるため、
+  // ここで .then(render) はしない（state が変わらないのに無条件再描画すると、
+  // ユーザーのフォーム入力中の操作（file 選択等）を破棄してしまう）。
   if (runtime) {
-    void hydrateCurrentProject(store, runtime).then(render);
+    void hydrateCurrentProject(store, runtime);
   }
 
   render();
@@ -332,11 +335,39 @@ function buildDefaultViewOptions(
         runFetchArticle(store, runtime, pmid),
     },
     validate: {
-      onRun: async (): Promise<ValidationSummary> => runValidate(store, runtime),
+      // 結果は store に保存する。LLM コスト集計（cumulativeCostUsd）の setState が
+      // ビュー全体を再描画しても、validate view が state から結果を復元できるようにするため。
+      onRun: async (): Promise<ValidationSummary> => {
+        const summary = await runValidate(store, runtime);
+        store.setState((s) => ({
+          ...s,
+          validationResult:
+            s.currentFormulaVersionId === null
+              ? null
+              : { formulaVersionId: s.currentFormulaVersionId, summary },
+          // 検証をやり直したら過去の原因分析は古くなるため破棄する
+          missedAnalysis: null,
+        }));
+        return summary;
+      },
       onAnalyzeMissed: async (
         missedPmids: string[]
-      ): Promise<AnalyzeMissedSeedsResult> =>
-        runAnalyzeMissedSeeds(store, runtime, llmFactoryDepsBase(), missedPmids),
+      ): Promise<AnalyzeMissedSeedsResult> => {
+        const result = await runAnalyzeMissedSeeds(
+          store,
+          runtime,
+          llmFactoryDepsBase(),
+          missedPmids
+        );
+        store.setState((s) => ({
+          ...s,
+          missedAnalysis:
+            s.currentFormulaVersionId === null
+              ? null
+              : { formulaVersionId: s.currentFormulaVersionId, result },
+        }));
+        return result;
+      },
     },
     history: {
       onList: async (): Promise<FormulaVersion[]> => runListHistory(store, runtime),

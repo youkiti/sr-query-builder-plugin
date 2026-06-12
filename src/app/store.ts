@@ -1,4 +1,8 @@
 import type { CurrentProjectEntry } from '@/features/project';
+import type {
+  AnalyzeMissedSeedsResult,
+  ValidationSummary,
+} from './services/validationService';
 import { DEFAULT_ROUTE, type RouteName } from './router';
 
 /**
@@ -49,6 +53,24 @@ export interface ProtocolDraft {
   rawTextInline: string | null;
 }
 
+/**
+ * 検証画面（#/validate）の検証結果。
+ * LLM コスト集計（cumulativeCostUsd）等の setState による全ビュー再描画でも
+ * 結果表示を失わないよう、ローカル DOM ではなく store に保持する。
+ * formulaVersionId が currentFormulaVersionId と一致するときだけ有効
+ * （別バージョンの stale な結果を表示しないため）。
+ */
+export interface ValidationResultEntry {
+  formulaVersionId: string;
+  summary: ValidationSummary;
+}
+
+/** 未捕捉 PMID の AI 原因分析結果（requirements.md §4.6）。stale 判定は ValidationResultEntry と同じ */
+export interface MissedAnalysisEntry {
+  formulaVersionId: string;
+  result: AnalyzeMissedSeedsResult;
+}
+
 export interface AppState {
   /** 現在のハッシュルート */
   route: RouteName;
@@ -66,6 +88,10 @@ export interface AppState {
   currentFormulaVersionId: string | null;
   /** 直近に生成 / 読み込んだ検索式の markdown */
   currentFormulaMarkdown: string | null;
+  /** 直近の検証結果。未実行なら null */
+  validationResult: ValidationResultEntry | null;
+  /** 未捕捉 PMID の AI 原因分析結果。未実行なら null */
+  missedAnalysis: MissedAnalysisEntry | null;
 }
 
 export const INITIAL_STATE: AppState = {
@@ -77,6 +103,8 @@ export const INITIAL_STATE: AppState = {
   currentProtocolVersion: null,
   currentFormulaVersionId: null,
   currentFormulaMarkdown: null,
+  validationResult: null,
+  missedAnalysis: null,
 };
 
 export type Updater = (prev: AppState) => AppState;

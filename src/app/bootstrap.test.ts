@@ -57,6 +57,8 @@ describe('startApp', () => {
       currentProtocolVersion: null,
       currentFormulaVersionId: null,
       currentFormulaMarkdown: null,
+      validationResult: null,
+      missedAnalysis: null,
     });
     startApp(doc, { ...noopHashOptions('#/home'), store });
     expect(doc.getElementById('app-status')?.textContent).toContain('My SR');
@@ -93,6 +95,8 @@ describe('startApp', () => {
       currentProtocolVersion: null,
       currentFormulaVersionId: null,
       currentFormulaMarkdown: null,
+      validationResult: null,
+      missedAnalysis: null,
     });
     startApp(doc, { ...noopHashOptions('#/home'), setHash, store });
     const protocolBtn = Array.from(
@@ -884,6 +888,66 @@ describe('startApp - wiring 層', () => {
     );
     // line_hits 1 行 + final_query 1 行 + mesh 1 行 = 3 行（formula のブロック数=1 のため）
     expect(appendCalls.length).toBe(3);
+  });
+
+  test('検証結果は store に保存され、コスト集計の setState による再描画後も表示が残る', async () => {
+    const doc = buildDocument();
+    const seedHeader = [...SHEET_HEADERS.SeedPapers];
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+    });
+    fetchMock.mockImplementation(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/values/SeedPapers')) {
+        const seedRow = seedHeader.map((k) => {
+          if (k === 'pmid') return '111';
+          if (k === 'is_valid') return 'true';
+          if (k === 'source') return 'initial';
+          if (k === 'ingest_format') return 'pmid_direct';
+          return '';
+        });
+        return jsonResponse({ values: [seedHeader, seedRow] });
+      }
+      if (typeof url === 'string' && url.includes('eutils.ncbi.nlm.nih.gov')) {
+        if (url.includes('efetch')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({}),
+            text: async () => `<?xml version="1.0"?><PubmedArticleSet></PubmedArticleSet>`,
+          } as Response;
+        }
+        return jsonResponse({ esearchresult: { count: '0', idlist: [] } });
+      }
+      return jsonResponse({});
+    });
+    const handle = startApp(doc, {
+      getHash: () => '#/validate',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({
+      ...s,
+      currentFormulaVersionId: 'v-1',
+      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 diabetes\n```\n',
+    }));
+    const runBtn = doc.querySelector<HTMLButtonElement>('#app-content button')!;
+    runBtn.click();
+    for (let i = 0; i < 10; i += 1) {
+      await flush();
+    }
+    expect(handle.store.getState().validationResult?.formulaVersionId).toBe('v-1');
+    expect(doc.querySelector('.validate__line-hits')).not.toBeNull();
+
+    // LLM コスト集計（onCostAccumulate）相当の setState → 全ビュー再描画
+    handle.store.setState((s) => ({
+      ...s,
+      cumulativeCostUsd: (s.cumulativeCostUsd ?? 0) + 0.01,
+    }));
+    // 再描画後も state から結果が復元されている
+    expect(doc.querySelector('.validate__line-hits')).not.toBeNull();
+    expect(doc.querySelector('.validate__missed')?.textContent).toContain('111');
   });
 
   test('apiKeys.ncbi が保存されていれば、validate の eutils 呼び出しに api_key が載る', async () => {

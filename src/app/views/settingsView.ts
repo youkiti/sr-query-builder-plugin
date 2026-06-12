@@ -1,3 +1,7 @@
+import {
+  detectGeminiTier as defaultDetectGeminiTier,
+  FREE_TIER_MODEL_ID,
+} from '@/lib/llm/geminiTierDetector';
 import type { RenderView } from './types';
 
 const KEY_GEMINI = 'apiKeys.gemini';
@@ -6,10 +10,13 @@ const KEY_NCBI = 'apiKeys.ncbi';
 const KEY_LLM_MODEL = 'llm.selectedModel';
 const KEY_CUSTOM_MODELS = 'llm.customModels';
 const KEY_PENDING = 'pendingOpenAppTab';
+/** 最後に検出した Gemini プラン（'paid' | 'free'）。Options 画面と共有する */
+const KEY_GEMINI_TIER = 'gemini.detectedTier';
 const DEFAULT_MODEL = 'gemini-3.5-flash';
 const MAX_CUSTOM_MODELS = 20;
 
 const BUILTIN_MODELS = [
+  { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash（無料枠対応）', provider: 'gemini' as const },
   { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', provider: 'gemini' as const },
   { id: 'qwen/qwen3-235b-a22b-2507', label: 'Qwen3 235B Instruct', provider: 'openrouter' as const },
   { id: 'deepseek/deepseek-v4-flash', label: 'DeepSeek V4 Flash', provider: 'openrouter' as const },
@@ -26,6 +33,11 @@ export interface SettingsViewCallbacks {
   readKey: (key: string) => Promise<string | undefined>;
   writeKey: (key: string, value: string) => Promise<void>;
   removeKey: (key: string) => Promise<void>;
+  /**
+   * Gemini API キーのプラン（無料/有料）を確認する。
+   * 省略時は本物の detectGeminiTier を使う（テストではモックを注入する）。
+   */
+  detectGeminiTier?: (apiKey: string) => Promise<'paid' | 'free' | 'unknown'>;
 }
 
 function resolveProvider(modelId: string): Provider {
@@ -87,6 +99,29 @@ function refreshProviderCards(doc: Document, selectedModelId: string): void {
   doc
     .getElementById('settings-openrouter-card')
     ?.classList.toggle('settings__provider-card--active', provider === 'openrouter');
+}
+
+function updateTierBadge(
+  badge: HTMLElement,
+  state: 'checking' | 'paid' | 'free' | 'unknown'
+): void {
+  badge.className = 'settings__tier-badge';
+  switch (state) {
+    case 'checking':
+      badge.classList.add('settings__tier-badge--checking');
+      badge.textContent = '確認中...';
+      break;
+    case 'paid':
+      badge.classList.add('settings__tier-badge--paid');
+      badge.textContent = '有料プラン';
+      break;
+    case 'free':
+      badge.classList.add('settings__tier-badge--free');
+      badge.textContent = '無料プラン';
+      break;
+    default:
+      badge.textContent = '';
+  }
 }
 
 function renderCustomModelsList(
@@ -164,8 +199,13 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
     geminiLink.rel = 'noreferrer';
     geminiLink.className = 'settings__provider-link';
     geminiLink.textContent = 'APIキーを取得 ↗';
+    const tierBadge = doc.createElement('span');
+    tierBadge.id = 'settings-gemini-tier-badge';
+    tierBadge.className = 'settings__tier-badge';
+    tierBadge.setAttribute('aria-live', 'polite');
     geminiTitle.appendChild(geminiTitleText);
     geminiTitle.appendChild(geminiLink);
+    geminiTitle.appendChild(tierBadge);
     geminiCard.appendChild(geminiTitle);
     const geminiLabel = doc.createElement('label');
     geminiLabel.className = 'settings__field';
@@ -178,6 +218,12 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
     geminiLabel.appendChild(geminiLabelText);
     geminiLabel.appendChild(geminiInput);
     geminiCard.appendChild(geminiLabel);
+    const geminiMuted = doc.createElement('p');
+    geminiMuted.className = 'settings__muted';
+    geminiMuted.textContent =
+      'キーの保存時（未判定の場合はこの画面を開いたとき）にプランを自動確認します。' +
+      '無料プランを検出した場合はモデルを Gemini 2.0 Flash に自動切り替えします。';
+    geminiCard.appendChild(geminiMuted);
     llmSection.appendChild(geminiCard);
 
     // OpenRouter カード
@@ -310,16 +356,20 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
     actions.appendChild(saveBtn);
     container.appendChild(actions);
 
+    const detectTier = callbacks.detectGeminiTier ?? defaultDetectGeminiTier;
+
     // ---- 非同期初期化 ----
     void (async () => {
-      const [pending, gemini, openrouter, ncbi, rawModel, rawCustom] = await Promise.all([
-        callbacks.readKey(KEY_PENDING),
-        callbacks.readKey(KEY_GEMINI),
-        callbacks.readKey(KEY_OPENROUTER),
-        callbacks.readKey(KEY_NCBI),
-        callbacks.readKey(KEY_LLM_MODEL),
-        callbacks.readKey(KEY_CUSTOM_MODELS),
-      ]);
+      const [pending, gemini, openrouter, ncbi, rawModel, rawCustom, savedTier] =
+        await Promise.all([
+          callbacks.readKey(KEY_PENDING),
+          callbacks.readKey(KEY_GEMINI),
+          callbacks.readKey(KEY_OPENROUTER),
+          callbacks.readKey(KEY_NCBI),
+          callbacks.readKey(KEY_LLM_MODEL),
+          callbacks.readKey(KEY_CUSTOM_MODELS),
+          callbacks.readKey(KEY_GEMINI_TIER),
+        ]);
 
       if (pending === '1') {
         banner.textContent =
@@ -342,6 +392,23 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
       parts.push(openrouter ? 'OpenRouter: 保存済み' : 'OpenRouter: 未設定');
       parts.push(ncbi ? 'NCBI: 保存済み' : 'NCBI: 未設定（3 req/s 枠）');
       status.textContent = parts.join(' / ');
+
+      // 保存済み tier をバッジへ復元。未判定でキーがあれば読み込み時に自動判定する
+      if (savedTier === 'paid' || savedTier === 'free') {
+        updateTierBadge(tierBadge, savedTier);
+      } else if (gemini && gemini.trim() !== '') {
+        updateTierBadge(tierBadge, 'checking');
+        let tier: 'paid' | 'free' | 'unknown';
+        try {
+          tier = await detectTier(gemini);
+        } catch {
+          tier = 'unknown';
+        }
+        updateTierBadge(tierBadge, tier);
+        if (tier === 'paid' || tier === 'free') {
+          await callbacks.writeKey(KEY_GEMINI_TIER, tier);
+        }
+      }
     })();
 
     function handleRemoveCustomModel(id: string): void {
@@ -404,8 +471,45 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
           callbacks.writeKey(KEY_LLM_MODEL, selectedModel),
         ]);
 
+        // Gemini キーが設定されており Gemini モデルが選択されている場合にプラン自動判定
+        let modelSwitchedToFree = false;
+        let tierUndetermined = false;
+        if (geminiVal.trim() === '') {
+          // キーが空になったので保存済み tier をクリア
+          await callbacks.removeKey(KEY_GEMINI_TIER);
+          updateTierBadge(tierBadge, 'unknown');
+        } else if (resolveProvider(selectedModel) === 'gemini') {
+          status.textContent = 'APIプランを確認中...';
+          updateTierBadge(tierBadge, 'checking');
+
+          let tier: 'paid' | 'free' | 'unknown';
+          try {
+            tier = await detectTier(geminiVal);
+          } catch {
+            tier = 'unknown';
+          }
+
+          if (tier === 'free') {
+            updateTierBadge(tierBadge, 'free');
+            await callbacks.writeKey(KEY_GEMINI_TIER, 'free');
+            if (modelSelect.value !== FREE_TIER_MODEL_ID) {
+              modelSelect.value = FREE_TIER_MODEL_ID;
+              await callbacks.writeKey(KEY_LLM_MODEL, FREE_TIER_MODEL_ID);
+              refreshProviderCards(doc, FREE_TIER_MODEL_ID);
+              modelSwitchedToFree = true;
+            }
+          } else if (tier === 'paid') {
+            updateTierBadge(tierBadge, 'paid');
+            await callbacks.writeKey(KEY_GEMINI_TIER, 'paid');
+          } else {
+            updateTierBadge(tierBadge, 'unknown');
+            tierUndetermined = true;
+          }
+        }
+
         const pendingNow = await callbacks.readKey(KEY_PENDING);
-        const provider = resolveProvider(selectedModel);
+        const currentModel = modelSelect.value ?? DEFAULT_MODEL;
+        const provider = resolveProvider(currentModel);
         const keyForProvider = provider === 'openrouter' ? orVal : geminiVal;
 
         if (pendingNow === '1' && keyForProvider.trim() !== '') {
@@ -416,7 +520,15 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
           return;
         }
 
-        status.textContent = '保存しました。';
+        if (modelSwitchedToFree) {
+          status.textContent =
+            '保存しました。無料プランを検出。Gemini 2.0 Flash に切り替えました。';
+        } else if (tierUndetermined) {
+          status.textContent =
+            '保存しました。（Gemini プランを自動判定できませんでした。コンソールログを確認してください）';
+        } else {
+          status.textContent = '保存しました。';
+        }
       })();
     });
   };

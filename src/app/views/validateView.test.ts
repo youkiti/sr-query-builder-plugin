@@ -194,6 +194,62 @@ describe('createValidateView', () => {
     expect(container.querySelector('.validate__mesh')?.textContent).toContain('集計できません');
   });
 
+  test('state.validationResult があれば描画時に結果を復元する（再描画対策）', () => {
+    const view = createValidateView();
+    const container = buildContainer();
+    view(container, {
+      state: stateReady({
+        validationResult: { formulaVersionId: 'v-1', summary: sampleSummary() },
+      }),
+      navigate: jest.fn(),
+    });
+    expect(container.querySelector('.validate__status')?.textContent).toContain('4/5');
+    expect(container.querySelectorAll('.validate__line-hits li')).toHaveLength(3);
+    expect(container.querySelector('.validate__analyze-missed')).not.toBeNull();
+  });
+
+  test('state.missedAnalysis があれば AI 原因分析の結果も復元する', () => {
+    const view = createValidateView();
+    const container = buildContainer();
+    view(container, {
+      state: stateReady({
+        validationResult: { formulaVersionId: 'v-1', summary: sampleSummary() },
+        missedAnalysis: {
+          formulaVersionId: 'v-1',
+          result: {
+            analyses: [
+              {
+                pmid: '444',
+                cause: 'acute lung injury が #1 に無いため取りこぼしています。',
+                suggestedTerms: ['"acute lung injury"[tiab]'],
+                relatedBlock: '1',
+              },
+            ],
+            fetchedPmids: ['444'],
+          },
+        },
+      }),
+      navigate: jest.fn(),
+    });
+    const items = container.querySelectorAll('.validate__analysis-item');
+    expect(items).toHaveLength(1);
+    expect(items[0]!.textContent).toContain('PMID 444');
+    expect(container.querySelector('.validate__analyze-status')?.textContent).toContain('1 件');
+  });
+
+  test('validationResult の formulaVersionId が現在と違えば復元しない（stale 防止）', () => {
+    const view = createValidateView();
+    const container = buildContainer();
+    view(container, {
+      state: stateReady({
+        validationResult: { formulaVersionId: 'v-OLD', summary: sampleSummary() },
+      }),
+      navigate: jest.fn(),
+    });
+    expect(container.querySelector('.validate__results')?.childElementCount).toBe(0);
+    expect(container.querySelector('.validate__status')?.textContent).toBe('');
+  });
+
   test('未捕捉 PMID があると「AI で原因を分析する」ボタンを出し、結果を描画する', async () => {
     const onRun = jest.fn().mockResolvedValue(sampleSummary());
     const onAnalyzeMissed = jest.fn().mockResolvedValue({

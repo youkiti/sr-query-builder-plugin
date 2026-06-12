@@ -57,6 +57,8 @@ function makeStateWithDrafts(): AppState {
     currentProtocolVersion: null,
     currentFormulaVersionId: null,
     currentFormulaMarkdown: null,
+    validationResult: null,
+    missedAnalysis: null,
   };
 }
 

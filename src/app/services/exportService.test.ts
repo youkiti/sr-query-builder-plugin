@@ -32,6 +32,8 @@ function stateWithFormula(): AppState {
     currentProtocolVersion: 3,
     currentFormulaVersionId: 'v-42',
     currentFormulaMarkdown: formulaMd,
+    validationResult: null,
+    missedAnalysis: null,
   };
 }
 

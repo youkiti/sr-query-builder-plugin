@@ -39,6 +39,8 @@ function makeState(): AppState {
     currentProtocolVersion: 3,
     currentFormulaVersionId: null,
     currentFormulaMarkdown: null,
+    validationResult: null,
+    missedAnalysis: null,
   };
 }
 
