@@ -48,9 +48,12 @@ import {
 } from './services';
 import type { SeedPaper } from '@/domain/seedPaper';
 import { efetchArticles, type EfetchArticle } from '@/lib/ncbi';
-import { listFormulaVersions } from '@/features/formula';
+import { getLatestFormulaVersion, listFormulaVersions } from '@/features/formula';
 import type { FormulaVersion } from '@/domain/formulaVersion';
 import { getCurrentProject } from '@/features/project';
+import { getLatestProtocol, getProtocolBlocksByVersion } from '@/features/protocol';
+import type { Protocol, ProtocolBlock } from '@/domain/protocol';
+import type { BlocksDraft, ProtocolDraft } from './store';
 import { getCurrentUserEmail } from '@/lib/google';
 import { evaluateGuards } from './guards';
 import {
@@ -185,8 +188,10 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
 }
 
 /**
- * chrome.storage の currentProject をストアに反映する。
- * Popup 側で更新された後、メインビューを開いた直後に同期するための初期化処理。
+ * chrome.storage の currentProject をストアに反映し、
+ * 既存プロジェクトがあれば Sheets から Protocol / ProtocolBlocks / FormulaVersions の
+ * 最新行を読んで in-memory state を復元する。
+ * Sheets API エラーはアプリ起動を妨げない（エラー時は null のまま起動する）。
  */
 async function hydrateCurrentProject(store: AppStore, runtime: ChromeRuntimeDeps): Promise<void> {
   const current = await getCurrentProject(runtime.store);
@@ -194,6 +199,64 @@ async function hydrateCurrentProject(store: AppStore, runtime: ChromeRuntimeDeps
     return;
   }
   store.setState((s) => (s.project?.projectId === current.projectId ? s : { ...s, project: current }));
+
+  try {
+    const [protocol, latestFormula] = await Promise.all([
+      getLatestProtocol(current.spreadsheetId, runtime.google),
+      getLatestFormulaVersion(current.spreadsheetId, runtime.google),
+    ]);
+
+    if (protocol) {
+      const blocks = await getProtocolBlocksByVersion(
+        current.spreadsheetId,
+        protocol.version,
+        runtime.google
+      );
+      store.setState((s) => ({
+        ...s,
+        currentProtocolVersion: protocol.version,
+        protocolDraft: toProtocolDraft(protocol),
+        blocksDraft: blocks.length > 0 ? toBlocksDraft(blocks, protocol.combinationExpression) : s.blocksDraft,
+      }));
+    }
+
+    if (latestFormula) {
+      store.setState((s) => ({
+        ...s,
+        currentFormulaVersionId: latestFormula.versionId,
+        currentFormulaMarkdown: latestFormula.formulaMd,
+      }));
+    }
+  } catch {
+    // Sheets API エラーは無視してアプリを起動させる
+  }
+}
+
+function toProtocolDraft(protocol: Protocol): ProtocolDraft {
+  return {
+    frameworkType: protocol.frameworkType ?? 'custom',
+    researchQuestion: protocol.researchQuestion,
+    inclusionCriteria: protocol.inclusionCriteria ?? '',
+    exclusionCriteria: protocol.exclusionCriteria ?? '',
+    studyDesign: protocol.studyDesign ?? '',
+    sourceType: protocol.sourceType,
+    sourceFilename: protocol.sourceFilename,
+    rawTextRef: protocol.rawTextRef,
+    rawTextPreview: protocol.rawTextPreview ?? '',
+    rawTextInline: protocol.rawTextInline,
+  };
+}
+
+function toBlocksDraft(blocks: ProtocolBlock[], combinationExpression: string): BlocksDraft {
+  return {
+    blocks: blocks.map((b) => ({
+      blockLabel: b.blockLabel,
+      description: b.description,
+      aiGenerated: b.aiGenerated,
+      note: b.note ?? '',
+    })),
+    combinationExpression,
+  };
 }
 
 /**

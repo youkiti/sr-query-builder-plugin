@@ -12,5 +12,6 @@ describe('features/protocol index 再エクスポート', () => {
     expect(typeof mod.getNextProtocolVersion).toBe('function');
     expect(typeof mod.getLatestProtocol).toBe('function');
     expect(typeof mod.getProtocolByVersion).toBe('function');
+    expect(typeof mod.getProtocolBlocksByVersion).toBe('function');
   });
 });

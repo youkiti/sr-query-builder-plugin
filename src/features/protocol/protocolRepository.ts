@@ -98,6 +98,34 @@ export async function getProtocolByVersion(
 }
 
 /**
+ * 指定した version の ProtocolBlocks 行一覧を返す。1 件も無ければ []。
+ * block_index 昇順にソートして返す。
+ */
+export async function getProtocolBlocksByVersion(
+  spreadsheetId: string,
+  version: number,
+  deps: GoogleApiDeps
+): Promise<ProtocolBlock[]> {
+  const rows = await getSheetValues(spreadsheetId, 'ProtocolBlocks', deps);
+  if (rows.length <= 1) {
+    return [];
+  }
+  const versionIdx = BLOCKS_HEADER.indexOf('version');
+  /* istanbul ignore if -- HEADER に version は必ず含まれる */
+  if (versionIdx < 0) {
+    return [];
+  }
+  const result: ProtocolBlock[] = [];
+  for (const row of rows.slice(1)) {
+    const cell = row?.[versionIdx] ?? '';
+    if (Number.parseInt(cell, 10) === version) {
+      result.push(fromProtocolBlockRow(row));
+    }
+  }
+  return result.sort((a, b) => a.blockIndex - b.blockIndex);
+}
+
+/**
  * ProtocolBlocks タブに blocks の行数分まとめて追記する。
  * `version` は呼び出し側が一致させる責任を持つ（Protocol 側の version と同じ値）。
  */
@@ -195,4 +223,26 @@ function toProtocolBlockRow(block: ProtocolBlock): (string | number | boolean | 
     note: block.note,
   };
   return BLOCKS_HEADER.map((key) => map[key] ?? null);
+}
+
+function fromProtocolBlockRow(row: readonly string[]): ProtocolBlock {
+  const cell = (key: string): string => {
+    const idx = BLOCKS_HEADER.indexOf(key);
+    /* istanbul ignore if -- 呼び出しは固定キーのみ */
+    if (idx < 0) return '';
+    return row[idx] ?? '';
+  };
+  const version = Number.parseInt(cell('version'), 10);
+  const blockIndex = Number.parseInt(cell('block_index'), 10);
+  // Sheets は boolean を 'TRUE'/'FALSE' 文字列として返すが、
+  // RAW 書き込み時に boolean 値のまま保存された場合も考慮して String 変換してから比較する。
+  const aiGenerated = String(cell('ai_generated')).toUpperCase() === 'TRUE';
+  return {
+    version: Number.isFinite(version) ? version : 0,
+    blockIndex: Number.isFinite(blockIndex) ? blockIndex : 0,
+    blockLabel: cell('block_label'),
+    description: cell('description'),
+    aiGenerated,
+    note: cell('note') === '' ? null : cell('note'),
+  };
 }

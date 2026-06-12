@@ -5,6 +5,7 @@ import {
   getNextProtocolVersion,
   getLatestProtocol,
   getProtocolByVersion,
+  getProtocolBlocksByVersion,
 } from './protocolRepository';
 import type { Protocol, ProtocolBlock } from '@/domain/protocol';
 
@@ -278,5 +279,81 @@ describe('appendProtocolBlocks', () => {
     const d = deps();
     const blocks = Array.from({ length: 6 }, (_, i) => block({ blockIndex: i + 1 }));
     await expect(appendProtocolBlocks('sid', 1, blocks, d)).rejects.toThrow(/件数が不正/);
+  });
+});
+
+describe('getProtocolBlocksByVersion', () => {
+  function blockRow(overrides: {
+    version?: string;
+    block_index?: string;
+    block_label?: string;
+    description?: string;
+    ai_generated?: string;
+    note?: string;
+  }): string[] {
+    return SHEET_HEADERS.ProtocolBlocks.map((key) => {
+      const k = key as keyof typeof overrides;
+      if (k in overrides) return overrides[k] ?? '';
+      if (key === 'version') return '1';
+      if (key === 'block_index') return '1';
+      if (key === 'block_label') return 'Population';
+      if (key === 'description') return '対象集団';
+      if (key === 'ai_generated') return 'TRUE';
+      return '';
+    });
+  }
+
+  test('指定 version のブロックを block_index 昇順で返す', async () => {
+    const d = deps([
+      [...SHEET_HEADERS.ProtocolBlocks],
+      blockRow({ version: '2', block_index: '2', block_label: 'Intervention', description: '介入' }),
+      blockRow({ version: '2', block_index: '1', block_label: 'Population', description: '対象' }),
+      blockRow({ version: '1', block_index: '1', block_label: 'Other', description: '別版' }),
+    ]);
+    const result = await getProtocolBlocksByVersion('sid', 2, d);
+    expect(result).toHaveLength(2);
+    expect(result[0]!.blockIndex).toBe(1);
+    expect(result[0]!.blockLabel).toBe('Population');
+    expect(result[1]!.blockIndex).toBe(2);
+    expect(result[1]!.blockLabel).toBe('Intervention');
+  });
+
+  test('存在しない version は []', async () => {
+    const d = deps([[...SHEET_HEADERS.ProtocolBlocks], blockRow({ version: '1' })]);
+    await expect(getProtocolBlocksByVersion('sid', 99, d)).resolves.toEqual([]);
+  });
+
+  test('データ行が無ければ []', async () => {
+    const d = deps([[...SHEET_HEADERS.ProtocolBlocks]]);
+    await expect(getProtocolBlocksByVersion('sid', 1, d)).resolves.toEqual([]);
+  });
+
+  test('ai_generated が TRUE 文字列なら true、それ以外は false', async () => {
+    const d = deps([
+      [...SHEET_HEADERS.ProtocolBlocks],
+      blockRow({ version: '3', block_index: '1', ai_generated: 'TRUE' }),
+      blockRow({ version: '3', block_index: '2', ai_generated: 'FALSE' }),
+    ]);
+    const result = await getProtocolBlocksByVersion('sid', 3, d);
+    expect(result[0]!.aiGenerated).toBe(true);
+    expect(result[1]!.aiGenerated).toBe(false);
+  });
+
+  test('note が空文字なら null に変換される', async () => {
+    const d = deps([
+      [...SHEET_HEADERS.ProtocolBlocks],
+      blockRow({ version: '1', note: '' }),
+    ]);
+    const result = await getProtocolBlocksByVersion('sid', 1, d);
+    expect(result[0]!.note).toBeNull();
+  });
+
+  test('note に値があればそのまま返す', async () => {
+    const d = deps([
+      [...SHEET_HEADERS.ProtocolBlocks],
+      blockRow({ version: '1', note: 'メモ' }),
+    ]);
+    const result = await getProtocolBlocksByVersion('sid', 1, d);
+    expect(result[0]!.note).toBe('メモ');
   });
 });
