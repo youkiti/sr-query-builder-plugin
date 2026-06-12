@@ -285,10 +285,8 @@ function buildSeedRow(
 
   const label = doc.createElement('span');
   label.className = 'seeds__list-label';
-  if (seed.isValid) {
-    label.textContent = `✅ ${idText}`;
-  } else if (isDisabledRow) {
-    // 無効中はチェックボックス OFF + グレーアウトで表現する（バッジは付けない）
+  if (seed.isValid || isDisabledRow) {
+    // 有効/無効はチェックボックスの ON/OFF とグレーアウトで表現する（バッジは付けない）
     label.textContent = idText;
   } else {
     label.textContent = `⚠️ ${idText} — ${seed.exclusionReason ?? '無効'}`;
