@@ -322,60 +322,66 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
     if (status) status.textContent = '保存中...';
 
     void (async () => {
-      await Promise.all([
-        deps.writeKey(STORAGE_KEY_GEMINI, geminiVal),
-        deps.writeKey(STORAGE_KEY_OPENROUTER, openrouterVal),
-        deps.writeKey(STORAGE_KEY_NCBI, ncbiVal),
-        deps.writeKey(STORAGE_KEY_LLM_MODEL, selectedModel),
-      ]);
+      try {
+        await Promise.all([
+          deps.writeKey(STORAGE_KEY_GEMINI, geminiVal),
+          deps.writeKey(STORAGE_KEY_OPENROUTER, openrouterVal),
+          deps.writeKey(STORAGE_KEY_NCBI, ncbiVal),
+          deps.writeKey(STORAGE_KEY_LLM_MODEL, selectedModel),
+        ]);
 
-      // Gemini キーが設定されており Gemini モデルが選択されている場合にプラン自動判定
-      let modelSwitchedToFree = false;
-      const provider = resolveProviderFromModelId(selectedModel, BUILTIN_MODELS_DISPLAY);
-      if (deps.detectGeminiTier && geminiVal.trim() !== '' && provider === 'gemini') {
-        if (status) status.textContent = 'APIプランを確認中...';
-        updateTierBadge(doc, 'checking');
+        // Gemini キーが設定されており Gemini モデルが選択されている場合にプラン自動判定
+        let modelSwitchedToFree = false;
+        const provider = resolveProviderFromModelId(selectedModel, BUILTIN_MODELS_DISPLAY);
+        if (deps.detectGeminiTier && geminiVal.trim() !== '' && provider === 'gemini') {
+          if (status) status.textContent = 'APIプランを確認中...';
+          updateTierBadge(doc, 'checking');
 
-        let tier: 'paid' | 'free' | 'unknown';
-        try {
-          tier = await deps.detectGeminiTier(geminiVal);
-        } catch {
-          tier = 'unknown';
-        }
-
-        if (tier === 'free') {
-          updateTierBadge(doc, 'free');
-          if (selectEl && selectEl.value !== FREE_TIER_MODEL_ID) {
-            selectEl.value = FREE_TIER_MODEL_ID;
-            await deps.writeKey(STORAGE_KEY_LLM_MODEL, FREE_TIER_MODEL_ID);
-            refreshProviderCards(doc, FREE_TIER_MODEL_ID);
-            modelSwitchedToFree = true;
+          let tier: 'paid' | 'free' | 'unknown';
+          try {
+            tier = await deps.detectGeminiTier(geminiVal);
+          } catch {
+            tier = 'unknown';
           }
-        } else if (tier === 'paid') {
-          updateTierBadge(doc, 'paid');
-        } else {
-          updateTierBadge(doc, 'unknown');
+
+          if (tier === 'free') {
+            updateTierBadge(doc, 'free');
+            if (selectEl && selectEl.value !== FREE_TIER_MODEL_ID) {
+              selectEl.value = FREE_TIER_MODEL_ID;
+              await deps.writeKey(STORAGE_KEY_LLM_MODEL, FREE_TIER_MODEL_ID);
+              refreshProviderCards(doc, FREE_TIER_MODEL_ID);
+              modelSwitchedToFree = true;
+            }
+          } else if (tier === 'paid') {
+            updateTierBadge(doc, 'paid');
+          } else {
+            updateTierBadge(doc, 'unknown');
+          }
         }
-      }
 
-      const pendingNow = await deps.readKey(STORAGE_KEY_PENDING_APP_TAB);
-      const currentModel = selectEl?.value ?? DEFAULT_MODEL_ID;
-      const currentProvider = resolveProviderFromModelId(currentModel, BUILTIN_MODELS_DISPLAY);
-      const keyForProvider = currentProvider === 'openrouter' ? openrouterVal : geminiVal;
+        const pendingNow = await deps.readKey(STORAGE_KEY_PENDING_APP_TAB);
+        const currentModel = selectEl?.value ?? DEFAULT_MODEL_ID;
+        const currentProvider = resolveProviderFromModelId(currentModel, BUILTIN_MODELS_DISPLAY);
+        const keyForProvider = currentProvider === 'openrouter' ? openrouterVal : geminiVal;
 
-      if (pendingNow === '1' && keyForProvider.trim() !== '') {
-        await deps.removeKey(STORAGE_KEY_PENDING_APP_TAB);
+        if (pendingNow === '1' && keyForProvider.trim() !== '') {
+          await deps.removeKey(STORAGE_KEY_PENDING_APP_TAB);
+          if (status) {
+            status.textContent = '保存しました。トップ画面に戻ります…';
+          }
+          deps.openAppTab();
+          return;
+        }
+
         if (status) {
-          status.textContent = '保存しました。トップ画面に戻ります…';
+          status.textContent = modelSwitchedToFree
+            ? '保存しました。無料プランを検出。Gemini 2.0 Flash に切り替えました。'
+            : '保存しました。';
         }
-        deps.openAppTab();
-        return;
-      }
-
-      if (status) {
-        status.textContent = modelSwitchedToFree
-          ? '保存しました。無料プランを検出。Gemini 2.0 Flash に切り替えました。'
-          : '保存しました。';
+      } catch (err) {
+        if (status) {
+          status.textContent = `保存に失敗しました: ${err instanceof Error ? err.message : String(err)}`;
+        }
       }
     })();
   });

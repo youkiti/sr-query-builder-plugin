@@ -25,6 +25,8 @@ interface GeminiErrorBody {
   error?: { code?: number; message?: string; status?: string };
 }
 
+const PROBE_TIMEOUT_MS = 10_000;
+
 export async function detectGeminiTier(
   apiKey: string,
   fetchImpl: typeof fetch = globalThis.fetch
@@ -34,6 +36,8 @@ export async function detectGeminiTier(
   const url = `${ENDPOINT_BASE}/${encodeURIComponent(PROBE_MODEL_ID)}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
   let res: Response;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
   try {
     res = await fetchImpl(url, {
       method: 'POST',
@@ -42,9 +46,12 @@ export async function detectGeminiTier(
         contents: [{ role: 'user', parts: [{ text: 'hi' }] }],
         generationConfig: { maxOutputTokens: 1 },
       }),
+      signal: controller.signal,
     });
   } catch {
     return 'unknown';
+  } finally {
+    clearTimeout(timer);
   }
 
   if (res.ok) return 'paid';
