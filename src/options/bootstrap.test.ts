@@ -272,7 +272,7 @@ describe('startOptions', () => {
     expect(doc.getElementById('options-status')?.textContent).toBe('保存しました。');
   });
 
-  test('カスタムモデル ID に "/" が無いとエラー表示され追加されない', async () => {
+  test('カスタムモデル ID が空のときはエラー表示され追加されない', async () => {
     const doc = buildDocument();
     const writeKey = jest.fn<Promise<void>, [string, string]>(async () => undefined);
     const deps: OptionsDeps = {
@@ -282,11 +282,51 @@ describe('startOptions', () => {
       openAppTab: jest.fn(),
     };
     await startOptions(doc, deps);
-    (doc.getElementById('custom-model-id') as HTMLInputElement).value = 'invalidmodel';
+    (doc.getElementById('custom-model-id') as HTMLInputElement).value = '';
     (doc.getElementById('add-custom-model') as HTMLButtonElement).click();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(writeKey).not.toHaveBeenCalledWith(STORAGE_KEY_CUSTOM_MODELS, expect.anything());
-    expect(doc.getElementById('options-status')?.textContent).toContain('provider/model-name');
+    expect(doc.getElementById('options-status')?.textContent).toContain('モデルIDを入力してください');
+  });
+
+  test('カスタム Gemini モデル（スラッシュなし）を追加するとリストと Gemini optgroup に現れる', async () => {
+    const doc = buildDocument();
+    const store: Record<string, string> = {};
+    const deps: OptionsDeps = {
+      readKey: jest.fn(async (key) => store[key]),
+      writeKey: jest.fn(async (key, value) => {
+        store[key] = value;
+      }),
+      removeKey: jest.fn(async () => undefined),
+      openAppTab: jest.fn(),
+    };
+    await startOptions(doc, deps);
+    (doc.getElementById('custom-model-id') as HTMLInputElement).value = 'gemini-3.5-pro';
+    (doc.getElementById('custom-model-label') as HTMLInputElement).value = 'Gemini 3.5 Pro';
+    (doc.getElementById('add-custom-model') as HTMLButtonElement).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(JSON.parse(store[STORAGE_KEY_CUSTOM_MODELS] ?? '[]')).toEqual([
+      { id: 'gemini-3.5-pro', label: 'Gemini 3.5 Pro' },
+    ]);
+    const listText = doc.getElementById('custom-models-list')?.textContent ?? '';
+    expect(listText).toContain('gemini-3.5-pro');
+    const select = doc.getElementById('llm-model-select') as HTMLSelectElement;
+    // Gemini optgroup に属していること
+    const geminiGroup = Array.from(select.querySelectorAll('optgroup')).find(
+      (g) => g.label === 'Gemini'
+    );
+    const geminiOptionValues = Array.from(geminiGroup?.querySelectorAll('option') ?? []).map(
+      (o) => o.value
+    );
+    expect(geminiOptionValues).toContain('gemini-3.5-pro');
+    // OpenRouter optgroup には含まれないこと
+    const orGroup = Array.from(select.querySelectorAll('optgroup')).find(
+      (g) => g.label === 'OpenRouter'
+    );
+    const orOptionValues = Array.from(orGroup?.querySelectorAll('option') ?? []).map(
+      (o) => o.value
+    );
+    expect(orOptionValues).not.toContain('gemini-3.5-pro');
   });
 
   test('有効なカスタムモデルを追加するとリストとセレクトに現れる', async () => {

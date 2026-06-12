@@ -81,7 +81,7 @@ function populateModelSelect(
   selectedModelId: string
 ): void {
   selectEl.innerHTML = '';
-  // Gemini optgroup
+  // Gemini optgroup（ビルトイン + カスタム Gemini）
   const geminiGroup = document.createElement('optgroup');
   geminiGroup.label = 'Gemini';
   BUILTIN_MODELS_DISPLAY.filter((m) => m.provider === 'gemini').forEach((m) => {
@@ -91,8 +91,15 @@ function populateModelSelect(
     if (m.id === selectedModelId) opt.selected = true;
     geminiGroup.appendChild(opt);
   });
+  customModels.filter((m) => !m.id.includes('/')).forEach((m) => {
+    const opt = document.createElement('option');
+    opt.value = m.id;
+    opt.textContent = m.label ? m.label + ' (' + m.id + ')' : m.id;
+    if (m.id === selectedModelId) opt.selected = true;
+    geminiGroup.appendChild(opt);
+  });
   selectEl.appendChild(geminiGroup);
-  // OpenRouter optgroup
+  // OpenRouter optgroup（ビルトイン + カスタム OpenRouter）
   const orGroup = document.createElement('optgroup');
   orGroup.label = 'OpenRouter';
   BUILTIN_MODELS_DISPLAY.filter((m) => m.provider === 'openrouter').forEach((m) => {
@@ -102,7 +109,7 @@ function populateModelSelect(
     if (m.id === selectedModelId) opt.selected = true;
     orGroup.appendChild(opt);
   });
-  customModels.forEach((m) => {
+  customModels.filter((m) => m.id.includes('/')).forEach((m) => {
     const opt = document.createElement('option');
     opt.value = m.id;
     opt.textContent = m.label ? m.label + ' (' + m.id + ')' : m.id;
@@ -277,8 +284,8 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
   addCustomModelBtn?.addEventListener('click', async () => {
     const id = customModelIdInput?.value.trim() ?? '';
     const label = customModelLabelInput?.value.trim();
-    if (!id.includes('/')) {
-      if (status) status.textContent = 'モデルID は "provider/model-name" 形式で入力してください。';
+    if (!id) {
+      if (status) status.textContent = 'モデルIDを入力してください。';
       return;
     }
     const raw = await deps.readKey(STORAGE_KEY_CUSTOM_MODELS);
