@@ -82,6 +82,12 @@ export interface AppState {
   blocksDraft: BlocksDraft | null;
   /** プロトコル本文のメタ情報。未開始なら null */
   protocolDraft: ProtocolDraft | null;
+  /**
+   * protocolDraft が Sheets の Protocol タブへ保存（承認）済みなら true。
+   * submitProtocol で false に戻り、approveBlocks / 起動時 hydrate で true になる。
+   * protocolView はこれを見て「読み取り専用表示」と「編集フォーム」を切り替える（§4.2）。
+   */
+  protocolDraftPersisted: boolean;
   /** blocksService.approveBlocks が採番した Protocol.version */
   currentProtocolVersion: number | null;
   /** draftService.generateDraft が採番した FormulaVersions.version_id */
@@ -100,6 +106,7 @@ export const INITIAL_STATE: AppState = {
   cumulativeCostUsd: null,
   blocksDraft: null,
   protocolDraft: null,
+  protocolDraftPersisted: false,
   currentProtocolVersion: null,
   currentFormulaVersionId: null,
   currentFormulaMarkdown: null,

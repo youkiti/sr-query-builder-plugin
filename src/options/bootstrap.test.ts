@@ -529,6 +529,29 @@ describe('startOptions', () => {
     );
   });
 
+  test('プラン確認が unavailable（混雑）のときはモデルを変えず混雑中メッセージを出し永続化しない', async () => {
+    const doc = buildDocumentWithBadge();
+    const store: Record<string, string> = {};
+    const detectGeminiTierMock = jest.fn(async () => 'unavailable' as const);
+    const deps: OptionsDeps = {
+      readKey: jest.fn(async (key) => store[key]),
+      writeKey: jest.fn(async (key, value) => { store[key] = value; }),
+      removeKey: jest.fn(async () => undefined),
+      openAppTab: jest.fn(),
+      detectGeminiTier: detectGeminiTierMock,
+    };
+    await startOptions(doc, deps);
+    (doc.getElementById('gemini-api-key') as HTMLInputElement).value = 'some-key';
+    (doc.getElementById('save-keys') as HTMLButtonElement).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(store[STORAGE_KEY_LLM_MODEL]).toBe('gemini-3.5-flash');
+    expect(store['gemini.detectedTier']).toBeUndefined();
+    expect(doc.getElementById('options-status')?.textContent).toContain('混雑中');
+    expect(doc.getElementById('gemini-tier-badge')?.textContent).toBe('');
+  });
+
   test('保存済み tier があればページ読み込み時にバッジへ復元され、再判定はしない', async () => {
     const doc = buildDocumentWithBadge();
     const detectGeminiTierMock = jest.fn(async () => 'free' as const);

@@ -53,6 +53,7 @@ describe('startApp', () => {
       project: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'd', title: 'My SR' },
       cumulativeCostUsd: null,
       blocksDraft: null,
+      protocolDraftPersisted: false,
       protocolDraft: null,
       currentProtocolVersion: null,
       currentFormulaVersionId: null,
@@ -91,6 +92,7 @@ describe('startApp', () => {
       project: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'd', title: 'T' },
       cumulativeCostUsd: null,
       blocksDraft: null,
+      protocolDraftPersisted: false,
       protocolDraft: null,
       currentProtocolVersion: null,
       currentFormulaVersionId: null,
@@ -391,6 +393,189 @@ describe('startApp - wiring 層', () => {
     expect(handle.store.getState().blocksDraft?.blocks[0]?.blockLabel).toBe('P');
     expect(setHash).toHaveBeenCalledWith('#/blocks');
     expect(data['LLM_LOG']).toBeUndefined(); // sanity: no unexpected key
+  });
+
+  /** Protocol タブの行を SHEET_HEADERS.Protocol の列順で組み立てる */
+  function protocolRow(version: string, rq: string, inline = ''): string[] {
+    return SHEET_HEADERS.Protocol.map((key) => {
+      if (key === 'version') return version;
+      if (key === 'framework_type') return 'pico';
+      if (key === 'research_question') return rq;
+      if (key === 'block_count') return '1';
+      if (key === 'combination_expression') return '#1';
+      if (key === 'source_type') return 'manual';
+      if (key === 'raw_text_inline') return inline;
+      if (key === 'created_at') return `2026-06-0${version}T00:00:00Z`;
+      if (key === 'created_by') return 'me@x';
+      return '';
+    });
+  }
+
+  /** ProtocolBlocks タブの行を SHEET_HEADERS.ProtocolBlocks の列順で組み立てる */
+  function protocolBlockRow(version: string, label: string): string[] {
+    return SHEET_HEADERS.ProtocolBlocks.map((key) => {
+      if (key === 'version') return version;
+      if (key === 'block_index') return '1';
+      if (key === 'block_label') return label;
+      if (key === 'description') return 'desc';
+      if (key === 'ai_generated') return 'TRUE';
+      return '';
+    });
+  }
+
+  /** Sheets 読み出し（Protocol / ProtocolBlocks / FormulaVersions）を持つ fetch ハンドラ */
+  function sheetsFetchHandler(
+    extra?: (url: string) => Response | null
+  ): (url: string) => Promise<Response> {
+    return async (url: string): Promise<Response> => {
+      if (typeof url !== 'string') {
+        return jsonResponse({});
+      }
+      const handled = extra?.(url);
+      if (handled) {
+        return handled;
+      }
+      if (url.includes(':append')) {
+        return jsonResponse({});
+      }
+      if (url.includes('/values/ProtocolBlocks')) {
+        return jsonResponse({
+          values: [[...SHEET_HEADERS.ProtocolBlocks], protocolBlockRow('3', 'P-orig')],
+        });
+      }
+      if (url.includes('/values/Protocol')) {
+        return jsonResponse({
+          values: [
+            [...SHEET_HEADERS.Protocol],
+            protocolRow('1', 'RQ v1', '本文 v1'),
+            protocolRow('3', 'RQ v3', '本文 v3'),
+          ],
+        });
+      }
+      if (url.includes('/values/FormulaVersions')) {
+        return jsonResponse({ values: [] });
+      }
+      return jsonResponse({});
+    };
+  }
+
+  test('hydrate: Sheets の最新 Protocol を読み込むと persisted=true で読み取り専用表示になる', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'D', title: 'T' },
+    });
+    fetchMock.mockImplementation(sheetsFetchHandler());
+    const handle = startApp(doc, {
+      getHash: () => '#/protocol',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    const state = handle.store.getState();
+    expect(state.protocolDraftPersisted).toBe(true);
+    expect(state.currentProtocolVersion).toBe(3);
+    expect(state.protocolDraft?.researchQuestion).toBe('RQ v3');
+    handle.store.setState((s) => ({ ...s })); // 再レンダして view に反映
+    expect(doc.querySelector('.protocol__readonly')).not.toBeNull();
+    expect(doc.querySelector('.protocol__version-label')?.textContent).toContain('v3');
+  });
+
+  test('protocol view 既定 onListVersions が Protocol タブの全バージョンを読む', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'D', title: 'T' },
+    });
+    fetchMock.mockImplementation(sheetsFetchHandler());
+    const handle = startApp(doc, {
+      getHash: () => '#/protocol',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({ ...s }));
+    doc.querySelector<HTMLButtonElement>('.protocol__load-versions')!.click();
+    await flush();
+    const select = doc.querySelector<HTMLSelectElement>('#protocol-version-select')!;
+    expect(select.options).toHaveLength(2);
+    expect(select.options[0]?.textContent).toContain('v3');
+    expect(select.options[1]?.textContent).toContain('v1');
+  });
+
+  test('protocol view 既定 onReviseKeepBlocks が既存ブロックを維持したまま新 version を追記する', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'D', title: 'T' },
+      'apiKeys.gemini': 'KEY',
+    });
+    fetchMock.mockImplementation(
+      sheetsFetchHandler((url) => {
+        if (url.includes('generativelanguage.googleapis.com')) {
+          return jsonResponse({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify({
+                        framework_type: 'pico',
+                        research_question: 'RQ 改訂版',
+                        blocks: [{ block_label: 'P-llm', description: 'llm 抽出' }],
+                        combination_expression: '#1',
+                      }),
+                    },
+                  ],
+                },
+              },
+            ],
+          });
+        }
+        if (url.includes('/upload/drive/v3/files')) {
+          return jsonResponse({ id: 'f', webViewLink: 'https://drive/x' });
+        }
+        return null;
+      })
+    );
+    const handle = startApp(doc, {
+      getHash: () => '#/protocol',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({
+      ...s,
+      // 旧プロトコル由来の検索式があった想定（リセットされることを確認する）
+      currentFormulaVersionId: 'F-old',
+      currentFormulaMarkdown: '# old',
+    }));
+
+    // 読み取り専用 → 編集 → 保存 → 「既存ブロックを維持」
+    doc.querySelector<HTMLButtonElement>('.protocol__edit')!.click();
+    const inline = doc.querySelector<HTMLTextAreaElement>('textarea#inline')!;
+    inline.value = '改訂後の本文';
+    doc.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }));
+    doc.querySelector<HTMLButtonElement>('.protocol__revise-keep')!.click();
+    for (let i = 0; i < 10; i += 1) {
+      await flush();
+    }
+
+    const state = handle.store.getState();
+    // 既存最大 v3 の次 = v4 が採番され、ブロックは LLM 抽出結果ではなく既存定義のまま
+    expect(state.currentProtocolVersion).toBe(4);
+    expect(state.protocolDraftPersisted).toBe(true);
+    expect(state.blocksDraft?.blocks[0]?.blockLabel).toBe('P-orig');
+    expect(state.protocolDraft?.researchQuestion).toBe('RQ 改訂版');
+    // 検索式系の状態はリセットされる（§4.2）
+    expect(state.currentFormulaVersionId).toBeNull();
+    expect(state.currentFormulaMarkdown).toBeNull();
+    // Protocol / ProtocolBlocks への追記が起きている
+    const appended = fetchMock.mock.calls
+      .map((c) => c[0] as string)
+      .filter((u) => typeof u === 'string' && u.includes(':append'));
+    expect(appended.some((u) => u.includes('Protocol'))).toBe(true);
+    expect(appended.some((u) => u.includes('ProtocolBlocks'))).toBe(true);
   });
 
   test('blocks view 既定 onApprove が approveBlocks を呼ぶ', async () => {

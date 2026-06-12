@@ -24,6 +24,7 @@ function makeState(): AppState {
       ],
       combinationExpression: '#1 AND #2',
     },
+    protocolDraftPersisted: false,
     protocolDraft: {
       frameworkType: 'pico',
       researchQuestion: 'RQ',

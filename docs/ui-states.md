@@ -131,7 +131,7 @@
 
 | ルート | 主な可視要素 | エッジ |
 |---|---|---|
-| `#/protocol` | **入力形式ラジオは 2 モード**（`manual` / `file`）。`file` モードは `.md` / `.markdown` / `.docx` を同一 input（`accept=".md,.markdown,.docx"`）で受け、内部で拡張子 → `sourceType: markdown \| docx` に振り分ける。組入/除外基準は AI が元テキストから抽出するためこの画面では入力しない（[src/app/views/protocolView.ts:8-13](../src/app/views/protocolView.ts#L8-L13) 参照） | docx パース失敗で UI が固まらない |
+| `#/protocol` | **入力形式ラジオは 2 モード**（`manual` / `file`）。`file` モードは `.md` / `.markdown` / `.docx` を同一 input（`accept=".md,.markdown,.docx"`）で受け、内部で拡張子 → `sourceType: markdown \| docx` に振り分ける。組入/除外基準は AI が元テキストから抽出するためこの画面では入力しない（[src/app/views/protocolView.ts:8-13](../src/app/views/protocolView.ts#L8-L13) 参照）。**再訪時**は 3 モード分岐（requirements.md §4.2「プロトコル画面の再訪・改訂フロー」、2026-06-13 実装済み）: ①未承認 draft あり → 本文プリセット済みフォーム + `.protocol__draft-status`（「⚠ 未保存の下書き」バッジ。保存済み表示と視覚的に区別する）+ `.protocol__notice`、②承認済み（`protocolDraftPersisted=true`）→ `.protocol__readonly`（summary dl + `.protocol__version-label`）+ 「このプロトコルを編集する」+ `.protocol__load-versions` でバージョン切替（過去版は読み取り専用 + `.protocol__old-note`）、③どちらも無し → 空フォーム。改訂保存時は `.protocol__revise-confirm` パネルで「ブロックを作り直すか」を確認（再抽出 / 既存維持 / キャンセル） | docx パース失敗で UI が固まらない |
 | `#/blocks` | LLM 抽出のブロック候補一覧。承認 / 編集ボタン | 0 ブロックでも空状態 UI を出す |
 | `#/seeds` | PMID リスト + include/exclude/maybe ボタン + interactive 拡張ログ | 0 件と N 件で見た目が分岐する |
 | `#/draft` | LLM ドラフト検索式の表示 + 再生成ボタン | エラー時はスケルトンを残しエラーメッセージを別領域に出す |

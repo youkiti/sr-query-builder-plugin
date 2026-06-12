@@ -77,7 +77,14 @@ export async function submitProtocol(
     rawTextPreview: parsed.preview,
     rawTextInline: parsed.sourceType === 'manual' ? parsed.plainText : null,
   };
-  deps.store.setState((s) => ({ ...s, blocksDraft, protocolDraft }));
+  // 新しい draft はまだ Sheets に保存されていないので persisted を false に戻す
+  // （ブロック承認 = approveBlocks で true になる）
+  deps.store.setState((s) => ({
+    ...s,
+    blocksDraft,
+    protocolDraft,
+    protocolDraftPersisted: false,
+  }));
   return { parsed, blocksDraft, protocolDraft };
 }
 

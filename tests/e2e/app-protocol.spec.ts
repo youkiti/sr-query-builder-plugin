@@ -5,7 +5,8 @@
 
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { injectAppStub, scenarioWithProject } from './fixtures/appStub';
+import { injectAppStub, scenarioWithProject, PROJECT_FIXTURE } from './fixtures/appStub';
+import { fullStateScenario, FULL_PROTOCOL_DRAFT } from './fixtures/scenarios/fullState';
 
 const APP_URL = '/app/app.html#/protocol';
 
@@ -81,5 +82,100 @@ test.describe('app-protocol (#/protocol)', () => {
     await expect(page.locator('.protocol__form')).toBeVisible();
     const result = await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze();
     expect(result.violations, JSON.stringify(result.violations, null, 2)).toEqual([]);
+  });
+});
+
+test.describe('app-protocol 再訪・改訂フロー（requirements.md §4.2）', () => {
+  test('承認前の下書きで再訪すると「未保存」バッジ付きのプリセット済みフォームになる', async ({
+    page,
+  }) => {
+    await injectAppStub(
+      page,
+      scenarioWithProject({
+        preloadedState: {
+          project: PROJECT_FIXTURE,
+          protocolDraft: FULL_PROTOCOL_DRAFT,
+          protocolDraftPersisted: false,
+        },
+      })
+    );
+    await page.goto(APP_URL);
+
+    const badge = page.locator('.protocol__draft-status');
+    await expect(badge).toBeVisible();
+    await expect(badge).toContainText('未保存の下書き');
+    await expect(badge).toContainText('ブロック承認');
+    // 本文はプリセットされ、読み取り専用表示にはならない
+    await expect(page.locator('textarea#inline')).toHaveValue(/ECMO/);
+    await expect(page.locator('.protocol__readonly')).toHaveCount(0);
+  });
+
+  test('承認済みプロトコルで再訪すると読み取り専用表示になりフォームは出ない', async ({
+    page,
+  }) => {
+    await injectAppStub(page, fullStateScenario());
+    await page.goto(APP_URL);
+
+    await expect(page.locator('.protocol__readonly')).toBeVisible();
+    await expect(page.locator('.protocol__form')).toHaveCount(0);
+    await expect(page.locator('.protocol__version-label')).toContainText('v1');
+    await expect(page.locator('.protocol__version-label')).toContainText('最新');
+    // 抽出済みフィールドが表示されている
+    await expect(page.locator('.protocol__summary')).toContainText('ECMO');
+  });
+
+  test('編集ボタンで本文プリセット済みフォームに入り、「編集をやめる」で戻れる', async ({
+    page,
+  }) => {
+    await injectAppStub(page, fullStateScenario());
+    await page.goto(APP_URL);
+
+    await page.locator('.protocol__edit').click();
+    await expect(page.locator('.protocol__form')).toBeVisible();
+    await expect(page.locator('textarea#inline')).toHaveValue(/ECMO/);
+    await expect(page.locator('.protocol__notice')).toContainText('v1 を編集中');
+
+    await page.locator('.protocol__cancel').click();
+    await expect(page.locator('.protocol__readonly')).toBeVisible();
+    await expect(page.locator('.protocol__form')).toHaveCount(0);
+  });
+
+  test('改訂の保存で「ブロックを作り直すか」確認パネルが出て、キャンセルで閉じる', async ({
+    page,
+  }) => {
+    await injectAppStub(page, fullStateScenario());
+    await page.goto(APP_URL);
+
+    await page.locator('.protocol__edit').click();
+    await page.locator('button.protocol__submit').click();
+
+    const panel = page.locator('.protocol__revise-confirm');
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText('検索ブロックを作り直しますか');
+    await expect(panel.locator('.protocol__revise-rebuild')).toBeVisible();
+    await expect(panel.locator('.protocol__revise-keep')).toBeVisible();
+    await expect(page.locator('button.protocol__submit')).toBeDisabled();
+
+    await panel.locator('.protocol__revise-cancel').click();
+    await expect(panel).toBeHidden();
+    await expect(page.locator('button.protocol__submit')).toBeEnabled();
+  });
+
+  test('a11y: 読み取り専用表示と確認パネルで axe violation zero', async ({ page }) => {
+    await injectAppStub(page, fullStateScenario());
+    await page.goto(APP_URL);
+    await expect(page.locator('.protocol__readonly')).toBeVisible();
+    const readonlyResult = await new AxeBuilder({ page })
+      .disableRules(['color-contrast'])
+      .analyze();
+    expect(readonlyResult.violations, JSON.stringify(readonlyResult.violations, null, 2)).toEqual(
+      []
+    );
+
+    await page.locator('.protocol__edit').click();
+    await page.locator('button.protocol__submit').click();
+    await expect(page.locator('.protocol__revise-confirm')).toBeVisible();
+    const editResult = await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze();
+    expect(editResult.violations, JSON.stringify(editResult.violations, null, 2)).toEqual([]);
   });
 });

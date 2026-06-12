@@ -72,6 +72,24 @@ export async function getLatestProtocol(
 }
 
 /**
+ * Protocol タブの全行を version 降順で返す。1 件も無ければ []。
+ * プロトコル画面のバージョン切替 UI（requirements.md §4.2）が使う。
+ */
+export async function listProtocols(
+  spreadsheetId: string,
+  deps: GoogleApiDeps
+): Promise<Protocol[]> {
+  const rows = await getSheetValues(spreadsheetId, 'Protocol', deps);
+  if (rows.length <= 1) {
+    return [];
+  }
+  return rows
+    .slice(1)
+    .map(fromProtocolRow)
+    .sort((a, b) => b.version - a.version);
+}
+
+/**
  * 指定した version の Protocol 行を返す。存在しなければ null。
  */
 export async function getProtocolByVersion(

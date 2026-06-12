@@ -62,7 +62,18 @@ export async function approveBlocks(deps: BlocksServiceDeps): Promise<ApprovedPr
   });
   await appendProtocol(spreadsheetId, protocol, deps.google);
   await appendProtocolBlocks(spreadsheetId, version, blocks, deps.google);
-  deps.store.setState((s) => ({ ...s, currentProtocolVersion: version }));
+  // 新しい Protocol.version が確定したので、旧プロトコル由来の検索式系状態は
+  // リセットしてブロック以降をやり直させる（requirements.md §4.2）。
+  // 旧検索式は FormulaVersions に protocol_version 付きで残るため失われない。
+  deps.store.setState((s) => ({
+    ...s,
+    currentProtocolVersion: version,
+    protocolDraftPersisted: true,
+    currentFormulaVersionId: null,
+    currentFormulaMarkdown: null,
+    validationResult: null,
+    missedAnalysis: null,
+  }));
   return { version, protocol, blocks };
 }
 

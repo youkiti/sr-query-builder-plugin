@@ -57,6 +57,15 @@ describe('submitProtocol - manual', () => {
     expect(userMsg).toContain('本文');
   });
 
+  // §4.2: 確定済みプロトコルを改訂した直後は「未承認の新 draft」になるため、
+  // persisted を false に戻す（approveBlocks が true へ戻す）
+  test('persisted=true の状態から再送信すると protocolDraftPersisted が false に戻る', async () => {
+    const { provider } = fakeProvider(skillResponse);
+    const store = createStore({ ...createStore().getState(), protocolDraftPersisted: true });
+    await submitProtocol({ sourceType: 'manual', inlineText: '改訂後の本文' }, { store, provider });
+    expect(store.getState().protocolDraftPersisted).toBe(false);
+  });
+
   test('空入力でもクラッシュしない（extract-protocol が空入力で empty draft を返す）', async () => {
     const { provider } = fakeProvider(''); // 呼ばれないはず
     const store = createStore();

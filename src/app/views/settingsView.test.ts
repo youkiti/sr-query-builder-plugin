@@ -135,6 +135,21 @@ describe('createSettingsView - Gemini プラン判定', () => {
     );
   });
 
+  test('保存時に判定が unavailable（混雑）ならモデルを変えず混雑中メッセージを出す', async () => {
+    const store: Record<string, string> = {};
+    const detect = jest.fn(async () => 'unavailable' as const);
+    const container = render(buildDeps(store, detect));
+    await flush();
+    const input = container.querySelector('#settings-gemini-key') as HTMLInputElement;
+    input.value = 'free-key';
+    (container.querySelector('#settings-save') as HTMLButtonElement).click();
+    await flush();
+    expect(store['llm.selectedModel']).toBe('gemini-3.5-flash');
+    expect(store['gemini.detectedTier']).toBeUndefined();
+    expect(container.querySelector('.settings__status')?.textContent).toContain('混雑中');
+    expect(container.querySelector('#settings-gemini-tier-badge')?.textContent).toBe('');
+  });
+
   test('キーを空にして保存すると tier がクリアされバッジが消える', async () => {
     const store: Record<string, string> = {
       'apiKeys.gemini': 'old-key',

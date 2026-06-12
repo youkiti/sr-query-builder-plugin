@@ -53,6 +53,7 @@ function makeStateWithDrafts(): AppState {
     },
     cumulativeCostUsd: null,
     blocksDraft: makeBlocksDraft(),
+    protocolDraftPersisted: false,
     protocolDraft: makeProtocolDraft(),
     currentProtocolVersion: null,
     currentFormulaVersionId: null,
@@ -127,6 +128,38 @@ describe('approveBlocks', () => {
       store,
     });
     expect(result.version).toBe(3);
+  });
+
+  // §4.2: 新しい Protocol.version が確定したら、旧プロトコル由来の検索式系状態を
+  // リセットしてブロック以降をやり直させる（旧検索式は FormulaVersions に残る）
+  test('承認すると persisted=true になり、検索式系の状態がリセットされる', async () => {
+    const { store, fetchMock, google, profile } = setupDeps();
+    store.setState((s) => ({
+      ...s,
+      currentFormulaVersionId: 'F-9',
+      currentFormulaMarkdown: '# 旧検索式',
+      validationResult: {
+        formulaVersionId: 'F-9',
+        summary: {} as NonNullable<AppState['validationResult']>['summary'],
+      },
+      missedAnalysis: {
+        formulaVersionId: 'F-9',
+        result: {} as NonNullable<AppState['missedAnalysis']>['result'],
+      },
+    }));
+    fetchMock.mockImplementation(async () => jsonResponse({}));
+    await approveBlocks({
+      google: google as Parameters<typeof approveBlocks>[0]['google'],
+      profile,
+      store,
+    });
+    const state = store.getState();
+    expect(state.protocolDraftPersisted).toBe(true);
+    expect(state.currentProtocolVersion).toBe(1);
+    expect(state.currentFormulaVersionId).toBeNull();
+    expect(state.currentFormulaMarkdown).toBeNull();
+    expect(state.validationResult).toBeNull();
+    expect(state.missedAnalysis).toBeNull();
   });
 
   test('email 取得失敗時は createdBy が空文字', async () => {

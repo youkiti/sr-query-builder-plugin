@@ -31,7 +31,7 @@ export interface OptionsDeps {
    * Gemini API キーのプランを確認する。
    * 省略時はプラン確認をスキップする（テスト用途）。
    */
-  detectGeminiTier?: (apiKey: string) => Promise<'paid' | 'free' | 'unknown'>;
+  detectGeminiTier?: (apiKey: string) => Promise<'paid' | 'free' | 'unknown' | 'unavailable'>;
 }
 
 export const STORAGE_KEY_GEMINI = 'apiKeys.gemini';
@@ -135,7 +135,7 @@ function refreshProviderCards(doc: Document, selectedModelId: string): void {
 
 function updateTierBadge(
   doc: Document,
-  state: 'checking' | 'paid' | 'free' | 'unknown'
+  state: 'checking' | 'paid' | 'free' | 'unknown' | 'unavailable'
 ): void {
   const badge = doc.getElementById('gemini-tier-badge');
   if (!badge) return;
@@ -263,7 +263,7 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
     const detect = deps.detectGeminiTier;
     updateTierBadge(doc, 'checking');
     void (async () => {
-      let tier: 'paid' | 'free' | 'unknown';
+      let tier: 'paid' | 'free' | 'unknown' | 'unavailable';
       try {
         tier = await detect(existingGemini);
       } catch {
@@ -360,6 +360,7 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
         // Gemini キーが設定されており Gemini モデルが選択されている場合にプラン自動判定
         let modelSwitchedToFree = false;
         let tierUndetermined = false;
+        let tierUnavailable = false;
         const provider = resolveProviderFromModelId(selectedModel, BUILTIN_MODELS_DISPLAY);
         if (geminiVal.trim() === '') {
           // キーが空になったので保存済み tier をクリア
@@ -370,7 +371,7 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
           if (status) status.textContent = 'APIプランを確認中...';
           updateTierBadge(doc, 'checking');
 
-          let tier: 'paid' | 'free' | 'unknown';
+          let tier: 'paid' | 'free' | 'unknown' | 'unavailable';
           try {
             tier = await deps.detectGeminiTier(geminiVal);
           } catch {
@@ -389,6 +390,9 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
           } else if (tier === 'paid') {
             updateTierBadge(doc, 'paid');
             await deps.writeKey(STORAGE_KEY_GEMINI_TIER, 'paid');
+          } else if (tier === 'unavailable') {
+            updateTierBadge(doc, 'unavailable');
+            tierUnavailable = true;
           } else {
             updateTierBadge(doc, 'unknown');
             tierUndetermined = true;
@@ -412,6 +416,9 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
         if (status) {
           if (modelSwitchedToFree) {
             status.textContent = '保存しました。無料プランを検出。Gemini 2.0 Flash に切り替えました。';
+          } else if (tierUnavailable) {
+            status.textContent =
+              '保存しました。（Gemini が混雑中のためプランを判定できませんでした。時間をおいてこの画面を開くと自動で再判定されます）';
           } else if (tierUndetermined) {
             status.textContent =
               '保存しました。（Gemini プランを自動判定できませんでした。コンソールログを確認してください）';

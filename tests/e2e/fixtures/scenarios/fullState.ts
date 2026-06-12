@@ -50,6 +50,8 @@ export const FULL_APP_STATE: Partial<AppState> = {
   project: PROJECT_FIXTURE,
   cumulativeCostUsd: 0.12,
   protocolDraft: FULL_PROTOCOL_DRAFT,
+  // currentProtocolVersion=1 と整合: プロトコルは承認（Sheets 保存）済みの想定
+  protocolDraftPersisted: true,
   blocksDraft: FULL_BLOCKS_DRAFT,
   currentProtocolVersion: 1,
   currentFormulaVersionId: 'fv-20260420-01',

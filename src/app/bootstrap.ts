@@ -52,7 +52,7 @@ import { efetchArticles, type EfetchArticle } from '@/lib/ncbi';
 import { getLatestFormulaVersion, listFormulaVersions } from '@/features/formula';
 import type { FormulaVersion } from '@/domain/formulaVersion';
 import { getCurrentProject } from '@/features/project';
-import { getLatestProtocol, getProtocolBlocksByVersion } from '@/features/protocol';
+import { getLatestProtocol, getProtocolBlocksByVersion, listProtocols } from '@/features/protocol';
 import type { Protocol, ProtocolBlock } from '@/domain/protocol';
 import type { BlocksDraft, ProtocolDraft } from './store';
 import { getCurrentUserEmail } from '@/lib/google';
@@ -220,6 +220,8 @@ async function hydrateCurrentProject(store: AppStore, runtime: ChromeRuntimeDeps
         ...s,
         currentProtocolVersion: protocol.version,
         protocolDraft: toProtocolDraft(protocol),
+        // Sheets から読んだ確定済みプロトコルなので、protocolView は読み取り専用表示になる
+        protocolDraftPersisted: true,
         blocksDraft: blocks.length > 0 ? toBlocksDraft(blocks, protocol.combinationExpression) : s.blocksDraft,
       }));
     }
@@ -300,6 +302,25 @@ function buildDefaultViewOptions(
       onSubmit: async (input: ProtocolSubmissionInput) => {
         await runProtocolSubmit(store, runtime, llmFactoryDepsBase(), llmFactoryPromise, input);
         navigate('blocks');
+      },
+      // 改訂保存（既存ブロック維持）: extract-protocol で RQ 等を再抽出しつつ、
+      // ブロックは改訂前の承認済み定義へ戻してから即時 approve する。
+      // approveBlocks が新 Protocol.version の追記とブロックのコピー追記を行う（§4.2）。
+      onReviseKeepBlocks: async (input: ProtocolSubmissionInput) => {
+        const prevBlocks = store.getState().blocksDraft;
+        await runProtocolSubmit(store, runtime, llmFactoryDepsBase(), llmFactoryPromise, input);
+        if (prevBlocks) {
+          store.setState((s) => ({ ...s, blocksDraft: prevBlocks }));
+        }
+        await runApprove(store, runtime);
+      },
+      onListVersions: async () => {
+        const project = store.getState().project;
+        /* istanbul ignore if -- protocol view は project 選択済みでしか onListVersions を呼ばない */
+        if (!project) {
+          return [];
+        }
+        return listProtocols(project.spreadsheetId, runtime.google);
       },
     },
     blocks: {

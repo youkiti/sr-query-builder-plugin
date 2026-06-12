@@ -64,6 +64,7 @@ function makeState(overrides: Partial<AppState> = {}): AppState {
     },
     cumulativeCostUsd: null,
     blocksDraft: makeBlocksDraft(),
+    protocolDraftPersisted: false,
     protocolDraft: makeProtocolDraft(),
     currentProtocolVersion: 1,
     currentFormulaVersionId: 'v1',

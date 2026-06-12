@@ -35,6 +35,7 @@ function makeState(): AppState {
     project: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
     cumulativeCostUsd: null,
     blocksDraft: null,
+    protocolDraftPersisted: false,
     protocolDraft: null,
     currentProtocolVersion: null,
     currentFormulaVersionId: null,

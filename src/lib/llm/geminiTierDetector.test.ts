@@ -105,6 +105,57 @@ describe('detectGeminiTier', () => {
     await expect(detectGeminiTier('any-key', makeNetworkError())).resolves.toBe('unknown');
   });
 
+  test('503 UNAVAILABLE が続く → リトライ後 unavailable（fetch は 3 回呼ばれる）', async () => {
+    const fetchMock = makeFetch(503, {
+      error: { code: 503, status: 'UNAVAILABLE', message: 'This model is currently experiencing high demand.' },
+    });
+    const sleepMock = jest.fn(async () => undefined);
+    await expect(detectGeminiTier('free-key', fetchMock, sleepMock)).resolves.toBe('unavailable');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(sleepMock).toHaveBeenCalledTimes(2);
+  });
+
+  test('503 のあと 200 → リトライで paid を返す', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        json: jest.fn().mockResolvedValue({ error: { code: 503, status: 'UNAVAILABLE' } }),
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: jest.fn().mockResolvedValue({ candidates: [] }),
+      } as unknown as Response) as unknown as typeof fetch;
+    const sleepMock = jest.fn(async () => undefined);
+    await expect(detectGeminiTier('paid-key', fetchMock, sleepMock)).resolves.toBe('paid');
+    expect(sleepMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('503 のあと「free quota tier なし」429 → リトライで free を返す', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        json: jest.fn().mockResolvedValue({ error: { code: 503, status: 'UNAVAILABLE' } }),
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        json: jest.fn().mockResolvedValue({
+          error: {
+            code: 429,
+            status: 'RESOURCE_EXHAUSTED',
+            message: "Gemini 3.5 Flash doesn't have a free quota tier.",
+          },
+        }),
+      } as unknown as Response) as unknown as typeof fetch;
+    const sleepMock = jest.fn(async () => undefined);
+    await expect(detectGeminiTier('free-key', fetchMock, sleepMock)).resolves.toBe('free');
+  });
+
   test('レスポンスボディが JSON でない → unknown（クラッシュしない）', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: false,

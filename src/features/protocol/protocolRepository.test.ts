@@ -6,6 +6,7 @@ import {
   getLatestProtocol,
   getProtocolByVersion,
   getProtocolBlocksByVersion,
+  listProtocols,
 } from './protocolRepository';
 import type { Protocol, ProtocolBlock } from '@/domain/protocol';
 
@@ -231,6 +232,36 @@ describe('getProtocolByVersion', () => {
     // 空行（row[versionIdx] が undefined）も混ぜることで `row?.[versionIdx] ?? ''` の fallback を経由させる
     const d = deps([[...SHEET_HEADERS.Protocol], [], row('1'), row('2')]);
     await expect(getProtocolByVersion('sid', 99, d)).resolves.toBeNull();
+  });
+});
+
+describe('listProtocols', () => {
+  const row = (version: string, rq: string): string[] =>
+    SHEET_HEADERS.Protocol.map((key) => {
+      if (key === 'version') return version;
+      if (key === 'research_question') return rq;
+      if (key === 'block_count') return '1';
+      if (key === 'source_type') return 'manual';
+      if (key === 'created_at') return '2026';
+      if (key === 'created_by') return 'tester';
+      return '';
+    });
+
+  test('全行を version 降順で返す', async () => {
+    const d = deps([[...SHEET_HEADERS.Protocol], row('1', 'RQ-1'), row('3', 'RQ-3'), row('2', 'RQ-2')]);
+    const result = await listProtocols('sid', d);
+    expect(result.map((p) => p.version)).toEqual([3, 2, 1]);
+    expect(result[0]?.researchQuestion).toBe('RQ-3');
+  });
+
+  test('ヘッダのみなら []', async () => {
+    const d = deps([[...SHEET_HEADERS.Protocol]]);
+    await expect(listProtocols('sid', d)).resolves.toEqual([]);
+  });
+
+  test('完全に空のレスポンスでも []', async () => {
+    const d = deps([]);
+    await expect(listProtocols('sid', d)).resolves.toEqual([]);
   });
 });
 

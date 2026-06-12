@@ -37,7 +37,7 @@ export interface SettingsViewCallbacks {
    * Gemini API キーのプラン（無料/有料）を確認する。
    * 省略時は本物の detectGeminiTier を使う（テストではモックを注入する）。
    */
-  detectGeminiTier?: (apiKey: string) => Promise<'paid' | 'free' | 'unknown'>;
+  detectGeminiTier?: (apiKey: string) => Promise<'paid' | 'free' | 'unknown' | 'unavailable'>;
 }
 
 function resolveProvider(modelId: string): Provider {
@@ -103,7 +103,7 @@ function refreshProviderCards(doc: Document, selectedModelId: string): void {
 
 function updateTierBadge(
   badge: HTMLElement,
-  state: 'checking' | 'paid' | 'free' | 'unknown'
+  state: 'checking' | 'paid' | 'free' | 'unknown' | 'unavailable'
 ): void {
   badge.className = 'settings__tier-badge';
   switch (state) {
@@ -398,7 +398,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
         updateTierBadge(tierBadge, savedTier);
       } else if (gemini && gemini.trim() !== '') {
         updateTierBadge(tierBadge, 'checking');
-        let tier: 'paid' | 'free' | 'unknown';
+        let tier: 'paid' | 'free' | 'unknown' | 'unavailable';
         try {
           tier = await detectTier(gemini);
         } catch {
@@ -474,6 +474,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
         // Gemini キーが設定されており Gemini モデルが選択されている場合にプラン自動判定
         let modelSwitchedToFree = false;
         let tierUndetermined = false;
+        let tierUnavailable = false;
         if (geminiVal.trim() === '') {
           // キーが空になったので保存済み tier をクリア
           await callbacks.removeKey(KEY_GEMINI_TIER);
@@ -482,7 +483,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
           status.textContent = 'APIプランを確認中...';
           updateTierBadge(tierBadge, 'checking');
 
-          let tier: 'paid' | 'free' | 'unknown';
+          let tier: 'paid' | 'free' | 'unknown' | 'unavailable';
           try {
             tier = await detectTier(geminiVal);
           } catch {
@@ -501,6 +502,9 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
           } else if (tier === 'paid') {
             updateTierBadge(tierBadge, 'paid');
             await callbacks.writeKey(KEY_GEMINI_TIER, 'paid');
+          } else if (tier === 'unavailable') {
+            updateTierBadge(tierBadge, 'unavailable');
+            tierUnavailable = true;
           } else {
             updateTierBadge(tierBadge, 'unknown');
             tierUndetermined = true;
@@ -523,6 +527,9 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
         if (modelSwitchedToFree) {
           status.textContent =
             '保存しました。無料プランを検出。Gemini 2.0 Flash に切り替えました。';
+        } else if (tierUnavailable) {
+          status.textContent =
+            '保存しました。（Gemini が混雑中のためプランを判定できませんでした。時間をおいてこの画面を開くと自動で再判定されます）';
         } else if (tierUndetermined) {
           status.textContent =
             '保存しました。（Gemini プランを自動判定できませんでした。コンソールログを確認してください）';

@@ -9,4 +9,5 @@ export {
   getLatestProtocol,
   getProtocolByVersion,
   getProtocolBlocksByVersion,
+  listProtocols,
 } from './protocolRepository';
