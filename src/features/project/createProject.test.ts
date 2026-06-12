@@ -102,11 +102,12 @@ describe('createProject', () => {
     expect(body.parents).toBeUndefined();
   });
 
-  test('ensureRootFolder / newUuid / now の既定値が使われる（ensureRoot 既定はルートフォルダ作成を追加で行う）', async () => {
+  test('ensureRootFolder / newUuid / now の既定値が使われる（ensureRoot 既定はルートフォルダを検索して再利用、なければ作成）', async () => {
     const { fetch, calls } = makeFetch();
     const deps = { fetch, getAccessToken: jest.fn().mockResolvedValue('t') };
     await createProject({ projectTitle: 'Y', createdBy: 'u@y' }, deps);
-    // ルートフォルダ（sr-query-builder）+ top + sub 3 + logs/llm + logs/validation = 6
+    // モックが GET に空オブジェクトを返す → 既存フォルダなし → POST で作成する
+    // ルートフォルダ（sr-query-builder）+ top + raw_protocols + logs + llm + validation = 6
     const folderCreates = calls.filter(
       (c) =>
         c.url.startsWith('https://www.googleapis.com/drive/v3/files?fields=id,webViewLink') &&

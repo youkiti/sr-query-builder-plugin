@@ -260,16 +260,33 @@ function bindCreateForm(doc: Document, deps: PopupDeps): void {
   const titleInput = doc.getElementById('popup-create-title') as HTMLInputElement | null;
   const error = doc.getElementById('popup-create-error');
   if (!form || !titleInput) return;
+  const submitBtn = form.querySelector('button[type="submit"]') as HTMLButtonElement | null;
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     if (error) error.textContent = '';
+    let dotTimer: ReturnType<typeof setInterval> | null = null;
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      let dots = 0;
+      const dotLabels = ['.', '..', '...'];
+      submitBtn.textContent = `作成中${dotLabels[0]}`;
+      dotTimer = setInterval(() => {
+        dots = (dots + 1) % dotLabels.length;
+        if (submitBtn) submitBtn.textContent = `作成中${dotLabels[dots]}`;
+      }, 400);
+    }
     void createNewProject(titleInput.value, deps.runtime)
       .then(async () => {
         titleInput.value = '';
         await openAppOrRedirect(doc, deps);
       })
       .catch((err: unknown) => {
+        if (dotTimer !== null) clearInterval(dotTimer);
         if (error) error.textContent = formatError(err);
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = '作成';
+        }
       });
   });
 }

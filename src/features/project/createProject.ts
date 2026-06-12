@@ -3,6 +3,7 @@ import { SHEET_HEADERS, SHEET_TABS } from '@/domain/sheetsSchema';
 import {
   appendRow,
   createFolder,
+  ensureRootFolder,
   createSpreadsheet,
   writeHeaderRow,
   type CreatedSpreadsheet,
@@ -120,9 +121,10 @@ export async function createProject(
 
 /**
  * `sr-query-builder` ルートフォルダを確保する既定実装。
- * 無ければ新規作成する。テスト時は helpers で差し替え可能。
+ * My Drive ルート直下を検索して既存フォルダを再利用し、無ければ新規作成する。
+ * テスト時は helpers で差し替え可能。
  */
 async function defaultEnsureRootFolder(deps: GoogleApiDeps): Promise<string> {
-  const folder = await createFolder(ROOT_FOLDER_NAME, null, deps);
+  const folder = await ensureRootFolder(ROOT_FOLDER_NAME, deps);
   return folder.id;
 }

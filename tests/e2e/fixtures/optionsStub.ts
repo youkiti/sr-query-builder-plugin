@@ -51,6 +51,11 @@ export async function injectOptionsStub(
           set: async (items: Record<string, unknown>): Promise<void> => {
             Object.assign(data, items);
           },
+          remove: async (keys: string | string[]): Promise<void> => {
+            for (const k of Array.isArray(keys) ? keys : [keys]) {
+              delete data[k];
+            }
+          },
         },
       },
     };

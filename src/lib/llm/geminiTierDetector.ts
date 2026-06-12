@@ -4,12 +4,14 @@
  * 有料モデル（gemini-3.5-flash）へ最小プロンプトを送り、
  * レスポンスのエラーコードからプランを判定する。
  *
- * | 状態                            | 戻り値    |
- * |--------------------------------|-----------|
- * | HTTP 200（モデル使用可）         | 'paid'    |
- * | FAILED_PRECONDITION（課金未設定）| 'free'    |
- * | PERMISSION_DENIED / NOT_FOUND  | 'free'    |
- * | 無効キー・ネットワークエラー等   | 'unknown' |
+ * | 状態                                          | 戻り値    |
+ * |----------------------------------------------|-----------|
+ * | HTTP 200（モデル使用可）                       | 'paid'    |
+ * | FAILED_PRECONDITION（課金未設定）              | 'free'    |
+ * | PERMISSION_DENIED / NOT_FOUND                 | 'free'    |
+ * | 429 RESOURCE_EXHAUSTED（free quota tier なし） | 'free'    |
+ * | 429（通常のレートリミット）                     | 'unknown' |
+ * | 無効キー・ネットワークエラー等                  | 'unknown' |
  */
 
 export type GeminiTier = 'paid' | 'free' | 'unknown';
@@ -72,6 +74,22 @@ export async function detectGeminiTier(
   if (status === 'PERMISSION_DENIED' || res.status === 403) return 'free';
   if (status === 'NOT_FOUND' || res.status === 404) return 'free';
 
+  // 無料キーで有料専用モデルを叩くと 429 RESOURCE_EXHAUSTED で
+  // 「doesn't have a free quota tier」（quota limit = 0）が返る。
+  // 通常のレートリミット（limit > 0）とはエラー内容で区別する
+  if (res.status === 429 || status === 'RESOURCE_EXHAUSTED') {
+    const errorText = JSON.stringify(body.error ?? {});
+    if (/free quota tier/i.test(errorText) || /"quotaValue"\s*:\s*"0"/.test(errorText)) {
+      return 'free';
+    }
+  }
+
   // INVALID_ARGUMENT や UNAUTHENTICATED は無効キーの可能性が高い
+  console.warn(
+    '[geminiTierDetector] プラン判定不可:',
+    res.status,
+    status,
+    body.error?.message ?? ''
+  );
   return 'unknown';
 }

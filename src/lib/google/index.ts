@@ -21,6 +21,7 @@ export {
 export {
   createFolder,
   ensureChildFolder,
+  ensureRootFolder,
   uploadTextFile,
   getFileText,
   type DriveFileRef,

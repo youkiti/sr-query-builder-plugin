@@ -268,7 +268,8 @@ describe('startOptions', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(openAppTab).not.toHaveBeenCalled();
-    expect(removeKey).not.toHaveBeenCalled();
+    // pending フラグ自体はクリアされない（キーが空なので開かない）
+    expect(removeKey).not.toHaveBeenCalledWith(STORAGE_KEY_PENDING_APP_TAB);
     expect(doc.getElementById('options-status')?.textContent).toBe('保存しました。');
   });
 
@@ -505,7 +506,7 @@ describe('startOptions', () => {
     expect(detectGeminiTierMock).not.toHaveBeenCalled();
   });
 
-  test('プラン確認が unknown のときはモデルを変えずステータスは「保存しました。」', async () => {
+  test('プラン確認が unknown のときはモデルを変えず判定不能をステータスに明示する', async () => {
     const doc = buildDocumentWithBadge();
     const store: Record<string, string> = {};
     const detectGeminiTierMock = jest.fn(async () => 'unknown' as const);
@@ -523,7 +524,9 @@ describe('startOptions', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(store[STORAGE_KEY_LLM_MODEL]).toBe('gemini-3.5-flash');
-    expect(doc.getElementById('options-status')?.textContent).toBe('保存しました。');
+    expect(doc.getElementById('options-status')?.textContent).toContain(
+      'Gemini プランを自動判定できませんでした'
+    );
   });
 
   test('モデルセレクトに gemini-2.0-flash が含まれている', async () => {

@@ -1,4 +1,4 @@
-import { createFolder, ensureChildFolder, getFileText, uploadTextFile } from './drive';
+import { createFolder, ensureChildFolder, ensureRootFolder, getFileText, uploadTextFile } from './drive';
 
 function okJson(body: unknown): Response {
   return {
@@ -99,6 +99,36 @@ describe('ensureChildFolder', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
     const createBody = JSON.parse((fetch.mock.calls[1][1] as RequestInit).body as string);
     expect(createBody.name).toBe('skipped_seeds');
+  });
+});
+
+describe('ensureRootFolder', () => {
+  test('既存フォルダがあれば再利用する（POST は呼ばない）', async () => {
+    const fetch = jest
+      .fn()
+      .mockResolvedValueOnce(okJson({ files: [{ id: 'ROOT1', webViewLink: 'https://drive/root' }] }));
+    const deps = { fetch, getAccessToken: jest.fn().mockResolvedValue('t') };
+    const result = await ensureRootFolder('sr-query-builder', deps);
+    expect(result).toEqual({ id: 'ROOT1', webViewLink: 'https://drive/root' });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [url] = fetch.mock.calls[0] as [string, RequestInit];
+    const decoded = decodeURIComponent(url);
+    expect(decoded).toContain("'root' in parents");
+    expect(decoded).toContain("name='sr-query-builder'");
+  });
+
+  test('既存フォルダが無ければ新規作成する（親 undefined でマイドライブ直下）', async () => {
+    const fetch = jest
+      .fn()
+      .mockResolvedValueOnce(okJson({ files: [] }))
+      .mockResolvedValueOnce(okJson({ id: 'ROOT2', webViewLink: 'https://drive/new-root' }));
+    const deps = { fetch, getAccessToken: jest.fn().mockResolvedValue('t') };
+    const result = await ensureRootFolder('sr-query-builder', deps);
+    expect(result).toEqual({ id: 'ROOT2', webViewLink: 'https://drive/new-root' });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const createBody = JSON.parse((fetch.mock.calls[1] as [string, RequestInit])[1].body as string);
+    expect(createBody.name).toBe('sr-query-builder');
+    expect(createBody.parents).toBeUndefined();
   });
 });
 

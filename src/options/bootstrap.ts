@@ -39,6 +39,8 @@ export const STORAGE_KEY_CUSTOM_MODELS = 'llm.customModels';
 export const STORAGE_KEY_NCBI = 'apiKeys.ncbi';
 /** Popup で API キー未設定を検知したときに立てるフラグ。保存成功で畳む。 */
 export const STORAGE_KEY_PENDING_APP_TAB = 'pendingOpenAppTab';
+/** 最後に検出した Gemini プラン（'paid' | 'free'）。ページリロード後もバッジ復元に使う */
+export const STORAGE_KEY_GEMINI_TIER = 'gemini.detectedTier';
 
 /**
  * バンドル分離のため modelRegistry からは import せず、Options 画面が自前で
@@ -233,6 +235,7 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
   const existingNcbi = await deps.readKey(STORAGE_KEY_NCBI);
   const existingModel = (await deps.readKey(STORAGE_KEY_LLM_MODEL)) ?? DEFAULT_MODEL_ID;
   const customModels = parseCustomModels(await deps.readKey(STORAGE_KEY_CUSTOM_MODELS));
+  const savedTier = await deps.readKey(STORAGE_KEY_GEMINI_TIER);
 
   if (geminiInput && existingGemini !== undefined) {
     geminiInput.value = existingGemini;
@@ -248,6 +251,11 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
     populateModelSelect(selectEl, customModels, existingModel);
   }
   refreshProviderCards(doc, existingModel);
+
+  // 前回保存済みの tier をバッジに復元（ページリロード後も表示を維持するため）
+  if (savedTier === 'paid' || savedTier === 'free') {
+    updateTierBadge(doc, savedTier);
+  }
 
   function handleRemoveCustomModel(id: string): void {
     void (async () => {
@@ -332,7 +340,13 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
 
         // Gemini キーが設定されており Gemini モデルが選択されている場合にプラン自動判定
         let modelSwitchedToFree = false;
+        let tierUndetermined = false;
         const provider = resolveProviderFromModelId(selectedModel, BUILTIN_MODELS_DISPLAY);
+        if (geminiVal.trim() === '') {
+          // キーが空になったので保存済み tier をクリア
+          await deps.removeKey(STORAGE_KEY_GEMINI_TIER);
+          updateTierBadge(doc, 'unknown');
+        }
         if (deps.detectGeminiTier && geminiVal.trim() !== '' && provider === 'gemini') {
           if (status) status.textContent = 'APIプランを確認中...';
           updateTierBadge(doc, 'checking');
@@ -346,6 +360,7 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
 
           if (tier === 'free') {
             updateTierBadge(doc, 'free');
+            await deps.writeKey(STORAGE_KEY_GEMINI_TIER, 'free');
             if (selectEl && selectEl.value !== FREE_TIER_MODEL_ID) {
               selectEl.value = FREE_TIER_MODEL_ID;
               await deps.writeKey(STORAGE_KEY_LLM_MODEL, FREE_TIER_MODEL_ID);
@@ -354,8 +369,10 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
             }
           } else if (tier === 'paid') {
             updateTierBadge(doc, 'paid');
+            await deps.writeKey(STORAGE_KEY_GEMINI_TIER, 'paid');
           } else {
             updateTierBadge(doc, 'unknown');
+            tierUndetermined = true;
           }
         }
 
@@ -374,9 +391,14 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
         }
 
         if (status) {
-          status.textContent = modelSwitchedToFree
-            ? '保存しました。無料プランを検出。Gemini 2.0 Flash に切り替えました。'
-            : '保存しました。';
+          if (modelSwitchedToFree) {
+            status.textContent = '保存しました。無料プランを検出。Gemini 2.0 Flash に切り替えました。';
+          } else if (tierUndetermined) {
+            status.textContent =
+              '保存しました。（Gemini プランを自動判定できませんでした。コンソールログを確認してください）';
+          } else {
+            status.textContent = '保存しました。';
+          }
         }
       } catch (err) {
         if (status) {

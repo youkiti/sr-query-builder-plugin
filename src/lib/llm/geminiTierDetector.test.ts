@@ -13,6 +13,14 @@ function makeNetworkError(): typeof fetch {
 }
 
 describe('detectGeminiTier', () => {
+  beforeEach(() => {
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   test('空キーは unknown を返す', async () => {
     const fetchMock = jest.fn();
     await expect(detectGeminiTier('', fetchMock)).resolves.toBe('unknown');
@@ -54,9 +62,43 @@ describe('detectGeminiTier', () => {
     await expect(detectGeminiTier('bad-key', fetchMock)).resolves.toBe('unknown');
   });
 
-  test('RESOURCE_EXHAUSTED（レートリミット）→ unknown', async () => {
+  test('RESOURCE_EXHAUSTED（通常のレートリミット）→ unknown', async () => {
     const fetchMock = makeFetch(429, { error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'Quota exceeded' } });
     await expect(detectGeminiTier('paid-key', fetchMock)).resolves.toBe('unknown');
+  });
+
+  test('429 + 「free quota tier なし」メッセージ → free', async () => {
+    const fetchMock = makeFetch(429, {
+      error: {
+        code: 429,
+        status: 'RESOURCE_EXHAUSTED',
+        message: "Gemini 3.5 Flash doesn't have a free quota tier. Please enable billing.",
+      },
+    });
+    await expect(detectGeminiTier('free-key', fetchMock)).resolves.toBe('free');
+  });
+
+  test('429 + QuotaFailure（quotaValue "0"）→ free', async () => {
+    const fetchMock = makeFetch(429, {
+      error: {
+        code: 429,
+        status: 'RESOURCE_EXHAUSTED',
+        message: 'You exceeded your current quota.',
+        details: [
+          {
+            '@type': 'type.googleapis.com/google.rpc.QuotaFailure',
+            violations: [
+              {
+                quotaMetric:
+                  'generativelanguage.googleapis.com/generate_content_paid_tier_input_token_count',
+                quotaValue: '0',
+              },
+            ],
+          },
+        ],
+      },
+    });
+    await expect(detectGeminiTier('free-key', fetchMock)).resolves.toBe('free');
   });
 
   test('ネットワークエラー → unknown', async () => {

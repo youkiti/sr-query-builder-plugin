@@ -16,7 +16,7 @@ test.describe('options (MVP 現実装)', () => {
 
     // 読み込み完了を待つ（初期の "読み込み中…" が差し替わるまで）
     await expect(page.locator('#options-status')).toHaveText(
-      'Gemini: 未設定 / NCBI: 未設定（3 req/s 枠）'
+      'Gemini: 未設定 / OpenRouter: 未設定 / NCBI: 未設定（3 req/s 枠）'
     );
     await expect(page.locator('#gemini-api-key')).toHaveValue('');
     await expect(page.locator('#ncbi-api-key')).toHaveValue('');
@@ -32,7 +32,7 @@ test.describe('options (MVP 現実装)', () => {
     await page.goto(OPTIONS_URL);
 
     await expect(page.locator('#options-status')).toHaveText(
-      'Gemini: 保存済み / NCBI: 保存済み'
+      'Gemini: 保存済み / OpenRouter: 未設定 / NCBI: 保存済み'
     );
     // 現実装は raw 値で復元（マスクはしない）
     await expect(page.locator('#gemini-api-key')).toHaveValue('gem-test-123');
