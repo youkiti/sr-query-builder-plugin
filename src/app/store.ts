@@ -23,6 +23,8 @@ export interface BlockDraft {
 export interface BlocksDraft {
   blocks: BlockDraft[];
   combinationExpression: string;
+  /** 選択済みフィルター ID のリスト（例: ['RCTfilter']）。undefined は未設定（studyDesign から自動推論） */
+  selectedFilterIds?: string[];
 }
 
 /**

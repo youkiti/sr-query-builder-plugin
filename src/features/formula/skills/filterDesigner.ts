@@ -107,6 +107,78 @@ export function designDefaultFilters(input: FilterDesignerInput): FilterDesigner
 }
 
 /* ----------------------------------------------------------------------- */
+/* 事前定義フィルターカタログ — ユーザーが選択できる固定フィルター一覧      */
+/* ----------------------------------------------------------------------- */
+
+export interface PredefinedFilterDef {
+  id: string;
+  label: string;
+  description: string;
+  expression: string;
+  /** 自動選択の判定に使う正規表現パターン文字列（studyDesign に対してテスト） */
+  defaultForPattern: string;
+  comment: string;
+}
+
+export const PREDEFINED_FILTER_DEFS: readonly PredefinedFilterDef[] = [
+  {
+    id: 'RCTfilter',
+    label: 'RCT フィルター（Cochrane HSSS 2024）',
+    description:
+      'Cochrane Handbook 2024 推奨の感度優先 RCT フィルター（PubMed 版）。RCT を対象とするレビューで適用する。',
+    expression: COCHRANE_HSSS_2024_PUBMED,
+    defaultForPattern: '\\b(rct|randomized|randomised)\\b',
+    comment: 'Cochrane HSSS PubMed 2024 (sensitivity-maximizing) を適用',
+  },
+  {
+    id: 'SRfilter',
+    label: '系統的レビュー・メタアナリシス フィルター',
+    description:
+      'SR / MA のみに絞り込む。Overview of reviews（傘レビュー）を実施する場合に使用する。通常の SR では不要。',
+    expression:
+      '(systematic review[pt] OR systematic review[ti] OR meta-analysis[pt] OR meta-analysis[ti])',
+    defaultForPattern: '\\b(overview.?of.?review|umbrella.?review)\\b',
+    comment: '系統的レビュー・メタアナリシス文献に絞り込む',
+  },
+];
+
+/**
+ * studyDesign 文字列から自動選択すべきフィルター ID のリストを返す。
+ * 新規ドラフト作成時の初期値に使用する。
+ */
+export function getDefaultSelectedFilterIds(studyDesign: string): string[] {
+  return PREDEFINED_FILTER_DEFS.filter((def) =>
+    new RegExp(def.defaultForPattern, 'i').test(studyDesign)
+  ).map((def) => def.id);
+}
+
+/**
+ * ユーザーが選択したフィルター ID から FilterDesignerResult を組み立てる。
+ * designDefaultFilters の代替（こちらはユーザー明示的選択ベース）。
+ */
+export function buildFiltersFromSelection(selectedIds: string[]): FilterDesignerResult {
+  const filters: DesignedFilter[] = [];
+  const combinationParts: string[] = [];
+
+  for (const def of PREDEFINED_FILTER_DEFS) {
+    if (selectedIds.includes(def.id)) {
+      filters.push({
+        blockId: def.id,
+        expression: def.expression,
+        comment: def.comment,
+      });
+      combinationParts.push(`AND #${def.id}`);
+    }
+  }
+
+  return {
+    filters,
+    appendToCombination: combinationParts.length === 0 ? '' : ` ${combinationParts.join(' ')}`,
+    excessFilterCandidates: [],
+  };
+}
+
+/* ----------------------------------------------------------------------- */
 /* ヒット過大時の追加フィルタ提案 — ここだけ LLM を呼ぶ                    */
 /* ----------------------------------------------------------------------- */
 

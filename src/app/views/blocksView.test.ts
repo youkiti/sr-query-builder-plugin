@@ -365,7 +365,7 @@ describe('createBlocksView', () => {
     expect(store.getState().blocksDraft?.blocks[0]?.note).toBe('メモ');
   });
 
-  test('study_design=RCT のとき #RCTfilter の自動付与プレビューが表示される', () => {
+  test('study_design=RCT のとき RCT フィルターが自動選択されプレビューに反映される', () => {
     const store = createStore({
       ...withProject(),
       blocksDraft: draftOf(2, '#1 AND #2'),
@@ -374,14 +374,21 @@ describe('createBlocksView', () => {
     const view = createBlocksView(store);
     const container = buildContainer();
     view(container, { state: store.getState(), navigate: jest.fn() });
-    const final = container.querySelector('.blocks__autofilter-final');
-    expect(final?.textContent).toBe('検索式生成後: #1 AND #2 AND #RCTfilter');
-    const items = container.querySelectorAll('.blocks__autofilter-list li');
-    expect(items).toHaveLength(1);
-    expect(items[0]?.textContent).toContain('RCTfilter');
+    const checkboxes = Array.from(
+      container.querySelectorAll<HTMLInputElement>('.blocks__filter-item-checkbox')
+    );
+    const rctCheckbox = checkboxes.find((cb) =>
+      cb
+        .closest('.blocks__filter-item')
+        ?.querySelector('.blocks__filter-item-name')
+        ?.textContent?.includes('RCT')
+    );
+    expect(rctCheckbox?.checked).toBe(true);
+    const previewCode = container.querySelector('.blocks__combination-preview code');
+    expect(previewCode?.textContent).toContain('#RCTfilter');
   });
 
-  test('study_design が RCT 以外なら自動付与プレビューを出さない', () => {
+  test('study_design が RCT 以外なら RCT フィルターは自動選択されない', () => {
     const store = createStore({
       ...withProject(),
       blocksDraft: draftOf(2, '#1 AND #2'),
@@ -390,10 +397,21 @@ describe('createBlocksView', () => {
     const view = createBlocksView(store);
     const container = buildContainer();
     view(container, { state: store.getState(), navigate: jest.fn() });
-    expect(container.querySelector('.blocks__autofilter')).toBeNull();
+    const checkboxes = Array.from(
+      container.querySelectorAll<HTMLInputElement>('.blocks__filter-item-checkbox')
+    );
+    const rctCheckbox = checkboxes.find((cb) =>
+      cb
+        .closest('.blocks__filter-item')
+        ?.querySelector('.blocks__filter-item-name')
+        ?.textContent?.includes('RCT')
+    );
+    expect(rctCheckbox?.checked).toBe(false);
+    const previewCode = container.querySelector('.blocks__combination-preview code');
+    expect(previewCode?.textContent).not.toContain('#RCTfilter');
   });
 
-  test('protocolDraft が無ければ自動付与プレビューを出さない', () => {
+  test('protocolDraft が無くてもフィルターセレクターは表示され、デフォルトでは何も選択されない', () => {
     const store = createStore({
       ...withProject(),
       blocksDraft: draftOf(2, '#1 AND #2'),
@@ -402,7 +420,60 @@ describe('createBlocksView', () => {
     const view = createBlocksView(store);
     const container = buildContainer();
     view(container, { state: store.getState(), navigate: jest.fn() });
-    expect(container.querySelector('.blocks__autofilter')).toBeNull();
+    expect(container.querySelector('.blocks__filter-selector')).not.toBeNull();
+    const checkboxes = container.querySelectorAll<HTMLInputElement>('.blocks__filter-item-checkbox');
+    expect(checkboxes.length).toBeGreaterThan(0);
+    for (const cb of Array.from(checkboxes)) {
+      expect(cb.checked).toBe(false);
+    }
+  });
+
+  test('フィルターチェックボックスを ON にすると selectedFilterIds に追加される', () => {
+    const store = createStore({
+      ...withProject(),
+      blocksDraft: draftOf(2, '#1 AND #2'),
+      protocolDraft: protocolOf({ studyDesign: 'observational' }),
+    });
+    const view = createBlocksView(store);
+    const container = buildContainer();
+    view(container, { state: store.getState(), navigate: jest.fn() });
+    const checkboxes = Array.from(
+      container.querySelectorAll<HTMLInputElement>('.blocks__filter-item-checkbox')
+    );
+    const rctCheckbox = checkboxes.find((cb) =>
+      cb
+        .closest('.blocks__filter-item')
+        ?.querySelector('.blocks__filter-item-name')
+        ?.textContent?.includes('RCT')
+    )!;
+    expect(rctCheckbox.checked).toBe(false);
+    rctCheckbox.checked = true;
+    rctCheckbox.dispatchEvent(new Event('change'));
+    expect(store.getState().blocksDraft?.selectedFilterIds).toContain('RCTfilter');
+  });
+
+  test('フィルターチェックボックスを OFF にすると selectedFilterIds から除去される', () => {
+    const store = createStore({
+      ...withProject(),
+      blocksDraft: { ...draftOf(2, '#1 AND #2'), selectedFilterIds: ['RCTfilter'] },
+      protocolDraft: protocolOf({ studyDesign: 'RCT' }),
+    });
+    const view = createBlocksView(store);
+    const container = buildContainer();
+    view(container, { state: store.getState(), navigate: jest.fn() });
+    const checkboxes = Array.from(
+      container.querySelectorAll<HTMLInputElement>('.blocks__filter-item-checkbox')
+    );
+    const rctCheckbox = checkboxes.find((cb) =>
+      cb
+        .closest('.blocks__filter-item')
+        ?.querySelector('.blocks__filter-item-name')
+        ?.textContent?.includes('RCT')
+    )!;
+    expect(rctCheckbox.checked).toBe(true);
+    rctCheckbox.checked = false;
+    rctCheckbox.dispatchEvent(new Event('change'));
+    expect(store.getState().blocksDraft?.selectedFilterIds).not.toContain('RCTfilter');
   });
 
   test('blocksDraft が render 中に消えると mutateDraft は何もしない', () => {

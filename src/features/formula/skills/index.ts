@@ -28,7 +28,10 @@ export {
 export {
   designDefaultFilters,
   proposeExcessFilters,
+  getDefaultSelectedFilterIds,
+  buildFiltersFromSelection,
   COCHRANE_HSSS_2024_PUBMED,
+  PREDEFINED_FILTER_DEFS,
   EXCESS_FILTER_SYSTEM_PROMPT,
   EXCESS_FILTER_USER_PROMPT_TEMPLATE,
   HIT_THRESHOLD,
@@ -36,6 +39,7 @@ export {
   type FilterDesignerResult,
   type DesignedFilter,
   type ExcessFilterCandidate,
+  type PredefinedFilterDef,
 } from './filterDesigner';
 export {
   pickBoundaryCases,

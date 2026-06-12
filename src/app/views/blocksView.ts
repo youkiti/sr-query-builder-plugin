@@ -3,7 +3,11 @@ import {
   normalizeCombinationExpression,
   validateCombinationExpression,
 } from '@/lib/combination-expression';
-import { designDefaultFilters } from '@/features/formula/skills';
+import {
+  PREDEFINED_FILTER_DEFS,
+  getDefaultSelectedFilterIds,
+  buildFiltersFromSelection,
+} from '@/features/formula/skills';
 import { ROUTE_LABELS } from '../router';
 import type { AppStore, BlockDraft, BlocksDraft, ProtocolDraft } from '../store';
 import {
@@ -83,9 +87,11 @@ function ensureDraft(store: AppStore): BlocksDraft {
   if (current !== null) {
     return current;
   }
+  const studyDesign = store.getState().protocolDraft?.studyDesign ?? '';
   const initial: BlocksDraft = {
     blocks: [emptyBlock()],
     combinationExpression: defaultCombination(1),
+    selectedFilterIds: getDefaultSelectedFilterIds(studyDesign),
   };
   store.setState((s) => ({ ...s, blocksDraft: initial }));
   return initial;
@@ -425,13 +431,22 @@ function buildCombinationEditor(
     'ブロック同士をどう組み合わせて検索するかを決めます。通常はすべて AND で問題ありません。';
   fieldset.appendChild(hint);
 
+  fieldset.appendChild(buildFilterSelector(doc, draft, store));
+
+  const protocol = store.getState().protocolDraft;
+  const selectedIds =
+    draft.selectedFilterIds ?? getDefaultSelectedFilterIds(protocol?.studyDesign ?? '');
+  const filterResult = buildFiltersFromSelection(selectedIds);
+  const baseExpr = normalizeCombinationExpression(draft.combinationExpression);
+  const finalExpr = baseExpr + filterResult.appendToCombination;
+
   const preview = doc.createElement('div');
   preview.className = 'blocks__combination-preview';
   const previewLabel = doc.createElement('span');
   previewLabel.className = 'blocks__combination-preview-label';
-  previewLabel.textContent = 'プレビュー:';
+  previewLabel.textContent = '最終プレビュー:';
   const previewCode = doc.createElement('code');
-  previewCode.textContent = normalizeCombinationExpression(draft.combinationExpression) || '(空)';
+  previewCode.textContent = finalExpr || '(空)';
   preview.appendChild(previewLabel);
   preview.appendChild(previewCode);
   fieldset.appendChild(preview);
@@ -480,11 +495,6 @@ function buildCombinationEditor(
   }
   fieldset.appendChild(errorList);
 
-  const autoFilter = buildAutoFilterPreview(doc, draft, store.getState().protocolDraft);
-  if (autoFilter) {
-    fieldset.appendChild(autoFilter);
-  }
-
   const actions = doc.createElement('div');
   actions.className = 'blocks__combination-actions';
   const resetBtn = doc.createElement('button');
@@ -499,43 +509,82 @@ function buildCombinationEditor(
 }
 
 /**
- * 検索式生成時に filter-designer が決定論的に自動付与するブロック（#RCTfilter / #DateFilter）の
- * プレビューを返す。study_design / yearRange のいずれも該当しない場合は null。
+ * ユーザーが適用するフィルターを選択できるインタラクティブなセレクター。
+ * selectedFilterIds が undefined のときは studyDesign から自動推論した値をデフォルトにする。
  */
-function buildAutoFilterPreview(
-  doc: Document,
-  draft: BlocksDraft,
-  protocol: ProtocolDraft | null
-): HTMLElement | null {
-  if (!protocol) {
-    return null;
-  }
-  const filterResult = designDefaultFilters({ studyDesign: protocol.studyDesign });
-  if (filterResult.filters.length === 0) {
-    return null;
-  }
+function buildFilterSelector(doc: Document, draft: BlocksDraft, store: AppStore): HTMLElement {
+  const protocol = store.getState().protocolDraft;
+  const selectedIds =
+    draft.selectedFilterIds ?? getDefaultSelectedFilterIds(protocol?.studyDesign ?? '');
 
-  const wrap = doc.createElement('div');
-  wrap.className = 'blocks__autofilter';
+  const section = doc.createElement('div');
+  section.className = 'blocks__filter-selector';
 
-  const finalLine = doc.createElement('div');
-  finalLine.className = 'blocks__autofilter-final';
-  const finalExpr =
-    normalizeCombinationExpression(draft.combinationExpression) +
-    filterResult.appendToCombination;
-  finalLine.textContent = `検索式生成後: ${finalExpr}`;
-  wrap.appendChild(finalLine);
+  const header = doc.createElement('div');
+  header.className = 'blocks__filter-selector-header';
+
+  const title = doc.createElement('span');
+  title.className = 'blocks__field-title';
+  title.textContent = '検索フィルター';
+  header.appendChild(title);
+
+  const hint = doc.createElement('span');
+  hint.className = 'blocks__field-hint';
+  hint.textContent =
+    '検索式生成後に AND で結合されるフィルターを選択してください。';
+  header.appendChild(hint);
+
+  section.appendChild(header);
 
   const list = doc.createElement('ul');
-  list.className = 'blocks__autofilter-list';
-  for (const f of filterResult.filters) {
+  list.className = 'blocks__filter-list';
+  list.setAttribute('aria-label', '利用可能な検索フィルター');
+
+  for (const def of PREDEFINED_FILTER_DEFS) {
     const li = doc.createElement('li');
-    li.textContent = `#${f.blockId}: ${f.comment}`;
+    li.className = 'blocks__filter-item';
+
+    const labelEl = doc.createElement('label');
+    labelEl.className = 'blocks__filter-item-label';
+
+    const checkbox = doc.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'blocks__filter-item-checkbox';
+    checkbox.checked = selectedIds.includes(def.id);
+    checkbox.setAttribute('aria-describedby', `filter-desc-${def.id}`);
+    checkbox.addEventListener('change', () => {
+      mutateDraft(store, (d) => {
+        const current =
+          d.selectedFilterIds ??
+          getDefaultSelectedFilterIds(
+            store.getState().protocolDraft?.studyDesign ?? ''
+          );
+        const next = checkbox.checked
+          ? [...current, def.id]
+          : current.filter((id) => id !== def.id);
+        return { ...d, selectedFilterIds: next };
+      });
+    });
+    labelEl.appendChild(checkbox);
+
+    const nameEl = doc.createElement('span');
+    nameEl.className = 'blocks__filter-item-name';
+    nameEl.textContent = def.label;
+    labelEl.appendChild(nameEl);
+
+    li.appendChild(labelEl);
+
+    const descEl = doc.createElement('p');
+    descEl.className = 'blocks__filter-item-desc';
+    descEl.id = `filter-desc-${def.id}`;
+    descEl.textContent = def.description;
+    li.appendChild(descEl);
+
     list.appendChild(li);
   }
-  wrap.appendChild(list);
 
-  return wrap;
+  section.appendChild(list);
+  return section;
 }
 
 function buildActionRow(
