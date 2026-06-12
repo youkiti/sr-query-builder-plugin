@@ -1553,6 +1553,22 @@
   background: var(--color-surface-muted, #f7f7f7);
 }
 
+/* チェックボックスで一時無効化中の行（user_disabled）。削除と違い一覧に残るのでグレーアウトで示す */
+.seeds__list-item--disabled {
+  background: var(--color-surface-muted, #f7f7f7);
+  opacity: 0.65;
+}
+
+.seeds__list-enabled {
+  flex: none;
+  margin: 0;
+  cursor: pointer;
+}
+
+.seeds__list-enabled:disabled {
+  cursor: progress;
+}
+
 .seeds__list-header {
   display: flex;
   align-items: center;
@@ -1616,7 +1632,7 @@
   text-decoration: underline;
 }
 
-.seeds__list-invalidate,
+.seeds__list-delete,
 .seeds__list-retry {
   padding: var(--space-1) var(--space-3);
   border: 1px solid var(--color-border);
@@ -1626,12 +1642,17 @@
   font-size: var(--font-size-sm);
 }
 
-.seeds__list-invalidate:hover:not(:disabled),
+.seeds__list-delete {
+  color: var(--color-danger, #b3261e);
+  border-color: var(--color-danger, #b3261e);
+}
+
+.seeds__list-delete:hover:not(:disabled),
 .seeds__list-retry:hover:not(:disabled) {
   background: var(--color-surface-muted, #f0f0f0);
 }
 
-.seeds__list-invalidate:disabled,
+.seeds__list-delete:disabled,
 .seeds__list-retry:disabled {
   opacity: 0.6;
   cursor: progress;

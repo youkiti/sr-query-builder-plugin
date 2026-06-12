@@ -12,6 +12,8 @@
  *
  * 保存時に Gemini API キーが設定されている場合、プラン（無料/有料）を自動判定し、
  * 無料プランが検出されたときはモデルを gemini-2.0-flash に自動切り替えする。
+ * 保存済みキーがあるのにプラン未判定（ティア判定機能の導入前に保存した等）の場合は、
+ * ページ読み込み時にも自動判定してバッジへ反映する。
  */
 
 import { detectGeminiTier, FREE_TIER_MODEL_ID } from '@/lib/llm/geminiTierDetector';
@@ -255,6 +257,23 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
   // 前回保存済みの tier をバッジに復元（ページリロード後も表示を維持するため）
   if (savedTier === 'paid' || savedTier === 'free') {
     updateTierBadge(doc, savedTier);
+  } else if (deps.detectGeminiTier && existingGemini !== undefined && existingGemini.trim() !== '') {
+    // キーは保存済みなのに tier 未判定（ティア判定機能の導入前に保存した等）
+    // → 読み込み時に自動判定する。ネットワーク待ちで UI を塞がないよう非同期で流す
+    const detect = deps.detectGeminiTier;
+    updateTierBadge(doc, 'checking');
+    void (async () => {
+      let tier: 'paid' | 'free' | 'unknown';
+      try {
+        tier = await detect(existingGemini);
+      } catch {
+        tier = 'unknown';
+      }
+      updateTierBadge(doc, tier);
+      if (tier === 'paid' || tier === 'free') {
+        await deps.writeKey(STORAGE_KEY_GEMINI_TIER, tier);
+      }
+    })();
   }
 
   function handleRemoveCustomModel(id: string): void {

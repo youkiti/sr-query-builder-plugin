@@ -74,9 +74,9 @@ test.describe('app-seeds (#/seeds)', () => {
     await expect(page.locator('.seeds__status')).toHaveCount(1);
   });
 
-  test('登録済み一覧: デフォルトは有効のみ→トグルで無効行も表示', async ({ page }) => {
+  test('登録済み一覧: デフォルトは有効 + user_disabled→トグルで取込失敗行も表示', async ({ page }) => {
     await injectAppStub(page, scenarioWithProject());
-    // SeedPapers の GET 値をモック（有効 1 / 無効 1）
+    // SeedPapers の GET 値をモック（有効 1 / 取込失敗 1 / チェックボックス無効化中 1）
     await page.route('**/sheets.googleapis.com/**/values/**', async (route) => {
       const url = route.request().url();
       if (route.request().method() === 'GET' && url.includes('SeedPapers')) {
@@ -88,6 +88,7 @@ test.describe('app-seeds (#/seeds)', () => {
               SEED_HEADER,
               seedRow('111', true),
               seedRow('222', false, 'pmid_not_found'),
+              seedRow('333', false, 'user_disabled'),
             ],
           }),
         });
@@ -97,28 +98,76 @@ test.describe('app-seeds (#/seeds)', () => {
     });
     await page.goto(APP_URL);
 
-    // 初期は有効 1 件のみ
-    await expect(page.locator('.seeds__list-item')).toHaveCount(1);
-    await expect(page.locator('.seeds__list-item--valid')).toHaveCount(1);
-    await expect(page.locator('.seeds__list-item--invalid')).toHaveCount(0);
-
-    // 「無効行も表示」トグル ON → 2 件
-    await page.locator('.seeds__show-invalid').check();
+    // 初期は有効 1 件 + 無効化中（user_disabled）1 件
     await expect(page.locator('.seeds__list-item')).toHaveCount(2);
+    await expect(page.locator('.seeds__list-item--valid')).toHaveCount(1);
+    await expect(page.locator('.seeds__list-item--disabled')).toHaveCount(1);
+    await expect(page.locator('.seeds__list-item--invalid')).toHaveCount(0);
+    // 無効化中の行はチェックボックスが OFF、有効行は ON
+    await expect(
+      page.locator('.seeds__list-item--valid .seeds__list-enabled')
+    ).toBeChecked();
+    await expect(
+      page.locator('.seeds__list-item--disabled .seeds__list-enabled')
+    ).not.toBeChecked();
+
+    // 「取込失敗・削除済みの行も表示」トグル ON → 3 件
+    await page.locator('.seeds__show-invalid').check();
+    await expect(page.locator('.seeds__list-item')).toHaveCount(3);
     await expect(page.locator('.seeds__list-item--invalid')).toContainText('pmid_not_found');
   });
 
-  test('無効化ボタン: 当該行を is_valid=false / user_removed へ PUT する', async ({ page }) => {
+  test('チェックボックス OFF: 当該行を is_valid=false / user_disabled へ PUT し一覧には残る', async ({ page }) => {
     await injectAppStub(page, scenarioWithProject());
 
     const putBodies: string[] = [];
-    let invalidated = false;
+    let disabled = false;
     await page.route('**/sheets.googleapis.com/**/values/**', async (route) => {
       const req = route.request();
       const url = req.url();
       if (req.method() === 'GET' && url.includes('SeedPapers')) {
-        // PUT（無効化）が来る前は有効 1 件、来た後は user_removed 済みを返す
-        const rows = invalidated
+        const rows = disabled
+          ? [SEED_HEADER, seedRow('111', false, 'user_disabled')]
+          : [SEED_HEADER, seedRow('111', true)];
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ values: rows }),
+        });
+        return;
+      }
+      if (req.method() === 'PUT' && url.includes('SeedPapers')) {
+        putBodies.push(req.postData() ?? '');
+        disabled = true;
+        await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+        return;
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+    });
+    await page.goto(APP_URL);
+
+    await expect(page.locator('.seeds__list-item--valid')).toHaveCount(1);
+    await page.locator('.seeds__list-enabled').uncheck();
+
+    // PUT が 1 回飛び、ボディに user_disabled / false が含まれる
+    await expect.poll(() => putBodies.length).toBeGreaterThan(0);
+    expect(putBodies[0]).toContain('user_disabled');
+    // 再取得後も一覧には残り、無効化中スタイル + チェック OFF になる
+    await expect(page.locator('.seeds__list-item--disabled')).toHaveCount(1);
+    await expect(page.locator('.seeds__list-enabled')).not.toBeChecked();
+  });
+
+  test('削除ボタン: 当該行を is_valid=false / user_removed へ PUT し一覧から消える', async ({ page }) => {
+    await injectAppStub(page, scenarioWithProject());
+
+    const putBodies: string[] = [];
+    let removed = false;
+    await page.route('**/sheets.googleapis.com/**/values/**', async (route) => {
+      const req = route.request();
+      const url = req.url();
+      if (req.method() === 'GET' && url.includes('SeedPapers')) {
+        // PUT（削除）が来る前は有効 1 件、来た後は user_removed 済みを返す
+        const rows = removed
           ? [SEED_HEADER, seedRow('111', false, 'user_removed')]
           : [SEED_HEADER, seedRow('111', true)];
         await route.fulfill({
@@ -130,7 +179,7 @@ test.describe('app-seeds (#/seeds)', () => {
       }
       if (req.method() === 'PUT' && url.includes('SeedPapers')) {
         putBodies.push(req.postData() ?? '');
-        invalidated = true;
+        removed = true;
         await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
         return;
       }
@@ -139,13 +188,13 @@ test.describe('app-seeds (#/seeds)', () => {
     await page.goto(APP_URL);
 
     await expect(page.locator('.seeds__list-item--valid')).toHaveCount(1);
-    await page.locator('.seeds__list-invalidate').click();
+    await page.locator('.seeds__list-delete').click();
 
     // PUT が 1 回飛び、ボディに user_removed / false が含まれる
     await expect.poll(() => putBodies.length).toBeGreaterThan(0);
     expect(putBodies[0]).toContain('user_removed');
-    // 再取得後は有効行が 0 件（user_removed になった）
-    await expect(page.locator('.seeds__list-item--valid')).toHaveCount(0);
+    // 再取得後はデフォルト表示から消える（user_removed はトグル ON でのみ見える）
+    await expect(page.locator('.seeds__list-item')).toHaveCount(0);
   });
 
   test('a11y: axe violation zero', async ({ page }) => {

@@ -50,6 +50,7 @@ export {
   ingestSeeds,
   listSeeds,
   invalidateSeed,
+  setSeedEnabled,
   retrySeed,
   fillPmidForRisRow,
   type IngestInput,

@@ -21,8 +21,10 @@ export interface SeedsViewCallbacks {
   onIngest?: (input: IngestInput) => Promise<IngestSummary>;
   /** 登録済み SeedPapers を行番号付きで一覧する（§4.3 一覧表示） */
   onListSeeds?: () => Promise<SeedPaperWithRow[]>;
-  /** 有効行の論理削除（user_removed へ書き換え。§4.3） */
-  onInvalidate?: (rowIndex: number, seed: SeedPaper) => Promise<SeedPaper>;
+  /** チェックボックスによる有効/無効の切り替え（user_disabled との往復。§4.3） */
+  onSetEnabled?: (rowIndex: number, seed: SeedPaper, enabled: boolean) => Promise<SeedPaper>;
+  /** 行の削除（user_removed への論理削除。一覧から消えるが行はシートに残る。§4.3） */
+  onDelete?: (rowIndex: number, seed: SeedPaper) => Promise<SeedPaper>;
   /** pmid_not_found 行の再試行（1 PMID で再 ingest。§4.3） */
   onRetry?: (pmid: string) => Promise<IngestSummary>;
   /** ris_no_pmid 行への手動 PMID 補完（§4.3）。成功時は新規 pmid_direct 行を追記する */
@@ -93,11 +95,21 @@ export function createSeedsView(callbacks: SeedsViewCallbacks = {}): RenderView 
             listState.showInvalid = next;
             void refreshList();
           },
-          onInvalidate: async (rowIndex, seed) => {
-            if (!callbacks.onInvalidate) return;
+          onSetEnabled: async (rowIndex, seed, enabled) => {
+            if (!callbacks.onSetEnabled) return;
             errorBox.textContent = '';
             try {
-              await callbacks.onInvalidate(rowIndex, seed);
+              await callbacks.onSetEnabled(rowIndex, seed, enabled);
+              await refreshList();
+            } catch (err) {
+              errorBox.textContent = formatError(err);
+            }
+          },
+          onDelete: async (rowIndex, seed) => {
+            if (!callbacks.onDelete) return;
+            errorBox.textContent = '';
+            try {
+              await callbacks.onDelete(rowIndex, seed);
               await refreshList();
             } catch (err) {
               errorBox.textContent = formatError(err);
@@ -155,18 +167,26 @@ export function createSeedsView(callbacks: SeedsViewCallbacks = {}): RenderView 
 
 interface SeedListActions {
   onToggleShowInvalid: (next: boolean) => void;
-  onInvalidate: (rowIndex: number, seed: SeedPaper) => void | Promise<void>;
+  onSetEnabled: (rowIndex: number, seed: SeedPaper, enabled: boolean) => void | Promise<void>;
+  onDelete: (rowIndex: number, seed: SeedPaper) => void | Promise<void>;
   onRetry: (pmid: string) => void | Promise<void>;
   onFillPmid: (rowIndex: number, pmid: string) => void | Promise<void>;
   onFetchArticle?: (pmid: string) => Promise<EfetchArticle | null>;
 }
 
+/** 一覧のデフォルト表示に含める行か（有効行 + チェックボックスで無効化中の行）。§4.3 */
+function isListedByDefault(seed: SeedPaper): boolean {
+  return seed.isValid || seed.exclusionReason === 'user_disabled';
+}
+
 /**
  * 登録済みシード一覧を描画する（§4.3）。
- * - デフォルトは is_valid=true のみ表示。「無効行も表示」トグルで全件表示
- * - 有効行: 「無効化」ボタン（論理削除）
+ * - デフォルトは有効行 + user_disabled（チェックボックス OFF）行を表示。
+ *   取込失敗・削除済み行（pmid_not_found / duplicate_pmid / user_removed / no_pmid_resolved）は
+ *   「取込失敗・削除済みの行も表示」トグルで全件表示
+ * - 有効行・user_disabled 行: 左端チェックボックスで有効/無効を往復 + 「削除」ボタン（論理削除）
  * - pmid_not_found 行: 「再試行」ボタン
- * - 無効行には exclusion_reason を表示する
+ * - 取込失敗行には exclusion_reason を表示する
  *
  * TODO(§4.3): ris_no_pmid 行への「PMID を入力する」補完 UI は今回スコープ外。
  *   タイトルと元 DB から手動補完し、成功時は新規 pmid_direct 行として追記する仕様を別途実装する。
@@ -185,8 +205,7 @@ function renderSeedList(
   heading.textContent = '登録済みシード一覧';
   container.appendChild(heading);
 
-  const validCount = rows.filter((r) => r.seed.isValid).length;
-  const invalidCount = rows.length - validCount;
+  const hiddenCount = rows.filter((r) => !isListedByDefault(r.seed)).length;
 
   const toggleLabel = doc.createElement('label');
   toggleLabel.className = 'seeds__list-toggle';
@@ -197,11 +216,11 @@ function renderSeedList(
   toggle.addEventListener('change', () => actions.onToggleShowInvalid(toggle.checked));
   toggleLabel.appendChild(toggle);
   toggleLabel.appendChild(
-    doc.createTextNode(` 無効行も表示（無効 ${invalidCount} 件）`)
+    doc.createTextNode(` 取込失敗・削除済みの行も表示（${hiddenCount} 件）`)
   );
   container.appendChild(toggleLabel);
 
-  const visible = state.showInvalid ? rows : rows.filter((r) => r.seed.isValid);
+  const visible = state.showInvalid ? rows : rows.filter((r) => isListedByDefault(r.seed));
 
   if (rows.length === 0) {
     const empty = doc.createElement('p');
@@ -214,7 +233,7 @@ function renderSeedList(
   if (visible.length === 0) {
     const empty = doc.createElement('p');
     empty.className = 'seeds__list-empty';
-    empty.textContent = `有効なシードはありません（無効 ${invalidCount} 件は「無効行も表示」で確認できます）。`;
+    empty.textContent = `表示できるシードはありません（取込失敗・削除済み ${hiddenCount} 件はトグルで確認できます）。`;
     container.appendChild(empty);
     return;
   }
@@ -233,21 +252,47 @@ function buildSeedRow(
   actions: SeedListActions
 ): HTMLElement {
   const { seed, rowIndex } = row;
+  // user_disabled はチェックボックスで往復できる「一時無効」。取込失敗系の invalid と区別する
+  const isDisabledRow = !seed.isValid && seed.exclusionReason === 'user_disabled';
+  const modifier = seed.isValid ? 'valid' : isDisabledRow ? 'disabled' : 'invalid';
   const li = doc.createElement('li');
-  li.className = `seeds__list-item seeds__list-item--${seed.isValid ? 'valid' : 'invalid'}`;
+  li.className = `seeds__list-item seeds__list-item--${modifier}`;
   li.dataset['rowIndex'] = String(rowIndex);
 
-  // --- 上段: ステータスバッジ + タイトル + コントロール ---
+  // --- 上段: 有効/無効チェックボックス + ステータスバッジ + タイトル + コントロール ---
   const header = doc.createElement('div');
   header.className = 'seeds__list-header';
   li.appendChild(header);
 
+  const idText = seed.pmid ? `PMID ${seed.pmid}` : `(PMID 無し) ${seed.title ?? ''}`;
+
+  if (seed.isValid || isDisabledRow) {
+    const enabledBox = doc.createElement('input');
+    enabledBox.type = 'checkbox';
+    enabledBox.className = 'seeds__list-enabled';
+    enabledBox.checked = seed.isValid;
+    enabledBox.setAttribute('aria-label', `${idText} を有効にする`);
+    enabledBox.addEventListener('change', () => {
+      enabledBox.disabled = true;
+      void Promise.resolve(actions.onSetEnabled(rowIndex, seed, enabledBox.checked)).finally(
+        () => {
+          enabledBox.disabled = false;
+        }
+      );
+    });
+    header.appendChild(enabledBox);
+  }
+
   const label = doc.createElement('span');
   label.className = 'seeds__list-label';
-  const idText = seed.pmid ? `PMID ${seed.pmid}` : `(PMID 無し) ${seed.title ?? ''}`;
-  label.textContent = seed.isValid
-    ? `✅ ${idText}`
-    : `⚠️ ${idText} — ${seed.exclusionReason ?? '無効'}`;
+  if (seed.isValid) {
+    label.textContent = `✅ ${idText}`;
+  } else if (isDisabledRow) {
+    // 無効中はチェックボックス OFF + グレーアウトで表現する（バッジは付けない）
+    label.textContent = idText;
+  } else {
+    label.textContent = `⚠️ ${idText} — ${seed.exclusionReason ?? '無効'}`;
+  }
   header.appendChild(label);
 
   if (seed.title) {
@@ -300,18 +345,18 @@ function buildSeedRow(
   const controls = doc.createElement('span');
   controls.className = 'seeds__list-controls';
 
-  if (seed.isValid) {
-    const invalidateBtn = doc.createElement('button');
-    invalidateBtn.type = 'button';
-    invalidateBtn.className = 'seeds__list-invalidate';
-    invalidateBtn.textContent = '無効化';
-    invalidateBtn.addEventListener('click', () => {
-      invalidateBtn.disabled = true;
-      void Promise.resolve(actions.onInvalidate(rowIndex, seed)).finally(() => {
-        invalidateBtn.disabled = false;
+  if (seed.isValid || isDisabledRow) {
+    const deleteBtn = doc.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'seeds__list-delete';
+    deleteBtn.textContent = '削除';
+    deleteBtn.addEventListener('click', () => {
+      deleteBtn.disabled = true;
+      void Promise.resolve(actions.onDelete(rowIndex, seed)).finally(() => {
+        deleteBtn.disabled = false;
       });
     });
-    controls.appendChild(invalidateBtn);
+    controls.appendChild(deleteBtn);
   } else if (seed.exclusionReason === 'pmid_not_found' && seed.pmid) {
     const retryBtn = doc.createElement('button');
     retryBtn.type = 'button';

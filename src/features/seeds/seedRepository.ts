@@ -72,8 +72,28 @@ export async function listSeedPapersWithRows(
 }
 
 /**
+ * 指定行番号の seed の有効/無効をチェックボックスで切り替える（§4.3）。
+ * - 無効化: `is_valid=false, exclusion_reason=user_disabled`（一覧には表示されたまま）
+ * - 再有効化: `is_valid=true, exclusion_reason=null`
+ * 論理削除（user_removed）と違い、ユーザーがいつでも往復できる一時的な除外を表す。
+ */
+export async function setSeedEnabledRow(
+  spreadsheetId: string,
+  rowIndex: number,
+  seed: SeedPaper,
+  enabled: boolean,
+  deps: GoogleApiDeps
+): Promise<SeedPaper> {
+  const updated: SeedPaper = enabled
+    ? { ...seed, isValid: true, exclusionReason: null }
+    : { ...seed, isValid: false, exclusionReason: 'user_disabled' };
+  await updateRow(spreadsheetId, 'SeedPapers', rowIndex, toRow(updated), deps);
+  return updated;
+}
+
+/**
  * 指定行番号の seed を `is_valid=false, exclusion_reason=user_removed` に書き換える（論理削除）。
- * §4.3「押下時の挙動は当該行を書き換えるだけで、行自体は残す」。
+ * §4.3「押下時の挙動は当該行を書き換えるだけで、行自体は残す」。一覧の「削除」ボタンが使う。
  *
  * 行追加ではなく既存行の上書きなので、呼び出し側は `listSeedPapersWithRows` の
  * rowIndex を渡すこと。書き換え後の seed をそのまま返す。
@@ -111,7 +131,9 @@ export async function hasValidSeedPmid(
  *
  * 重複と見なすのは次のいずれかの行が存在する場合：
  * - `is_valid=true` の同 PMID 行（既に有効登録済み）
- * - `exclusion_reason=user_removed` の同 PMID 行（ユーザーが一度無効化した事実を監査ログに残すため）
+ * - `exclusion_reason=user_disabled` の同 PMID 行（チェックボックスで一時無効化中。
+ *   再有効化はチェックボックスで行うため、再 ingest は重複として扱う）
+ * - `exclusion_reason=user_removed` の同 PMID 行（ユーザーが一度削除した事実を監査ログに残すため）
  *
  * 一方、次の無効行は重複判定に含めない（既存挙動を維持）：
  * - `exclusion_reason=pmid_not_found`: 「再試行」で同 PMID を再 ingest し、見つかれば
@@ -128,7 +150,9 @@ export async function hasDuplicateSeedPmid(
   return seeds.some(
     (seed) =>
       seed.pmid === pmid &&
-      (seed.isValid || seed.exclusionReason === 'user_removed')
+      (seed.isValid ||
+        seed.exclusionReason === 'user_disabled' ||
+        seed.exclusionReason === 'user_removed')
   );
 }
 
@@ -205,7 +229,13 @@ function isIngestFormat(value: string): value is SeedPaper['ingestFormat'] {
 function isExclusionReason(
   value: string
 ): value is NonNullable<SeedPaper['exclusionReason']> {
-  return ['pmid_not_found', 'duplicate_pmid', 'user_removed', 'no_pmid_resolved'].includes(value);
+  return [
+    'pmid_not_found',
+    'duplicate_pmid',
+    'user_removed',
+    'user_disabled',
+    'no_pmid_resolved',
+  ].includes(value);
 }
 
 function isUserDecision(value: string): value is NonNullable<SeedPaper['userDecision']> {

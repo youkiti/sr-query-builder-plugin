@@ -529,6 +529,86 @@ describe('startOptions', () => {
     );
   });
 
+  test('保存済み tier があればページ読み込み時にバッジへ復元され、再判定はしない', async () => {
+    const doc = buildDocumentWithBadge();
+    const detectGeminiTierMock = jest.fn(async () => 'free' as const);
+    const deps: OptionsDeps = {
+      readKey: jest.fn(async (key) => {
+        if (key === STORAGE_KEY_GEMINI) return 'saved-key';
+        if (key === 'gemini.detectedTier') return 'paid';
+        return undefined;
+      }),
+      writeKey: jest.fn(async () => undefined),
+      removeKey: jest.fn(async () => undefined),
+      openAppTab: jest.fn(),
+      detectGeminiTier: detectGeminiTierMock,
+    };
+    await startOptions(doc, deps);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const badge = doc.getElementById('gemini-tier-badge');
+    expect(badge?.textContent).toBe('有料プラン');
+    expect(detectGeminiTierMock).not.toHaveBeenCalled();
+  });
+
+  test('キー保存済みで tier 未保存ならページ読み込み時に自動判定してバッジ表示・永続化する', async () => {
+    const doc = buildDocumentWithBadge();
+    const store: Record<string, string> = { [STORAGE_KEY_GEMINI]: 'legacy-key' };
+    const detectGeminiTierMock = jest.fn(async () => 'paid' as const);
+    const deps: OptionsDeps = {
+      readKey: jest.fn(async (key) => store[key]),
+      writeKey: jest.fn(async (key, value) => { store[key] = value; }),
+      removeKey: jest.fn(async () => undefined),
+      openAppTab: jest.fn(),
+      detectGeminiTier: detectGeminiTierMock,
+    };
+    await startOptions(doc, deps);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(detectGeminiTierMock).toHaveBeenCalledWith('legacy-key');
+    const badge = doc.getElementById('gemini-tier-badge');
+    expect(badge?.textContent).toBe('有料プラン');
+    expect(store['gemini.detectedTier']).toBe('paid');
+  });
+
+  test('読み込み時の自動判定が unknown ならバッジは空のままで永続化もしない', async () => {
+    const doc = buildDocumentWithBadge();
+    const store: Record<string, string> = { [STORAGE_KEY_GEMINI]: 'legacy-key' };
+    const detectGeminiTierMock = jest.fn(async () => 'unknown' as const);
+    const deps: OptionsDeps = {
+      readKey: jest.fn(async (key) => store[key]),
+      writeKey: jest.fn(async (key, value) => { store[key] = value; }),
+      removeKey: jest.fn(async () => undefined),
+      openAppTab: jest.fn(),
+      detectGeminiTier: detectGeminiTierMock,
+    };
+    await startOptions(doc, deps);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(detectGeminiTierMock).toHaveBeenCalledWith('legacy-key');
+    const badge = doc.getElementById('gemini-tier-badge');
+    expect(badge?.textContent).toBe('');
+    expect(store['gemini.detectedTier']).toBeUndefined();
+  });
+
+  test('キー未保存ならページ読み込み時の自動判定は走らない', async () => {
+    const doc = buildDocumentWithBadge();
+    const detectGeminiTierMock = jest.fn(async () => 'paid' as const);
+    const deps: OptionsDeps = {
+      readKey: jest.fn(async () => undefined),
+      writeKey: jest.fn(async () => undefined),
+      removeKey: jest.fn(async () => undefined),
+      openAppTab: jest.fn(),
+      detectGeminiTier: detectGeminiTierMock,
+    };
+    await startOptions(doc, deps);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(detectGeminiTierMock).not.toHaveBeenCalled();
+  });
+
   test('モデルセレクトに gemini-2.0-flash が含まれている', async () => {
     const doc = buildDocument();
     const deps = readStoredValues({});

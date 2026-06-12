@@ -4,6 +4,7 @@ import {
   fillPmidForRisRow,
   ingestSeeds,
   invalidateSeed,
+  setSeedEnabled,
   listSeeds,
   retrySeed,
   type IngestInput,
@@ -520,6 +521,57 @@ describe('listSeeds / invalidateSeed / retrySeed', () => {
     );
     expect(putCall).toBeDefined();
     expect(decodeURIComponent(putCall![0] as string)).toContain('SeedPapers!A2:Z2');
+  });
+
+  test('setSeedEnabled(false) は当該行を user_disabled へ PUT する', async () => {
+    const { sheetsFetchMock, deps } = setupDeps();
+    sheetsFetchMock.mockResolvedValue(jsonResponse({}));
+    const seed = {
+      pmid: '111',
+      title: 'T',
+      year: 2020,
+      source: 'initial' as const,
+      ingestFormat: 'pmid_direct' as const,
+      originalDb: null,
+      isValid: true,
+      exclusionReason: null,
+      originalPayloadRef: null,
+      userDecision: null,
+      decidedAt: null,
+      decidedBy: null,
+      note: null,
+    };
+    const updated = await setSeedEnabled(2, seed, false, deps);
+    expect(updated.isValid).toBe(false);
+    expect(updated.exclusionReason).toBe('user_disabled');
+    const putCall = sheetsFetchMock.mock.calls.find(
+      (c) => (c[1] as RequestInit | undefined)?.method === 'PUT'
+    );
+    expect(putCall).toBeDefined();
+    expect(decodeURIComponent(putCall![0] as string)).toContain('SeedPapers!A2:Z2');
+  });
+
+  test('setSeedEnabled(true) は user_disabled 行を有効へ戻す', async () => {
+    const { sheetsFetchMock, deps } = setupDeps();
+    sheetsFetchMock.mockResolvedValue(jsonResponse({}));
+    const seed = {
+      pmid: '111',
+      title: 'T',
+      year: 2020,
+      source: 'initial' as const,
+      ingestFormat: 'pmid_direct' as const,
+      originalDb: null,
+      isValid: false,
+      exclusionReason: 'user_disabled' as const,
+      originalPayloadRef: null,
+      userDecision: null,
+      decidedAt: null,
+      decidedBy: null,
+      note: null,
+    };
+    const updated = await setSeedEnabled(2, seed, true, deps);
+    expect(updated.isValid).toBe(true);
+    expect(updated.exclusionReason).toBeNull();
   });
 
   test('retrySeed は 1 PMID で再 ingest する（見つかれば有効行追記）', async () => {

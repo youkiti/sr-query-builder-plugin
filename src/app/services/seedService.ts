@@ -4,6 +4,7 @@ import {
   hasDuplicateSeedPmid,
   invalidateSeedRow,
   listSeedPapersWithRows,
+  setSeedEnabledRow,
   parseNbib,
   parseRis,
   resolveRisEntry,
@@ -151,9 +152,10 @@ async function ingestPmidBatch(
   const orderedInput = pmids.map((p) => p.trim()).filter((p) => p !== '');
   const uniqueInput = dedupePreserveOrder(pmids);
   const existing = new Set<string>();
-  // 既に有効行、または user_removed 行を持つ PMID は duplicate_pmid で記録（§4.3）。
-  // 「ユーザーが一度無効化した事実」を監査ログに残すため、user_removed 済み PMID の
-  // 再 ingest も新規有効行として復活させず、duplicate_pmid 行を追記する。
+  // 既に有効行・user_disabled 行・user_removed 行を持つ PMID は duplicate_pmid で記録（§4.3）。
+  // 「ユーザーが一度削除・無効化した事実」を監査ログに残すため、これらの PMID の
+  // 再 ingest も新規有効行として復活させず、duplicate_pmid 行を追記する
+  // （user_disabled の復帰は一覧のチェックボックスで行う）。
   // pmid_not_found 行のみの PMID は重複扱いにしない（「再試行」で再 ingest する前提）。
   for (const pmid of uniqueInput) {
     if (await hasDuplicateSeedPmid(spreadsheetId, pmid, deps.google)) {
@@ -338,8 +340,27 @@ export async function listSeeds(deps: SeedServiceDeps): Promise<SeedPaperWithRow
 }
 
 /**
- * 有効行を論理削除する（§4.3）。当該行を `is_valid=false, exclusion_reason=user_removed`
- * へ書き換えるだけで、行自体は SeedPapers に残す（監査性のため物理削除しない）。
+ * シードの有効/無効をチェックボックスで切り替える（§4.3）。
+ * 無効化は `is_valid=false, exclusion_reason=user_disabled` で、一覧に表示されたまま
+ * いつでも再有効化できる。論理削除（user_removed）とは区別する。
+ */
+export async function setSeedEnabled(
+  rowIndex: number,
+  seed: SeedPaper,
+  enabled: boolean,
+  deps: SeedServiceDeps
+): Promise<SeedPaper> {
+  const state = deps.store.getState();
+  if (state.project === null) {
+    throw new Error('プロジェクトが選択されていません');
+  }
+  return setSeedEnabledRow(state.project.spreadsheetId, rowIndex, seed, enabled, deps.google);
+}
+
+/**
+ * 行を論理削除する（§4.3 の「削除」ボタン）。当該行を `is_valid=false,
+ * exclusion_reason=user_removed` へ書き換えるだけで、行自体は SeedPapers に残す
+ * （監査性のため物理削除しない）。削除後は一覧のデフォルト表示から消える。
  */
 export async function invalidateSeed(
   rowIndex: number,

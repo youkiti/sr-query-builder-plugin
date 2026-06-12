@@ -11,6 +11,7 @@ export {
   listSeedPapers,
   listSeedPapersWithRows,
   invalidateSeedRow,
+  setSeedEnabledRow,
   hasValidSeedPmid,
   hasDuplicateSeedPmid,
   type SeedPaperWithRow,

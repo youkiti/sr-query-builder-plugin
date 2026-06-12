@@ -18,6 +18,7 @@ export type SeedExclusionReason =
   | 'pmid_not_found'
   | 'duplicate_pmid'
   | 'user_removed'
+  | 'user_disabled'
   | 'no_pmid_resolved';
 
 export type SeedUserDecision = 'include' | 'exclude' | 'maybe';

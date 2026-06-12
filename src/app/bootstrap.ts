@@ -19,6 +19,7 @@ import {
   generateDraft,
   ingestSeeds,
   invalidateSeed,
+  setSeedEnabled,
   listSeeds,
   recordDecision,
   retrySeed,
@@ -316,7 +317,12 @@ function buildDefaultViewOptions(
       onIngest: async (input: IngestInput): Promise<IngestSummary> =>
         runIngestSeeds(store, runtime, input),
       onListSeeds: async (): Promise<SeedPaperWithRow[]> => runListSeeds(store, runtime),
-      onInvalidate: async (rowIndex: number, seed: SeedPaper): Promise<SeedPaper> =>
+      onSetEnabled: async (
+        rowIndex: number,
+        seed: SeedPaper,
+        enabled: boolean
+      ): Promise<SeedPaper> => runSetSeedEnabled(store, runtime, rowIndex, seed, enabled),
+      onDelete: async (rowIndex: number, seed: SeedPaper): Promise<SeedPaper> =>
         runInvalidateSeed(store, runtime, rowIndex, seed),
       onRetry: async (pmid: string): Promise<IngestSummary> =>
         runRetrySeed(store, runtime, pmid),
@@ -471,6 +477,17 @@ async function runListSeeds(
 ): Promise<SeedPaperWithRow[]> {
   const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
   return listSeeds({ google: runtime.google, eutils, store });
+}
+
+async function runSetSeedEnabled(
+  store: AppStore,
+  runtime: ChromeRuntimeDeps,
+  rowIndex: number,
+  seed: SeedPaper,
+  enabled: boolean
+): Promise<SeedPaper> {
+  const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
+  return setSeedEnabled(rowIndex, seed, enabled, { google: runtime.google, eutils, store });
 }
 
 async function runInvalidateSeed(

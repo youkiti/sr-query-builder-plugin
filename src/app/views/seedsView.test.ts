@@ -374,19 +374,21 @@ describe('createSeedsView - 登録済みシード一覧（§4.3）', () => {
     };
   }
 
-  test('デフォルトは有効行のみ表示、トグルで無効行も表示', async () => {
+  test('デフォルトは有効行 + user_disabled 行を表示、トグルで取込失敗行も表示', async () => {
     const onListSeeds = jest.fn().mockResolvedValue([
       seedRow(2, { pmid: '111', isValid: true }),
       seedRow(3, { pmid: '222', isValid: false, exclusionReason: 'pmid_not_found' }),
+      seedRow(4, { pmid: '333', isValid: false, exclusionReason: 'user_disabled' }),
     ]);
     const view = createSeedsView({ onListSeeds });
     const container = buildContainer();
     view(container, { state: stateWithProject, navigate: jest.fn() });
     await flushAsync();
     await flushAsync();
-    // 初期は有効 1 件のみ
-    expect(container.querySelectorAll('.seeds__list-item')).toHaveLength(1);
+    // 初期は有効 1 件 + 無効化中（user_disabled）1 件
+    expect(container.querySelectorAll('.seeds__list-item')).toHaveLength(2);
     expect(container.querySelector('.seeds__list-item--valid')).not.toBeNull();
+    expect(container.querySelector('.seeds__list-item--disabled')).not.toBeNull();
     expect(container.querySelector('.seeds__list-item--invalid')).toBeNull();
     // トグル ON
     const toggle = container.querySelector<HTMLInputElement>('.seeds__show-invalid')!;
@@ -394,27 +396,73 @@ describe('createSeedsView - 登録済みシード一覧（§4.3）', () => {
     toggle.dispatchEvent(new Event('change'));
     await flushAsync();
     await flushAsync();
-    expect(container.querySelectorAll('.seeds__list-item')).toHaveLength(2);
+    expect(container.querySelectorAll('.seeds__list-item')).toHaveLength(3);
     expect(container.querySelector('.seeds__list-item--invalid')?.textContent).toContain(
       'pmid_not_found'
     );
   });
 
-  test('有効行の「無効化」ボタンで onInvalidate が行番号付きで呼ばれる', async () => {
+  test('有効行のチェックボックス OFF で onSetEnabled(enabled=false) が行番号付きで呼ばれる', async () => {
     const onListSeeds = jest.fn().mockResolvedValue([seedRow(2, { pmid: '111', isValid: true })]);
-    const onInvalidate = jest.fn().mockResolvedValue({});
-    const view = createSeedsView({ onListSeeds, onInvalidate });
+    const onSetEnabled = jest.fn().mockResolvedValue({});
+    const view = createSeedsView({ onListSeeds, onSetEnabled });
     const container = buildContainer();
     view(container, { state: stateWithProject, navigate: jest.fn() });
     await flushAsync();
     await flushAsync();
-    const btn = container.querySelector<HTMLButtonElement>('.seeds__list-invalidate')!;
+    const checkbox = container.querySelector<HTMLInputElement>('.seeds__list-enabled')!;
+    expect(checkbox.checked).toBe(true);
+    checkbox.checked = false;
+    checkbox.dispatchEvent(new Event('change'));
+    await flushAsync();
+    await flushAsync();
+    expect(onSetEnabled).toHaveBeenCalledTimes(1);
+    expect(onSetEnabled.mock.calls[0][0]).toBe(2);
+    expect((onSetEnabled.mock.calls[0][1] as SeedPaper).pmid).toBe('111');
+    expect(onSetEnabled.mock.calls[0][2]).toBe(false);
+  });
+
+  test('user_disabled 行のチェックボックス ON で onSetEnabled(enabled=true) が呼ばれる', async () => {
+    const onListSeeds = jest
+      .fn()
+      .mockResolvedValue([
+        seedRow(5, { pmid: '444', isValid: false, exclusionReason: 'user_disabled' }),
+      ]);
+    const onSetEnabled = jest.fn().mockResolvedValue({});
+    const view = createSeedsView({ onListSeeds, onSetEnabled });
+    const container = buildContainer();
+    view(container, { state: stateWithProject, navigate: jest.fn() });
+    await flushAsync();
+    await flushAsync();
+    // user_disabled 行はトグルなしで表示され、チェックボックスは OFF
+    const checkbox = container.querySelector<HTMLInputElement>('.seeds__list-enabled')!;
+    expect(checkbox).not.toBeNull();
+    expect(checkbox.checked).toBe(false);
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change'));
+    await flushAsync();
+    await flushAsync();
+    expect(onSetEnabled).toHaveBeenCalledTimes(1);
+    expect(onSetEnabled.mock.calls[0][0]).toBe(5);
+    expect(onSetEnabled.mock.calls[0][2]).toBe(true);
+  });
+
+  test('「削除」ボタンで onDelete が行番号付きで呼ばれる', async () => {
+    const onListSeeds = jest.fn().mockResolvedValue([seedRow(2, { pmid: '111', isValid: true })]);
+    const onDelete = jest.fn().mockResolvedValue({});
+    const view = createSeedsView({ onListSeeds, onDelete });
+    const container = buildContainer();
+    view(container, { state: stateWithProject, navigate: jest.fn() });
+    await flushAsync();
+    await flushAsync();
+    const btn = container.querySelector<HTMLButtonElement>('.seeds__list-delete')!;
+    expect(btn.textContent).toBe('削除');
     btn.click();
     await flushAsync();
     await flushAsync();
-    expect(onInvalidate).toHaveBeenCalledTimes(1);
-    expect(onInvalidate.mock.calls[0][0]).toBe(2);
-    expect((onInvalidate.mock.calls[0][1] as SeedPaper).pmid).toBe('111');
+    expect(onDelete).toHaveBeenCalledTimes(1);
+    expect(onDelete.mock.calls[0][0]).toBe(2);
+    expect((onDelete.mock.calls[0][1] as SeedPaper).pmid).toBe('111');
   });
 
   test('pmid_not_found 行の「再試行」ボタンで onRetry が呼ばれる', async () => {

@@ -7,6 +7,7 @@ import {
   invalidateSeedRow,
   listSeedPapers,
   listSeedPapersWithRows,
+  setSeedEnabledRow,
 } from './seedRepository';
 
 function jsonResponse(body: unknown): Response {
@@ -270,6 +271,50 @@ describe('invalidateSeedRow', () => {
   });
 });
 
+describe('setSeedEnabledRow', () => {
+  test('enabled=false: is_valid=false / user_disabled に書き換える', async () => {
+    const d = deps();
+    const updated = await setSeedEnabledRow('sid', 4, seedFixture({ pmid: '111' }), false, d);
+    const [url, init] = d.fetch.mock.calls[0];
+    expect(decodeURIComponent(url as string)).toContain('SeedPapers!A4:Z4?valueInputOption=RAW');
+    expect((init as RequestInit).method).toBe('PUT');
+    const body = JSON.parse((init as RequestInit).body as string) as {
+      values: (string | number | boolean | null)[][];
+    };
+    const map: Record<string, string | number | boolean | null> = {};
+    SHEET_HEADERS.SeedPapers.forEach((k, i) => {
+      map[k] = body.values[0]![i] as string | number | boolean | null;
+    });
+    expect(map['is_valid']).toBe(false);
+    expect(map['exclusion_reason']).toBe('user_disabled');
+    expect(updated.isValid).toBe(false);
+    expect(updated.exclusionReason).toBe('user_disabled');
+  });
+
+  test('enabled=true: is_valid=true / exclusion_reason=null に戻す', async () => {
+    const d = deps();
+    const disabled = seedFixture({
+      pmid: '111',
+      isValid: false,
+      exclusionReason: 'user_disabled',
+    });
+    const updated = await setSeedEnabledRow('sid', 4, disabled, true, d);
+    const [, init] = d.fetch.mock.calls[0];
+    const body = JSON.parse((init as RequestInit).body as string) as {
+      values: (string | number | boolean | null)[][];
+    };
+    const map: Record<string, string | number | boolean | null> = {};
+    SHEET_HEADERS.SeedPapers.forEach((k, i) => {
+      map[k] = body.values[0]![i] as string | number | boolean | null;
+    });
+    expect(map['is_valid']).toBe(true);
+    // null セルは Sheets へは空文字として書き込まれる（lib/google の serialize 仕様）
+    expect(map['exclusion_reason']).toBe('');
+    expect(updated.isValid).toBe(true);
+    expect(updated.exclusionReason).toBeNull();
+  });
+});
+
 describe('hasValidSeedPmid', () => {
   const header = [...SHEET_HEADERS.SeedPapers];
   function row(overrides: Partial<Record<string, string>> = {}): string[] {
@@ -335,9 +380,19 @@ describe('hasDuplicateSeedPmid', () => {
     await expect(hasDuplicateSeedPmid('sid', '12345', d)).resolves.toBe(true);
   });
 
-  test('user_removed 行があれば true（一度無効化した事実を重複扱いにする）', async () => {
+  test('user_removed 行があれば true（一度削除した事実を重複扱いにする）', async () => {
     const d = deps({
       values: [header, row({ pmid: '12345', is_valid: 'false', exclusion_reason: 'user_removed' })],
+    });
+    await expect(hasDuplicateSeedPmid('sid', '12345', d)).resolves.toBe(true);
+  });
+
+  test('user_disabled 行があれば true（チェックボックスで再有効化する前提のため重複扱い）', async () => {
+    const d = deps({
+      values: [
+        header,
+        row({ pmid: '12345', is_valid: 'false', exclusion_reason: 'user_disabled' }),
+      ],
     });
     await expect(hasDuplicateSeedPmid('sid', '12345', d)).resolves.toBe(true);
   });
