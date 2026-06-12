@@ -7,7 +7,9 @@ import {
   type GoogleApiDeps,
 } from '@/lib/google';
 import {
-  GeminiProvider,
+  createProvider,
+  resolveProviderId,
+  DEFAULT_MODEL,
   withLogging,
   type LLMProvider,
 } from '@/lib/llm';
@@ -24,12 +26,15 @@ import {
  */
 
 export const STORAGE_KEY_GEMINI = 'apiKeys.gemini';
+export const STORAGE_KEY_OPENROUTER = 'apiKeys.openrouter';
+export const STORAGE_KEY_LLM_MODEL = 'llm.selectedModel';
 const LLM_LOG_HEADER = SHEET_HEADERS.LLMApiLog;
 
 export class LlmApiKeyMissingError extends Error {
-  constructor() {
+  constructor(provider: string = 'Gemini') {
     super(
-      'Gemini API キーが未設定です。Options 画面（chrome://extensions の拡張詳細 → 拡張機能のオプション）で設定してください。'
+      provider +
+        ' API キーが未設定です。Options 画面（chrome://extensions の拡張詳細 → 拡張機能のオプション）で設定してください。'
     );
     this.name = 'LlmApiKeyMissingError';
   }
@@ -42,7 +47,7 @@ export interface LlmFactoryDeps {
   llmLogFolderId: string;
   /** LLMApiLog 行を追記する spreadsheet。 */
   spreadsheetId: string;
-  /** 任意: GeminiProvider のモデル指定 */
+  /** 任意: モデル指定の上書き（主にテスト用。通常は chrome.storage の選択モデルを使う）。 */
   model?: string;
   /** 任意: LLM 呼び出しごとに概算コストを通知するコールバック（§ cumulativeCostUsd 集計用）。 */
   onCostAccumulate?: (costUsd: number) => void;
@@ -65,17 +70,35 @@ export async function getGeminiApiKey(store: ProjectStoreDeps): Promise<string |
 }
 
 /**
+ * chrome.storage から OpenRouter API キーを取得する（無ければ null）。
+ */
+export async function getOpenRouterApiKey(store: ProjectStoreDeps): Promise<string | null> {
+  const value = await store.read<string>(STORAGE_KEY_OPENROUTER);
+  return value === undefined || value === '' ? null : value;
+}
+
+/**
  * Drive ロガー付きの LLMProvider ファクトリを生成する。
- * @throws {LlmApiKeyMissingError} chrome.storage に Gemini API キーが無いとき
+ *
+ * 選択モデル（`deps.model` の上書き → chrome.storage → `DEFAULT_MODEL`）から
+ * プロバイダを解決し、対応する API キーを取得して `createProvider` で生成する。
+ * @throws {LlmApiKeyMissingError} 解決したプロバイダの API キーが chrome.storage に無いとき
  */
 export async function buildLlmProviderFactory(deps: LlmFactoryDeps): Promise<LlmProviderFactory> {
-  const apiKey = await getGeminiApiKey(deps.store);
+  const selectedModel =
+    deps.model ?? (await deps.store.read<string>(STORAGE_KEY_LLM_MODEL)) ?? DEFAULT_MODEL;
+  const providerId = resolveProviderId(selectedModel);
+  const apiKey =
+    providerId === 'openrouter'
+      ? await getOpenRouterApiKey(deps.store)
+      : await getGeminiApiKey(deps.store);
   if (apiKey === null) {
-    throw new LlmApiKeyMissingError();
+    const providerName = providerId === 'openrouter' ? 'OpenRouter' : 'Gemini';
+    throw new LlmApiKeyMissingError(providerName);
   }
-  const baseProvider = new GeminiProvider({
+  const baseProvider = createProvider({
     apiKey,
-    model: deps.model,
+    model: selectedModel,
     fetch: deps.google.fetch,
   });
   return {

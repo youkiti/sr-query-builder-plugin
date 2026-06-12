@@ -21,6 +21,18 @@ describe('estimateCostUsd', () => {
     expect(estimateCostUsd('gemini-2.5-pro', null, 1_000_000)).toBeCloseTo(10.0, 10);
   });
 
+  test('gemini-3.5-flash は概算コストを返す', () => {
+    expect(estimateCostUsd('gemini-3.5-flash', 1_000_000, 1_000_000)).not.toBeNull();
+  });
+
+  test('qwen/qwen3-235b-a22b-2507 は概算コストを返す', () => {
+    expect(estimateCostUsd('qwen/qwen3-235b-a22b-2507', 1_000_000, 0)).not.toBeNull();
+  });
+
+  test('deepseek/deepseek-v4-flash は概算コストを返す', () => {
+    expect(estimateCostUsd('deepseek/deepseek-v4-flash', 0, 1_000_000)).not.toBeNull();
+  });
+
   test('既定モデル gemini-2.5-pro が単価表に存在する', () => {
     expect(MODEL_PRICING['gemini-2.5-pro']).toEqual({
       inputPerMillion: 1.25,

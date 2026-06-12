@@ -21,7 +21,7 @@ export interface GeminiProviderOptions {
   fetch?: typeof fetch;
 }
 
-const DEFAULT_MODEL = 'gemini-2.5-pro';
+const DEFAULT_MODEL = 'gemini-3.5-flash';
 const ENDPOINT_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 interface GeminiResponse {

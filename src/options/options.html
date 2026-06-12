@@ -15,10 +15,45 @@
       <p class="options__status" id="options-status">読み込み中…</p>
       <section class="options__section">
         <h2>LLM プロバイダ</h2>
-        <p class="options__muted">MVP は Gemini のみ対応。APIキーを設定してください。</p>
+
+        <div class="options__provider-card" id="gemini-card">
+          <h3 class="options__provider-title">Gemini</h3>
+          <label class="options__field">
+            <span>API キー</span>
+            <input type="password" id="gemini-api-key" autocomplete="off" />
+          </label>
+        </div>
+
+        <div class="options__provider-card" id="openrouter-card">
+          <h3 class="options__provider-title">OpenRouter</h3>
+          <p class="options__muted">Qwen / DeepSeek などの OSS モデルや多プロバイダを利用できます。</p>
+          <label class="options__field">
+            <span>API キー</span>
+            <input type="password" id="openrouter-api-key" autocomplete="off" />
+          </label>
+          <div class="options__custom-model-form">
+            <h4>カスタムモデルを追加（上限 20 件）</h4>
+            <p class="options__muted">
+              OpenRouter の任意のモデルIDを追加できます（例: meta-llama/llama-3.3-70b）。
+            </p>
+            <div class="options__field-row">
+              <label class="options__field">
+                <span>モデルID</span>
+                <input type="text" id="custom-model-id" placeholder="provider/model-name" autocomplete="off" />
+              </label>
+              <label class="options__field">
+                <span>表示名（任意）</span>
+                <input type="text" id="custom-model-label" placeholder="My Model" autocomplete="off" />
+              </label>
+            </div>
+            <button type="button" id="add-custom-model" class="options__button">追加</button>
+            <div id="custom-models-list" class="options__custom-models-list"></div>
+          </div>
+        </div>
+
         <label class="options__field">
-          <span>Gemini APIキー</span>
-          <input type="password" id="gemini-api-key" autocomplete="off" />
+          <span>使用モデル</span>
+          <select id="llm-model-select"></select>
         </label>
       </section>
       <section class="options__section">

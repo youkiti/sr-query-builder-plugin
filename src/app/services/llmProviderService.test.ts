@@ -2,8 +2,11 @@ import { SHEET_HEADERS } from '@/domain/sheetsSchema';
 import {
   LlmApiKeyMissingError,
   STORAGE_KEY_GEMINI,
+  STORAGE_KEY_LLM_MODEL,
+  STORAGE_KEY_OPENROUTER,
   buildLlmProviderFactory,
   getGeminiApiKey,
+  getOpenRouterApiKey,
 } from './llmProviderService';
 import type { ProjectStoreDeps } from '@/features/project';
 
@@ -46,21 +49,92 @@ describe('getGeminiApiKey', () => {
   });
 });
 
+describe('getOpenRouterApiKey', () => {
+  test('chrome.storage の値を返す', async () => {
+    const { store } = memoryStore({ [STORAGE_KEY_OPENROUTER]: 'or' });
+    await expect(getOpenRouterApiKey(store)).resolves.toBe('or');
+  });
+
+  test('未定義 / 空文字なら null', async () => {
+    await expect(getOpenRouterApiKey(memoryStore().store)).resolves.toBeNull();
+    await expect(
+      getOpenRouterApiKey(memoryStore({ [STORAGE_KEY_OPENROUTER]: '' }).store)
+    ).resolves.toBeNull();
+  });
+});
+
 describe('buildLlmProviderFactory', () => {
-  test('API キーが無いと LlmApiKeyMissingError', async () => {
-    const { store } = memoryStore();
-    const google = {
+  const stubGoogle = () =>
+    ({
       fetch: jest.fn(),
       getAccessToken: jest.fn().mockResolvedValue('t'),
-    };
+    }) as unknown as Parameters<typeof buildLlmProviderFactory>[0]['google'];
+
+  test('Gemini モデル選択時に Gemini キーが無いと LlmApiKeyMissingError(Gemini)', async () => {
+    const { store } = memoryStore();
     await expect(
       buildLlmProviderFactory({
-        google: google as Parameters<typeof buildLlmProviderFactory>[0]['google'],
+        google: stubGoogle(),
         store,
         llmLogFolderId: 'F',
         spreadsheetId: 'S',
       })
-    ).rejects.toBeInstanceOf(LlmApiKeyMissingError);
+    ).rejects.toMatchObject({
+      name: 'LlmApiKeyMissingError',
+      message: expect.stringContaining('Gemini API キー'),
+    });
+  });
+
+  test('OpenRouter モデル選択時に OpenRouter キーが無いと LlmApiKeyMissingError(OpenRouter)', async () => {
+    const { store } = memoryStore({
+      [STORAGE_KEY_LLM_MODEL]: 'qwen/qwen3-235b-a22b-2507',
+    });
+    let caught: unknown;
+    try {
+      await buildLlmProviderFactory({
+        google: stubGoogle(),
+        store,
+        llmLogFolderId: 'F',
+        spreadsheetId: 'S',
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(LlmApiKeyMissingError);
+    expect((caught as Error).message).toContain('OpenRouter API キー');
+  });
+
+  test('選択モデルが OpenRouter なら OpenRouterProvider が生成される', async () => {
+    const { store } = memoryStore({
+      [STORAGE_KEY_LLM_MODEL]: 'qwen/qwen3-235b-a22b-2507',
+      [STORAGE_KEY_OPENROUTER]: 'OR-KEY',
+    });
+    const factory = await buildLlmProviderFactory({
+      google: stubGoogle(),
+      store,
+      llmLogFolderId: 'F',
+      spreadsheetId: 'S',
+    });
+    const provider = factory.forPurpose('extract_protocol');
+    expect(provider.providerId).toBe('openrouter');
+    expect(provider.model).toBe('qwen/qwen3-235b-a22b-2507');
+  });
+
+  test('deps.model の上書きは storage の選択モデルより優先される', async () => {
+    const { store } = memoryStore({
+      [STORAGE_KEY_LLM_MODEL]: 'qwen/qwen3-235b-a22b-2507',
+      [STORAGE_KEY_GEMINI]: 'G-KEY',
+    });
+    const factory = await buildLlmProviderFactory({
+      google: stubGoogle(),
+      store,
+      llmLogFolderId: 'F',
+      spreadsheetId: 'S',
+      model: 'gemini-3.5-flash',
+    });
+    const provider = factory.forPurpose('extract_protocol');
+    expect(provider.providerId).toBe('gemini');
+    expect(provider.model).toBe('gemini-3.5-flash');
   });
 
   test('factory.forPurpose が GeminiProvider を返し、chat 後に Drive と Sheets に書く', async () => {
