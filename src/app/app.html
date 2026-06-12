@@ -21,10 +21,21 @@
             SR Query Builder
           </button>
         </h1>
+        <span class="app__build-date" id="app-build-date"></span>
       </div>
-      <div class="app__header-status">
-        <span class="app__status" id="app-status">起動中…</span>
-        <span class="app__context" id="app-context" aria-live="polite"></span>
+      <div class="app__header-right">
+        <button
+          type="button"
+          id="app-settings-link"
+          class="app__settings-btn"
+          title="設定（APIキー・モデル選択）"
+        >
+          設定
+        </button>
+        <div class="app__header-status">
+          <span class="app__status" id="app-status">起動中…</span>
+          <span class="app__context" id="app-context" aria-live="polite"></span>
+        </div>
       </div>
     </header>
     <main class="app__main">

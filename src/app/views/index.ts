@@ -16,6 +16,7 @@ import { createEditView, type EditViewCallbacks } from './editView';
 import { createExpandView, type ExpandViewCallbacks } from './expandView';
 import { createHistoryView, type HistoryViewCallbacks } from './historyView';
 import { buildNotImplementedView } from './notImplementedView';
+import { createSettingsView, type SettingsViewCallbacks } from './settingsView';
 import type { RenderView } from './types';
 
 export interface BuildViewsOptions {
@@ -29,6 +30,7 @@ export interface BuildViewsOptions {
   history?: HistoryViewCallbacks;
   edit?: EditViewCallbacks;
   expand?: ExpandViewCallbacks;
+  settings?: SettingsViewCallbacks;
 }
 
 /**
@@ -51,6 +53,9 @@ export function buildViews(
     export: createExportView(options.export),
     done: renderDoneView,
     history: createHistoryView(options.history),
+    settings: options.settings
+      ? createSettingsView(options.settings)
+      : buildNotImplementedView('settings'),
   };
 }
 
@@ -70,5 +75,6 @@ export {
   createHistoryView,
   createEditView,
   createExpandView,
+  createSettingsView,
 };
-export type { HomeViewCallbacks };
+export type { HomeViewCallbacks, SettingsViewCallbacks };

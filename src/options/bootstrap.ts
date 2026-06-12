@@ -9,7 +9,12 @@
  * をそれぞれ chrome.storage.local に保存する。API キーと NCBI キーは 1 つの
  * 「保存」ボタンでまとめて書き込み、UI 上はステータス文字列にまとめて結果を出す。
  * 使用モデルの選択とカスタムモデルの追加/削除は即時保存する。
+ *
+ * 保存時に Gemini API キーが設定されている場合、プラン（無料/有料）を自動判定し、
+ * 無料プランが検出されたときはモデルを gemini-2.0-flash に自動切り替えする。
  */
+
+import { detectGeminiTier, FREE_TIER_MODEL_ID } from '@/lib/llm/geminiTierDetector';
 
 export interface OptionsDeps {
   /** chrome.storage.local から既存値を読み取る */
@@ -20,6 +25,11 @@ export interface OptionsDeps {
   removeKey: (key: string) => Promise<void>;
   /** メインビュー（app.html）を新規タブで開く。pending フラグが立っているときのみ呼ばれる */
   openAppTab: () => void;
+  /**
+   * Gemini API キーのプランを確認する。
+   * 省略時はプラン確認をスキップする（テスト用途）。
+   */
+  detectGeminiTier?: (apiKey: string) => Promise<'paid' | 'free' | 'unknown'>;
 }
 
 export const STORAGE_KEY_GEMINI = 'apiKeys.gemini';
@@ -35,6 +45,7 @@ export const STORAGE_KEY_PENDING_APP_TAB = 'pendingOpenAppTab';
  * モデル一覧を保持する（modelRegistry に巻き込まれて他依存を引き込まないため）。
  */
 const BUILTIN_MODELS_DISPLAY = [
+  { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash（無料枠対応）', provider: 'gemini' as const },
   { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', provider: 'gemini' as const },
   { id: 'qwen/qwen3-235b-a22b-2507', label: 'Qwen3 235B Instruct', provider: 'openrouter' as const },
   { id: 'deepseek/deepseek-v4-flash', label: 'DeepSeek V4 Flash', provider: 'openrouter' as const },
@@ -111,6 +122,31 @@ function refreshProviderCards(doc: Document, selectedModelId: string): void {
     ?.classList.toggle('options__provider-card--active', provider === 'openrouter');
 }
 
+function updateTierBadge(
+  doc: Document,
+  state: 'checking' | 'paid' | 'free' | 'unknown'
+): void {
+  const badge = doc.getElementById('gemini-tier-badge');
+  if (!badge) return;
+  badge.className = 'options__tier-badge';
+  switch (state) {
+    case 'checking':
+      badge.classList.add('options__tier-badge--checking');
+      badge.textContent = '確認中...';
+      break;
+    case 'paid':
+      badge.classList.add('options__tier-badge--paid');
+      badge.textContent = '有料プラン';
+      break;
+    case 'free':
+      badge.classList.add('options__tier-badge--free');
+      badge.textContent = '無料プラン';
+      break;
+    default:
+      badge.textContent = '';
+  }
+}
+
 function renderCustomModelsList(
   listEl: HTMLElement,
   customModels: CustomModelEntry[],
@@ -169,6 +205,7 @@ export function createChromeOptionsDeps(): OptionsDeps {
     openAppTab: () => {
       chrome.tabs.create({ url: chrome.runtime.getURL('app/app.html') });
     },
+    detectGeminiTier: (apiKey) => detectGeminiTier(apiKey),
   };
 }
 
@@ -274,15 +311,51 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
     const openrouterVal = openrouterInput?.value ?? '';
     const ncbiVal = ncbiInput?.value ?? '';
     const selectedModel = selectEl?.value ?? DEFAULT_MODEL_ID;
-    void Promise.all([
-      deps.writeKey(STORAGE_KEY_GEMINI, geminiVal),
-      deps.writeKey(STORAGE_KEY_OPENROUTER, openrouterVal),
-      deps.writeKey(STORAGE_KEY_NCBI, ncbiVal),
-      deps.writeKey(STORAGE_KEY_LLM_MODEL, selectedModel),
-    ]).then(async () => {
-      const pendingNow = await deps.readKey(STORAGE_KEY_PENDING_APP_TAB);
+
+    if (status) status.textContent = '保存中...';
+
+    void (async () => {
+      await Promise.all([
+        deps.writeKey(STORAGE_KEY_GEMINI, geminiVal),
+        deps.writeKey(STORAGE_KEY_OPENROUTER, openrouterVal),
+        deps.writeKey(STORAGE_KEY_NCBI, ncbiVal),
+        deps.writeKey(STORAGE_KEY_LLM_MODEL, selectedModel),
+      ]);
+
+      // Gemini キーが設定されており Gemini モデルが選択されている場合にプラン自動判定
+      let modelSwitchedToFree = false;
       const provider = resolveProviderFromModelId(selectedModel, BUILTIN_MODELS_DISPLAY);
-      const keyForProvider = provider === 'openrouter' ? openrouterVal : geminiVal;
+      if (deps.detectGeminiTier && geminiVal.trim() !== '' && provider === 'gemini') {
+        if (status) status.textContent = 'APIプランを確認中...';
+        updateTierBadge(doc, 'checking');
+
+        let tier: 'paid' | 'free' | 'unknown';
+        try {
+          tier = await deps.detectGeminiTier(geminiVal);
+        } catch {
+          tier = 'unknown';
+        }
+
+        if (tier === 'free') {
+          updateTierBadge(doc, 'free');
+          if (selectEl && selectEl.value !== FREE_TIER_MODEL_ID) {
+            selectEl.value = FREE_TIER_MODEL_ID;
+            await deps.writeKey(STORAGE_KEY_LLM_MODEL, FREE_TIER_MODEL_ID);
+            refreshProviderCards(doc, FREE_TIER_MODEL_ID);
+            modelSwitchedToFree = true;
+          }
+        } else if (tier === 'paid') {
+          updateTierBadge(doc, 'paid');
+        } else {
+          updateTierBadge(doc, 'unknown');
+        }
+      }
+
+      const pendingNow = await deps.readKey(STORAGE_KEY_PENDING_APP_TAB);
+      const currentModel = selectEl?.value ?? DEFAULT_MODEL_ID;
+      const currentProvider = resolveProviderFromModelId(currentModel, BUILTIN_MODELS_DISPLAY);
+      const keyForProvider = currentProvider === 'openrouter' ? openrouterVal : geminiVal;
+
       if (pendingNow === '1' && keyForProvider.trim() !== '') {
         await deps.removeKey(STORAGE_KEY_PENDING_APP_TAB);
         if (status) {
@@ -291,9 +364,12 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
         deps.openAppTab();
         return;
       }
+
       if (status) {
-        status.textContent = '保存しました。';
+        status.textContent = modelSwitchedToFree
+          ? '保存しました。無料プランを検出。Gemini 2.0 Flash に切り替えました。'
+          : '保存しました。';
       }
-    });
+    })();
   });
 }

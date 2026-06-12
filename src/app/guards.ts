@@ -67,6 +67,7 @@ export function evaluateGuards(state: AppState): Record<RouteName, RouteGuard> {
     export: needsFormula(),
     done: needsFormula(),
     history: needsProject(),
+    settings: allow(),
   };
 }
 

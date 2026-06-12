@@ -4,6 +4,8 @@ import type { EfetchArticle } from '@/lib/ncbi';
 import { ROUTE_LABELS } from '../router';
 import type { RenderView } from './types';
 
+const MESH_BROWSER_BASE = 'https://www.ncbi.nlm.nih.gov/mesh/?term=';
+
 /**
  * シード論文入力画面（#/seeds）。
  *
@@ -25,6 +27,8 @@ export interface SeedsViewCallbacks {
   onRetry?: (pmid: string) => Promise<IngestSummary>;
   /** ris_no_pmid 行への手動 PMID 補完（§4.3）。成功時は新規 pmid_direct 行を追記する */
   onFillPmid?: (rowIndex: number, pmid: string) => Promise<IngestSummary>;
+  /** PMID を指定して NCBI から書誌詳細（タイトル・MeSH 等）を取得する */
+  onFetchArticle?: (pmid: string) => Promise<EfetchArticle | null>;
 }
 
 export function createSeedsView(callbacks: SeedsViewCallbacks = {}): RenderView {
@@ -119,6 +123,7 @@ export function createSeedsView(callbacks: SeedsViewCallbacks = {}): RenderView 
               errorBox.textContent = formatError(err);
             }
           },
+          onFetchArticle: callbacks.onFetchArticle,
         });
       } catch (err) {
         errorBox.textContent = formatError(err);
@@ -153,6 +158,7 @@ interface SeedListActions {
   onInvalidate: (rowIndex: number, seed: SeedPaper) => void | Promise<void>;
   onRetry: (pmid: string) => void | Promise<void>;
   onFillPmid: (rowIndex: number, pmid: string) => void | Promise<void>;
+  onFetchArticle?: (pmid: string) => Promise<EfetchArticle | null>;
 }
 
 /**
@@ -231,13 +237,65 @@ function buildSeedRow(
   li.className = `seeds__list-item seeds__list-item--${seed.isValid ? 'valid' : 'invalid'}`;
   li.dataset['rowIndex'] = String(rowIndex);
 
+  // --- 上段: ステータスバッジ + タイトル + コントロール ---
+  const header = doc.createElement('div');
+  header.className = 'seeds__list-header';
+  li.appendChild(header);
+
   const label = doc.createElement('span');
   label.className = 'seeds__list-label';
   const idText = seed.pmid ? `PMID ${seed.pmid}` : `(PMID 無し) ${seed.title ?? ''}`;
   label.textContent = seed.isValid
     ? `✅ ${idText}`
     : `⚠️ ${idText} — ${seed.exclusionReason ?? '無効'}`;
-  li.appendChild(label);
+  header.appendChild(label);
+
+  if (seed.title) {
+    const titleEl = doc.createElement('span');
+    titleEl.className = 'seeds__list-item-title';
+    titleEl.textContent = seed.title;
+    header.appendChild(titleEl);
+  }
+
+  // --- 展開パネル（クリックで詳細を表示） ---
+  const detailPanel = doc.createElement('div');
+  detailPanel.className = 'seeds__list-detail';
+  detailPanel.hidden = true;
+  let detailLoaded = false;
+
+  if (seed.pmid && actions.onFetchArticle) {
+    const expandBtn = doc.createElement('button');
+    expandBtn.type = 'button';
+    expandBtn.className = 'seeds__list-expand';
+    expandBtn.textContent = '詳細 ▼';
+    header.appendChild(expandBtn);
+
+    const fetchArticle = actions.onFetchArticle;
+    const pmid = seed.pmid;
+    expandBtn.addEventListener('click', () => {
+      if (detailPanel.hidden) {
+        detailPanel.hidden = false;
+        expandBtn.textContent = '詳細 ▲';
+        if (!detailLoaded) {
+          detailLoaded = true;
+          detailPanel.textContent = '読み込み中…';
+          fetchArticle(pmid)
+            .then((article) => {
+              detailPanel.innerHTML = '';
+              detailPanel.appendChild(
+                buildArticleCardContent(doc, pmid, seed.title, seed.year, article)
+              );
+            })
+            .catch((err: unknown) => {
+              detailPanel.textContent = `取得失敗: ${formatError(err)}`;
+            });
+        }
+      } else {
+        detailPanel.hidden = true;
+        expandBtn.textContent = '詳細 ▼';
+      }
+    });
+  }
 
   const controls = doc.createElement('span');
   controls.className = 'seeds__list-controls';
@@ -333,7 +391,8 @@ function buildSeedRow(
     controls.appendChild(cancelBtn);
   }
 
-  li.appendChild(controls);
+  header.appendChild(controls);
+  li.appendChild(detailPanel);
   return li;
 }
 
@@ -390,23 +449,23 @@ function renderDetails(doc: Document, container: HTMLElement, summary: IngestSum
   container.appendChild(list);
 }
 
-function buildArticleCard(
+function buildArticleCardContent(
   doc: Document,
   pmid: string,
   fallbackTitle: string | null,
   fallbackYear: number | null,
   article: EfetchArticle | null
 ): HTMLElement {
-  const li = doc.createElement('li');
-  li.className = 'seeds__article';
+  const wrap = doc.createElement('div');
+  wrap.className = 'seeds__article-content';
 
-  const header = doc.createElement('div');
-  header.className = 'seeds__article-header';
+  const articleHeader = doc.createElement('div');
+  articleHeader.className = 'seeds__article-header';
 
   const title = doc.createElement('h4');
   title.className = 'seeds__article-title';
   title.textContent = article?.title ?? fallbackTitle ?? `(タイトル不明) PMID ${pmid}`;
-  header.appendChild(title);
+  articleHeader.appendChild(title);
 
   const link = doc.createElement('a');
   link.className = 'seeds__article-link';
@@ -414,20 +473,20 @@ function buildArticleCard(
   link.target = '_blank';
   link.rel = 'noopener noreferrer';
   link.textContent = `PubMed PMID ${pmid} ↗`;
-  header.appendChild(link);
+  articleHeader.appendChild(link);
 
-  li.appendChild(header);
+  wrap.appendChild(articleHeader);
 
   const meta = buildMetaLine(doc, fallbackYear, article);
   if (meta) {
-    li.appendChild(meta);
+    wrap.appendChild(meta);
   }
 
   if (article?.authors && article.authors.length > 0) {
     const authors = doc.createElement('p');
     authors.className = 'seeds__article-authors';
     authors.textContent = formatAuthors(article.authors);
-    li.appendChild(authors);
+    wrap.appendChild(authors);
   }
 
   if (article?.doi) {
@@ -440,42 +499,61 @@ function buildArticleCard(
     a.textContent = `doi:${article.doi}`;
     doi.appendChild(doc.createTextNode('DOI: '));
     doi.appendChild(a);
-    li.appendChild(doi);
+    wrap.appendChild(doi);
   }
 
   if (article?.abstract) {
-    const wrap = doc.createElement('div');
-    wrap.className = 'seeds__article-abstract';
+    const abstractWrap = doc.createElement('div');
+    abstractWrap.className = 'seeds__article-abstract';
     const label = doc.createElement('div');
     label.className = 'seeds__article-section-label';
     label.textContent = 'Abstract';
-    wrap.appendChild(label);
+    abstractWrap.appendChild(label);
     const body = doc.createElement('p');
     body.className = 'seeds__article-abstract-body';
     body.textContent = article.abstract;
-    wrap.appendChild(body);
-    li.appendChild(wrap);
+    abstractWrap.appendChild(body);
+    wrap.appendChild(abstractWrap);
   }
 
   if (article?.meshHeadings && article.meshHeadings.length > 0) {
-    const wrap = doc.createElement('div');
-    wrap.className = 'seeds__article-mesh';
+    const meshWrap = doc.createElement('div');
+    meshWrap.className = 'seeds__article-mesh';
     const label = doc.createElement('div');
     label.className = 'seeds__article-section-label';
     label.textContent = 'MeSH';
-    wrap.appendChild(label);
+    meshWrap.appendChild(label);
     const ul = doc.createElement('ul');
     ul.className = 'seeds__article-mesh-list';
     for (const mh of article.meshHeadings) {
       const item = doc.createElement('li');
       item.className = 'seeds__article-mesh-item';
-      item.textContent = mh;
+      const a = doc.createElement('a');
+      a.href = `${MESH_BROWSER_BASE}${encodeURIComponent(mh)}`;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.className = 'seeds__article-mesh-link';
+      a.textContent = mh;
+      item.appendChild(a);
       ul.appendChild(item);
     }
-    wrap.appendChild(ul);
-    li.appendChild(wrap);
+    meshWrap.appendChild(ul);
+    wrap.appendChild(meshWrap);
   }
 
+  return wrap;
+}
+
+function buildArticleCard(
+  doc: Document,
+  pmid: string,
+  fallbackTitle: string | null,
+  fallbackYear: number | null,
+  article: EfetchArticle | null
+): HTMLElement {
+  const li = doc.createElement('li');
+  li.className = 'seeds__article';
+  li.appendChild(buildArticleCardContent(doc, pmid, fallbackTitle, fallbackYear, article));
   return li;
 }
 

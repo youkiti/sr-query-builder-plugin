@@ -424,8 +424,11 @@ describe('createChromePopupDeps', () => {
     deps.openAppTab();
     expect(getURL).toHaveBeenCalledWith('app/app.html');
     expect(tabsCreate).toHaveBeenCalled();
+    tabsCreate.mockClear();
     deps.openOptions();
-    expect(openOptionsPage).toHaveBeenCalled();
+    expect(tabsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ url: expect.stringContaining('#/settings') })
+    );
     expect(await deps.isAuthenticated()).toBe(true);
     expect(getAuthToken).toHaveBeenLastCalledWith({ interactive: false }, expect.any(Function));
     expect(await deps.signIn()).toBe(true);

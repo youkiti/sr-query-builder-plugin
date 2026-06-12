@@ -1,4 +1,5 @@
 const path = require('path');
+const webpack = require('webpack');
 const CopyPlugin = require('copy-webpack-plugin');
 const dotenv = require('dotenv');
 
@@ -51,6 +52,9 @@ module.exports = (env, argv) => {
       },
     },
     plugins: [
+      new webpack.DefinePlugin({
+        __BUILD_DATE__: JSON.stringify(new Date().toISOString().slice(0, 10)),
+      }),
       new CopyPlugin({
         patterns: [
           {

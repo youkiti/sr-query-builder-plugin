@@ -60,6 +60,7 @@ function labelFor(route: RouteName): string {
     export: 'エクスポート',
     done: '完了',
     history: 'バージョン履歴',
+    settings: '設定',
   };
   return map[route];
 }

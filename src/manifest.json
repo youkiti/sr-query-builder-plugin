@@ -24,7 +24,6 @@
     "type": "module"
   },
   "action": {
-    "default_popup": "popup/popup.html",
     "default_title": "__MSG_extName__"
   },
   "options_ui": {

@@ -28,8 +28,15 @@ describe('modelRegistry の定数', () => {
     expect(DEFAULT_MODEL).toBe('gemini-3.5-flash');
   });
 
-  test('BUILTIN_MODELS は 3 件', () => {
-    expect(BUILTIN_MODELS).toHaveLength(3);
+  test('BUILTIN_MODELS には Gemini モデルと OpenRouter モデルが含まれる', () => {
+    expect(BUILTIN_MODELS.some((m) => m.id === 'gemini-2.0-flash')).toBe(true);
+    expect(BUILTIN_MODELS.some((m) => m.id === 'gemini-3.5-flash')).toBe(true);
+    expect(BUILTIN_MODELS.some((m) => m.provider === 'openrouter')).toBe(true);
+  });
+
+  test('gemini-2.0-flash は freeTier フラグが true', () => {
+    const model = BUILTIN_MODELS.find((m) => m.id === 'gemini-2.0-flash');
+    expect(model?.freeTier).toBe(true);
   });
 
   test('MAX_CUSTOM_MODELS は 20', () => {

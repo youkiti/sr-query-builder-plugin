@@ -71,7 +71,7 @@ export function createChromePopupDeps(): PopupDeps {
       chrome.tabs.create({ url: chrome.runtime.getURL('app/app.html') });
     },
     openOptions: () => {
-      chrome.runtime.openOptionsPage();
+      chrome.tabs.create({ url: chrome.runtime.getURL('app/app.html') + '#/settings' });
     },
     runtime: createChromeRuntimeDeps(),
     isAuthenticated: async () => {

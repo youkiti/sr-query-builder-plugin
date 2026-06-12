@@ -17,15 +17,38 @@
         <h2>LLM プロバイダ</h2>
 
         <div class="options__provider-card" id="gemini-card">
-          <h3 class="options__provider-title">Gemini</h3>
+          <h3 class="options__provider-title">
+            Google AI Studio
+            <a
+              href="https://aistudio.google.com/apikey"
+              target="_blank"
+              rel="noreferrer"
+              class="options__provider-link"
+              >APIキーを取得 ↗</a
+            >
+            <span id="gemini-tier-badge" class="options__tier-badge" aria-live="polite"></span>
+          </h3>
           <label class="options__field">
             <span>API キー</span>
             <input type="password" id="gemini-api-key" autocomplete="off" />
           </label>
+          <p class="options__muted">
+            保存時にプランを自動確認します。無料プランを検出した場合はモデルを
+            <strong>Gemini 2.0 Flash</strong> に自動切り替えします。
+          </p>
         </div>
 
         <div class="options__provider-card" id="openrouter-card">
-          <h3 class="options__provider-title">OpenRouter</h3>
+          <h3 class="options__provider-title">
+            OpenRouter
+            <a
+              href="https://openrouter.ai/settings/keys"
+              target="_blank"
+              rel="noreferrer"
+              class="options__provider-link"
+              >APIキーを取得 ↗</a
+            >
+          </h3>
           <p class="options__muted">Qwen / DeepSeek などの OSS モデルや多プロバイダを利用できます。</p>
           <label class="options__field">
             <span>API キー</span>

@@ -1,3 +1,5 @@
+declare const __BUILD_DATE__: string;
+
 /**
  * メインビュー（app.html）の起動ロジック。
  * router / store / views を組み合わせ、ハッシュ変更とストア更新の両方で再レンダする。
@@ -45,6 +47,7 @@ import {
   type ValidationSummary,
 } from './services';
 import type { SeedPaper } from '@/domain/seedPaper';
+import { efetchArticles, type EfetchArticle } from '@/lib/ncbi';
 import { listFormulaVersions } from '@/features/formula';
 import type { FormulaVersion } from '@/domain/formulaVersion';
 import { getCurrentProject } from '@/features/project';
@@ -103,6 +106,10 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
   const content = doc.getElementById('app-content');
   const sidebar = doc.querySelector('#app-sidebar nav');
   const homeLinkBtn = doc.getElementById('app-home-link') as HTMLButtonElement | null;
+  const buildDateEl = doc.getElementById('app-build-date');
+  if (buildDateEl) {
+    buildDateEl.textContent = `build: ${__BUILD_DATE__}`;
+  }
   /**
    * ガード判定付きナビゲーション。サイドバー / ホーム画面 / サービス層からの遷移すべてが
    * これを経由するので、前提条件を満たさないルートへは setHash を発行せず、
@@ -124,6 +131,10 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
   // ヘッダーのアプリタイトル: クリックで #/home へ戻す（docs/ui-flow.md §4）
   if (homeLinkBtn) {
     homeLinkBtn.addEventListener('click', () => navigate('home'));
+  }
+  const settingsLinkBtn = doc.getElementById('app-settings-link') as HTMLButtonElement | null;
+  if (settingsLinkBtn) {
+    settingsLinkBtn.addEventListener('click', () => navigate('settings'));
   }
 
   const render = (): void => {
@@ -248,6 +259,8 @@ function buildDefaultViewOptions(
         runRetrySeed(store, runtime, pmid),
       onFillPmid: async (_rowIndex: number, pmid: string): Promise<IngestSummary> =>
         runFillPmidForRisRow(store, runtime, pmid),
+      onFetchArticle: async (pmid: string): Promise<EfetchArticle | null> =>
+        runFetchArticle(store, runtime, pmid),
     },
     validate: {
       onRun: async (): Promise<ValidationSummary> => runValidate(store, runtime),
@@ -281,6 +294,11 @@ function buildDefaultViewOptions(
       onDecide: async (input: RecordDecisionInput): Promise<RecordDecisionResult> =>
         runRecordDecision(store, runtime, input),
       onRoundComplete: async (): Promise<ValidationSummary> => runValidate(store, runtime),
+    },
+    settings: {
+      readKey: (key) => runtime.store.read<string>(key),
+      writeKey: (key, value) => runtime.store.write({ [key]: value }),
+      removeKey: (key) => chrome.storage.local.remove(key),
     },
   };
 }
@@ -418,6 +436,16 @@ async function runFillPmidForRisRow(
 ): Promise<IngestSummary> {
   const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
   return fillPmidForRisRow(pmid, { google: runtime.google, eutils, store });
+}
+
+async function runFetchArticle(
+  store: AppStore,
+  runtime: ChromeRuntimeDeps,
+  pmid: string
+): Promise<EfetchArticle | null> {
+  const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
+  const articles = await efetchArticles([pmid], eutils);
+  return articles[0] ?? null;
 }
 
 async function runValidate(

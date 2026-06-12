@@ -1,6 +1,8 @@
 import { createLocationOptions, startApp } from './bootstrap';
 import { INITIAL_STATE, createStore, type AppState, type AppStore } from './store';
 
+declare const __BUILD_DATE__: string;
+
 declare global {
   interface Window {
     /**

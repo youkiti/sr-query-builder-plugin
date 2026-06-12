@@ -6,3 +6,7 @@
 chrome.runtime.onInstalled.addListener((details) => {
   console.warn(`[sr-query-builder] installed: ${details.reason}`);
 });
+
+chrome.action.onClicked.addListener(() => {
+  void chrome.tabs.create({ url: chrome.runtime.getURL('popup/popup.html') });
+});

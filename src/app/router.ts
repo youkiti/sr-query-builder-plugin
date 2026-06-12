@@ -15,6 +15,7 @@ export const ROUTES = [
   'export',
   'done',
   'history',
+  'settings',
 ] as const;
 
 export type RouteName = (typeof ROUTES)[number];
@@ -37,6 +38,7 @@ export const ROUTE_LABELS: Record<RouteName, string> = {
   export: 'エクスポート',
   done: '完了',
   history: 'バージョン履歴',
+  settings: '設定',
 };
 
 export interface RouterDeps {

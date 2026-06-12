@@ -87,6 +87,16 @@
 .options__provider-title {
   margin: 0;
   font-size: inherit;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.options__provider-link {
+  font-size: var(--font-size-sm);
+  font-weight: normal;
+  color: var(--color-primary);
+  text-decoration: none;
 }
 
 .options__custom-model-form {
@@ -141,4 +151,31 @@
   border: none;
   cursor: pointer;
   color: var(--color-text-muted);
+}
+
+.options__tier-badge {
+  font-size: var(--font-size-sm);
+  font-weight: normal;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.options__tier-badge:empty {
+  display: none;
+}
+
+.options__tier-badge--checking {
+  color: var(--color-text-muted);
+}
+
+.options__tier-badge--paid {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.options__tier-badge--free {
+  color: #92400e;
+  background: #fef3c7;
 }
