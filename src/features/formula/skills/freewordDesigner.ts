@@ -1,5 +1,6 @@
 import type { LLMProvider } from '@/lib/llm';
 import { parseSkillJson } from './parseSkillJson';
+import { arraySchema, objectSchema, stringSchema } from './schema';
 
 /**
  * `freeword-designer` skill — ブロック概念に対する tiab フリーワードを展開する。
@@ -71,6 +72,15 @@ interface RawFreeword {
   freewords?: Array<{ query?: string; rationale?: string }>;
 }
 
+const FREEWORD_DESIGNER_SCHEMA = objectSchema({
+  freewords: arraySchema(
+    objectSchema({
+      query: stringSchema('PubMed クエリ片（例: "heart failure"[tiab]）'),
+      rationale: stringSchema('採用根拠（日本語）'),
+    })
+  ),
+});
+
 export async function designFreewords(
   input: FreewordDesignerInput,
   provider: LLMProvider
@@ -92,7 +102,7 @@ export async function designFreewords(
       { role: 'system', content: FREEWORD_DESIGNER_SYSTEM_PROMPT },
       { role: 'user', content: userPrompt },
     ],
-    { responseFormat: 'json', temperature: 0.4 }
+    { responseFormat: 'json', responseSchema: FREEWORD_DESIGNER_SCHEMA, temperature: 0.4 }
   );
   const raw = parseSkillJson<RawFreeword>(response.text, SKILL_NAME);
   return (raw.freewords ?? []).map((f) => ({

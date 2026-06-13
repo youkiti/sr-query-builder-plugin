@@ -1,4 +1,4 @@
-import { GeminiProvider } from './GeminiProvider';
+import { GeminiProvider, toGeminiSchema } from './GeminiProvider';
 import { LlmProviderError } from './LLMProvider';
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -95,6 +95,32 @@ describe('GeminiProvider.chat', () => {
       maxOutputTokens: 256,
       responseMimeType: 'application/json',
     });
+  });
+
+  test('responseSchema を渡すと responseMimeType + 変換済み responseSchema を載せる', async () => {
+    const fetch = jest.fn().mockResolvedValue(
+      jsonResponse({ candidates: [{ content: { parts: [{ text: '{}' }] } }] })
+    );
+    const provider = new GeminiProvider({ apiKey: 'k', fetch });
+    await provider.chat([{ role: 'user', content: 'q' }], {
+      responseFormat: 'json',
+      responseSchema: {
+        type: 'object',
+        properties: { name: { type: 'string' } },
+        required: ['name'],
+        additionalProperties: false,
+      },
+      temperature: 0.3,
+    });
+    const body = JSON.parse((fetch.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.generationConfig.responseMimeType).toBe('application/json');
+    // type は大文字 enum へ、additionalProperties は落ちる
+    expect(body.generationConfig.responseSchema).toEqual({
+      type: 'OBJECT',
+      properties: { name: { type: 'STRING' } },
+      required: ['name'],
+    });
+    expect(body.generationConfig.temperature).toBe(0.3);
   });
 
   test('responseFormat=text なら responseMimeType を付けない', async () => {
@@ -203,5 +229,36 @@ describe('GeminiProvider.chat', () => {
         (globalThis as { fetch?: typeof fetch }).fetch = original;
       }
     }
+  });
+});
+
+describe('toGeminiSchema', () => {
+  test('type を大文字 enum に写し、未対応キーを落とす', () => {
+    expect(
+      toGeminiSchema({
+        type: 'object',
+        properties: {
+          summary: { type: 'string', description: 'd' },
+          items: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['summary', 'items'],
+        additionalProperties: false,
+        $schema: 'http://json-schema.org/draft-07/schema#',
+      })
+    ).toEqual({
+      type: 'OBJECT',
+      properties: {
+        summary: { type: 'STRING', description: 'd' },
+        items: { type: 'ARRAY', items: { type: 'STRING' } },
+      },
+      required: ['summary', 'items'],
+    });
+  });
+
+  test('enum はそのまま保持する', () => {
+    expect(toGeminiSchema({ type: 'string', enum: ['a', 'b'] })).toEqual({
+      type: 'STRING',
+      enum: ['a', 'b'],
+    });
   });
 });

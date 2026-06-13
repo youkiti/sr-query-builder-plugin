@@ -1,5 +1,6 @@
 import type { LLMProvider } from '@/lib/llm';
 import { parseSkillJson, SkillResponseError } from './parseSkillJson';
+import { arraySchema, enumSchema, objectSchema, stringSchema } from './schema';
 
 /**
  * `extract-protocol` skill — プロトコル本文から RQ・組入除外・1〜5 個の
@@ -68,6 +69,21 @@ interface RawExtracted {
   combination_expression?: string;
 }
 
+const EXTRACT_PROTOCOL_SCHEMA = objectSchema({
+  framework_type: enumSchema(['pico', 'peco', 'pcc', 'spider', 'custom']),
+  research_question: stringSchema('RQ を 1 文'),
+  inclusion_criteria: stringSchema('改行区切りの組入基準'),
+  exclusion_criteria: stringSchema('改行区切りの除外基準'),
+  study_design: stringSchema('例: RCT / observational / any'),
+  blocks: arraySchema(
+    objectSchema({
+      block_label: stringSchema('英語ラベル'),
+      description: stringSchema('日本語の概念説明'),
+    })
+  ),
+  combination_expression: stringSchema('例: #1 AND #2'),
+});
+
 /**
  * extract-protocol skill を実行する。
  *
@@ -87,7 +103,7 @@ export async function extractProtocol(
       { role: 'system', content: EXTRACT_PROTOCOL_SYSTEM_PROMPT },
       { role: 'user', content: userPrompt },
     ],
-    { responseFormat: 'json', temperature: 0.2 }
+    { responseFormat: 'json', responseSchema: EXTRACT_PROTOCOL_SCHEMA, temperature: 0.2 }
   );
   const raw = parseSkillJson<RawExtracted>(response.text, SKILL_NAME);
   return validateAndNormalize(raw, response.text);

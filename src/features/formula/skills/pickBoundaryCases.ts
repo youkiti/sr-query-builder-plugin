@@ -1,5 +1,6 @@
 import type { LLMProvider } from '@/lib/llm';
 import { parseSkillJson } from './parseSkillJson';
+import { arraySchema, objectSchema, stringSchema } from './schema';
 
 /**
  * `pick-boundary-cases` skill — 検索式のヒット集合から
@@ -78,6 +79,15 @@ interface RawResponse {
   picks?: RawPick[];
 }
 
+const PICK_BOUNDARY_SCHEMA = objectSchema({
+  picks: arraySchema(
+    objectSchema({
+      pmid: stringSchema('PMID'),
+      reason: stringSchema('境界事例として迷う理由（日本語）'),
+    })
+  ),
+});
+
 export async function pickBoundaryCases(
   input: PickBoundaryCasesInput,
   provider: LLMProvider
@@ -101,7 +111,7 @@ export async function pickBoundaryCases(
       { role: 'system', content: PICK_BOUNDARY_SYSTEM_PROMPT },
       { role: 'user', content: userPrompt },
     ],
-    { responseFormat: 'json', temperature: 0.3 }
+    { responseFormat: 'json', responseSchema: PICK_BOUNDARY_SCHEMA, temperature: 0.3 }
   );
   const raw = parseSkillJson<RawResponse>(response.text, SKILL_NAME);
   const allowedPmids = new Set(input.candidates.map((c) => c.pmid));

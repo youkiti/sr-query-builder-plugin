@@ -1,5 +1,6 @@
 import type { LLMProvider } from '@/lib/llm';
 import { parseSkillJson } from './parseSkillJson';
+import { objectSchema, stringSchema } from './schema';
 
 /**
  * `improve-block` skill — 既存の検索式 1 行 (#N) の PubMed 表現を LLM に再設計させる。
@@ -70,6 +71,11 @@ interface RawProposal {
   rationale?: string;
 }
 
+const IMPROVE_BLOCK_SCHEMA = objectSchema({
+  proposed_expression: stringSchema('新しい PubMed 検索式 1 行'),
+  rationale: stringSchema('改善点の日本語メモ'),
+});
+
 export async function improveBlockExpression(
   input: ImproveBlockInput,
   provider: LLMProvider
@@ -84,7 +90,7 @@ export async function improveBlockExpression(
       { role: 'system', content: IMPROVE_BLOCK_SYSTEM_PROMPT },
       { role: 'user', content: userPrompt },
     ],
-    { responseFormat: 'json', temperature: 0.3 }
+    { responseFormat: 'json', responseSchema: IMPROVE_BLOCK_SCHEMA, temperature: 0.3 }
   );
   const raw = parseSkillJson<RawProposal>(response.text, SKILL_NAME);
   return {

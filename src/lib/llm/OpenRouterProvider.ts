@@ -12,6 +12,9 @@ import {
  * - 認証は `Authorization: Bearer {apiKey}` ヘッダ。
  * - 本拡張の `model` ロールは OpenAI 互換の `assistant` ロールへ変換する。
  *   `system` / `user` はそのまま。
+ * - `responseSchema` を渡すと `response_format: { type: 'json_schema', ... }` で
+ *   **構造化出力** を要求する。スキーマ無しで `responseFormat: 'json'` のときは
+ *   `response_format: { type: 'json_object' }`（JSON モード）にフォールバックする。
  * - fetch を注入できるので network 無しでテスト可能。
  */
 
@@ -97,6 +100,20 @@ export class OpenRouterProvider implements LLMProvider {
     }
     if (options.maxOutputTokens !== undefined) {
       body['max_tokens'] = options.maxOutputTokens;
+    }
+    if (options.responseSchema) {
+      // OpenAI 互換の構造化出力。strict:true は additionalProperties:false と
+      // 全プロパティ required を要求するため、schema 側でそれを満たしている前提。
+      body['response_format'] = {
+        type: 'json_schema',
+        json_schema: {
+          name: 'response',
+          strict: true,
+          schema: options.responseSchema,
+        },
+      };
+    } else if (options.responseFormat === 'json') {
+      body['response_format'] = { type: 'json_object' };
     }
     return body;
   }

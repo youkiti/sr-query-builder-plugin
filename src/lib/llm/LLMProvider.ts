@@ -14,11 +14,24 @@ export interface ChatMessage {
 
 export type ResponseFormat = 'text' | 'json';
 
+/**
+ * 構造化出力（structured output）に渡す JSON Schema。
+ * 標準 JSON Schema 方言（`type` は小文字 / `additionalProperties` 等）で記述する。
+ * 各プロバイダ実装がそのプロバイダの方言へ変換して constrained decoding に流す。
+ */
+export type JsonSchema = Record<string, unknown>;
+
 export interface ChatOptions {
   temperature?: number;
   maxOutputTokens?: number;
   /** `'json'` を指定すると JSON モードを要求する。skill 側で構造化出力にしたいときに使う */
   responseFormat?: ResponseFormat;
+  /**
+   * JSON Schema を渡すと **構造化出力（スキーマ制約付き）** を要求する。
+   * `responseFormat: 'json'` 単体は MIME ヒントに過ぎず壊れた JSON が出うるため、
+   * 確実に valid な JSON が欲しい skill はこちらを使う。
+   */
+  responseSchema?: JsonSchema;
 }
 
 export interface ChatResponse {

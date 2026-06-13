@@ -1,5 +1,6 @@
 import type { LLMProvider } from '@/lib/llm';
 import { parseSkillJson } from './parseSkillJson';
+import { arraySchema, objectSchema, stringSchema } from './schema';
 
 /**
  * `block-designer` skill — 単一ブロックの概念を MeSH 要件・フリーワード要件に
@@ -68,6 +69,13 @@ interface RawBlock {
   rationale?: string;
 }
 
+const BLOCK_DESIGNER_SCHEMA = objectSchema({
+  concept_summary: stringSchema('英語 1 文の概念要約'),
+  mesh_requirements: arraySchema(stringSchema()),
+  freeword_requirements: arraySchema(stringSchema()),
+  rationale: stringSchema('検索式 1 行に落とす戦略メモ（日本語）'),
+});
+
 export async function designBlock(
   input: BlockDesignerInput,
   provider: LLMProvider
@@ -88,7 +96,7 @@ export async function designBlock(
       { role: 'system', content: BLOCK_DESIGNER_SYSTEM_PROMPT },
       { role: 'user', content: userPrompt },
     ],
-    { responseFormat: 'json', temperature: 0.3 }
+    { responseFormat: 'json', responseSchema: BLOCK_DESIGNER_SCHEMA, temperature: 0.3 }
   );
   const raw = parseSkillJson<RawBlock>(response.text, SKILL_NAME);
   return {

@@ -1,5 +1,6 @@
 import type { LLMProvider } from '@/lib/llm';
 import { parseSkillJson } from './parseSkillJson';
+import { arraySchema, objectSchema, stringSchema } from './schema';
 
 /**
  * `interpret-result` skill — シード捕捉率検証で「漏れた（未捕捉）PMID」について、
@@ -101,6 +102,19 @@ interface RawResponse {
   analyses?: RawAnalysis[];
 }
 
+const INTERPRET_RESULT_SCHEMA = objectSchema({
+  analyses: arraySchema(
+    objectSchema({
+      pmid: stringSchema('PMID'),
+      cause: stringSchema('原因の日本語説明 1-3 文'),
+      suggested_terms: arraySchema(stringSchema('追加候補のクエリ片')),
+      related_block: stringSchema(
+        '原因と思われるブロック ID（例: 1, 2, RCTfilter）。不明なら "null"'
+      ),
+    })
+  ),
+});
+
 export async function interpretResult(
   input: InterpretResultInput,
   provider: LLMProvider
@@ -121,7 +135,7 @@ export async function interpretResult(
       { role: 'system', content: INTERPRET_RESULT_SYSTEM_PROMPT },
       { role: 'user', content: userPrompt },
     ],
-    { responseFormat: 'json', temperature: 0.3 }
+    { responseFormat: 'json', responseSchema: INTERPRET_RESULT_SCHEMA, temperature: 0.3 }
   );
   const raw = parseSkillJson<RawResponse>(response.text, SKILL_NAME);
   const allowedPmids = new Set(input.missedArticles.map((a) => a.pmid));

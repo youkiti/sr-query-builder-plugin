@@ -78,13 +78,42 @@ describe('OpenRouterProvider.chat', () => {
     expect(body.max_tokens).toBe(256);
   });
 
-  test('オプション未指定なら temperature / max_tokens を付けない', async () => {
+  test('オプション未指定なら temperature / max_tokens / response_format を付けない', async () => {
     const fetch = jest.fn().mockResolvedValue(jsonResponse(chatCompletion('ok')));
     const provider = new OpenRouterProvider({ apiKey: 'k', model: 'm/x', fetch });
     await provider.chat([{ role: 'user', content: 'q' }]);
     const body = JSON.parse((fetch.mock.calls[0][1] as RequestInit).body as string);
     expect(body.temperature).toBeUndefined();
     expect(body.max_tokens).toBeUndefined();
+    expect(body.response_format).toBeUndefined();
+  });
+
+  test('responseFormat=json なら response_format を json_object にする', async () => {
+    const fetch = jest.fn().mockResolvedValue(jsonResponse(chatCompletion('{}')));
+    const provider = new OpenRouterProvider({ apiKey: 'k', model: 'm/x', fetch });
+    await provider.chat([{ role: 'user', content: 'q' }], { responseFormat: 'json' });
+    const body = JSON.parse((fetch.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.response_format).toEqual({ type: 'json_object' });
+  });
+
+  test('responseSchema を渡すと strict な json_schema 構造化出力にする', async () => {
+    const fetch = jest.fn().mockResolvedValue(jsonResponse(chatCompletion('{}')));
+    const provider = new OpenRouterProvider({ apiKey: 'k', model: 'm/x', fetch });
+    const schema = {
+      type: 'object',
+      properties: { name: { type: 'string' } },
+      required: ['name'],
+      additionalProperties: false,
+    };
+    await provider.chat([{ role: 'user', content: 'q' }], {
+      responseFormat: 'json',
+      responseSchema: schema,
+    });
+    const body = JSON.parse((fetch.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.response_format).toEqual({
+      type: 'json_schema',
+      json_schema: { name: 'response', strict: true, schema },
+    });
   });
 
   test('HTTP 400 は LlmProviderError（status 400）', async () => {

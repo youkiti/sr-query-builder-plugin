@@ -3,6 +3,7 @@ export {
   type ChatMessage,
   type ChatOptions,
   type ChatResponse,
+  type JsonSchema,
   type LLMProvider,
   type ResponseFormat,
 } from './LLMProvider';

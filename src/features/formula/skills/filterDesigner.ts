@@ -7,6 +7,7 @@
 
 import type { LLMProvider } from '@/lib/llm';
 import { parseSkillJson } from './parseSkillJson';
+import { arraySchema, objectSchema, stringSchema } from './schema';
 
 export interface FilterDesignerInput {
   /** プロトコルから推定された study_design（例: 'RCT', 'observational', 'any'） */
@@ -215,6 +216,16 @@ interface RawExcess {
   candidates?: Array<{ label?: string; expression?: string; rationale?: string }>;
 }
 
+const EXCESS_FILTER_SCHEMA = objectSchema({
+  candidates: arraySchema(
+    objectSchema({
+      label: stringSchema('候補名'),
+      expression: stringSchema('PubMed クエリ片'),
+      rationale: stringSchema('効果と漏れリスクの両方を日本語で'),
+    })
+  ),
+});
+
 /**
  * ヒット過大時に LLM へ追加フィルタ案を尋ねる。
  * 既定経路（designDefaultFilters）と独立しており、戻り値はあくまで候補。
@@ -237,7 +248,7 @@ export async function proposeExcessFilters(
       { role: 'system', content: EXCESS_FILTER_SYSTEM_PROMPT },
       { role: 'user', content: userPrompt },
     ],
-    { responseFormat: 'json', temperature: 0.2 }
+    { responseFormat: 'json', responseSchema: EXCESS_FILTER_SCHEMA, temperature: 0.2 }
   );
   const raw = parseSkillJson<RawExcess>(response.text, SKILL_NAME);
   return (raw.candidates ?? []).map((c) => ({

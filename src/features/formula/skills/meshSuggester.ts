@@ -1,6 +1,7 @@
 import type { LLMProvider } from '@/lib/llm';
 import type { SeedMeshSummary } from '@/features/validation';
 import { parseSkillJson } from './parseSkillJson';
+import { arraySchema, objectSchema, stringSchema } from './schema';
 
 /**
  * `mesh-suggester` skill — ブロック概念に対応する MeSH 記述子を提案する。
@@ -69,6 +70,16 @@ interface RawMesh {
   suggestions?: Array<{ descriptor?: string; tag_syntax?: string; rationale?: string }>;
 }
 
+const MESH_SUGGESTER_SCHEMA = objectSchema({
+  suggestions: arraySchema(
+    objectSchema({
+      descriptor: stringSchema('英語の MeSH 記述子'),
+      tag_syntax: stringSchema('<descriptor>[Mesh] 形式のタグ'),
+      rationale: stringSchema('採用根拠（日本語）'),
+    })
+  ),
+});
+
 export async function suggestMesh(
   input: MeshSuggesterInput,
   provider: LLMProvider
@@ -85,7 +96,7 @@ export async function suggestMesh(
       { role: 'system', content: MESH_SUGGESTER_SYSTEM_PROMPT },
       { role: 'user', content: userPrompt },
     ],
-    { responseFormat: 'json', temperature: 0.3 }
+    { responseFormat: 'json', responseSchema: MESH_SUGGESTER_SCHEMA, temperature: 0.3 }
   );
   const raw = parseSkillJson<RawMesh>(response.text, SKILL_NAME);
   return (raw.suggestions ?? []).map((s) => ({
