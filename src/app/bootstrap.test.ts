@@ -902,8 +902,13 @@ describe('startApp - wiring 層', () => {
       currentFormulaVersionId: 'parent-v',
       currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 old\n```\n',
     }));
-    const textarea = doc.querySelector<HTMLTextAreaElement>('.edit__formula')!;
-    textarea.value = '## PubMed/MEDLINE\n\n```\n#1 edited\n```\n';
+    // 鉛筆インライン編集で #1 を書き換える
+    doc
+      .querySelector<HTMLButtonElement>('.edit__block-row[data-block-id="1"] .edit__block-edit-toggle')!
+      .click();
+    const blockInput = doc.querySelector<HTMLTextAreaElement>('.edit__block-edit-input')!;
+    blockInput.value = 'edited';
+    doc.querySelector<HTMLButtonElement>('.edit__block-edit-save')!.click();
     const saveBtn = doc.querySelector<HTMLButtonElement>('.edit__actions button')!;
     saveBtn.click();
     for (let i = 0; i < 5; i += 1) {
@@ -972,6 +977,12 @@ describe('startApp - wiring 層', () => {
     }));
     const improveBtn = doc.querySelector<HTMLButtonElement>('.edit__block-improve')!;
     improveBtn.click();
+    // 新フロー: 改善ボタンはプロンプト欄を開くだけ。「改善案を取得」で実行する。
+    for (let i = 0; i < 5; i += 1) {
+      await flush();
+    }
+    const submitBtn = doc.querySelector<HTMLButtonElement>('.edit__block-ai-submit')!;
+    submitBtn.click();
     for (let i = 0; i < 5; i += 1) {
       await flush();
     }

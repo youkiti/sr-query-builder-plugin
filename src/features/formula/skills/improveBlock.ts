@@ -23,6 +23,29 @@ export interface ImproveBlockInput {
   blockDescription: string;
   /** RQ（あれば文脈として渡す） */
   researchQuestion: string;
+  /** ユーザーが任意で書いた改善指示。空文字なら「おまかせ」改善 */
+  userInstruction: string;
+  /** 捕捉すべきシード論文（include 判定 + 初期登録 + 対話拡張分）。空配列なら省略 */
+  seedPapers?: SeedPaperContext[];
+  /** 直近の検証で得た捕捉情報。null なら未検証として省略 */
+  validation?: ValidationContext | null;
+}
+
+/** improve-block に渡すシード論文 1 件（プロンプト用の最小情報）。 */
+export interface SeedPaperContext {
+  pmid: string;
+  title: string;
+  /** include / maybe / initial 等のユーザー判定 */
+  decision: string;
+}
+
+/** 直近の検証捕捉情報。 */
+export interface ValidationContext {
+  /** 0〜1 */
+  captureRate: number;
+  capturedPmids: string[];
+  /** この式で取りこぼしているシード PMID。改善の主目的 */
+  missedPmids: string[];
 }
 
 export interface ImproveBlockProposal {
@@ -46,6 +69,11 @@ export const IMPROVE_BLOCK_SYSTEM_PROMPT = `
 - MeSH / tiab のタグは保持、追加、削除の選択肢を検討する。
 - プロトコルに明記されていないフィルタ（English[lang] / Humans[mh] / 年代制限）は
   絶対に付けない（filter-designer の責務）。
+- ユーザーからの追加指示がある場合は、上記ルールに反しない範囲で最優先で従う。
+- シード論文（捕捉すべき既知の重要論文）が与えられた場合は、それらを取りこぼさない
+  ことを重視する。特に「取りこぼし PMID」がある場合は、その論文が引っかかるよう
+  同義語・表記ゆれ・MeSH を補って感度を上げる（ただし無関係な語の追加で特異度を
+  大きく下げない）。
 - rationale は日本語 1-2 文で、何をどう変えたか書く。
 `.trim();
 
@@ -58,6 +86,15 @@ RQ: {{RQ}}
 
 現在の expression:
 {{CURRENT}}
+
+シード論文（捕捉すべき既知の重要論文）:
+{{SEEDS}}
+
+直近の検証結果:
+{{VALIDATION}}
+
+ユーザーからの追加指示:
+{{INSTRUCTION}}
 
 スキーマ:
 {
@@ -83,7 +120,13 @@ export async function improveBlockExpression(
   const userPrompt = IMPROVE_BLOCK_USER_PROMPT_TEMPLATE.replace('{{RQ}}', input.researchQuestion)
     .replace('{{LABEL}}', input.blockLabel)
     .replace('{{DESC}}', input.blockDescription === '' ? '(不明)' : input.blockDescription)
-    .replace('{{CURRENT}}', input.currentExpression);
+    .replace('{{CURRENT}}', input.currentExpression)
+    .replace('{{SEEDS}}', formatSeeds(input.seedPapers))
+    .replace('{{VALIDATION}}', formatValidation(input.validation))
+    .replace(
+      '{{INSTRUCTION}}',
+      input.userInstruction.trim() === '' ? '(特になし／おまかせで改善してよい)' : input.userInstruction.trim()
+    );
 
   const response = await provider.chat(
     [
@@ -97,4 +140,32 @@ export async function improveBlockExpression(
     proposedExpression: (raw.proposed_expression ?? '').trim(),
     rationale: raw.rationale ?? '',
   };
+}
+
+/** シード論文リストを箇条書きへ整形する。空なら「(なし)」。 */
+function formatSeeds(seeds: SeedPaperContext[] | undefined): string {
+  if (!seeds || seeds.length === 0) {
+    return '(なし)';
+  }
+  return seeds
+    .map((s) => `- PMID ${s.pmid} [${s.decision}]: ${s.title}`)
+    .join('\n');
+}
+
+/** 検証捕捉情報を整形する。null なら「(未検証)」。 */
+function formatValidation(validation: ValidationContext | null | undefined): string {
+  if (!validation) {
+    return '(未検証)';
+  }
+  const ratePct = Math.round(validation.captureRate * 1000) / 10;
+  const missed =
+    validation.missedPmids.length === 0
+      ? 'なし'
+      : validation.missedPmids.join(', ');
+  return [
+    `捕捉率: ${ratePct}%（${validation.capturedPmids.length}/${
+      validation.capturedPmids.length + validation.missedPmids.length
+    } 件捕捉）`,
+    `取りこぼし PMID: ${missed}`,
+  ].join('\n');
 }

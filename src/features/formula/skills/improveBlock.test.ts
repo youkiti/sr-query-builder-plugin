@@ -29,6 +29,7 @@ describe('improveBlockExpression', () => {
         blockLabel: 'Population',
         blockDescription: '糖尿病',
         researchQuestion: 'RQ',
+        userInstruction: '',
       },
       p
     );
@@ -46,6 +47,7 @@ describe('improveBlockExpression', () => {
         blockLabel: 'Intervention',
         blockDescription: '経口糖尿病薬',
         researchQuestion: 'Metformin vs sulfonylurea',
+        userInstruction: '',
       },
       p
     );
@@ -65,6 +67,7 @@ describe('improveBlockExpression', () => {
         blockLabel: '',
         blockDescription: '',
         researchQuestion: '',
+        userInstruction: '',
       },
       p
     );
@@ -80,9 +83,59 @@ describe('improveBlockExpression', () => {
         blockLabel: 'L',
         blockDescription: 'D',
         researchQuestion: 'RQ',
+        userInstruction: '',
       },
       p
     );
     expect(result).toEqual({ proposedExpression: '', rationale: '' });
+  });
+
+  test('ユーザー指示・シード論文・検証捕捉情報がプロンプトに載る', async () => {
+    const { provider: p, calls } = provider(JSON.stringify({}));
+    await improveBlockExpression(
+      {
+        currentExpression: 'asthma[tiab]',
+        blockLabel: 'Population',
+        blockDescription: '喘息',
+        researchQuestion: 'RQ',
+        userInstruction: '同義語をもっと増やして',
+        seedPapers: [
+          { pmid: '111', title: 'Seed A', decision: 'include' },
+          { pmid: '222', title: 'Seed B', decision: '(未判定)' },
+        ],
+        validation: {
+          captureRate: 0.5,
+          capturedPmids: ['111'],
+          missedPmids: ['222'],
+        },
+      },
+      p
+    );
+    const userMsg = calls[0]!.find((m) => m.role === 'user')?.content ?? '';
+    expect(userMsg).toContain('同義語をもっと増やして');
+    expect(userMsg).toContain('PMID 111 [include]: Seed A');
+    expect(userMsg).toContain('PMID 222 [(未判定)]: Seed B');
+    expect(userMsg).toContain('捕捉率: 50%');
+    expect(userMsg).toContain('取りこぼし PMID: 222');
+  });
+
+  test('指示が空ならプレースホルダ、シード・検証が無ければ (なし) / (未検証)', async () => {
+    const { provider: p, calls } = provider(JSON.stringify({}));
+    await improveBlockExpression(
+      {
+        currentExpression: 'x',
+        blockLabel: 'L',
+        blockDescription: 'D',
+        researchQuestion: 'RQ',
+        userInstruction: '   ',
+        seedPapers: [],
+        validation: null,
+      },
+      p
+    );
+    const userMsg = calls[0]!.find((m) => m.role === 'user')?.content ?? '';
+    expect(userMsg).toContain('(特になし／おまかせで改善してよい)');
+    expect(userMsg).toContain('(なし)');
+    expect(userMsg).toContain('(未検証)');
   });
 });

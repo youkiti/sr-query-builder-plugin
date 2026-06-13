@@ -24,11 +24,13 @@ import {
   recordDecision,
   retrySeed,
   requestBlockImprovement,
+  getBlockImprovementContext,
   runValidation,
   analyzeMissedSeeds,
   saveEditedFormula,
   submitProtocol,
   type AnalyzeMissedSeedsResult,
+  type BlockImprovementContext,
   type BlockImprovementResult,
   type ChromeRuntimeDeps,
   type DraftBlockHit,
@@ -396,6 +398,8 @@ function buildDefaultViewOptions(
         input: RequestBlockImprovementInput
       ): Promise<BlockImprovementResult> =>
         runImproveBlock(store, runtime, llmFactoryDepsBase(), input),
+      onGetImproveContext: (blockId: string): Promise<BlockImprovementContext | null> =>
+        getBlockImprovementContext(blockId, { store, google: runtime.google }),
     },
     expand: {
       // 進捗・取得結果は store.expandRun 経由で反映される（draft の onGenerate と同じ思想）
@@ -449,7 +453,11 @@ async function runImproveBlock(
     llmLogFolderId: project.driveFolderId,
     spreadsheetId: project.spreadsheetId,
   });
-  return requestBlockImprovement(input, { store, llmFactory: factory });
+  return requestBlockImprovement(input, {
+    store,
+    google: runtime.google,
+    llmFactory: factory,
+  });
 }
 
 /**

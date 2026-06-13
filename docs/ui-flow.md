@@ -62,7 +62,7 @@ flowchart TD
 | `#/draft` | 検索式ドラフト生成 | 4 skill を順次実行する進捗ビュー（block-designer → mesh-suggester → freeword-designer → filter-designer） | `FormulaVersions`（`ai_draft`）, `LLMApiLog` |
 | `#/validate` | 検証 | 行ごとヒット数バッジ、シード捕捉率サマリ、MeSH ダイアグラム（Mermaid）、ブロック重複（P1） | `ValidationLog` |
 | `#/expand` | 対話的シード拡張 | 50 件抽出 → 5 件提示 → include/exclude/maybe 判定 | `SeedPapers`（`source=interactive`）, 自動再検証 |
-| `#/edit` | 検索式編集 | マークダウンエディタ。行単位で「AI 改善」ボタン（該当 skill 再実行 → diff → accept/reject） | `FormulaVersions`（`user_edit` / `auto_optimize`） |
+| `#/edit` | 検索式編集 | ブロックカード一覧（textarea は廃止）。ホバーの鉛筆ボタンで各ブロックをインライン手編集／「AI に改善させる」で指示文入力＋文脈開示（RQ・ブロック定義・シード論文・直近検証の捕捉率/取りこぼし）→ improve-block skill 実行 → diff → accept/reject | `FormulaVersions`（`user_edit` / `auto_optimize`） |
 | `#/export` | 4 DB 変換 | ワンクリックで CENTRAL / Embase / CT.gov / ICTRP に変換、`.md` ダウンロード | `Conversions` |
 | `#/done` | 完了案内 | PubMed 検索ページを新規タブで開くリンク、CT.gov / ICTRP リンク、nbib ダウンロード手順 | （読み取りのみ） |
 | `#/history` | バージョン履歴 | `FormulaVersions` 一覧。各バージョンの protocol_version / capture_rate / 作成種別を表示。クリックで `#/validate` に該当 version を読み込む | `FormulaVersions` / `ValidationLog` |
@@ -116,5 +116,5 @@ flowchart TD
 
 - 各画面のレスポンシブブレークポイント（メインビューはタブ全画面前提だが、最小幅 1024px を想定）
 - 各遷移のアニメーション / ローディング表示
-- `#/edit` のマークダウンエディタ採用ライブラリ（CodeMirror 6 候補）
+- ~~`#/edit` のマークダウンエディタ採用ライブラリ（CodeMirror 6 候補）~~ → textarea を廃止しブロックカード単位のインライン編集に変更したため不要
 - `#/validate` の MeSH ダイアグラムレンダラ（Mermaid.js を CDN 経由ではなくバンドルする）

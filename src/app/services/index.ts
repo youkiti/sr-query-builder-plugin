@@ -72,7 +72,9 @@ export type { MissedSeedAnalysis } from '@/features/formula/skills';
 export {
   applyBlockImprovement,
   requestBlockImprovement,
+  getBlockImprovementContext,
   saveEditedFormula,
+  type BlockImprovementContext,
   type BlockImprovementDeps,
   type BlockImprovementResult,
   type EditServiceDeps,

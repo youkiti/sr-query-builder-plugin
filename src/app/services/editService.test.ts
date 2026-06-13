@@ -7,6 +7,7 @@ import {
 } from '../store';
 import {
   applyBlockImprovement,
+  getBlockImprovementContext,
   requestBlockImprovement,
   saveEditedFormula,
   type BlockImprovementDeps,
@@ -21,6 +22,27 @@ function jsonResponse(body: unknown): Response {
     json: async () => body,
     text: async () => JSON.stringify(body),
   } as Response;
+}
+
+/** SeedPapers タブが空（ヘッダのみ）で返る Google モック。seed 文脈を空にしたいとき用。 */
+function emptySeedsGoogle(): { fetch: jest.Mock; getAccessToken: jest.Mock } {
+  return {
+    fetch: jest.fn().mockResolvedValue(jsonResponse({ values: [SHEET_HEADERS.SeedPapers] })),
+    getAccessToken: jest.fn().mockResolvedValue('t'),
+  };
+}
+
+/** 指定した SeedPapers の行（seed オブジェクト → 行配列）を返す Google モック。 */
+function seedsGoogle(rows: Record<string, string | number | boolean>[]): {
+  fetch: jest.Mock;
+  getAccessToken: jest.Mock;
+} {
+  const header = [...SHEET_HEADERS.SeedPapers];
+  const values = [header, ...rows.map((r) => header.map((key) => r[key] ?? ''))];
+  return {
+    fetch: jest.fn().mockResolvedValue(jsonResponse({ values })),
+    getAccessToken: jest.fn().mockResolvedValue('t'),
+  };
 }
 
 function makeProtocolDraft(overrides: Partial<ProtocolDraft> = {}): ProtocolDraft {
@@ -302,7 +324,7 @@ describe('requestBlockImprovement', () => {
         rationale: 'MeSH 追加で感度向上',
       })
     );
-    const deps: BlockImprovementDeps = { store, llmFactory: factory };
+    const deps: BlockImprovementDeps = { store, google: emptySeedsGoogle(), llmFactory: factory };
     const result = await requestBlockImprovement({ blockId: '1' }, deps);
     expect(captured.purpose).toBe('improve_block');
     expect(result).toEqual({
@@ -317,7 +339,7 @@ describe('requestBlockImprovement', () => {
     const store = createStore(makeState({ currentFormulaMarkdown: null }));
     const { factory } = fakeLlmFactory('{}');
     await expect(
-      requestBlockImprovement({ blockId: '1' }, { store, llmFactory: factory })
+      requestBlockImprovement({ blockId: '1' }, { store, google: emptySeedsGoogle(), llmFactory: factory })
     ).rejects.toThrow(/検索式/);
   });
 
@@ -325,7 +347,7 @@ describe('requestBlockImprovement', () => {
     const store = createStore(makeState({ currentFormulaMarkdown: '   \n  ' }));
     const { factory } = fakeLlmFactory('{}');
     await expect(
-      requestBlockImprovement({ blockId: '1' }, { store, llmFactory: factory })
+      requestBlockImprovement({ blockId: '1' }, { store, google: emptySeedsGoogle(), llmFactory: factory })
     ).rejects.toThrow(/検索式/);
   });
 
@@ -333,7 +355,7 @@ describe('requestBlockImprovement', () => {
     const store = createStore(makeState({ currentFormulaMarkdown: VALID_MD }));
     const { factory } = fakeLlmFactory('{}');
     await expect(
-      requestBlockImprovement({ blockId: '99' }, { store, llmFactory: factory })
+      requestBlockImprovement({ blockId: '99' }, { store, google: emptySeedsGoogle(), llmFactory: factory })
     ).rejects.toThrow(/#99/);
   });
 
@@ -360,7 +382,7 @@ describe('requestBlockImprovement', () => {
       },
     };
     const factory: LlmProviderFactory = { forPurpose: () => provider };
-    await requestBlockImprovement({ blockId: '1' }, { store, llmFactory: factory });
+    await requestBlockImprovement({ blockId: '1' }, { store, google: emptySeedsGoogle(), llmFactory: factory });
     // label と description が空なので description は「(不明)」で埋められる
     expect(calls[0]).toContain('(不明)');
   });
@@ -382,7 +404,7 @@ describe('requestBlockImprovement', () => {
     );
     const result = await requestBlockImprovement(
       { blockId: 'RCTfilter' },
-      { store, llmFactory: factory }
+      { store, google: emptySeedsGoogle(), llmFactory: factory }
     );
     expect(result.currentExpression).toBe('"randomized controlled trial"[pt]');
     expect(result.proposedExpression).toBe('updated');
@@ -416,7 +438,7 @@ describe('requestBlockImprovement', () => {
     };
     await requestBlockImprovement(
       { blockId: '2' },
-      { store, llmFactory: { forPurpose: () => provider } }
+      { store, google: emptySeedsGoogle(), llmFactory: { forPurpose: () => provider } }
     );
     expect(calls[0]).toContain('(不明)');
   });
@@ -444,10 +466,158 @@ describe('requestBlockImprovement', () => {
     };
     await requestBlockImprovement(
       { blockId: '1' },
-      { store, llmFactory: { forPurpose: () => provider } }
+      { store, google: emptySeedsGoogle(), llmFactory: { forPurpose: () => provider } }
     );
     // RQ: の直後に空行がくる（`RQ: \n` パターン）
     expect(calls[0]).toMatch(/RQ:\s*\n/);
+  });
+});
+
+describe('requestBlockImprovement - シード / 検証文脈', () => {
+  function capturingFactory(): { factory: LlmProviderFactory; calls: string[] } {
+    const calls: string[] = [];
+    const provider: LLMProvider = {
+      providerId: 'gemini',
+      model: 'test',
+      chat: async (messages) => {
+        calls.push(messages.find((m) => m.role === 'user')!.content);
+        return {
+          text: JSON.stringify({ proposed_expression: 'x', rationale: 'r' }),
+          tokensIn: null,
+          tokensOut: null,
+          raw: {},
+        };
+      },
+    };
+    return { calls, factory: { forPurpose: () => provider } };
+  }
+
+  test('SeedPapers の include / 初期シードがプロンプトに載り、exclude は除外される', async () => {
+    const store = createStore(makeState({ currentFormulaMarkdown: VALID_MD }));
+    const google = seedsGoogle([
+      { pmid: '111', title: 'Seed A', source: 'initial', is_valid: 'true', user_decision: 'include' },
+      { pmid: '222', title: 'Seed B', source: 'interactive', is_valid: 'true', user_decision: 'include' },
+      { pmid: '999', title: 'Excluded', source: 'interactive', is_valid: 'true', user_decision: 'exclude' },
+    ]);
+    const { factory, calls } = capturingFactory();
+    await requestBlockImprovement({ blockId: '1' }, { store, google, llmFactory: factory });
+    expect(calls[0]).toContain('PMID 111 [include]: Seed A');
+    expect(calls[0]).toContain('PMID 222 [include]: Seed B');
+    expect(calls[0]).not.toContain('999');
+  });
+
+  test('現バージョンと一致する検証結果（捕捉率・取りこぼし）がプロンプトに載る', async () => {
+    const store = createStore(
+      makeState({
+        currentFormulaMarkdown: VALID_MD,
+        currentFormulaVersionId: 'v-now',
+        validationResult: {
+          formulaVersionId: 'v-now',
+          summary: {
+            finalQuery: { captureRate: 0.5, capturedPmids: ['111'], missedPmids: ['222'] },
+          },
+        } as unknown as AppState['validationResult'],
+      })
+    );
+    const { factory, calls } = capturingFactory();
+    await requestBlockImprovement(
+      { blockId: '1' },
+      { store, google: emptySeedsGoogle(), llmFactory: factory }
+    );
+    expect(calls[0]).toContain('捕捉率: 50%');
+    expect(calls[0]).toContain('取りこぼし PMID: 222');
+  });
+
+  test('検証結果が別バージョンのものなら stale 扱いで載せない', async () => {
+    const store = createStore(
+      makeState({
+        currentFormulaMarkdown: VALID_MD,
+        currentFormulaVersionId: 'v-now',
+        validationResult: {
+          formulaVersionId: 'v-old',
+          summary: {
+            finalQuery: { captureRate: 0.9, capturedPmids: ['111'], missedPmids: [] },
+          },
+        } as unknown as AppState['validationResult'],
+      })
+    );
+    const { factory, calls } = capturingFactory();
+    await requestBlockImprovement(
+      { blockId: '1' },
+      { store, google: emptySeedsGoogle(), llmFactory: factory }
+    );
+    expect(calls[0]).toContain('(未検証)');
+    expect(calls[0]).not.toContain('捕捉率: 90%');
+  });
+
+  test('ユーザー指示がプロンプトに載る', async () => {
+    const store = createStore(makeState({ currentFormulaMarkdown: VALID_MD }));
+    const { factory, calls } = capturingFactory();
+    await requestBlockImprovement(
+      { blockId: '1', instruction: 'tiab を増やして' },
+      { store, google: emptySeedsGoogle(), llmFactory: factory }
+    );
+    expect(calls[0]).toContain('tiab を増やして');
+  });
+
+  test('Sheets 読み取りが失敗してもシードは空で改善は続行する', async () => {
+    const store = createStore(makeState({ currentFormulaMarkdown: VALID_MD }));
+    const google = {
+      fetch: jest.fn().mockRejectedValue(new Error('network')),
+      getAccessToken: jest.fn().mockResolvedValue('t'),
+    };
+    const { factory, calls } = capturingFactory();
+    const result = await requestBlockImprovement(
+      { blockId: '1' },
+      { store, google, llmFactory: factory }
+    );
+    expect(result.proposedExpression).toBe('x');
+    expect(calls[0]).toContain('(なし)');
+  });
+});
+
+describe('getBlockImprovementContext', () => {
+  test('式が未生成なら null', async () => {
+    const store = createStore(makeState({ currentFormulaMarkdown: null }));
+    const ctx = await getBlockImprovementContext('1', { store, google: emptySeedsGoogle() });
+    expect(ctx).toBeNull();
+  });
+
+  test('存在しない blockId は null', async () => {
+    const store = createStore(makeState({ currentFormulaMarkdown: VALID_MD }));
+    const ctx = await getBlockImprovementContext('99', { store, google: emptySeedsGoogle() });
+    expect(ctx).toBeNull();
+  });
+
+  test('RQ / ブロック定義 / シード / 検証捕捉情報を返す', async () => {
+    const store = createStore(
+      makeState({
+        currentFormulaMarkdown: VALID_MD,
+        currentFormulaVersionId: 'v-now',
+        validationResult: {
+          formulaVersionId: 'v-now',
+          summary: {
+            finalQuery: { captureRate: 0.5, capturedPmids: ['111'], missedPmids: ['222'] },
+          },
+        } as unknown as AppState['validationResult'],
+      })
+    );
+    const google = seedsGoogle([
+      { pmid: '111', title: 'Seed A', source: 'initial', is_valid: 'true', user_decision: 'include' },
+    ]);
+    const ctx = await getBlockImprovementContext('1', { store, google });
+    expect(ctx).not.toBeNull();
+    expect(ctx!.researchQuestion).toBe('RQ');
+    expect(ctx!.blockLabel).toBe('Population');
+    expect(ctx!.currentExpression).toBe('asthma[tiab]');
+    expect(ctx!.seedPapers).toEqual([
+      { pmid: '111', title: 'Seed A', decision: 'include', source: 'initial' },
+    ]);
+    expect(ctx!.validation).toEqual({
+      captureRate: 0.5,
+      capturedPmids: ['111'],
+      missedPmids: ['222'],
+    });
   });
 });
 
