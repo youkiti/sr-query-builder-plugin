@@ -1,5 +1,5 @@
 import type { ChatMessage, LLMProvider } from '@/lib/llm';
-import { designFreewords } from './freewordDesigner';
+import { designFreewords, formatSeedSamples } from './freewordDesigner';
 
 function provider(text: string): { provider: LLMProvider; calls: ChatMessage[][] } {
   const calls: ChatMessage[][] = [];
@@ -50,6 +50,23 @@ describe('designFreewords', () => {
     expect(userMsg).toContain('(MeSH なし)');
   });
 
+  test('seedSamples を title/abstract として埋め込む', async () => {
+    const { provider: p, calls } = provider('{"freewords":[]}');
+    await designFreewords(
+      {
+        conceptSummary: 'x',
+        freewordRequirements: [],
+        meshSuggestions: [],
+        seedSamples: [{ title: 'Sacubitril/valsartan in HFrEF', abstract: 'We randomized patients...' }],
+      },
+      p
+    );
+    const userMsg = calls[0]!.find((m) => m.role === 'user')?.content ?? '';
+    expect(userMsg).toContain('title: Sacubitril/valsartan in HFrEF');
+    expect(userMsg).toContain('abstract: We randomized patients...');
+    expect(userMsg).not.toContain('{{SEED_SAMPLES}}');
+  });
+
   test('MeSH と要件ありはリスト整形して埋め込む', async () => {
     const { provider: p, calls } = provider('{"freewords":[]}');
     await designFreewords(
@@ -83,5 +100,20 @@ describe('designFreewords', () => {
       p
     );
     expect(result[0]).toEqual({ query: '', rationale: '' });
+  });
+});
+
+describe('formatSeedSamples', () => {
+  test('空配列・タイトルも抄録もないサンプルは (なし)', () => {
+    expect(formatSeedSamples([])).toBe('(なし)');
+    expect(formatSeedSamples([{ title: null, abstract: null }])).toBe('(なし)');
+  });
+
+  test('長い抄録は 1500 字で切り詰める', () => {
+    const long = 'a'.repeat(2000);
+    const text = formatSeedSamples([{ title: 'T', abstract: long }]);
+    expect(text).toContain('title: T');
+    expect(text).toContain('a'.repeat(1500) + '…');
+    expect(text).not.toContain('a'.repeat(1501));
   });
 });

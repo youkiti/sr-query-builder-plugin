@@ -40,6 +40,7 @@ function makeState(): AppState {
     currentProtocolVersion: 3,
     currentFormulaVersionId: null,
     currentFormulaMarkdown: null,
+    draftRun: null,
     validationResult: null,
     missedAnalysis: null,
   };
@@ -250,17 +251,21 @@ describe('generateDraft', () => {
     await expect(generateDraft(deps)).rejects.toThrow(/blocksDraft/);
   });
 
-  test('seed あり → suggestMesh に seed MeSH 頻度が渡る（§4.4）', async () => {
-    // SeedPapers に適格 seed 1 件、efetch でその論文の MeSH を返すように fetch を分岐する
+  test('seed あり → 各 skill に seed のタイトル・抄録・MeSH が渡る（§4.4）', async () => {
+    // SeedPapers に適格 seed 1 件、efetch でその論文の MeSH/抄録を返すように fetch を分岐する
     const seedRow = [
       '111', 'Seed title', '2020', 'initial', 'pmid_direct', '',
       'true', '', '', '', '', '', '',
     ];
     const efetchXml =
       '<PubmedArticleSet><PubmedArticle><MedlineCitation><PMID>111</PMID>' +
-      '<Article><ArticleTitle>Seed title</ArticleTitle></Article>' +
-      '<MeshHeadingList><MeshHeading><DescriptorName>Stroke</DescriptorName></MeshHeading>' +
+      '<Article><ArticleTitle>Thrombolysis for acute stroke</ArticleTitle>' +
+      '<Abstract><AbstractText>We studied alteplase in ischemic stroke.</AbstractText></Abstract></Article>' +
+      '<MeshHeadingList>' +
+      '<MeshHeading><DescriptorName MajorTopicYN="Y">Stroke</DescriptorName>' +
+      '<QualifierName>drug therapy</QualifierName></MeshHeading>' +
       '<MeshHeading><DescriptorName>Thrombolytic Therapy</DescriptorName></MeshHeading>' +
+      '<MeshHeading><DescriptorName>Humans</DescriptorName></MeshHeading>' +
       '</MeshHeadingList></MedlineCitation></PubmedArticle></PubmedArticleSet>';
     const fetchMock = jest.fn((input: string) => {
       const url = String(input);
@@ -277,7 +282,7 @@ describe('generateDraft', () => {
       }
       return Promise.resolve(jsonResponse({}));
     });
-    const meshPrompts: string[] = [];
+    const prompts: Record<string, string[]> = {};
     const store = createStore(makeState());
     const deps: Parameters<typeof generateDraft>[0] = {
       google: {
@@ -289,11 +294,10 @@ describe('generateDraft', () => {
       llmFactory: {
         forPurpose: (purpose) => {
           const base = skillProviderFor(purpose);
-          if (purpose !== 'suggest_mesh') return base;
           return {
             ...base,
             chat: async (messages) => {
-              meshPrompts.push(messages.map((m) => m.content).join('\n'));
+              (prompts[purpose] ??= []).push(messages.map((m) => m.content).join('\n'));
               return base.chat(messages);
             },
           };
@@ -303,10 +307,15 @@ describe('generateDraft', () => {
       now: () => '2026-04-19T00:00:00.000Z',
     };
     await generateDraft(deps);
-    // suggest_mesh プロンプトに seed の MeSH 頻度行が含まれる
-    expect(meshPrompts.length).toBeGreaterThan(0);
-    expect(meshPrompts[0]).toContain('Stroke');
-    expect(meshPrompts[0]).not.toContain('(seed 論文の MeSH なし)');
+    // block-designer プロンプトに seed タイトルが含まれる
+    expect(prompts['draft_block']![0]).toContain('- Thrombolysis for acute stroke');
+    // suggest_mesh プロンプトにカバレッジ付き MeSH が含まれ、チェックタグは分離される
+    expect(prompts['suggest_mesh']![0]).toContain('Stroke* (1/1)');
+    expect(prompts['suggest_mesh']![0]).toContain('drug therapy');
+    expect(prompts['suggest_mesh']![0]).toContain('チェックタグ');
+    expect(prompts['suggest_mesh']![0]).not.toContain('(seed 論文の MeSH なし)');
+    // freeword-designer プロンプトに seed の抄録が含まれる
+    expect(prompts['expand_freeword']![0]).toContain('We studied alteplase in ischemic stroke.');
   });
 
   test('seed なし → suggestMesh に空配列が渡る（プロンプトは「MeSH なし」）', async () => {

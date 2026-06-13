@@ -41,7 +41,12 @@ function sampleSummary(overrides: Partial<ValidationSummary> = {}): ValidationSu
     },
     finalQueryError: null,
     mesh: [
-      { pmid: '111', title: 'A', meshHeadings: ['Diabetes Mellitus'] },
+      {
+        pmid: '111',
+        title: 'A',
+        meshHeadings: ['Diabetes Mellitus'],
+        meshDetails: [{ descriptor: 'Diabetes Mellitus', majorTopic: false, qualifiers: [] }],
+      },
     ],
     meshFrequency: [
       { descriptor: 'Diabetes Mellitus', count: 2 },

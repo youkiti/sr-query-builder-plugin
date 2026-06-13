@@ -92,11 +92,28 @@ export async function esearch(
   return { count: Number.isFinite(count) ? count : 0, pmids };
 }
 
+/** MeSH qualifier（subheading）。例: `/drug therapy` */
+export interface MeshQualifierDetail {
+  name: string;
+  majorTopic: boolean;
+}
+
+/** MeSH heading の構造化表現（descriptor + MajorTopic + qualifiers）。 */
+export interface MeshHeadingDetail {
+  descriptor: string;
+  /** DescriptorName の MajorTopicYN="Y"（論文の主題として索引されている） */
+  majorTopic: boolean;
+  qualifiers: MeshQualifierDetail[];
+}
+
 export interface EfetchArticle {
   pmid: string;
   title: string | null;
   year: number | null;
+  /** 後方互換: descriptor 文字列のみの一覧。詳細は meshDetails を参照 */
   meshHeadings: string[];
+  /** MajorTopic / qualifier を含む構造化 MeSH（meshHeadings と同順） */
+  meshDetails: MeshHeadingDetail[];
   abstract: string | null;
   journal: string | null;
   authors: string[];
@@ -153,11 +170,26 @@ export function parsePubmedXml(xml: string): EfetchArticle[] {
       null;
     const year = yearText ? parseYear(yearText) : null;
     const meshHeadings: string[] = [];
+    const meshDetails: MeshHeadingDetail[] = [];
     for (const heading of Array.from(article.getElementsByTagName('MeshHeading'))) {
-      const descriptor = heading.getElementsByTagName('DescriptorName')[0]?.textContent?.trim();
-      if (descriptor) {
-        meshHeadings.push(descriptor);
+      const descriptorEl = heading.getElementsByTagName('DescriptorName')[0];
+      const descriptor = descriptorEl?.textContent?.trim();
+      if (!descriptor) {
+        continue;
       }
+      const qualifiers: MeshQualifierDetail[] = [];
+      for (const q of Array.from(heading.getElementsByTagName('QualifierName'))) {
+        const name = q.textContent?.trim();
+        if (name) {
+          qualifiers.push({ name, majorTopic: q.getAttribute('MajorTopicYN') === 'Y' });
+        }
+      }
+      meshHeadings.push(descriptor);
+      meshDetails.push({
+        descriptor,
+        majorTopic: descriptorEl?.getAttribute('MajorTopicYN') === 'Y',
+        qualifiers,
+      });
     }
     const abstract = collectAbstract(article);
     const journal =
@@ -177,6 +209,7 @@ export function parsePubmedXml(xml: string): EfetchArticle[] {
         title,
         year,
         meshHeadings,
+        meshDetails,
         abstract,
         journal,
         authors,

@@ -1,0 +1,118 @@
+
+src/app/app.css
+     2:3   ‼  '.app__header' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                       sr-query-builder/no-display-without-hidden-guard
+    11:3   ‼  '.app__header-brand' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                 sr-query-builder/no-display-without-hidden-guard
+    38:3   ‼  '.app__header-right' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                 sr-query-builder/no-display-without-hidden-guard
+    60:3   ‼  '.app__header-status' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                sr-query-builder/no-display-without-hidden-guard
+    82:3   ‼  '.app__main' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                         sr-query-builder/no-display-without-hidden-guard
+   158:3   ‼  '.home__status' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                      sr-query-builder/no-display-without-hidden-guard
+   182:3   ‼  '.protocol__form' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                    sr-query-builder/no-display-without-hidden-guard
+   201:3   ‼  '.protocol__section' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                 sr-query-builder/no-display-without-hidden-guard
+   206:3   ‼  '.protocol__source-types' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。            sr-query-builder/no-display-without-hidden-guard
+   212:3   ‼  '.protocol__source-option' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。           sr-query-builder/no-display-without-hidden-guard
+   219:3   ‼  '.protocol__field, .protocol__file' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。  sr-query-builder/no-display-without-hidden-guard
+   263:3   ‼  '.protocol__progress' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                sr-query-builder/no-display-without-hidden-guard
+   554:3   ‼  '.blocks__stepper' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                   sr-query-builder/no-display-without-hidden-guard
+   563:3   ‼  '.blocks__step' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                      sr-query-builder/no-display-without-hidden-guard
+   573:3   ‼  '.blocks__step-num' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                  sr-query-builder/no-display-without-hidden-guard
+   586:3   ‼  '.blocks__step-body' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                 sr-query-builder/no-display-without-hidden-guard
+   606:3   ‼  '.blocks__section-header' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。            sr-query-builder/no-display-without-hidden-guard
+   635:3   ‼  '.blocks__list' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                      sr-query-builder/no-display-without-hidden-guard
+   648:3   ‼  '.blocks__item-header' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。               sr-query-builder/no-display-without-hidden-guard
+   663:3   ‼  '.blocks__badge' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                     sr-query-builder/no-display-without-hidden-guard
+   685:3   ‼  '.blocks__item-controls' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。             sr-query-builder/no-display-without-hidden-guard
+   709:3   ‼  '.blocks__item-body' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                 sr-query-builder/no-display-without-hidden-guard
+   716:3   ‼  '.blocks__field' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                     sr-query-builder/no-display-without-hidden-guard
+   767:3   ‼  '.blocks__add-row' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                   sr-query-builder/no-display-without-hidden-guard
+   792:3   ‼  '.blocks__combination-preview' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。       sr-query-builder/no-display-without-hidden-guard
+   815:3   ‼  '.blocks__combination-edit' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。          sr-query-builder/no-display-without-hidden-guard
+   839:3   ‼  '.blocks__combination-status' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。        sr-query-builder/no-display-without-hidden-guard
+   871:3   ‼  '.blocks__combination-actions' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。       sr-query-builder/no-display-without-hidden-guard
+   885:3   ‼  '.blocks__actions' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                   sr-query-builder/no-display-without-hidden-guard
+   899:3   ‼  '.blocks__actions-buttons' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。           sr-query-builder/no-display-without-hidden-guard
+   961:8   ×  Expected "context" media feature range notation                                                                                                                                              media-feature-range-notation
+  1019:3   ‼  '.edit__block-header' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                sr-query-builder/no-display-without-hidden-guard
+  1052:3   ‼  '.edit__block-diff' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                  sr-query-builder/no-display-without-hidden-guard
+  1077:3   ‼  '.edit__block-actions' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。               sr-query-builder/no-display-without-hidden-guard
+  1125:3   ‼  '.blocks__protocol-ref-body' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。         sr-query-builder/no-display-without-hidden-guard
+  1131:3   ‼  '.blocks__protocol-ref-field' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。        sr-query-builder/no-display-without-hidden-guard
+  1143:15  ×  Deprecated keyword "break-word" for property "word-break"                                                                                                                                    declaration-property-value-keyword-no-deprecated
+  1147:1   ×  Duplicate selector ".blocks__summary", first used at line 618                                                                                                                                no-duplicate-selectors
+  1152:1   ×  Duplicate selector ".blocks__list", first used at line 631                                                                                                                                   no-duplicate-selectors
+  1156:3   ‼  '.blocks__list' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                      sr-query-builder/no-display-without-hidden-guard
+  1161:1   ×  Duplicate selector ".blocks__item", first used at line 640                                                                                                                                   no-duplicate-selectors
+  1162:3   ‼  '.blocks__item' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                      sr-query-builder/no-display-without-hidden-guard
+  1170:1   ×  Duplicate selector ".blocks__item-header", first used at line 647                                                                                                                            no-duplicate-selectors
+  1171:3   ‼  '.blocks__item-header' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。               sr-query-builder/no-display-without-hidden-guard
+  1177:1   ×  Duplicate selector ".blocks__item-id", first used at line 656                                                                                                                                no-duplicate-selectors
+  1182:1   ×  Duplicate selector ".blocks__badge", first used at line 662                                                                                                                                  no-duplicate-selectors
+  1183:3   ‼  '.blocks__badge' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                     sr-query-builder/no-display-without-hidden-guard
+  1194:1   ×  Duplicate selector ".blocks__badge--user", first used at line 677                                                                                                                            no-duplicate-selectors
+  1256:1   ×  Duplicate selector ".blocks__add-row", first used at line 765                                                                                                                                no-duplicate-selectors
+  1278:1   ×  Duplicate selector ".blocks__combination", first used at line 777                                                                                                                            no-duplicate-selectors
+  1279:3   ‼  '.blocks__combination' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。               sr-query-builder/no-display-without-hidden-guard
+  1288:1   ×  Duplicate selector ".blocks__combination legend", first used at line 785                                                                                                                     no-duplicate-selectors
+  1293:1   ×  Duplicate selector ".blocks__combination-preview", first used at line 791                                                                                                                    no-duplicate-selectors
+  1298:1   ×  Duplicate selector ".blocks__combination-input", first used at line 821                                                                                                                      no-duplicate-selectors
+  1302:1   ×  Duplicate selector ".blocks__combination-errors", first used at line 858                                                                                                                     no-duplicate-selectors
+  1310:1   ×  Duplicate selector ".blocks__combination-errors:empty", first used at line 866                                                                                                               no-duplicate-selectors
+  1315:3   ‼  '.blocks__autofilter' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                sr-query-builder/no-display-without-hidden-guard
+  1337:3   ‼  '.blocks__filter-selector' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。           sr-query-builder/no-display-without-hidden-guard
+  1343:3   ‼  '.blocks__filter-selector-header' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。    sr-query-builder/no-display-without-hidden-guard
+  1352:3   ‼  '.blocks__filter-list' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。               sr-query-builder/no-display-without-hidden-guard
+  1357:3   ‼  '.blocks__filter-item' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。               sr-query-builder/no-display-without-hidden-guard
+  1372:3   ‼  '.blocks__filter-item-label' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。         sr-query-builder/no-display-without-hidden-guard
+  1412:1   ×  Duplicate selector ".blocks__actions", first used at line 876                                                                                                                                no-duplicate-selectors
+  1413:3   ‼  '.blocks__actions' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                   sr-query-builder/no-display-without-hidden-guard
+  1448:1   ×  Duplicate selector ".blocks__error", first used at line 950                                                                                                                                  no-duplicate-selectors
+  1454:1   ×  Duplicate selector ".blocks__error:empty", first used at line 957                                                                                                                            no-duplicate-selectors
+  1519:3   ‼  '.seeds__details-list' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。               sr-query-builder/no-display-without-hidden-guard
+  1524:3   ‼  '.seeds__article' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                    sr-query-builder/no-display-without-hidden-guard
+  1533:3   ‼  '.seeds__article-header' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。             sr-query-builder/no-display-without-hidden-guard
+  1588:15  ×  Deprecated keyword "break-word" for property "word-break"                                                                                                                                    declaration-property-value-keyword-no-deprecated
+  1596:3   ‼  '.seeds__article-mesh-list' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。          sr-query-builder/no-display-without-hidden-guard
+  1602:3   ‼  '.seeds__article-mesh-item' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。          sr-query-builder/no-display-without-hidden-guard
+  1613:3   ‼  '.seeds__form' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                       sr-query-builder/no-display-without-hidden-guard
+  1624:3   ‼  '.seeds__section' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                    sr-query-builder/no-display-without-hidden-guard
+  1697:3   ‼  '.seeds__list-toggle' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                sr-query-builder/no-display-without-hidden-guard
+  1714:3   ‼  '.seeds__list' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                       sr-query-builder/no-display-without-hidden-guard
+  1720:3   ‼  '.seeds__list-item' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                  sr-query-builder/no-display-without-hidden-guard
+  1748:3   ‼  '.seeds__list-header' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                sr-query-builder/no-display-without-hidden-guard
+  1770:3   ‼  '.seeds__list-controls' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。              sr-query-builder/no-display-without-hidden-guard
+  1796:3   ‼  '.seeds__article-content' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。            sr-query-builder/no-display-without-hidden-guard
+  1841:3   ‼  '.settings__header' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                  sr-query-builder/no-display-without-hidden-guard
+  1883:3   ‼  '.settings__section' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                 sr-query-builder/no-display-without-hidden-guard
+  1912:3   ‼  '.settings__provider-card' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。           sr-query-builder/no-display-without-hidden-guard
+  1924:3   ‼  '.settings__provider-title' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。          sr-query-builder/no-display-without-hidden-guard
+  1941:3   ‼  '.settings__tier-badge' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。              sr-query-builder/no-display-without-hidden-guard
+  1964:3   ‼  '.settings__field' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                   sr-query-builder/no-display-without-hidden-guard
+  1984:3   ‼  '.settings__field-row' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。               sr-query-builder/no-display-without-hidden-guard
+  1995:3   ‼  '.settings__custom-model-form' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。       sr-query-builder/no-display-without-hidden-guard
+  2009:3   ‼  '.settings__custom-models-list' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。      sr-query-builder/no-display-without-hidden-guard
+  2016:3   ‼  '.settings__custom-model-item' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。       sr-query-builder/no-display-without-hidden-guard
+  2057:3   ‼  '.settings__actions' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                 sr-query-builder/no-display-without-hidden-guard
+
+src/options/options.css
+    5:3  ‼  '.options' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。                      sr-query-builder/no-display-without-hidden-guard
+   21:3  ‼  '.options__section' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。             sr-query-builder/no-display-without-hidden-guard
+   40:3  ‼  '.options__field' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。               sr-query-builder/no-display-without-hidden-guard
+   53:3  ‼  '.options__actions' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。             sr-query-builder/no-display-without-hidden-guard
+   78:3  ‼  '.options__provider-card' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。       sr-query-builder/no-display-without-hidden-guard
+   90:3  ‼  '.options__provider-title' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。      sr-query-builder/no-display-without-hidden-guard
+  103:3  ‼  '.options__custom-model-form' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。   sr-query-builder/no-display-without-hidden-guard
+  117:3  ‼  '.options__field-row' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。           sr-query-builder/no-display-without-hidden-guard
+  128:3  ‼  '.options__custom-models-list' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。  sr-query-builder/no-display-without-hidden-guard
+  135:3  ‼  '.options__custom-model-item' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。   sr-query-builder/no-display-without-hidden-guard
+  161:3  ‼  '.options__tier-badge' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。          sr-query-builder/no-display-without-hidden-guard
+
+src/popup/popup.css
+    4:3  ‼  '.popup' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。               sr-query-builder/no-display-without-hidden-guard
+   21:3  ‼  '.popup__section' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。      sr-query-builder/no-display-without-hidden-guard
+   41:3  ‼  '#popup-projects' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。      sr-query-builder/no-display-without-hidden-guard
+   47:3  ‼  '.popup__form' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。         sr-query-builder/no-display-without-hidden-guard
+   70:3  ‼  '.popup__recent' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。       sr-query-builder/no-display-without-hidden-guard
+  115:3  ‼  '.popup__account-row' に display を直書きしています。hidden 属性で隠す可能性があるなら globals.css の [hidden] リセットに頼るか、セレクタに :not([hidden]) を付けてください。  sr-query-builder/no-display-without-hidden-guard
+
+× 108 problems (20 errors, 88 warnings)
+  3 errors potentially fixable with the "--fix" option.
+

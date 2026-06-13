@@ -22,6 +22,7 @@ function sampleArticle(overrides: Partial<EfetchArticle> = {}): EfetchArticle {
     title: 'Sample title',
     year: 2020,
     meshHeadings: [],
+    meshDetails: [],
     abstract: null,
     journal: null,
     authors: [],

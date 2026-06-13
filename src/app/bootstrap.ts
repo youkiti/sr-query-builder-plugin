@@ -66,6 +66,7 @@ import {
 } from './router';
 import { createStore, type AppState, type AppStore } from './store';
 import { buildViews, type BuildViewsOptions, type ViewContext } from './views';
+import { formatDraftProgress } from './views/draftView';
 import { formatFormulaVersionShort } from './views/formatHelpers';
 
 export interface AppBootstrapOptions {
@@ -330,8 +331,42 @@ function buildDefaultViewOptions(
       },
     },
     draft: {
-      onGenerate: async (onProgress) => {
-        await runGenerateDraft(store, runtime, llmFactoryDepsBase(), onProgress);
+      // 進捗・エラーは store.draftRun で管理する（LLM コスト集計の setState による
+      // 全ビュー再描画でローカル DOM の進捗表示が消えるため）。view は描画専任。
+      onGenerate: async () => {
+        if (store.getState().draftRun?.status === 'running') {
+          // 再描画タイミング次第でボタンが二度押せた場合の保険
+          return;
+        }
+        store.setState((s) => ({
+          ...s,
+          draftRun: {
+            status: 'running',
+            progressLabel: '開始します…',
+            startedAtMs: Date.now(),
+            error: null,
+          },
+        }));
+        try {
+          await runGenerateDraft(store, runtime, llmFactoryDepsBase(), (p) => {
+            store.setState((s) =>
+              s.draftRun === null
+                ? s
+                : { ...s, draftRun: { ...s.draftRun, progressLabel: formatDraftProgress(p) } }
+            );
+          });
+          store.setState((s) => ({ ...s, draftRun: null }));
+        } catch (err) {
+          store.setState((s) => ({
+            ...s,
+            draftRun: {
+              status: 'error',
+              progressLabel: '',
+              startedAtMs: s.draftRun?.startedAtMs ?? Date.now(),
+              error: err instanceof Error ? err.message : String(err),
+            },
+          }));
+        }
       },
     },
     export: {

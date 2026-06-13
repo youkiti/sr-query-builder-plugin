@@ -58,6 +58,7 @@ describe('startApp', () => {
       currentProtocolVersion: null,
       currentFormulaVersionId: null,
       currentFormulaMarkdown: null,
+      draftRun: null,
       validationResult: null,
       missedAnalysis: null,
     });
@@ -97,6 +98,7 @@ describe('startApp', () => {
       currentProtocolVersion: null,
       currentFormulaVersionId: null,
       currentFormulaMarkdown: null,
+      draftRun: null,
       validationResult: null,
       missedAnalysis: null,
     });

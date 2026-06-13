@@ -18,4 +18,5 @@ export {
 } from './modelRegistry';
 export { createProvider, type ProviderConfig } from './providerFactory';
 export { withLogging, buildPromptSummary, type ApiLoggerDeps } from './apiLogger';
+export { withRetry, RETRYABLE_STATUSES, type RetryOptions } from './retry';
 export { estimateCostUsd, MODEL_PRICING, type ModelPricing } from './pricing';

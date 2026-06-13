@@ -52,6 +52,28 @@ describe('designBlock', () => {
     expect(userMsg).not.toContain('{{RQ}}');
   });
 
+  test('seedTitles はリストとして埋め込み、空なら (なし)', async () => {
+    const { provider: withTitles, calls: titleCalls } = provider('{}');
+    await designBlock(
+      {
+        blockLabel: 'P',
+        description: 'd',
+        researchQuestion: 'rq',
+        seedTitles: ['Effect of sacubitril on heart failure', 'PARADIGM-HF trial'],
+      },
+      withTitles
+    );
+    const withMsg = titleCalls[0]!.find((m) => m.role === 'user')?.content ?? '';
+    expect(withMsg).toContain('- Effect of sacubitril on heart failure');
+    expect(withMsg).toContain('- PARADIGM-HF trial');
+    expect(withMsg).not.toContain('{{SEED_TITLES}}');
+
+    const { provider: noTitles, calls: noCalls } = provider('{}');
+    await designBlock({ blockLabel: 'P', description: 'd', researchQuestion: 'rq' }, noTitles);
+    const noMsg = noCalls[0]!.find((m) => m.role === 'user')?.content ?? '';
+    expect(noMsg).toContain('(なし)');
+  });
+
   test('欠落フィールドは安全な既定で埋める', async () => {
     const { provider: p } = provider('{}');
     const result = await designBlock(

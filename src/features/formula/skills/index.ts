@@ -13,6 +13,7 @@ export {
 } from './blockDesigner';
 export {
   suggestMesh,
+  formatSeedMesh,
   MESH_SUGGESTER_SYSTEM_PROMPT,
   MESH_SUGGESTER_USER_PROMPT_TEMPLATE,
   type MeshSuggesterInput,
@@ -20,10 +21,12 @@ export {
 } from './meshSuggester';
 export {
   designFreewords,
+  formatSeedSamples,
   FREEWORD_DESIGNER_SYSTEM_PROMPT,
   FREEWORD_DESIGNER_USER_PROMPT_TEMPLATE,
   type FreewordDesignerInput,
   type FreewordSuggestion,
+  type SeedSample,
 } from './freewordDesigner';
 export {
   designDefaultFilters,

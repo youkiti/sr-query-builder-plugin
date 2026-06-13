@@ -11,6 +11,8 @@ export interface BlockDesignerInput {
   blockLabel: string;
   description: string;
   researchQuestion: string;
+  /** seed 論文のタイトル一覧（概念を実際の研究空間に接地させる）。空配列でも可 */
+  seedTitles?: string[];
 }
 
 export interface BlockSkeleton {
@@ -33,6 +35,9 @@ export const BLOCK_DESIGNER_SYSTEM_PROMPT = `
 ルール:
 - MeSH 要件とフリーワード要件を**別々のリスト**で書き出す。
   MeSH は階層を意識した一般的な記述子、フリーワードは tiab で拾う具体語にする。
+- seed 論文のタイトルが与えられた場合は、そこに実際に現れる語彙・表記ゆれを要件に反映する。
+  ただし seed は「捕捉すべき既知の正例」であって母集団ではないので、seed の語彙に過剰適合して
+  概念を狭めない（一般的な同義語・関連語も含める）。
 - conceptSummary は英語 1 文、rationale は日本語の戦略メモ。
 - 出力は JSON のみ。
 `.trim();
@@ -43,6 +48,9 @@ RQ: {{RQ}}
 ブロック:
 - label: {{LABEL}}
 - description: {{DESC}}
+
+seed 論文のタイトル（既知の正例。語彙の参考にする）:
+{{SEED_TITLES}}
 
 スキーマ:
 {
@@ -64,12 +72,16 @@ export async function designBlock(
   input: BlockDesignerInput,
   provider: LLMProvider
 ): Promise<BlockSkeleton> {
+  const seedTitles = input.seedTitles ?? [];
+  const seedTitlesBlock =
+    seedTitles.length === 0 ? '(なし)' : seedTitles.map((t) => `- ${t}`).join('\n');
   const userPrompt = BLOCK_DESIGNER_USER_PROMPT_TEMPLATE.replace(
     '{{RQ}}',
     input.researchQuestion
   )
     .replace('{{LABEL}}', input.blockLabel)
-    .replace('{{DESC}}', input.description);
+    .replace('{{DESC}}', input.description)
+    .replace('{{SEED_TITLES}}', seedTitlesBlock);
 
   const response = await provider.chat(
     [

@@ -167,6 +167,10 @@ describe('parsePubmedXml / efetchArticles', () => {
       title: 'Study of A',
       year: 2020,
       meshHeadings: ['Diabetes Mellitus', 'Metformin'],
+      meshDetails: [
+        { descriptor: 'Diabetes Mellitus', majorTopic: true, qualifiers: [] },
+        { descriptor: 'Metformin', majorTopic: false, qualifiers: [] },
+      ],
       abstract: 'BACKGROUND: Diabetes is common.\n\nMETHODS: RCT of metformin.',
       journal: 'The Lancet',
       authors: ['Smith J', 'Doe JA'],
@@ -180,6 +184,7 @@ describe('parsePubmedXml / efetchArticles', () => {
       title: 'Study of B',
       year: 2019,
       meshHeadings: [],
+      meshDetails: [],
       abstract: null,
       journal: 'J Med',
       authors: [],

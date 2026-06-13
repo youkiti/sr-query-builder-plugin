@@ -14,12 +14,13 @@ import {
   type FilterDesignerResult,
   type FreewordSuggestion,
   type MeshSuggestion,
+  type SeedSample,
 } from '@/features/formula/skills';
 import { isSeedEligibleForValidation } from '@/domain/seedPaper';
 import { listSeedPapers } from '@/features/seeds';
-import { aggregateMeshFrequency, extractMeshForSeeds } from '@/features/validation';
+import { summarizeSeedMesh, type MeshForSeed, type SeedMeshSummary } from '@/features/validation';
 import type { GoogleApiDeps } from '@/lib/google';
-import type { EutilsDeps } from '@/lib/ncbi';
+import { efetchArticles, type EutilsDeps } from '@/lib/ncbi';
 import { nowIso } from '@/utils/iso8601';
 import { newUuid } from '@/utils/uuid';
 import type { LlmProviderFactory } from './llmProviderService';
@@ -103,9 +104,9 @@ export async function generateDraft(deps: DraftServiceDeps): Promise<DraftResult
   const meshes: MeshSuggestion[][] = [];
   const freewords: FreewordSuggestion[][] = [];
 
-  // seed 論文の MeSH 頻度を mesh-suggester へ渡す（requirements.md §4.4）。
-  // 取得に失敗しても／seed 0 件でもドラフト生成は止めず、空配列で続行する。
-  const seedMeshFrequency = await collectSeedMeshFrequency(project.spreadsheetId, deps);
+  // seed 論文のタイトル・抄録・MeSH を各 skill へ渡す（requirements.md §4.4）。
+  // 取得に失敗しても／seed 0 件でもドラフト生成は止めず、空のコンテクストで続行する。
+  const seedContext = await collectSeedContext(project.spreadsheetId, deps);
 
   for (let i = 0; i < blockCount; i += 1) {
     const block = blocks.blocks[i];
@@ -119,6 +120,7 @@ export async function generateDraft(deps: DraftServiceDeps): Promise<DraftResult
         blockLabel: block.blockLabel,
         description: block.description,
         researchQuestion: protocol.researchQuestion,
+        seedTitles: seedContext.titles,
       },
       deps.llmFactory.forPurpose('draft_block')
     );
@@ -129,7 +131,7 @@ export async function generateDraft(deps: DraftServiceDeps): Promise<DraftResult
       {
         conceptSummary: skeleton.conceptSummary,
         meshRequirements: skeleton.meshRequirements,
-        seedMeshFrequency,
+        seedMesh: seedContext.meshSummary,
       },
       deps.llmFactory.forPurpose('suggest_mesh')
     );
@@ -145,6 +147,7 @@ export async function generateDraft(deps: DraftServiceDeps): Promise<DraftResult
         conceptSummary: skeleton.conceptSummary,
         freewordRequirements: skeleton.freewordRequirements,
         meshSuggestions: meshSuggestionsRef,
+        seedSamples: seedContext.samples,
       },
       deps.llmFactory.forPurpose('expand_freeword')
     );
@@ -206,17 +209,38 @@ export async function generateDraft(deps: DraftServiceDeps): Promise<DraftResult
   };
 }
 
+/** ドラフト生成の各 skill へ渡す seed 論文コンテクスト。 */
+export interface SeedContext {
+  /** block-designer 用のタイトル一覧（先頭 MAX_SEED_TITLES 件） */
+  titles: string[];
+  /** freeword-designer 用のタイトル/抄録サンプル（先頭 MAX_SEED_SAMPLES 件） */
+  samples: SeedSample[];
+  /** mesh-suggester 用の MeSH 要約（カバレッジ・MajorTopic・qualifier） */
+  meshSummary: SeedMeshSummary;
+}
+
+/** block-designer に渡すタイトル数の上限。 */
+const MAX_SEED_TITLES = 30;
+/** freeword-designer に渡す抄録付きサンプル数の上限（トークン節約）。 */
+const MAX_SEED_SAMPLES = 10;
+
+const EMPTY_SEED_CONTEXT: SeedContext = {
+  titles: [],
+  samples: [],
+  meshSummary: { seedCount: 0, concepts: [], checkTags: [] },
+};
+
 /**
- * 適格 seed 論文（isSeedEligibleForValidation）の PMID 群を NCBI efetch で引き、
- * MeSH 記述子の頻度表を返す。mesh-suggester のプロンプトに渡す（requirements.md §4.4）。
+ * 適格 seed 論文（isSeedEligibleForValidation）を NCBI efetch で 1 回だけ引き、
+ * 各 skill に渡すタイトル・抄録・MeSH 要約をまとめて返す（requirements.md §4.4）。
  *
- * seed 0 件や efetch 失敗時はドラフト生成を止めず、空配列で続行する
- * （MeSH 取得失敗は警告ログ程度に留める）。
+ * seed 0 件や efetch 失敗時はドラフト生成を止めず、空のコンテクストで続行する
+ * （取得失敗は警告ログ程度に留める）。
  */
-async function collectSeedMeshFrequency(
+async function collectSeedContext(
   spreadsheetId: string,
   deps: DraftServiceDeps
-): Promise<Array<{ descriptor: string; count: number }>> {
+): Promise<SeedContext> {
   try {
     const seeds = await listSeedPapers(spreadsheetId, deps.google);
     const eligiblePmids = seeds
@@ -224,14 +248,31 @@ async function collectSeedMeshFrequency(
       .map((seed) => seed.pmid)
       .filter((pmid): pmid is string => pmid !== null);
     if (eligiblePmids.length === 0) {
-      return [];
+      return EMPTY_SEED_CONTEXT;
     }
-    const mesh = await extractMeshForSeeds(eligiblePmids, deps.eutils);
-    return aggregateMeshFrequency(mesh);
+    const articles = await efetchArticles(eligiblePmids, deps.eutils);
+    if (articles.length === 0) {
+      return EMPTY_SEED_CONTEXT;
+    }
+    const titles = articles
+      .map((a) => a.title?.trim())
+      .filter((t): t is string => Boolean(t))
+      .slice(0, MAX_SEED_TITLES);
+    const samples: SeedSample[] = articles
+      .slice(0, MAX_SEED_SAMPLES)
+      .map((a) => ({ title: a.title, abstract: a.abstract }));
+    const meshRecords: MeshForSeed[] = articles.map((a) => ({
+      pmid: a.pmid,
+      title: a.title,
+      meshHeadings: a.meshHeadings,
+      meshDetails: a.meshDetails,
+    }));
+    const meshSummary = summarizeSeedMesh(meshRecords, articles.length);
+    return { titles, samples, meshSummary };
   } catch (err) {
-    // MeSH 取得に失敗してもドラフト生成は継続する（seed なし扱い）。
-    console.warn('[draft] seed 論文の MeSH 取得に失敗したため空で続行します', err);
-    return [];
+    // seed コンテクスト取得に失敗してもドラフト生成は継続する（seed なし扱い）。
+    console.warn('[draft] seed 論文のコンテクスト取得に失敗したため空で続行します', err);
+    return EMPTY_SEED_CONTEXT;
   }
 }
 

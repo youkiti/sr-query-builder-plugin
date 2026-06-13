@@ -71,6 +71,22 @@ export interface MissedAnalysisEntry {
   result: AnalyzeMissedSeedsResult;
 }
 
+/**
+ * 検索式ドラフト生成（#/draft）の実行状態。
+ * LLM コスト集計（cumulativeCostUsd）の setState による全ビュー再描画でも
+ * 進捗・エラー表示を失わないよう、ローカル DOM ではなく store に保持する
+ * （validationResult と同じ理由）。実行中は生成ボタンの二重クリック防止も兼ねる。
+ */
+export interface DraftRunState {
+  status: 'running' | 'error';
+  /** 現在処理中ステップの表示用ラベル（例: 「MeSH を提案中（ブロック 1/2）」） */
+  progressLabel: string;
+  /** 経過時間表示用の開始時刻（epoch ms）。view が 1 秒ごとに再計算する */
+  startedAtMs: number;
+  /** status='error' のときのメッセージ。running 中は null */
+  error: string | null;
+}
+
 export interface AppState {
   /** 現在のハッシュルート */
   route: RouteName;
@@ -94,6 +110,8 @@ export interface AppState {
   currentFormulaVersionId: string | null;
   /** 直近に生成 / 読み込んだ検索式の markdown */
   currentFormulaMarkdown: string | null;
+  /** 検索式ドラフト生成の実行状態。未実行（完了済み含む）なら null */
+  draftRun: DraftRunState | null;
   /** 直近の検証結果。未実行なら null */
   validationResult: ValidationResultEntry | null;
   /** 未捕捉 PMID の AI 原因分析結果。未実行なら null */
@@ -110,6 +128,7 @@ export const INITIAL_STATE: AppState = {
   currentProtocolVersion: null,
   currentFormulaVersionId: null,
   currentFormulaMarkdown: null,
+  draftRun: null,
   validationResult: null,
   missedAnalysis: null,
 };

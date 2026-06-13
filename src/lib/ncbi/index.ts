@@ -5,6 +5,8 @@ export {
   resolvePmidByDoi,
   EutilsError,
   type EfetchArticle,
+  type MeshHeadingDetail,
+  type MeshQualifierDetail,
   type EsearchOptions,
   type EsearchResult,
   type EutilsDeps,

@@ -4,7 +4,12 @@ export { checkFinalQuery, type FinalQueryResult } from './checkFinalQuery';
 export {
   extractMeshForSeeds,
   aggregateMeshFrequency,
+  summarizeSeedMesh,
+  isMeshCheckTag,
   type MeshForSeed,
+  type SeedMeshSummary,
+  type SeedMeshConcept,
+  type SeedMeshQualifier,
 } from './extractMesh';
 export {
   buildMeshHierarchy,

@@ -1,5 +1,5 @@
-import { INITIAL_STATE, type AppState, type BlocksDraft } from '../store';
-import { createDraftView } from './draftView';
+import { INITIAL_STATE, type AppState, type BlocksDraft, type DraftRunState } from '../store';
+import { createDraftView, formatDraftProgress } from './draftView';
 import type { DraftProgress } from '@/app/services';
 
 function buildContainer(): HTMLElement {
@@ -25,8 +25,8 @@ function stateReady(extra: Partial<AppState> = {}): AppState {
   };
 }
 
-async function flushAsync(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 0));
+function runningState(progressLabel = 'MeSH を提案中（ブロック 1/2）'): DraftRunState {
+  return { status: 'running', progressLabel, startedAtMs: Date.now() - 65_000, error: null };
 }
 
 describe('createDraftView', () => {
@@ -81,61 +81,94 @@ describe('createDraftView', () => {
     expect(container.querySelector('.draft__info')?.textContent).toContain('(未保存)');
   });
 
-  test('生成クリックで onGenerate が呼ばれ、progress がステータスに出る', async () => {
-    const received: DraftProgress[] = [];
-    const onGenerate = jest.fn(async (notify: (p: DraftProgress) => void) => {
-      notify({ step: 'block-designer', blockIndex: 0, blockCount: 1 });
-      notify({ step: 'assemble', blockCount: 1 });
-      received.push({ step: 'done', blockCount: 1 });
-    });
+  test('生成クリックで onGenerate が呼ばれる', () => {
+    const onGenerate = jest.fn().mockResolvedValue(undefined);
     const view = createDraftView({ onGenerate });
     const container = buildContainer();
     view(container, { state: stateReady(), navigate: jest.fn() });
-    const btn = container.querySelector('button')!;
+    container.querySelector('button')!.click();
+    expect(onGenerate).toHaveBeenCalledTimes(1);
+  });
+
+  test('クリック直後はボタンがローカルに無効化される（再描画前の二重クリック保険）', () => {
+    const onGenerate = jest.fn().mockResolvedValue(undefined);
+    const view = createDraftView({ onGenerate });
+    const container = buildContainer();
+    view(container, { state: stateReady(), navigate: jest.fn() });
+    const btn = container.querySelector('button') as HTMLButtonElement;
     btn.click();
-    expect((btn as HTMLButtonElement).disabled).toBe(true);
-    await flushAsync();
-    await flushAsync();
-    expect(onGenerate).toHaveBeenCalled();
-    expect(container.querySelector('.draft__status')?.textContent).toContain('完了');
-    expect((btn as HTMLButtonElement).disabled).toBe(false);
-    expect(received).toHaveLength(1); // 副次的な push
+    expect(btn.disabled).toBe(true);
+    btn.click();
+    expect(onGenerate).toHaveBeenCalledTimes(1);
   });
 
-  test('progress.blockIndex が未指定のステップではカウンタを出さない', async () => {
-    const onGenerate = jest.fn(async (notify: (p: DraftProgress) => void) => {
-      notify({ step: 'filter-designer', blockCount: 2 });
+  test('draftRun=running 中はボタンが無効で「生成中…」表記、進捗と経過時間を表示', () => {
+    const view = createDraftView({ onGenerate: jest.fn() });
+    const container = buildContainer();
+    view(container, { state: stateReady({ draftRun: runningState() }), navigate: jest.fn() });
+    const btn = container.querySelector('button') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(btn.textContent).toBe('生成中…');
+    const statusText = container.querySelector('.draft__status')?.textContent ?? '';
+    expect(statusText).toContain('MeSH を提案中（ブロック 1/2）');
+    expect(statusText).toMatch(/経過 1分\d+秒/);
+  });
+
+  test('running 中はクリックしても onGenerate を呼ばない', () => {
+    const onGenerate = jest.fn();
+    const view = createDraftView({ onGenerate });
+    const container = buildContainer();
+    view(container, { state: stateReady({ draftRun: runningState() }), navigate: jest.fn() });
+    container.querySelector('button')!.click();
+    expect(onGenerate).not.toHaveBeenCalled();
+  });
+
+  test('経過 60 秒未満は「N秒」表記', () => {
+    const view = createDraftView();
+    const container = buildContainer();
+    view(container, {
+      state: stateReady({
+        draftRun: { status: 'running', progressLabel: '開始します…', startedAtMs: Date.now() - 5_000, error: null },
+      }),
+      navigate: jest.fn(),
     });
-    const view = createDraftView({ onGenerate });
-    const container = buildContainer();
-    view(container, { state: stateReady(), navigate: jest.fn() });
-    container.querySelector('button')!.click();
-    await flushAsync();
-    await flushAsync();
-    expect(container.querySelector('.draft__status')?.textContent).not.toContain('/');
+    expect(container.querySelector('.draft__status')?.textContent).toMatch(/経過 \d秒/);
   });
 
-  test('onGenerate が throw したらエラーボックスに表示し、ステータスは空になる', async () => {
-    const onGenerate = jest.fn().mockRejectedValue(new Error('boom'));
+  test('draftRun=error はエラーボックスに表示し、ボタンは再度押せる', () => {
+    const onGenerate = jest.fn().mockResolvedValue(undefined);
     const view = createDraftView({ onGenerate });
     const container = buildContainer();
-    view(container, { state: stateReady(), navigate: jest.fn() });
-    container.querySelector('button')!.click();
-    await flushAsync();
-    await flushAsync();
-    expect(container.querySelector('.draft__error')?.textContent).toBe('boom');
-    expect(container.querySelector('.draft__status')?.textContent).toBe('');
+    view(container, {
+      state: stateReady({
+        draftRun: {
+          status: 'error',
+          progressLabel: '',
+          startedAtMs: Date.now(),
+          error: 'Gemini API failed: HTTP 503',
+        },
+      }),
+      navigate: jest.fn(),
+    });
+    const errorText = container.querySelector('.draft__error')?.textContent ?? '';
+    expect(errorText).toContain('生成に失敗しました');
+    expect(errorText).toContain('HTTP 503');
+    const btn = container.querySelector('button') as HTMLButtonElement;
+    expect(btn.disabled).toBe(false);
+    btn.click();
+    expect(onGenerate).toHaveBeenCalledTimes(1);
   });
 
-  test('Error 以外の例外も String 化', async () => {
-    const onGenerate = jest.fn().mockRejectedValue('rare');
-    const view = createDraftView({ onGenerate });
+  test('draftRun=error で error が null でも文言を出す', () => {
+    const view = createDraftView();
     const container = buildContainer();
-    view(container, { state: stateReady(), navigate: jest.fn() });
-    container.querySelector('button')!.click();
-    await flushAsync();
-    await flushAsync();
-    expect(container.querySelector('.draft__error')?.textContent).toBe('rare');
+    view(container, {
+      state: stateReady({
+        draftRun: { status: 'error', progressLabel: '', startedAtMs: Date.now(), error: null },
+      }),
+      navigate: jest.fn(),
+    });
+    expect(container.querySelector('.draft__error')?.textContent).toContain('不明なエラー');
   });
 
   test('onGenerate 未指定でもクリックで例外にならない', () => {
@@ -144,23 +177,20 @@ describe('createDraftView', () => {
     view(container, { state: stateReady(), navigate: jest.fn() });
     expect(() => container.querySelector('button')!.click()).not.toThrow();
   });
+});
 
-  test('progress の blockIndex=0 でもカウンタが出る（ブロック 1/N 表記）', async () => {
-    let capturedStatus = '';
-    const onGenerate = jest.fn(async (notify: (p: DraftProgress) => void) => {
-      notify({ step: 'mesh-suggester', blockIndex: 0, blockCount: 3 });
-      // この時点でステータスが更新されている
-      capturedStatus = container.querySelector('.draft__status')?.textContent ?? '';
-    });
-    const view = createDraftView({ onGenerate });
-    const container = buildContainer();
-    view(container, { state: stateReady(), navigate: jest.fn() });
-    container.querySelector('button')!.click();
-    await flushAsync();
-    expect(capturedStatus).toContain('1/3');
+describe('formatDraftProgress', () => {
+  test('blockIndex 付きステップは「ブロック N/M」カウンタを出す', () => {
+    expect(
+      formatDraftProgress({ step: 'mesh-suggester', blockIndex: 0, blockCount: 3 })
+    ).toContain('1/3');
   });
 
-  test('全ステップラベルをカバー', async () => {
+  test('blockIndex 無しステップはカウンタを出さない', () => {
+    expect(formatDraftProgress({ step: 'filter-designer', blockCount: 2 })).not.toContain('/');
+  });
+
+  test('全ステップにラベルがある', () => {
     const steps: DraftProgress['step'][] = [
       'block-designer',
       'mesh-suggester',
@@ -171,15 +201,7 @@ describe('createDraftView', () => {
       'done',
     ];
     for (const step of steps) {
-      const onGenerate = jest.fn(async (notify: (p: DraftProgress) => void) => {
-        notify({ step, blockCount: 1 });
-      });
-      const view = createDraftView({ onGenerate });
-      const container = buildContainer();
-      view(container, { state: stateReady(), navigate: jest.fn() });
-      container.querySelector('button')!.click();
-      await flushAsync();
-      expect(container.querySelector('.draft__status')?.textContent).toBeTruthy();
+      expect(formatDraftProgress({ step, blockCount: 1 })).toBeTruthy();
     }
   });
 });

@@ -420,9 +420,9 @@ AI による検索式作成を **4 つの skill（モジュール）** に分解
 
 | Skill 名 | 責務 | 入力 | 出力 |
 |---|---|---|---|
-| `block-designer` | 各ブロック（`ProtocolBlocks` の 1 行）を検索式の 1 行 `#N` に展開する骨格設計 | ブロック description + RQ | ブロックごとの概念骨格（MeSH 要件とフリーワード要件の振り分け） |
-| `mesh-suggester` | 各ブロックに対応する MeSH 記述子を提案 | ブロック概念 + seed PMIDs の MeSH（あれば） | MeSH 候補リスト（階層情報付き） |
-| `freeword-designer` | tiab / ti / ab 向けのフリーワード・同義語を展開 | ブロック概念 + MeSH 候補 | フリーワード候補（近接演算子付与も含む） |
+| `block-designer` | 各ブロック（`ProtocolBlocks` の 1 行）を検索式の 1 行 `#N` に展開する骨格設計 | ブロック description + RQ + seed 論文タイトル（あれば） | ブロックごとの概念骨格（MeSH 要件とフリーワード要件の振り分け） |
+| `mesh-suggester` | 各ブロックに対応する MeSH 記述子を提案 | ブロック概念 + seed PMIDs の MeSH 要約（カバレッジ／MajorTopic／qualifier、あれば） | MeSH 候補リスト（階層情報付き） |
+| `freeword-designer` | tiab / ti / ab 向けのフリーワード・同義語を展開 | ブロック概念 + MeSH 候補 + seed 論文のタイトル/抄録サンプル（あれば） | フリーワード候補（近接演算子付与も含む） |
 | `filter-designer` | 下記ルールに従い検索フィルタを提案 | プロトコル + `study_design` + （必要時）検索結果件数 | `Filters:` 行（適用するフィルタのみ列挙） |
 
 #### `filter-designer` の厳格ルール（LLM 過剰フィルタ対策）

@@ -11,6 +11,7 @@ import {
   resolveProviderId,
   DEFAULT_MODEL,
   withLogging,
+  withRetry,
   type LLMProvider,
 } from '@/lib/llm';
 
@@ -20,6 +21,7 @@ import {
  * - chrome.storage から Gemini API キーを取得
  * - GeminiProvider を生成
  * - withLogging で Drive へ prompt/response を保存し、LLMApiLog に行追記
+ * - withRetry で 429/5xx の一時的エラーを指数バックオフで自動再試行
  *
  * skill は呼び出すたびに purpose が変わるため、`LlmProviderFactory.forPurpose(purpose)`
  * の形で提供する（LLMProvider 自体は purpose を持たないという §4.9 の方針に従う）。
@@ -101,28 +103,32 @@ export async function buildLlmProviderFactory(deps: LlmFactoryDeps): Promise<Llm
     model: selectedModel,
     fetch: deps.google.fetch,
   });
+  // withLogging を内側にして「再試行 1 回ごとに LLMApiLog へ 1 行」残す
+  // （503 等の失敗試行も監査ログに見える状態を保つ）。
   return {
     forPurpose: (purpose) =>
-      withLogging(baseProvider, purpose, {
-        uploadJson: async ({ filename, content }) => {
-          const file = await uploadTextFile(
-            {
-              name: filename,
-              content,
-              parentId: deps.llmLogFolderId,
-              mimeType: 'application/json',
-            },
-            deps.google
-          );
-          return { webViewLink: file.webViewLink };
-        },
-        appendLogEntry: async (entry) => {
-          await appendRow(deps.spreadsheetId, 'LLMApiLog', toLogRow(entry), deps.google);
-          if (entry.costEstimateUsd !== null) {
-            deps.onCostAccumulate?.(entry.costEstimateUsd);
-          }
-        },
-      }),
+      withRetry(
+        withLogging(baseProvider, purpose, {
+          uploadJson: async ({ filename, content }) => {
+            const file = await uploadTextFile(
+              {
+                name: filename,
+                content,
+                parentId: deps.llmLogFolderId,
+                mimeType: 'application/json',
+              },
+              deps.google
+            );
+            return { webViewLink: file.webViewLink };
+          },
+          appendLogEntry: async (entry) => {
+            await appendRow(deps.spreadsheetId, 'LLMApiLog', toLogRow(entry), deps.google);
+            if (entry.costEstimateUsd !== null) {
+              deps.onCostAccumulate?.(entry.costEstimateUsd);
+            }
+          },
+        })
+      ),
   };
 }
 

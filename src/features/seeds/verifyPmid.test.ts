@@ -35,6 +35,7 @@ describe('verifyPmids', () => {
           title: 'T',
           year: 2022,
           meshHeadings: [],
+          meshDetails: [],
           abstract: null,
           journal: null,
           authors: [],
