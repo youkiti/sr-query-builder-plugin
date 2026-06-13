@@ -38,6 +38,10 @@ import type { RenderView } from './types';
  * - `n` / `→`: 次の未判定候補へフォーカス移動（無ければ次のカードへ）
  * - `p` / `←`: 前のカードへフォーカス移動
  *
+ * アブストラクト本文はフォーカス中のカードにだけ全文を展開する。各カードに常時
+ * Abstract 要素を置き、表示/非表示は `.expand__candidate--focused` への CSS で
+ * 切り替えるため、フォーカスロジック（setFocus / focusNext）側の改修は不要。
+ *
  * 実ロジック（onFetch / onDecide / onRoundComplete）は bootstrap で service を
  * ラップして渡す。
  */
@@ -89,7 +93,7 @@ export function createExpandView(callbacks: ExpandViewCallbacks = {}): RenderVie
     const shortcuts = doc.createElement('p');
     shortcuts.className = 'expand__shortcuts';
     shortcuts.textContent =
-      'ショートカット: i = include / e = exclude / m = maybe / n または → = 次へ / p または ← = 前へ';
+      'ショートカット: i = include / e = exclude / m = maybe / n または → = 次へ / p または ← = 前へ（アブストラクト本文はフォーカス中のカードに表示）';
     container.appendChild(shortcuts);
 
     const run = ctx.state.expandRun;
@@ -423,6 +427,25 @@ function buildCandidateItem(
   reason.className = 'expand__candidate-reason';
   reason.textContent = `迷う理由: ${candidate.reason === '' ? '(無し)' : candidate.reason}`;
   li.appendChild(reason);
+
+  // アブストラクト本文。常時 DOM に置き、表示はフォーカス中カードのみ（CSS で制御）。
+  const abstractWrap = doc.createElement('div');
+  abstractWrap.className = 'expand__candidate-abstract';
+  const abstractLabel = doc.createElement('div');
+  abstractLabel.className = 'expand__candidate-abstract-label';
+  abstractLabel.textContent = 'Abstract';
+  abstractWrap.appendChild(abstractLabel);
+  const abstractBody = doc.createElement('p');
+  if (candidate.abstract === null || candidate.abstract === '') {
+    abstractBody.className = 'expand__candidate-abstract-body expand__candidate-abstract-body--empty';
+    abstractBody.textContent = '(アブストラクトなし)';
+  } else {
+    abstractBody.className = 'expand__candidate-abstract-body';
+    // textContent で代入（XSS 回避）。構造化抄録の改行は white-space: pre-wrap で保持。
+    abstractBody.textContent = candidate.abstract;
+  }
+  abstractWrap.appendChild(abstractBody);
+  li.appendChild(abstractWrap);
 
   const decisionRow = doc.createElement('div');
   decisionRow.className = 'expand__candidate-actions';

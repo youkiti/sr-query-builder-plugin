@@ -86,7 +86,9 @@ function mockProvider(json: string): LLMProvider {
   };
 }
 
-function buildEfetchXml(pmids: Array<{ pmid: string; title: string; year?: number }>): string {
+function buildEfetchXml(
+  pmids: Array<{ pmid: string; title: string; year?: number; abstract?: string }>
+): string {
   const articles = pmids
     .map(
       (p) => `
@@ -95,6 +97,7 @@ function buildEfetchXml(pmids: Array<{ pmid: string; title: string; year?: numbe
         <PMID>${p.pmid}</PMID>
         <Article>
           <ArticleTitle>${p.title}</ArticleTitle>
+          ${p.abstract ? `<Abstract><AbstractText>${p.abstract}</AbstractText></Abstract>` : ''}
           <Journal>
             <JournalIssue>
               <PubDate><Year>${p.year ?? 2020}</Year></PubDate>
@@ -217,7 +220,7 @@ describe('fetchBoundaryCandidates', () => {
       if (url.includes('efetch.fcgi')) {
         return textResponse(
           buildEfetchXml([
-            { pmid: '222', title: 'Paper 222' },
+            { pmid: '222', title: 'Paper 222', abstract: 'Background of 222.' },
             { pmid: '333', title: 'Paper 333' },
             { pmid: '444', title: 'Paper 444' },
           ])
@@ -255,7 +258,10 @@ describe('fetchBoundaryCandidates', () => {
       pmid: '222',
       title: 'Paper 222',
       reason: 'subset match',
+      abstract: 'Background of 222.',
     });
+    // Abstract が無い候補は null になる
+    expect(result.candidates[1]).toMatchObject({ pmid: '333', abstract: null });
     expect(forPurpose).toHaveBeenCalledWith('pick_boundary');
   });
 
@@ -334,7 +340,7 @@ describe('fetchBoundaryCandidates', () => {
       },
     });
     expect(result.candidates).toEqual([
-      { pmid: '666', title: 'Only 666', year: 2020, reason: 'ok' },
+      { pmid: '666', title: 'Only 666', year: 2020, reason: 'ok', abstract: null },
     ]);
     expect(result.evaluatedCount).toBe(1);
   });
@@ -452,6 +458,7 @@ describe('fetchBoundaryCandidates', () => {
         title: 'Sheet-backed candidate',
         year: 2020,
         reason: 'sheet protocol used',
+        abstract: null,
       },
     ]);
     expect(provider.chat).toHaveBeenCalled();

@@ -19,8 +19,8 @@ const stateReady: AppState = {
 function sampleResult(overrides: Partial<BoundaryCasesResult> = {}): BoundaryCasesResult {
   return {
     candidates: [
-      { pmid: '111', title: 'Paper A', year: 2020, reason: 'subset' },
-      { pmid: '222', title: null, year: null, reason: '' },
+      { pmid: '111', title: 'Paper A', year: 2020, reason: 'subset', abstract: 'Body of A.' },
+      { pmid: '222', title: null, year: null, reason: '', abstract: null },
     ],
     totalHits: 500,
     evaluatedCount: 20,
@@ -266,6 +266,39 @@ describe('createExpandView', () => {
       expect(items[1]?.querySelector('.expand__candidate-reason')?.textContent).toContain('(無し)');
       // 各候補には 3 つの判定ボタン
       expect(items[0]?.querySelectorAll('button')).toHaveLength(3);
+    });
+
+    test('各候補にアブストラクト本文を描画し、無い場合はプレースホルダを出す', () => {
+      const view = createExpandView();
+      const container = buildContainer();
+      view(container, { state: readyState(), navigate: jest.fn() });
+      const items = container.querySelectorAll('.expand__candidate');
+      // 1 件目: abstract あり → 本文が入り、--empty は付かない
+      const body0 = items[0]?.querySelector('.expand__candidate-abstract-body');
+      expect(body0?.textContent).toBe('Body of A.');
+      expect(body0?.classList.contains('expand__candidate-abstract-body--empty')).toBe(false);
+      // 2 件目: abstract null → プレースホルダ + --empty
+      const body1 = items[1]?.querySelector('.expand__candidate-abstract-body');
+      expect(body1?.textContent).toContain('アブストラクトなし');
+      expect(body1?.classList.contains('expand__candidate-abstract-body--empty')).toBe(true);
+    });
+
+    test('アブストラクト本文は textContent で代入され HTML はエスケープされる', () => {
+      const view = createExpandView();
+      const container = buildContainer();
+      const malicious = '<img src=x onerror=alert(1)> & 結論';
+      view(container, {
+        state: readyState(
+          sampleResult({
+            candidates: [{ pmid: '111', title: 'A', year: 2020, reason: 'r', abstract: malicious }],
+          })
+        ),
+        navigate: jest.fn(),
+      });
+      const body = container.querySelector('.expand__candidate-abstract-body')!;
+      // テキストとしてそのまま入り、子要素（img）は生成されない
+      expect(body.textContent).toBe(malicious);
+      expect(body.querySelector('img')).toBeNull();
     });
 
     test('include ボタンで onDecide が呼ばれ、decided クラスが付く', async () => {

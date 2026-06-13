@@ -60,6 +60,8 @@ export interface BoundaryCaseView {
   year: number | null;
   /** skill が付けた「迷う理由」 */
   reason: string;
+  /** efetch で取得したアブストラクト本文。無ければ null */
+  abstract: string | null;
 }
 
 export interface BoundaryCasesResult {
@@ -200,16 +202,21 @@ export async function recordDecision(
 
 function picksToViews(
   picks: BoundaryPick[],
-  articleMap: Map<string, { title: string | null; year: number | null }>
+  articleMap: Map<string, { title: string | null; year: number | null; abstract: string | null }>
 ): BoundaryCaseView[] {
   return picks.map((pick) => {
     // pick.pmid は必ず articleMap のキーに含まれる（呼び出し側で allowedPmids でフィルタ済）
-    const a = articleMap.get(pick.pmid) as { title: string | null; year: number | null };
+    const a = articleMap.get(pick.pmid) as {
+      title: string | null;
+      year: number | null;
+      abstract: string | null;
+    };
     return {
       pmid: pick.pmid,
       title: a.title,
       year: a.year,
       reason: pick.reason,
+      abstract: a.abstract,
     };
   });
 }

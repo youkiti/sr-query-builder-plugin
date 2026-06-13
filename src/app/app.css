@@ -489,6 +489,39 @@
   opacity: 0.85;
 }
 
+/* アブストラクト本文はフォーカス中のカードだけ展開する（候補は数件・本文は長いため）。
+   要素は常時 DOM にあり、表示切り替えはフォーカスクラスで行う。 */
+.expand__candidate-abstract {
+  display: none;
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+}
+
+.expand__candidate--focused .expand__candidate-abstract {
+  display: block;
+}
+
+.expand__candidate-abstract-label {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-1);
+}
+
+.expand__candidate-abstract-body {
+  margin: 0;
+  color: var(--color-text);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  line-height: 1.55;
+}
+
+.expand__candidate-abstract-body--empty {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
 .expand__shortcuts {
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
