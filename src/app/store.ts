@@ -1,9 +1,10 @@
 import type { CurrentProjectEntry } from '@/features/project';
 import type {
   AnalyzeMissedSeedsResult,
+  ValidationProgress,
   ValidationSummary,
 } from './services/validationService';
-import type { DraftBlockHit } from './services/draftService';
+import type { DraftBlockHit, DraftProgress } from './services/draftService';
 import { DEFAULT_ROUTE, type RouteName } from './router';
 
 /**
@@ -81,12 +82,27 @@ export interface MissedAnalysisEntry {
  * phase は生成（generating）と、生成完了後に自動で続く検証（validating）の 2 段階。
  * blockHits は「ブロックが出来上がるごと」に計測したヒット数をライブ表示するためのもの。
  */
+
+/**
+ * 構造化進捗の 1 イベント。phase で生成／検証を判別し、それぞれの step 列挙を持つ。
+ * 生成 = DraftProgress、検証 = ValidationProgress をそのまま内包する。
+ */
+export type DraftRunProgressDetail =
+  | ({ phase: 'generating' } & DraftProgress)
+  | ({ phase: 'validating' } & ValidationProgress);
+
 export interface DraftRunState {
   status: 'running' | 'error';
   /** 実行中の段階。error 時は失敗した段階を保持する */
   phase: 'generating' | 'validating';
   /** 現在処理中ステップの表示用ラベル（例: 「MeSH を提案中（ブロック 1/2）」） */
   progressLabel: string;
+  /**
+   * 構造化進捗。progressLabel が「今やっていること」の 1 行表示なのに対し、
+   * こちらは「パイプライン全体のどのステップにいるか」を view（進捗トラッカー /
+   * プログレスバー）が算出するための生データ。未設定なら従来の 1 行表示のみ。
+   */
+  progress?: DraftRunProgressDetail | null;
   /** 経過時間表示用の開始時刻（epoch ms）。view が 1 秒ごとに再計算する */
   startedAtMs: number;
   /** status='error' のときのメッセージ。running 中は null */

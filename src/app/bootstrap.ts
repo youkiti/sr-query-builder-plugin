@@ -675,7 +675,14 @@ async function runGenerateAndValidate(
         store.setState((s) =>
           s.draftRun === null
             ? s
-            : { ...s, draftRun: { ...s.draftRun, progressLabel: formatDraftProgress(p) } }
+            : {
+                ...s,
+                draftRun: {
+                  ...s.draftRun,
+                  progressLabel: formatDraftProgress(p),
+                  progress: { phase: 'generating', ...p },
+                },
+              }
         );
       },
       (hit) => {
@@ -697,7 +704,12 @@ async function runGenerateAndValidate(
       ? s
       : {
           ...s,
-          draftRun: { ...s.draftRun, phase: 'validating', progressLabel: '検証を開始します…' },
+          draftRun: {
+            ...s.draftRun,
+            phase: 'validating',
+            progressLabel: '検証を開始します…',
+            progress: { phase: 'validating', step: 'line_hits' },
+          },
         }
   );
   // 生成時に計測済みの概念ブロックは再 esearch せず再利用する
@@ -715,7 +727,14 @@ async function runGenerateAndValidate(
         store.setState((s) =>
           s.draftRun === null
             ? s
-            : { ...s, draftRun: { ...s.draftRun, progressLabel: formatValidationProgress(p) } }
+            : {
+                ...s,
+                draftRun: {
+                  ...s.draftRun,
+                  progressLabel: formatValidationProgress(p),
+                  progress: { phase: 'validating', ...p },
+                },
+              }
         );
       },
       precomputed

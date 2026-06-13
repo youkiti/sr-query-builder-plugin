@@ -1,7 +1,7 @@
 import type { DraftBlockHit, DraftProgress } from '@/app/services';
 import { parsePubmedFormulaMd, type PubmedFormula } from '@/lib/search-formula-md';
 import { ROUTE_LABELS } from '../router';
-import type { AppState } from '../store';
+import type { AppState, DraftRunProgressDetail, DraftRunState } from '../store';
 import { tokenizeExpression } from './formulaDisplay';
 import type { RenderView } from './types';
 import {
@@ -83,6 +83,13 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
     generateBtn.disabled = running;
     actions.appendChild(generateBtn);
     container.appendChild(actions);
+
+    // 全体の進捗トラッカー（プログレスバー + ステップカウンタ + フェーズ・ステッパー）。
+    // 「今やっていること」の 1 行（下の status）に対し、こちらは「全体のどこか」を示し、
+    // 長い LLM 待ち（特にフリーワード展開）でも残りが見えるようにする。実行中のみ表示。
+    if (running && run) {
+      container.appendChild(renderProgressTracker(doc, ctx.state, run));
+    }
 
     const status = doc.createElement('p');
     status.className = 'draft__status';
@@ -181,6 +188,190 @@ function renderLiveBlockHits(
     ul.appendChild(li);
   });
   section.appendChild(ul);
+  return section;
+}
+
+// --- 進捗トラッカー（プログレスバー + ステップカウンタ + ステッパー）---------------
+
+/** 各ブロックの生成サブステップ（順序固定）。1 ブロックにつきこの 4 つを踏む */
+const GEN_SUBSTEPS = ['block-designer', 'mesh-suggester', 'freeword-designer', 'line-hits'] as const;
+/** 全ブロック処理後の生成ステップ（順序固定） */
+const GEN_TAIL = ['filter-designer', 'assemble', 'save'] as const;
+/** 検証フェーズのステップ（順序固定） */
+const VAL_STEPS = ['line_hits', 'final_query', 'mesh', 'mesh_hierarchy', 'logging'] as const;
+
+const GEN_SUBSTEP_LABELS: Record<(typeof GEN_SUBSTEPS)[number], string> = {
+  'block-designer': '骨格',
+  'mesh-suggester': 'MeSH',
+  'freeword-designer': 'フリーワード',
+  'line-hits': '件数',
+};
+const GEN_TAIL_LABELS: Record<(typeof GEN_TAIL)[number], string> = {
+  'filter-designer': 'フィルタ決定',
+  assemble: '組み立て',
+  save: '保存',
+};
+const VAL_STEP_LABELS: Record<(typeof VAL_STEPS)[number], string> = {
+  line_hits: '各行ヒット数',
+  final_query: '捕捉率',
+  mesh: 'MeSH 抽出',
+  mesh_hierarchy: 'MeSH 階層',
+  logging: '記録',
+};
+
+type StepState = 'done' | 'active' | 'pending';
+
+/** パイプライン全体のアトミックステップ総数（生成 4×ブロック + 末尾 3 + 検証 5） */
+function totalSteps(blockCount: number): number {
+  return blockCount * GEN_SUBSTEPS.length + GEN_TAIL.length + VAL_STEPS.length;
+}
+
+/**
+ * 現在の構造化進捗を、パイプライン全体での 0 始まりインデックスへ変換する。
+ * progress 未設定（開始直後）は 0（=最初のステップ）。done は完了位置を返す。
+ * テストから検証しやすいよう純関数として export する。
+ */
+export function currentStepIndex(
+  progress: DraftRunProgressDetail | null | undefined,
+  blockCount: number
+): number {
+  const genTailBase = blockCount * GEN_SUBSTEPS.length;
+  const valBase = genTailBase + GEN_TAIL.length;
+  if (!progress) {
+    return 0;
+  }
+  if (progress.phase === 'generating') {
+    const subIdx = (GEN_SUBSTEPS as readonly string[]).indexOf(progress.step);
+    if (subIdx >= 0) {
+      return (progress.blockIndex ?? 0) * GEN_SUBSTEPS.length + subIdx;
+    }
+    const tailIdx = (GEN_TAIL as readonly string[]).indexOf(progress.step);
+    if (tailIdx >= 0) {
+      return genTailBase + tailIdx;
+    }
+    // 'done' = 生成完了（検証開始直前）
+    return valBase;
+  }
+  const valIdx = (VAL_STEPS as readonly string[]).indexOf(progress.step);
+  if (valIdx >= 0) {
+    return valBase + valIdx;
+  }
+  // 'done' = 全工程完了
+  return valBase + VAL_STEPS.length;
+}
+
+function stepStateFor(stepIndex: number, current: number): StepState {
+  if (stepIndex < current) {
+    return 'done';
+  }
+  if (stepIndex === current) {
+    return 'active';
+  }
+  return 'pending';
+}
+
+/** 1 ステップを表すチップ（✓ / ⟳ / ○ + ラベル） */
+function renderStepChip(doc: Document, label: string, state: StepState): HTMLElement {
+  const chip = doc.createElement('span');
+  chip.className = `draft__step draft__step--${state}`;
+  const icon = doc.createElement('span');
+  icon.className = 'draft__step-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  icon.textContent = state === 'done' ? '✓' : state === 'active' ? '⟳' : '○';
+  chip.appendChild(icon);
+  chip.appendChild(doc.createTextNode(label));
+  return chip;
+}
+
+/**
+ * 全体進捗トラッカー。実行中のみ呼ばれる。
+ * - 上段: プログレスバー（確定値）+「ステップ N / 総数」カウンタ（案 B）
+ * - 下段: 生成 / 検証の 2 フェーズ・ステッパー。生成はブロックごとに 4 サブステップを並べる（案 A）
+ * 構造（ブロック数・ステップ並び）は固定で blocksDraft から、現在位置は run.progress から決まる。
+ */
+function renderProgressTracker(doc: Document, state: AppState, run: DraftRunState): HTMLElement {
+  const blocks = state.blocksDraft?.blocks ?? [];
+  const blockCount = blocks.length;
+  const total = totalSteps(blockCount);
+  const current = currentStepIndex(run.progress, blockCount);
+
+  const section = doc.createElement('section');
+  section.className = 'draft__tracker';
+
+  // 上段: バー + カウンタ
+  const header = doc.createElement('div');
+  header.className = 'draft__tracker-header';
+  const bar = doc.createElement('progress');
+  bar.className = 'draft__progressbar';
+  bar.max = total;
+  bar.value = Math.min(current, total);
+  bar.setAttribute('aria-label', '全体の進捗');
+  const counter = doc.createElement('span');
+  counter.className = 'draft__step-counter';
+  counter.textContent = `ステップ ${Math.min(current + 1, total)} / ${total}`;
+  header.appendChild(bar);
+  header.appendChild(counter);
+  section.appendChild(header);
+
+  // 下段: 生成フェーズ
+  const genGroup = doc.createElement('div');
+  genGroup.className = 'draft__phase';
+  const genLabel = doc.createElement('span');
+  genLabel.className = 'draft__phase-label';
+  genLabel.textContent = '生成';
+  genGroup.appendChild(genLabel);
+
+  blocks.forEach((block, i) => {
+    const startIdx = i * GEN_SUBSTEPS.length;
+    const endIdx = startIdx + GEN_SUBSTEPS.length - 1;
+    const blockState: StepState =
+      current > endIdx ? 'done' : current < startIdx ? 'pending' : 'active';
+
+    const row = doc.createElement('div');
+    row.className = `draft__step-block draft__step-block--${blockState}`;
+    const name = doc.createElement('span');
+    name.className = 'draft__step-block-label';
+    name.textContent = `#${i + 1} ${block.blockLabel || `ブロック ${i + 1}`}`;
+    row.appendChild(name);
+
+    const subWrap = doc.createElement('div');
+    subWrap.className = 'draft__substeps';
+    GEN_SUBSTEPS.forEach((sub, j) => {
+      subWrap.appendChild(
+        renderStepChip(doc, GEN_SUBSTEP_LABELS[sub], stepStateFor(startIdx + j, current))
+      );
+    });
+    row.appendChild(subWrap);
+    genGroup.appendChild(row);
+  });
+
+  const tailWrap = doc.createElement('div');
+  tailWrap.className = 'draft__substeps draft__substeps--tail';
+  GEN_TAIL.forEach((s, k) => {
+    tailWrap.appendChild(
+      renderStepChip(doc, GEN_TAIL_LABELS[s], stepStateFor(blockCount * GEN_SUBSTEPS.length + k, current))
+    );
+  });
+  genGroup.appendChild(tailWrap);
+  section.appendChild(genGroup);
+
+  // 下段: 検証フェーズ
+  const valGroup = doc.createElement('div');
+  valGroup.className = 'draft__phase';
+  const valLabel = doc.createElement('span');
+  valLabel.className = 'draft__phase-label';
+  valLabel.textContent = '検証';
+  valGroup.appendChild(valLabel);
+
+  const valWrap = doc.createElement('div');
+  valWrap.className = 'draft__substeps';
+  const valBase = blockCount * GEN_SUBSTEPS.length + GEN_TAIL.length;
+  VAL_STEPS.forEach((s, k) => {
+    valWrap.appendChild(renderStepChip(doc, VAL_STEP_LABELS[s], stepStateFor(valBase + k, current)));
+  });
+  valGroup.appendChild(valWrap);
+  section.appendChild(valGroup);
+
   return section;
 }
 

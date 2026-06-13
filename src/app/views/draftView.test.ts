@@ -1,5 +1,5 @@
 import { INITIAL_STATE, type AppState, type BlocksDraft, type DraftRunState } from '../store';
-import { createDraftView, formatDraftProgress } from './draftView';
+import { createDraftView, currentStepIndex, formatDraftProgress } from './draftView';
 import type { DraftProgress, ValidationSummary } from '@/app/services';
 
 function validationSummary(): ValidationSummary {
@@ -285,6 +285,53 @@ describe('createDraftView', () => {
     expect(items[1]?.textContent).toContain('計測中…');
   });
 
+  test('実行中は進捗トラッカー（バー + ステップカウンタ + ステッパー）を表示する', () => {
+    const view = createDraftView();
+    const container = buildContainer();
+    const draft: BlocksDraft = {
+      blocks: [
+        { blockLabel: 'Population', description: '', aiGenerated: true, note: '' },
+        { blockLabel: 'Intervention', description: '', aiGenerated: true, note: '' },
+      ],
+      combinationExpression: '#1 AND #2',
+    };
+    view(container, {
+      state: stateReady({
+        blocksDraft: draft,
+        draftRun: {
+          ...runningState('フリーワードを展開中（ブロック 2/2）'),
+          progress: { phase: 'generating', step: 'freeword-designer', blockIndex: 1, blockCount: 2 },
+        },
+      }),
+      navigate: jest.fn(),
+    });
+    // バーと総数（生成 4×2 + 末尾 3 + 検証 5 = 16）
+    const bar = container.querySelector('progress.draft__progressbar') as HTMLProgressElement;
+    expect(bar).not.toBeNull();
+    expect(bar.max).toBe(16);
+    // freeword(ブロック2) = index 1*4 + 2 = 6 → 7 番目
+    expect(bar.value).toBe(6);
+    expect(container.querySelector('.draft__step-counter')?.textContent).toBe('ステップ 7 / 16');
+    // ブロック #1 は完了、#2 が実行中
+    const blockRows = container.querySelectorAll('.draft__step-block');
+    expect(blockRows).toHaveLength(2);
+    expect(blockRows[0]?.className).toContain('draft__step-block--done');
+    expect(blockRows[1]?.className).toContain('draft__step-block--active');
+    // #2 の骨格・MeSH は done、フリーワードが active、件数は pending
+    const block2Steps = blockRows[1]?.querySelectorAll('.draft__step') ?? [];
+    expect(block2Steps[0]?.className).toContain('draft__step--done');
+    expect(block2Steps[1]?.className).toContain('draft__step--done');
+    expect(block2Steps[2]?.className).toContain('draft__step--active');
+    expect(block2Steps[3]?.className).toContain('draft__step--pending');
+  });
+
+  test('実行中でなければ進捗トラッカーは出ない', () => {
+    const view = createDraftView();
+    const container = buildContainer();
+    view(container, { state: stateReady(), navigate: jest.fn() });
+    expect(container.querySelector('.draft__tracker')).toBeNull();
+  });
+
   test('検証結果が state にあり実行中でなければ捕捉率・未捕捉 PMID を表示する', () => {
     const view = createDraftView();
     const container = buildContainer();
@@ -349,5 +396,34 @@ describe('formatDraftProgress', () => {
     for (const step of steps) {
       expect(formatDraftProgress({ step, blockCount: 1 })).toBeTruthy();
     }
+  });
+});
+
+describe('currentStepIndex', () => {
+  // blockCount=2 のとき: 生成 4×2=8（idx 0-7）, 末尾 3（idx 8-10）, 検証 5（idx 11-15）
+  test('progress 未設定なら 0', () => {
+    expect(currentStepIndex(null, 2)).toBe(0);
+    expect(currentStepIndex(undefined, 2)).toBe(0);
+  });
+
+  test('生成サブステップは blockIndex×4 + サブ位置', () => {
+    expect(currentStepIndex({ phase: 'generating', step: 'block-designer', blockIndex: 0, blockCount: 2 }, 2)).toBe(0);
+    expect(currentStepIndex({ phase: 'generating', step: 'line-hits', blockIndex: 0, blockCount: 2 }, 2)).toBe(3);
+    expect(currentStepIndex({ phase: 'generating', step: 'mesh-suggester', blockIndex: 1, blockCount: 2 }, 2)).toBe(5);
+  });
+
+  test('生成末尾ステップはブロック分の後ろに並ぶ', () => {
+    expect(currentStepIndex({ phase: 'generating', step: 'filter-designer', blockCount: 2 }, 2)).toBe(8);
+    expect(currentStepIndex({ phase: 'generating', step: 'save', blockCount: 2 }, 2)).toBe(10);
+  });
+
+  test('生成 done は検証開始位置（=生成全完了）', () => {
+    expect(currentStepIndex({ phase: 'generating', step: 'done', blockCount: 2 }, 2)).toBe(11);
+  });
+
+  test('検証ステップは生成全体の後ろに並ぶ', () => {
+    expect(currentStepIndex({ phase: 'validating', step: 'line_hits' }, 2)).toBe(11);
+    expect(currentStepIndex({ phase: 'validating', step: 'logging' }, 2)).toBe(15);
+    expect(currentStepIndex({ phase: 'validating', step: 'done' }, 2)).toBe(16);
   });
 });
