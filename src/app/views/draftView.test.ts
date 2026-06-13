@@ -48,19 +48,52 @@ describe('createDraftView', () => {
     expect(container.querySelector('.view__placeholder')?.textContent).toContain('ブロック');
   });
 
-  test('既存の markdown があれば pre に表示し、ボタンは「再生成」', () => {
+  test('既存の markdown があればブロック単位で表示し、ボタンは「再生成」', () => {
     const view = createDraftView();
     const container = buildContainer();
     view(container, {
       state: stateReady({
-        currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 x\n```\n',
+        currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 x[Mesh]\n```\n',
         currentFormulaVersionId: 'v-123',
       }),
       navigate: jest.fn(),
     });
-    expect(container.querySelector('pre.draft__formula')?.textContent).toContain('PubMed');
+    const formula = container.querySelector('.draft__formula');
+    expect(formula).not.toBeNull();
+    expect(container.querySelector('.draft__block-id')?.textContent).toBe('#1');
+    // MeSH 語は専用 span で色分けされる
+    expect(container.querySelector('.draft__term--mesh')?.textContent).toBe('x[Mesh]');
     expect(container.querySelector('.draft__info')?.textContent).toContain('v-123');
     expect(container.querySelector('button')?.textContent).toBe('再生成する');
+  });
+
+  test('結合行は combination スタイルで描画される', () => {
+    const view = createDraftView();
+    const container = buildContainer();
+    view(container, {
+      state: stateReady({
+        currentFormulaMarkdown:
+          '## PubMed/MEDLINE\n\n```\n#1 a[Mesh] OR "b"[tiab]\n#2 c[Mesh]\n#3 #1 AND #2\n```\n',
+      }),
+      navigate: jest.fn(),
+    });
+    const blocks = container.querySelectorAll('.draft__block');
+    expect(blocks).toHaveLength(3);
+    expect(container.querySelectorAll('.draft__block--combination')).toHaveLength(1);
+    // フリーワード語も色分けされる
+    expect(container.querySelector('.draft__term--freeword')?.textContent).toBe('"b"[tiab]');
+  });
+
+  test('パース不能な markdown は生テキストの pre にフォールバック', () => {
+    const view = createDraftView();
+    const container = buildContainer();
+    view(container, {
+      state: stateReady({ currentFormulaMarkdown: 'これは検索式ではない' }),
+      navigate: jest.fn(),
+    });
+    expect(container.querySelector('pre.draft__formula--raw')?.textContent).toContain(
+      'これは検索式ではない'
+    );
   });
 
   test('markdown が無ければボタンは「生成する」', () => {
@@ -68,7 +101,7 @@ describe('createDraftView', () => {
     const container = buildContainer();
     view(container, { state: stateReady(), navigate: jest.fn() });
     expect(container.querySelector('button')?.textContent).toBe('生成する');
-    expect(container.querySelector('pre.draft__formula')).toBeNull();
+    expect(container.querySelector('.draft__formula')).toBeNull();
   });
 
   test('現在 version が null のときは "(未保存)" を表示', () => {

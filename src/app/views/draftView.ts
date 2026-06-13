@@ -1,5 +1,7 @@
 import type { DraftProgress } from '@/app/services';
+import { parsePubmedFormulaMd, type PubmedFormula } from '@/lib/search-formula-md';
 import { ROUTE_LABELS } from '../router';
+import { tokenizeExpression } from './formulaDisplay';
 import type { RenderView } from './types';
 
 /**
@@ -51,10 +53,7 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
       info.className = 'draft__info';
       info.textContent = `現在の version: ${ctx.state.currentFormulaVersionId ?? '(未保存)'}`;
       container.appendChild(info);
-      const pre = doc.createElement('pre');
-      pre.className = 'draft__formula';
-      pre.textContent = existing;
-      container.appendChild(pre);
+      container.appendChild(renderFormula(doc, existing));
     }
 
     const run = ctx.state.draftRun;
@@ -98,6 +97,81 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
       void callbacks.onGenerate();
     });
   };
+}
+
+/**
+ * 検索式 markdown をブロック単位で描画する。
+ * - 1 行が長いため折り返す（CSS の white-space: pre-wrap / overflow-wrap）
+ * - `#N` ごとにカードとして区切り、結合行（`#3 #1 AND #2`）は別スタイル
+ * - 語のフィールドタグを見て MeSH / フリーワードを薄く色分けする
+ *
+ * パースに失敗した場合（PubMed セクション欠落など）は生テキストの <pre> に
+ * フォールバックする。
+ */
+function renderFormula(doc: Document, markdown: string): HTMLElement {
+  let formula: PubmedFormula | null = null;
+  try {
+    formula = parsePubmedFormulaMd(markdown);
+  } catch {
+    formula = null;
+  }
+
+  if (!formula || formula.blocks.length === 0) {
+    const pre = doc.createElement('pre');
+    pre.className = 'draft__formula draft__formula--raw';
+    pre.textContent = markdown;
+    return pre;
+  }
+
+  const wrap = doc.createElement('div');
+  wrap.className = 'draft__formula';
+
+  for (const block of formula.blocks) {
+    const row = doc.createElement('div');
+    row.className = 'draft__block';
+    if (block.isCombination) {
+      row.classList.add('draft__block--combination');
+    }
+
+    const id = doc.createElement('span');
+    id.className = 'draft__block-id';
+    id.textContent = `#${block.id}`;
+    row.appendChild(id);
+
+    const expr = doc.createElement('div');
+    expr.className = 'draft__block-expr';
+    for (const segment of tokenizeExpression(block.expression)) {
+      if (segment.kind === 'plain') {
+        expr.appendChild(doc.createTextNode(segment.text));
+      } else {
+        const span = doc.createElement('span');
+        span.className = `draft__term draft__term--${segment.kind}`;
+        span.textContent = segment.text;
+        expr.appendChild(span);
+      }
+    }
+    row.appendChild(expr);
+    wrap.appendChild(row);
+  }
+
+  wrap.appendChild(buildLegend(doc));
+  return wrap;
+}
+
+/** MeSH / フリーワードの色分け凡例 */
+function buildLegend(doc: Document): HTMLElement {
+  const legend = doc.createElement('div');
+  legend.className = 'draft__legend';
+  for (const [kind, label] of [
+    ['mesh', 'MeSH'],
+    ['freeword', 'フリーワード'],
+  ] as const) {
+    const item = doc.createElement('span');
+    item.className = `draft__legend-item draft__term--${kind}`;
+    item.textContent = label;
+    legend.appendChild(item);
+  }
+  return legend;
 }
 
 /**
