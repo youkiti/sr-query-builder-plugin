@@ -26,6 +26,18 @@ import type { LlmProviderFactory } from './llmProviderService';
  * UI は候補を列挙して各候補に対して recordDecision を呼ぶ。
  */
 
+/**
+ * 境界事例取得（fetchBoundaryCandidates）の進捗ステップ。
+ * 画面（#/expand）の進捗トラッカーが「いま何をやっているか」を可視化するために使う。
+ * draft 画面と同じ思想で、各段階の開始時に onProgress で通知する。
+ */
+export type ExpandFetchStep =
+  | 'protocol' // プロトコル（RQ・組入/除外基準）を取得
+  | 'esearch' // 検索式を展開して PubMed を検索
+  | 'dedup' // 既存 seed と重複する PMID を除去
+  | 'efetch' // 候補論文のメタデータ（title/year/MeSH）を取得
+  | 'pick-boundary'; // LLM に境界事例を選定させる
+
 export interface ExpandServiceDeps {
   google: GoogleApiDeps;
   eutils: EutilsDeps;
@@ -37,6 +49,8 @@ export interface ExpandServiceDeps {
   retmax?: number;
   /** pick-boundary-cases に渡す候補件数上限。既定 20 */
   skillCandidateLimit?: number;
+  /** 任意: 各段階の開始時に呼ばれる進捗コールバック（進捗トラッカー表示用） */
+  onProgress?: (step: ExpandFetchStep) => void;
   now?: () => string;
 }
 
@@ -70,6 +84,7 @@ export async function fetchBoundaryCandidates(
   if (!state.currentFormulaMarkdown) {
     throw new Error('検索式ドラフトが未生成です。先に /draft で生成してください');
   }
+  deps.onProgress?.('protocol');
   const protocol = await resolveBoundaryProtocol(deps);
   const formula = parsePubmedFormulaMd(state.currentFormulaMarkdown);
   const query = expandFormula(formula).trim();
@@ -77,10 +92,12 @@ export async function fetchBoundaryCandidates(
     throw new Error('検索式の展開結果が空です');
   }
 
+  deps.onProgress?.('esearch');
   const esearchResult = await esearch(query, deps.eutils, {
     retmax: deps.retmax ?? 50,
   });
 
+  deps.onProgress?.('dedup');
   const seeds = await listSeedPapers(state.project.spreadsheetId, deps.google);
   const existingPmids = new Set(
     seeds.map((s) => s.pmid).filter((p): p is string => p !== null)
@@ -95,6 +112,7 @@ export async function fetchBoundaryCandidates(
       evaluatedCount: 0,
     };
   }
+  deps.onProgress?.('efetch');
   const articles = await efetchArticles(toFetch, deps.eutils);
   const articleMap = new Map(articles.map((a) => [a.pmid, a]));
   const candidates: BoundaryCandidate[] = toFetch
@@ -110,6 +128,7 @@ export async function fetchBoundaryCandidates(
     })
     .filter((v): v is BoundaryCandidate => v !== null);
 
+  deps.onProgress?.('pick-boundary');
   const provider = deps.llmFactory.forPurpose('pick_boundary');
   const picks = await pickBoundaryCases(
     {

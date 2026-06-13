@@ -5,6 +5,7 @@ import type {
   ValidationSummary,
 } from './services/validationService';
 import type { DraftBlockHit, DraftProgress } from './services/draftService';
+import type { BoundaryCasesResult, ExpandFetchStep } from './services/expandService';
 import { DEFAULT_ROUTE, type RouteName } from './router';
 
 /**
@@ -111,6 +112,33 @@ export interface DraftRunState {
   blockHits: DraftBlockHit[];
 }
 
+/**
+ * 対話的 seed 拡張（#/expand）の「境界事例を取得」実行状態。
+ *
+ * fetchBoundaryCandidates は最後に LLM（pick-boundary）を呼ぶため、その完了時に
+ * LLM コスト集計（cumulativeCostUsd）の setState が走り、expand ビューも含めた全ビューが
+ * 再描画される。進捗・取得結果をローカル DOM に書くとこの再描画で消えてしまうため、
+ * draftRun / validationResult と同じく store に保持して再描画に耐えるようにする。
+ *
+ * - status='running': fetch 実行中。step が現在の段階（進捗トラッカー表示用）
+ * - status='ready':   取得完了。result の候補を判定できる段階
+ * - status='error':   いずれかの段階で失敗
+ *
+ * 候補の判定（recordDecision）とラウンド完了の再検証（runValidation）は LLM を呼ばず
+ * setState を起こさない（= 再描画されない）ため、判定 UI 自体はビュー側のローカル状態で扱う。
+ */
+export interface ExpandRunState {
+  status: 'running' | 'ready' | 'error';
+  /** running 中は現在処理中の段階。ready は 'done' 相当、error は失敗した段階 */
+  step: ExpandFetchStep | 'done';
+  /** 経過時間表示用の開始時刻（epoch ms）。view が 1 秒ごとに再計算する */
+  startedAtMs: number;
+  /** status='error' のときのメッセージ。それ以外は null */
+  error: string | null;
+  /** status='ready' のときの取得結果（候補・ヒット数）。それ以外は null */
+  result: BoundaryCasesResult | null;
+}
+
 export interface AppState {
   /** 現在のハッシュルート */
   route: RouteName;
@@ -136,6 +164,8 @@ export interface AppState {
   currentFormulaMarkdown: string | null;
   /** 検索式ドラフト生成の実行状態。未実行（完了済み含む）なら null */
   draftRun: DraftRunState | null;
+  /** 境界事例取得（#/expand）の実行状態。未実行なら null */
+  expandRun: ExpandRunState | null;
   /** 直近の検証結果。未実行なら null */
   validationResult: ValidationResultEntry | null;
   /** 未捕捉 PMID の AI 原因分析結果。未実行なら null */
@@ -153,6 +183,7 @@ export const INITIAL_STATE: AppState = {
   currentFormulaVersionId: null,
   currentFormulaMarkdown: null,
   draftRun: null,
+  expandRun: null,
   validationResult: null,
   missedAnalysis: null,
 };

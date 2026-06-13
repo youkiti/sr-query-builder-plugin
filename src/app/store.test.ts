@@ -18,6 +18,7 @@ describe('createStore', () => {
       currentFormulaVersionId: null,
       currentFormulaMarkdown: null,
       draftRun: null,
+      expandRun: null,
       validationResult: null,
       missedAnalysis: null,
     });

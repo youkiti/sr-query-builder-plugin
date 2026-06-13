@@ -59,6 +59,7 @@ describe('startApp', () => {
       currentFormulaVersionId: null,
       currentFormulaMarkdown: null,
       draftRun: null,
+      expandRun: null,
       validationResult: null,
       missedAnalysis: null,
     });
@@ -99,6 +100,7 @@ describe('startApp', () => {
       currentFormulaVersionId: null,
       currentFormulaMarkdown: null,
       draftRun: null,
+      expandRun: null,
       validationResult: null,
       missedAnalysis: null,
     });
@@ -1020,6 +1022,10 @@ describe('startApp - wiring 層', () => {
               },
             },
           ],
+          // 実 Gemini はトークン数を返すため LLM コスト集計の setState（→ 全ビュー再描画）が
+          // 走る。この再描画でも取得結果（候補一覧）が消えないこと＝store.expandRun 保持の
+          // 回帰テストとして、トークン数を載せて cost を非 null にしておく。
+          usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 50 },
         });
       }
       if (u.includes('/upload/drive/v3/files')) {
@@ -1069,6 +1075,35 @@ describe('startApp - wiring 層', () => {
       (c[0] as string).includes('SeedPapers') && (c[0] as string).includes(':append')
     );
     expect(seedAppends).toHaveLength(1);
+  });
+
+  test('境界事例取得が失敗すると expandRun=error になりエラーを表示する', async () => {
+    const doc = buildDocument();
+    // Gemini API キー未設定 → buildLlmProviderFactory が LlmApiKeyMissingError を投げる
+    const { runtime } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+    });
+    const handle = startApp(doc, {
+      getHash: () => '#/expand',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({
+      ...s,
+      currentFormulaVersionId: 'v-1',
+      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 asthma[tiab]\n```\n',
+    }));
+    doc.querySelector<HTMLButtonElement>('.expand__actions button')!.click();
+    for (let i = 0; i < 10; i += 1) {
+      await flush();
+    }
+    const expandRun = handle.store.getState().expandRun;
+    expect(expandRun?.status).toBe('error');
+    expect(expandRun?.error).toContain('API キー');
+    expect(doc.querySelector('.expand__error')?.textContent).toContain('API キー');
+    expect(doc.querySelector('.expand__candidate')).toBeNull();
   });
 
   test('生成→検証パイプラインが ValidationLog に検証行を追記する', async () => {

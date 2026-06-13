@@ -30,7 +30,6 @@ import {
   submitProtocol,
   type AnalyzeMissedSeedsResult,
   type BlockImprovementResult,
-  type BoundaryCasesResult,
   type ChromeRuntimeDeps,
   type DraftBlockHit,
   type DraftProgress,
@@ -399,7 +398,8 @@ function buildDefaultViewOptions(
         runImproveBlock(store, runtime, llmFactoryDepsBase(), input),
     },
     expand: {
-      onFetch: async (): Promise<BoundaryCasesResult> =>
+      // 進捗・取得結果は store.expandRun 経由で反映される（draft の onGenerate と同じ思想）
+      onFetch: async (): Promise<void> =>
         runFetchBoundary(store, runtime, llmFactoryDepsBase()),
       onDecide: async (input: RecordDecisionInput): Promise<RecordDecisionResult> =>
         runRecordDecision(store, runtime, input),
@@ -452,28 +452,83 @@ async function runImproveBlock(
   return requestBlockImprovement(input, { store, llmFactory: factory });
 }
 
+/**
+ * 「境界事例を取得」パイプライン。fetchBoundaryCandidates の進捗（プロトコル取得 →
+ * PubMed 検索 → 重複除去 → 候補論文取得 → AI 選定）と取得結果を、すべて store.expandRun
+ * 経由で更新する。最後の AI 選定（LLM）完了時に走る LLM コスト集計の setState による
+ * 全ビュー再描画でも進捗・候補が消えないよう、ローカル DOM ではなく store に保持する。
+ */
 async function runFetchBoundary(
   store: AppStore,
   runtime: ChromeRuntimeDeps,
   baseDeps: Omit<LlmFactoryDeps, 'llmLogFolderId' | 'spreadsheetId'>
-): Promise<BoundaryCasesResult> {
+): Promise<void> {
+  if (store.getState().expandRun?.status === 'running') {
+    // 再描画タイミング次第でボタンが二度押せた場合の保険
+    return;
+  }
+  store.setState((s) => ({
+    ...s,
+    expandRun: {
+      status: 'running',
+      step: 'protocol',
+      startedAtMs: Date.now(),
+      error: null,
+      result: null,
+    },
+  }));
+
   const project = store.getState().project;
   /* istanbul ignore if -- expand view は project + formula 有り時しか onFetch を呼ばない */
   if (!project) {
-    throw new Error('プロジェクトが選択されていません');
+    setExpandRunError(store, new Error('プロジェクトが選択されていません'));
+    return;
   }
-  const factory: LlmProviderFactory = await buildLlmProviderFactory({
-    ...baseDeps,
-    llmLogFolderId: project.driveFolderId,
-    spreadsheetId: project.spreadsheetId,
-  });
-  const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
-  return fetchBoundaryCandidates({
-    google: runtime.google,
-    eutils,
-    store,
-    llmFactory: factory,
-  });
+  try {
+    const factory: LlmProviderFactory = await buildLlmProviderFactory({
+      ...baseDeps,
+      llmLogFolderId: project.driveFolderId,
+      spreadsheetId: project.spreadsheetId,
+    });
+    const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
+    const result = await fetchBoundaryCandidates({
+      google: runtime.google,
+      eutils,
+      store,
+      llmFactory: factory,
+      onProgress: (step) => {
+        store.setState((s) =>
+          s.expandRun === null ? s : { ...s, expandRun: { ...s.expandRun, step } }
+        );
+      },
+    });
+    store.setState((s) => ({
+      ...s,
+      expandRun: {
+        status: 'ready',
+        step: 'done',
+        startedAtMs: s.expandRun?.startedAtMs ?? Date.now(),
+        error: null,
+        result,
+      },
+    }));
+  } catch (err) {
+    setExpandRunError(store, err);
+  }
+}
+
+/** expandRun を失敗状態にする（失敗した段階 step は保持して原因を読み取れるようにする） */
+function setExpandRunError(store: AppStore, err: unknown): void {
+  store.setState((s) => ({
+    ...s,
+    expandRun: {
+      status: 'error',
+      step: s.expandRun?.step ?? 'protocol',
+      startedAtMs: s.expandRun?.startedAtMs ?? Date.now(),
+      error: err instanceof Error ? err.message : String(err),
+      result: null,
+    },
+  }));
 }
 
 async function runRecordDecision(

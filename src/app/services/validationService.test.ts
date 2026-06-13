@@ -50,6 +50,7 @@ function makeState(): AppState {
     currentFormulaVersionId: 'v-1',
     currentFormulaMarkdown: formulaMd,
     draftRun: null,
+    expandRun: null,
     validationResult: null,
     missedAnalysis: null,
   };

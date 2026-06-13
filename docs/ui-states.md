@@ -136,7 +136,7 @@
 | `#/seeds` | PMID リスト + include/exclude/maybe ボタン + interactive 拡張ログ | 0 件と N 件で見た目が分岐する |
 | `#/draft` | LLM ドラフト検索式の表示 + 再生成ボタン。生成の進捗・エラーは `store.draftRun` で管理し（LLM コスト集計の setState による全ビュー再描画で表示が消えないように）、実行中は `.draft__tracker`（全体進捗トラッカー: 確定 `progress` バー + 「ステップ N / 総数」カウンタ + 生成/検証 2 フェーズのステッパー。生成はブロックごとに 骨格→MeSH→フリーワード→件数 の 4 サブステップを ✓/⟳/○ で表示）と、`.draft__status` の進捗ラベル + 経過時間（1 秒ごと更新）を併記。全体位置は `store.draftRun.progress`（`DraftRunProgressDetail`）から算出する。ボタンは「実行中…」で無効化 | エラー時は `.draft__error`（role=alert、枠付き）に「生成に失敗しました: …」を出し、ボタンは再試行可能に戻る |
 | `#/validate` | 行ごとヒット数 / 捕捉率 / missed PMIDs | 結果待ちはスピナ、失敗時はリトライボタン |
-| `#/expand` | 境界事例論文の対話判定 UI | 0 件のときは「再検証可能」案内のみ |
+| `#/expand` | 境界事例論文の対話判定 UI。取得（fetchBoundaryCandidates）の進捗・取得結果は `store.expandRun` で管理し（最後の AI 選定 LLM の setState による全ビュー再描画で表示が消えないように。draft と同じ思想）、取得中は `.expand__tracker`（プロトコル取得→PubMed 検索→重複除去→候補論文の取得→AI 選定 の 5 段階を `draft__step` チップ ✓/⟳/○ で表示）+ `.expand__status` の現在段階ラベル + 経過時間（1 秒ごと更新）を出す。取得完了後の候補一覧・判定・ラウンド再検証はビュー側ローカル DOM（recordDecision / 再検証は LLM を呼ばず再描画されないため） | 0 件のときは「再検証可能」案内のみ。取得失敗時は `.expand__error` にメッセージ |
 | `#/edit` | 検索式編集（diff 表示） | diff ペインが空でも縦スクロールが出ない |
 | `#/export` | 各 DB 変換結果（CENTRAL / Embase(Dialog) / ClinicalTrials.gov / ICTRP）+ コピー / DL ボタン | 1 つも変換結果が無い時は完了ボタンを出さない |
 | `#/done` | PubMed nbib DL 案内 + 次ステップ（tiab-review-plugin への引き継ぎ） | 「もう一度エクスポート」リンクで `#/export` に戻る |
