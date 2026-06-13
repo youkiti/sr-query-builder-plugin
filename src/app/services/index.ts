@@ -63,6 +63,7 @@ export {
   analyzeMissedSeeds,
   type ValidationServiceDeps,
   type ValidationSummary,
+  type ValidationProgress,
   type AnalyzeMissedSeedsDeps,
   type AnalyzeMissedSeedsResult,
 } from './validationService';

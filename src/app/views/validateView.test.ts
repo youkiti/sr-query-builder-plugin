@@ -113,6 +113,33 @@ describe('createValidateView', () => {
     );
   });
 
+  test('検証中は段階ラベルと経過時間を status に表示する', async () => {
+    let capturedProgress: ((p: { step: string; blockIndex?: number; blockCount?: number }) => void) | undefined;
+    const onRun = jest.fn().mockImplementation((onProgress) => {
+      capturedProgress = onProgress;
+      return new Promise(() => {}); // 解決しない → 実行中のまま
+    });
+    const view = createValidateView({ onRun });
+    const container = buildContainer();
+    view(container, { state: stateReady(), navigate: jest.fn() });
+    const button = container.querySelector('button')!;
+    button.click();
+    // 実行中はボタンが無効化され「検証中…」になる
+    expect(button.disabled).toBe(true);
+    expect(button.textContent).toBe('検証中…');
+    // 進捗が来たら段階ラベル + 経過時間を表示
+    expect(capturedProgress).toBeInstanceOf(Function);
+    capturedProgress!({ step: 'line_hits', blockIndex: 1, blockCount: 3 });
+    const status = container.querySelector('.validate__status')?.textContent ?? '';
+    expect(status).toContain('行ごとのヒット数を集計中');
+    expect(status).toContain('ブロック 1/3');
+    expect(status).toContain('経過');
+    capturedProgress!({ step: 'mesh' });
+    expect(container.querySelector('.validate__status')?.textContent).toContain(
+      'Seed の MeSH を抽出中'
+    );
+  });
+
   test('mesh 階層取得失敗時は meshHierarchy エラーセクションに理由を出し、frequency は残す', async () => {
     const onRun = jest.fn().mockResolvedValue(
       sampleSummary({

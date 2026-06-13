@@ -18,11 +18,20 @@ export interface LineHitResult {
   error: string | null;
 }
 
+/**
+ * ブロックごとのヒット数取得の進捗を通知するコールバック。
+ * `done` 件目（1 始まり）を `total` 件中で処理し終えたタイミングで呼ばれる。
+ */
+export type LineHitProgress = (done: number, total: number, blockId: string) => void;
+
 export async function checkSearchLines(
   formula: PubmedFormula,
-  deps: EutilsDeps
+  deps: EutilsDeps,
+  onProgress?: LineHitProgress
 ): Promise<LineHitResult[]> {
   const results: LineHitResult[] = [];
+  const total = formula.blocks.length;
+  let done = 0;
   for (const block of formula.blocks) {
     try {
       const expandedQuery = expandFormula(formula, block.id);
@@ -43,6 +52,8 @@ export async function checkSearchLines(
         error: err instanceof Error ? err.message : String(err),
       });
     }
+    done += 1;
+    onProgress?.(done, total, block.id);
   }
   return results;
 }

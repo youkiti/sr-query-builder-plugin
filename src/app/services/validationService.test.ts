@@ -166,6 +166,43 @@ describe('runValidation', () => {
     expect(appendCalls).toHaveLength(5);
   });
 
+  test('onProgress に各検証段階の進捗を通知する', async () => {
+    const { eutilsFetchMock, deps } = setupDeps();
+    eutilsFetchMock
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '100', idlist: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '200', idlist: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '50', idlist: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '500', idlist: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '1', idlist: ['111'] } }))
+      .mockResolvedValueOnce(
+        xmlResponse(
+          `<?xml version="1.0"?><PubmedArticleSet><PubmedArticle><MedlineCitation><PMID>111</PMID><Article><ArticleTitle>X</ArticleTitle></Article><MeshHeadingList><MeshHeading><DescriptorName>Diabetes Mellitus</DescriptorName></MeshHeading></MeshHeadingList></MedlineCitation></PubmedArticle></PubmedArticleSet>`
+        )
+      )
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { idlist: ['2001'] } }))
+      .mockResolvedValueOnce(
+        xmlResponse(
+          `<?xml version="1.0"?><DescriptorRecordSet><DescriptorRecord><DescriptorName><String>Diabetes Mellitus</String></DescriptorName><TreeNumberList><TreeNumber>C18.452.394</TreeNumber></TreeNumberList></DescriptorRecord></DescriptorRecordSet>`
+        )
+      );
+    const progress: import('./validationService').ValidationProgress[] = [];
+    await runValidation({ ...deps, onProgress: (p) => progress.push(p) });
+    const steps = progress.map((p) => p.step);
+    // 段階が順に通知され、line_hits はブロックごとの内訳も出る
+    expect(steps).toContain('line_hits');
+    expect(steps).toContain('final_query');
+    expect(steps).toContain('mesh');
+    expect(steps).toContain('mesh_hierarchy');
+    expect(steps).toContain('logging');
+    expect(steps[steps.length - 1]).toBe('done');
+    const lineHitProgress = progress.filter((p) => p.step === 'line_hits');
+    expect(lineHitProgress[lineHitProgress.length - 1]).toEqual({
+      step: 'line_hits',
+      blockIndex: 3,
+      blockCount: 3,
+    });
+  });
+
   test('mesh tree 取得のみ失敗した場合、meshFrequency は生きて meshHierarchyError にメッセージが入る', async () => {
     const { eutilsFetchMock, deps } = setupDeps();
     eutilsFetchMock

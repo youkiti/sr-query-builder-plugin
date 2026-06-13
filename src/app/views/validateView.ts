@@ -1,4 +1,8 @@
-import type { AnalyzeMissedSeedsResult, ValidationSummary } from '@/app/services';
+import type {
+  AnalyzeMissedSeedsResult,
+  ValidationProgress,
+  ValidationSummary,
+} from '@/app/services';
 import type { AppState } from '../store';
 import { ROUTE_LABELS } from '../router';
 import type { RenderView } from './types';
@@ -15,7 +19,11 @@ import type { RenderView } from './types';
  */
 
 export interface ValidateViewCallbacks {
-  onRun?: () => Promise<ValidationSummary>;
+  /**
+   * 検証を実行する。`onProgress` には各検証段階の進捗が渡るので、
+   * 「いま何をしているか」を画面に表示するのに使う（draft タブと同様）。
+   */
+  onRun?: (onProgress?: (progress: ValidationProgress) => void) => Promise<ValidationSummary>;
   /** 未捕捉 PMID の原因を AI に分析させる（requirements.md §4.6） */
   onAnalyzeMissed?: (missedPmids: string[]) => Promise<AnalyzeMissedSeedsResult>;
 }
@@ -77,11 +85,26 @@ export function createValidateView(callbacks: ValidateViewCallbacks = {}): Rende
         return;
       }
       runBtn.disabled = true;
-      status.textContent = '検証中…';
+      runBtn.textContent = '検証中…';
       errorBox.textContent = '';
       results.innerHTML = '';
+
+      // 実行中は「いま何をしているか」と経過時間を表示して動いていることを示す。
+      // runValidation は LLM を呼ばず、実行中にストア更新→再描画が起きないため、
+      // draft タブのような store 経由ではなくローカル DOM + ticker で十分。
+      const startedAtMs = Date.now();
+      let currentLabel = '検証を開始します…';
+      status.textContent = runningStatusText(currentLabel, startedAtMs);
+      const stopTicker = startElapsedTicker(status, () => currentLabel, startedAtMs);
+      const onProgress = (progress: ValidationProgress): void => {
+        currentLabel = formatValidationProgress(progress);
+        if (status.isConnected) {
+          status.textContent = runningStatusText(currentLabel, startedAtMs);
+        }
+      };
+
       callbacks
-        .onRun()
+        .onRun(onProgress)
         .then((summary) => {
           status.textContent = summaryStatusText(summary);
           renderResults(doc, results, summary, callbacks, null);
@@ -91,10 +114,64 @@ export function createValidateView(callbacks: ValidateViewCallbacks = {}): Rende
           status.textContent = '';
         })
         .finally(() => {
+          stopTicker();
           runBtn.disabled = false;
+          runBtn.textContent = '検証を実行する';
         });
     });
   };
+}
+
+/** ValidationProgress を表示用ラベルへ変換する（draftView.formatDraftProgress と同型） */
+export function formatValidationProgress(progress: ValidationProgress): string {
+  const label = {
+    line_hits: '行ごとのヒット数を集計中',
+    final_query: 'シード捕捉率を確認中',
+    mesh: 'Seed の MeSH を抽出中',
+    mesh_hierarchy: 'MeSH 階層を取得中',
+    logging: '結果を記録中',
+    done: '完了',
+  }[progress.step];
+  if (progress.step === 'line_hits' && progress.blockCount !== undefined) {
+    return `${label}（ブロック ${progress.blockIndex ?? 0}/${progress.blockCount}）`;
+  }
+  return label;
+}
+
+/**
+ * 実行中ステータスの経過時間を 1 秒ごとに更新する（draftView と同じ手法）。
+ * 再描画などで要素が DOM から外れたら isConnected を見て自動停止する。
+ * 戻り値の関数を呼ぶと明示的に停止できる。
+ */
+function startElapsedTicker(
+  status: HTMLElement,
+  getLabel: () => string,
+  startedAtMs: number
+): () => void {
+  const win = status.ownerDocument.defaultView;
+  /* istanbul ignore if -- jsdom/ブラウザでは defaultView は常に存在する防御 */
+  if (!win) {
+    return () => {};
+  }
+  const timer = win.setInterval(() => {
+    if (!status.isConnected) {
+      win.clearInterval(timer);
+      return;
+    }
+    status.textContent = runningStatusText(getLabel(), startedAtMs);
+  }, 1000);
+  return () => win.clearInterval(timer);
+}
+
+function runningStatusText(label: string, startedAtMs: number): string {
+  return `${label}（経過 ${formatElapsed(Date.now() - startedAtMs)}）`;
+}
+
+function formatElapsed(ms: number): string {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return min > 0 ? `${min}分${sec}秒` : `${sec}秒`;
 }
 
 /** state.validationResult が現在の formula バージョンの結果なら返す（stale は null） */

@@ -38,12 +38,33 @@ import type { LlmProviderFactory } from './llmProviderService';
  * 実行には現在の FormulaVersion と project が必要。
  */
 
+/**
+ * 検証の進捗段階。view 側で「いま何をしているか」を表示するために使う
+ * （draftView の DraftProgress と同じ役割）。
+ *
+ * - `line_hits`: 行ごとのヒット数を集計中（blockIndex/blockCount で内訳）
+ * - `final_query`: シード捕捉率を確認中
+ * - `mesh`: seed の MeSH を抽出中
+ * - `mesh_hierarchy`: MeSH 階層を取得中
+ * - `logging`: 結果を Drive / ValidationLog に記録中
+ * - `done`: 完了
+ */
+export interface ValidationProgress {
+  step: 'line_hits' | 'final_query' | 'mesh' | 'mesh_hierarchy' | 'logging' | 'done';
+  /** line_hits 段階で処理し終えたブロック数（1 始まり） */
+  blockIndex?: number;
+  /** line_hits 段階の総ブロック数 */
+  blockCount?: number;
+}
+
 export interface ValidationServiceDeps {
   google: GoogleApiDeps;
   eutils: EutilsDeps;
   store: AppStore;
   newUuid?: () => string;
   now?: () => string;
+  /** 進捗通知（任意）。各検証段階の開始時などに呼ばれる */
+  onProgress?: (progress: ValidationProgress) => void;
 }
 
 export interface ValidationSummary {
@@ -85,8 +106,14 @@ export async function runValidation(deps: ValidationServiceDeps): Promise<Valida
     .map((seed) => seed.pmid)
     .filter((pmid): pmid is string => pmid !== null);
 
-  const lineHits = await checkSearchLines(formula, deps.eutils);
+  const notify = deps.onProgress ?? (() => {});
 
+  notify({ step: 'line_hits', blockIndex: 0, blockCount: formula.blocks.length });
+  const lineHits = await checkSearchLines(formula, deps.eutils, (done, count, _blockId) => {
+    notify({ step: 'line_hits', blockIndex: done, blockCount: count });
+  });
+
+  notify({ step: 'final_query' });
   let finalQuery = buildEmptyFinalQuery();
   let finalQueryError: string | null = null;
   try {
@@ -95,6 +122,7 @@ export async function runValidation(deps: ValidationServiceDeps): Promise<Valida
     finalQueryError = formatError(err);
   }
 
+  notify({ step: 'mesh' });
   let mesh: MeshForSeed[] = [];
   let meshFrequency: Array<{ descriptor: string; count: number }> = [];
   let meshError: string | null = null;
@@ -112,6 +140,7 @@ export async function runValidation(deps: ValidationServiceDeps): Promise<Valida
   let meshMermaid: string = toMermaidFlowchart([]);
   let meshHierarchyError: string | null = null;
   if (meshError === null && meshFrequency.length > 0) {
+    notify({ step: 'mesh_hierarchy' });
     try {
       const treeMap = await fetchMeshTreeNumbers(
         meshFrequency.map((entry) => entry.descriptor),
@@ -124,6 +153,7 @@ export async function runValidation(deps: ValidationServiceDeps): Promise<Valida
     }
   }
 
+  notify({ step: 'logging' });
   const uuidFn = deps.newUuid ?? newUuid;
   const nowFn = deps.now ?? nowIso;
   const loggedValidationIds: string[] = [];
@@ -187,6 +217,7 @@ export async function runValidation(deps: ValidationServiceDeps): Promise<Valida
     detailRef,
   });
 
+  notify({ step: 'done' });
   return {
     lineHits,
     finalQuery,

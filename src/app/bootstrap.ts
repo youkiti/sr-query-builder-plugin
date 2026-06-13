@@ -45,6 +45,7 @@ import {
   type SaveEditedFormulaInput,
   type SaveEditedFormulaResult,
   type SeedPaperWithRow,
+  type ValidationProgress,
   type ValidationSummary,
 } from './services';
 import type { SeedPaper } from '@/domain/seedPaper';
@@ -393,8 +394,10 @@ function buildDefaultViewOptions(
     validate: {
       // 結果は store に保存する。LLM コスト集計（cumulativeCostUsd）の setState が
       // ビュー全体を再描画しても、validate view が state から結果を復元できるようにするため。
-      onRun: async (): Promise<ValidationSummary> => {
-        const summary = await runValidate(store, runtime);
+      onRun: async (
+        onProgress?: (progress: ValidationProgress) => void
+      ): Promise<ValidationSummary> => {
+        const summary = await runValidate(store, runtime, onProgress);
         store.setState((s) => ({
           ...s,
           validationResult:
@@ -617,13 +620,15 @@ async function runFetchArticle(
 
 async function runValidate(
   store: AppStore,
-  runtime: ChromeRuntimeDeps
+  runtime: ChromeRuntimeDeps,
+  onProgress?: (progress: ValidationProgress) => void
 ): Promise<ValidationSummary> {
   const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
   return runValidation({
     google: runtime.google,
     eutils,
     store,
+    onProgress,
   });
 }
 
