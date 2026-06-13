@@ -1,6 +1,7 @@
 import type { AppStore } from '../store';
 import {
   assembleFormulaMd,
+  buildBlockExpression,
   appendFormulaVersion,
   type AssembledFormula,
   type BlockOutputs,
@@ -43,6 +44,7 @@ export interface DraftProgress {
     | 'block-designer'
     | 'mesh-suggester'
     | 'freeword-designer'
+    | 'line-hits'
     | 'filter-designer'
     | 'assemble'
     | 'save'
@@ -51,6 +53,26 @@ export interface DraftProgress {
   blockIndex?: number;
   /** ユーザーブロックの総数 */
   blockCount: number;
+}
+
+/**
+ * 生成途中に計測した 1 概念ブロックのヒット数（line_hits の前倒し実行）。
+ * 「ブロックが出来上がるごとに検索」を実現するためのもので、view のライブ表示と、
+ * 完成後の検証（runValidation）での再 esearch 省略の両方に使う。
+ */
+export interface DraftBlockHit {
+  /** ユーザーブロック index（0〜N-1） */
+  blockIndex: number;
+  /** 検索式上のブロック id（`#N` の N）。概念ブロックは String(blockIndex + 1) */
+  blockId: string;
+  /** ブロック名（blocksDraft.blockLabel） */
+  blockLabel: string;
+  /** 組み立てたブロック式（そのまま esearch に投げた文字列） */
+  expression: string;
+  /** ヒット数。計測前 / エラー時は null */
+  hitCount: number | null;
+  /** 計測エラー時のメッセージ。成功時は null */
+  error: string | null;
 }
 
 export interface DraftServiceDeps {
@@ -62,6 +84,14 @@ export interface DraftServiceDeps {
   llmFactory: LlmProviderFactory;
   /** 進捗通知 callback（UI が prog バーを進める用） */
   onProgress?: (progress: DraftProgress) => void;
+  /**
+   * ブロック式のヒット数を計測する（esearch count）。注入された場合のみ、
+   * 各概念ブロックが出来上がった直後に呼んで line_hits を前倒し計測する。
+   * draftService 自身は NCBI を直接叩かず、配線側（bootstrap）が esearch を渡す。
+   */
+  countBlockHits?: (expression: string) => Promise<number>;
+  /** 1 ブロックの計測が確定するたびに呼ぶ（view のライブ表示更新用） */
+  onBlockCounted?: (hit: DraftBlockHit) => void;
   /** テスト時に差し替え可能な UUID / 時刻 */
   newUuid?: () => string;
   now?: () => string;
@@ -75,6 +105,8 @@ export interface DraftResult {
   blockSkeletons: BlockSkeleton[];
   meshSuggestions: MeshSuggestion[][];
   freewordSuggestions: FreewordSuggestion[][];
+  /** 生成途中に計測した概念ブロックごとのヒット数。countBlockHits 未注入なら空配列 */
+  blockHits: DraftBlockHit[];
 }
 
 const noopProgress: (p: DraftProgress) => void = () => undefined;
@@ -103,6 +135,7 @@ export async function generateDraft(deps: DraftServiceDeps): Promise<DraftResult
   const skeletons: BlockSkeleton[] = [];
   const meshes: MeshSuggestion[][] = [];
   const freewords: FreewordSuggestion[][] = [];
+  const blockHits: DraftBlockHit[] = [];
 
   // seed 論文のタイトル・抄録・MeSH を各 skill へ渡す（requirements.md §4.4）。
   // 取得に失敗しても／seed 0 件でもドラフト生成は止めず、空のコンテクストで続行する。
@@ -152,6 +185,28 @@ export async function generateDraft(deps: DraftServiceDeps): Promise<DraftResult
       deps.llmFactory.forPurpose('expand_freeword')
     );
     freewords.push(fw);
+
+    // ブロックが出来上がった瞬間に単体ヒット数を計測する（line_hits の前倒し）。
+    // countBlockHits が注入されていない（テスト等）場合はスキップする。
+    if (deps.countBlockHits) {
+      const expression = buildBlockExpression({ skeleton, mesh, freewords: fw });
+      notifyProgress({ step: 'line-hits', blockIndex: i, blockCount });
+      let hit: DraftBlockHit = {
+        blockIndex: i,
+        blockId: String(i + 1),
+        blockLabel: block.blockLabel,
+        expression,
+        hitCount: null,
+        error: null,
+      };
+      try {
+        hit = { ...hit, hitCount: await deps.countBlockHits(expression) };
+      } catch (err) {
+        hit = { ...hit, error: err instanceof Error ? err.message : String(err) };
+      }
+      blockHits.push(hit);
+      deps.onBlockCounted?.(hit);
+    }
   }
 
   notifyProgress({ step: 'filter-designer', blockCount });
@@ -206,6 +261,7 @@ export async function generateDraft(deps: DraftServiceDeps): Promise<DraftResult
     blockSkeletons: skeletons,
     meshSuggestions: meshes,
     freewordSuggestions: freewords,
+    blockHits,
   };
 }
 

@@ -33,7 +33,6 @@ describe('evaluateGuards', () => {
       'blocks',
       'seeds',
       'draft',
-      'validate',
       'expand',
       'edit',
       'export',
@@ -55,7 +54,7 @@ describe('evaluateGuards', () => {
     expect(g.blocks.reason).toContain('プロトコル');
     expect(g.draft.enabled).toBe(false);
     expect(g.draft.reason).toContain('ブロック');
-    for (const route of ['validate', 'expand', 'edit', 'export', 'done'] as const) {
+    for (const route of ['expand', 'edit', 'export', 'done'] as const) {
       expect(g[route].enabled).toBe(false);
       expect(g[route].reason).toContain('検索式');
     }
@@ -78,8 +77,8 @@ describe('evaluateGuards', () => {
       })
     );
     expect(g.draft.enabled).toBe(true);
-    expect(g.validate.enabled).toBe(false);
-    expect(g.validate.reason).toContain('検索式');
+    expect(g.expand.enabled).toBe(false);
+    expect(g.expand.reason).toContain('検索式');
   });
 
   test('currentProtocolVersion があっても blocks 0 件なら draft は閉じたまま', () => {
@@ -107,7 +106,7 @@ describe('evaluateGuards', () => {
     expect(g.draft.enabled).toBe(false);
   });
 
-  test('currentFormulaVersionId あり: validate / expand / edit / export / done が全て開く', () => {
+  test('currentFormulaVersionId あり: expand / edit / export / done が全て開く', () => {
     const g = evaluateGuards(
       buildState({
         project,
@@ -118,7 +117,7 @@ describe('evaluateGuards', () => {
         currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 x\n```\n',
       })
     );
-    for (const route of ['validate', 'expand', 'edit', 'export', 'done'] as const) {
+    for (const route of ['expand', 'edit', 'export', 'done'] as const) {
       expect(g[route].enabled).toBe(true);
       expect(g[route].reason).toBe('');
     }

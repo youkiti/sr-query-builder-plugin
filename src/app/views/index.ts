@@ -10,7 +10,6 @@ import { createBlocksView, type BlocksViewCallbacks } from './blocksView';
 import { createDraftView, type DraftViewCallbacks } from './draftView';
 import { createExportView, type ExportViewCallbacks } from './exportView';
 import { createSeedsView, type SeedsViewCallbacks } from './seedsView';
-import { createValidateView, type ValidateViewCallbacks } from './validateView';
 import { renderDoneView } from './doneView';
 import { createEditView, type EditViewCallbacks } from './editView';
 import { createExpandView, type ExpandViewCallbacks } from './expandView';
@@ -26,7 +25,6 @@ export interface BuildViewsOptions {
   draft?: DraftViewCallbacks;
   export?: ExportViewCallbacks;
   seeds?: SeedsViewCallbacks;
-  validate?: ValidateViewCallbacks;
   history?: HistoryViewCallbacks;
   edit?: EditViewCallbacks;
   expand?: ExpandViewCallbacks;
@@ -47,7 +45,6 @@ export function buildViews(
     blocks: createBlocksView(store, options.blocks),
     seeds: createSeedsView(options.seeds),
     draft: createDraftView(options.draft),
-    validate: createValidateView(options.validate),
     expand: createExpandView(options.expand),
     edit: createEditView(options.edit),
     export: createExportView(options.export),
@@ -70,7 +67,6 @@ export {
   createDraftView,
   createExportView,
   createSeedsView,
-  createValidateView,
   renderDoneView,
   createHistoryView,
   createEditView,

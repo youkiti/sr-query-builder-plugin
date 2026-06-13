@@ -1,5 +1,6 @@
 export {
   assembleFormulaMd,
+  buildBlockExpression,
   AssembleFormulaError,
   type AssembleInput,
   type AssembledFormula,

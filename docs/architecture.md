@@ -68,8 +68,8 @@ src/
 │   │   ├── protocolView.ts
 │   │   ├── blocksView.ts
 │   │   ├── seedsView.ts
-│   │   ├── draftView.ts
-│   │   ├── validateView.ts
+│   │   ├── draftView.ts            # 検索式の生成 + 検証を統合（旧 validateView を吸収）
+│   │   ├── validationResults.ts    # 検証結果（捕捉率 / MeSH / 原因分析）の描画ユーティリティ
 │   │   ├── expandView.ts
 │   │   ├── editView.ts
 │   │   ├── exportView.ts

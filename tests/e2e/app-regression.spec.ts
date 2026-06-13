@@ -22,7 +22,6 @@ const ROUTES: RouteName[] = [
   'blocks',
   'seeds',
   'draft',
-  'validate',
   'expand',
   'edit',
   'export',

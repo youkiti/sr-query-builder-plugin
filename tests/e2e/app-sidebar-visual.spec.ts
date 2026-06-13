@@ -11,25 +11,25 @@ import { fullStateScenario } from './fixtures/scenarios/fullState';
 test.describe('app-sidebar-visual', () => {
   test('現在のルートのボタンに is-active + aria-current=page が付く', async ({ page }) => {
     await injectAppStub(page, fullStateScenario());
-    await page.goto('/app/app.html#/validate');
+    await page.goto('/app/app.html#/draft');
 
-    const activeBtn = page.locator('#app-sidebar nav button:has-text("検証")');
+    const activeBtn = page.locator('#app-sidebar nav button:has-text("検索式（生成・検証）")');
     await expect(activeBtn).toHaveAttribute('aria-current', 'page');
     await expect(activeBtn).toHaveClass(/is-active/);
 
     // 他ルートのボタンには aria-current が付かない
-    const otherBtn = page.locator('#app-sidebar nav button:has-text("検索式ドラフト")');
+    const otherBtn = page.locator('#app-sidebar nav button:has-text("エクスポート")');
     await expect(otherBtn).not.toHaveAttribute('aria-current', 'page');
   });
 
   test('クリックでルート遷移 → aria-current が追従する', async ({ page }) => {
     await injectAppStub(page, fullStateScenario());
-    await page.goto('/app/app.html#/validate');
+    await page.goto('/app/app.html#/draft');
 
     await page.locator('#app-sidebar nav button:has-text("エクスポート")').click();
     const nextActive = page.locator('#app-sidebar nav button:has-text("エクスポート")');
     await expect(nextActive).toHaveAttribute('aria-current', 'page');
-    const prevActive = page.locator('#app-sidebar nav button:has-text("検証")');
+    const prevActive = page.locator('#app-sidebar nav button:has-text("検索式（生成・検証）")');
     await expect(prevActive).not.toHaveAttribute('aria-current', 'page');
   });
 

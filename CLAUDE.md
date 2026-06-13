@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 現在のフェーズ
 
-**MVP 実装フェーズ**（2026-06 時点）。要件定義は完了し、`src/` 配下にフルページアプリ・Popup・Options・Background を含む実装と、unit 863 件 / E2E 89 件のテストスイートが存在する。
+**MVP 実装フェーズ**（2026-06 時点）。要件定義は完了し、`src/` 配下にフルページアプリ・Popup・Options・Background を含む実装と、unit 1100 件規模 / E2E 98 件のテストスイートが存在する。
 
-- ユーザーフロー全 11 ルート（home → protocol → blocks → seeds → draft → validate → expand → edit → export → done + history）の画面実装済み
+- ユーザーフロー全 10 ルート（home → protocol → blocks → seeds → draft → expand → edit → export → done + history）の画面実装済み。検索式の生成と検証は `draft` タブに統合され、「生成して検証する」1 操作でブロックごとのヒット数（line_hits）をライブ表示しつつ、完成後に捕捉率・MeSH 検証まで自動実行する（旧 `validate` ルートは廃止）
 - P0 の検証ロジック（行ごとのヒット数 / シード捕捉率 / 全 DB 変換 / MeSH 抽出）は TypeScript へ移植済み（[src/features/validation/](src/features/validation/), [src/features/conversion/](src/features/conversion/)）
 - 未実装・残タスクは「[未実装・既知のギャップ](#未実装既知のギャップ)」を参照
 
@@ -34,7 +34,7 @@ npm run lint:css     # stylelint
 ```
 src/
 ├── app/            # メインビュー（フルページタブ）。app.html + hash ルーティング
-│   ├── router.ts   # 11 ルート定義（ROUTE_LABELS）
+│   ├── router.ts   # ルート定義（ROUTE_LABELS。home〜history + settings）
 │   ├── store.ts    # in-memory ストア（currentProject のみ chrome.storage.local へ永続化）
 │   ├── guards.ts   # 前提条件ガード（プロトコル未入力なら #/blocks へ入れない等）
 │   ├── bootstrap.ts# DI 配線（views × services × navigate）

@@ -36,6 +36,7 @@ export {
 export {
   generateDraft,
   type DraftProgress,
+  type DraftBlockHit,
   type DraftResult,
   type DraftServiceDeps,
 } from './draftService';

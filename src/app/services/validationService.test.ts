@@ -40,7 +40,7 @@ const formulaMd = [
 
 function makeState(): AppState {
   return {
-    route: 'validate',
+    route: 'draft',
     project: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
     cumulativeCostUsd: null,
     blocksDraft: null,

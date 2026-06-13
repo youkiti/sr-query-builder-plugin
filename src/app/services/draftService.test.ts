@@ -339,6 +339,50 @@ describe('generateDraft', () => {
     expect(meshPrompts[0]).toContain('(seed 論文の MeSH なし)');
   });
 
+  test('countBlockHits 注入時はブロックごとにヒット数を計測し blockHits を返す', async () => {
+    const { deps } = setupDeps();
+    const counted: string[] = [];
+    const onCounted: string[] = [];
+    const result = await generateDraft({
+      ...deps,
+      countBlockHits: async (expression) => {
+        counted.push(expression);
+        return 42;
+      },
+      onBlockCounted: (hit) => onCounted.push(`${hit.blockId}:${hit.hitCount}`),
+    });
+    // 2 ブロックそれぞれで計測（葉式がそのまま渡る）
+    expect(counted).toHaveLength(2);
+    expect(counted[0]).toContain('[Mesh]');
+    expect(result.blockHits).toHaveLength(2);
+    expect(result.blockHits[0]).toMatchObject({ blockId: '1', hitCount: 42, error: null });
+    expect(result.blockHits[1]).toMatchObject({ blockId: '2', blockLabel: 'Intervention' });
+    expect(onCounted).toEqual(['1:42', '2:42']);
+  });
+
+  test('countBlockHits が投げてもブロックは error 付きで継続し、生成は完了する', async () => {
+    const { store, deps } = setupDeps();
+    const result = await generateDraft({
+      ...deps,
+      countBlockHits: async () => {
+        throw new Error('esearch failed');
+      },
+    });
+    expect(result.blockHits).toHaveLength(2);
+    expect(result.blockHits[0]?.hitCount).toBeNull();
+    expect(result.blockHits[0]?.error).toContain('esearch failed');
+    // 計測が失敗しても式の生成・保存は通る
+    expect(store.getState().currentFormulaVersionId).toBe('new-version-id');
+  });
+
+  test('countBlockHits 未注入なら計測せず blockHits は空（line-hits step も出ない）', async () => {
+    const progress: DraftProgress[] = [];
+    const { deps } = setupDeps({ onProgress: (p) => progress.push(p) });
+    const result = await generateDraft(deps);
+    expect(result.blockHits).toHaveLength(0);
+    expect(progress.map((p) => p.step)).not.toContain('line-hits');
+  });
+
   test('newUuid / now を省略しても動く', async () => {
     const { store, deps } = setupDeps();
     const overridden = { ...deps };

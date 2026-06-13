@@ -1,6 +1,6 @@
 /**
  * Phase A 完了基準: `injectAppStub` + `window.__E2E_PRELOADED_STATE__` hook だけで
- * `#/home` 〜 `#/history` の 11 ルートに guard 違反なく到達できることを確認する。
+ * `#/home` 〜 `#/history` の各ルートに guard 違反なく到達できることを確認する。
  *
  * docs/ui-deep-test-plan.md §Phase A 完了基準。
  */
@@ -18,7 +18,6 @@ const ROUTES: RouteName[] = [
   'blocks',
   'seeds',
   'draft',
-  'validate',
   'expand',
   'edit',
   'export',
@@ -26,7 +25,7 @@ const ROUTES: RouteName[] = [
   'history',
 ];
 
-test.describe('Phase A smoke-of-smoke: 全 11 ルートへ guard 違反なく到達', () => {
+test.describe('Phase A smoke-of-smoke: 全ルートへ guard 違反なく到達', () => {
   for (const route of ROUTES) {
     test(`#/${route} に到達して guard プレースホルダが出ない`, async ({ page }) => {
       await injectAppStub(page, fullStateScenario());
@@ -53,8 +52,7 @@ function labelFor(route: RouteName): string {
     protocol: 'プロトコル入力',
     blocks: 'ブロック承認',
     seeds: 'シード論文',
-    draft: '検索式ドラフト',
-    validate: '検証',
+    draft: '検索式（生成・検証）',
     expand: '対話的シード拡張',
     edit: '検索式編集',
     export: 'エクスポート',

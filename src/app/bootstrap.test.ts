@@ -306,6 +306,54 @@ describe('startApp - wiring 層', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
 
+  /** draft の 4 skill（block-designer / mesh / freeword）が解釈できる共通 Gemini 応答 */
+  function geminiDraftSkillResponse(): Response {
+    return jsonResponse({
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                text: JSON.stringify({
+                  concept_summary: 'c',
+                  mesh_requirements: [],
+                  freeword_requirements: [],
+                  rationale: '',
+                  suggestions: [{ descriptor: 'Desc', tag_syntax: '"Desc"[Mesh]', rationale: '' }],
+                  freewords: [{ query: 'term[tiab]', rationale: '' }],
+                }),
+              },
+            ],
+          },
+        },
+      ],
+    });
+  }
+
+  /** draft ルートの前提（プロトコル承認済み + 1 ブロック）を store に流し込む。studyDesign='' でフィルタ無し */
+  function seedDraftPrereqs(handle: ReturnType<typeof startApp>): void {
+    handle.store.setState((s) => ({
+      ...s,
+      protocolDraft: {
+        frameworkType: 'pico',
+        researchQuestion: 'RQ',
+        inclusionCriteria: '',
+        exclusionCriteria: '',
+        studyDesign: '',
+        sourceType: 'manual',
+        sourceFilename: null,
+        rawTextRef: null,
+        rawTextPreview: 'p',
+        rawTextInline: '本文',
+      },
+      blocksDraft: {
+        blocks: [{ blockLabel: 'P', description: 'p', aiGenerated: true, note: '' }],
+        combinationExpression: '#1',
+      },
+      currentProtocolVersion: 1,
+    }));
+  }
+
   test('hydrate: chrome.storage の currentProject を store に取り込む', async () => {
     const doc = buildDocument();
     const { runtime } = makeRuntime({
@@ -1023,13 +1071,20 @@ describe('startApp - wiring 層', () => {
     expect(seedAppends).toHaveLength(1);
   });
 
-  test('validate view 既定 onRun が ValidationLog に 5 行追記する', async () => {
+  test('生成→検証パイプラインが ValidationLog に検証行を追記する', async () => {
     const doc = buildDocument();
     const seedHeader = [...SHEET_HEADERS.SeedPapers];
     const { runtime, fetchMock } = makeRuntime({
       currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+      'apiKeys.gemini': 'KEY',
     });
     fetchMock.mockImplementation(async (url: string) => {
+      if (typeof url === 'string' && url.includes('generativelanguage.googleapis.com')) {
+        return geminiDraftSkillResponse();
+      }
+      if (typeof url === 'string' && url.includes('/upload/drive/v3/files')) {
+        return jsonResponse({ id: 'f', webViewLink: '' });
+      }
       if (typeof url === 'string' && url.includes('/values/SeedPapers')) {
         const seedRow = seedHeader.map((k) => {
           if (k === 'pmid') return '111';
@@ -1054,36 +1109,40 @@ describe('startApp - wiring 層', () => {
       return jsonResponse({});
     });
     const handle = startApp(doc, {
-      getHash: () => '#/validate',
+      getHash: () => '#/draft',
       onHashChange: jest.fn().mockReturnValue(() => undefined),
       setHash: jest.fn(),
       runtime,
     });
     await flush();
-    handle.store.setState((s) => ({
-      ...s,
-      currentFormulaVersionId: 'v-1',
-      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 diabetes\n```\n',
-    }));
+    seedDraftPrereqs(handle);
     const runBtn = doc.querySelector<HTMLButtonElement>('#app-content button')!;
     runBtn.click();
-    for (let i = 0; i < 10; i += 1) {
+    for (let i = 0; i < 30; i += 1) {
       await flush();
     }
     const appendCalls = fetchMock.mock.calls.filter((c) =>
       (c[0] as string).includes('ValidationLog') && (c[0] as string).includes(':append')
     );
-    // line_hits 1 行 + final_query 1 行 + mesh 1 行 = 3 行（formula のブロック数=1 のため）
-    expect(appendCalls.length).toBe(3);
+    // 生成式は概念 #1 + 結合 #2 の 2 ブロック（studyDesign='' でフィルタ無し）。
+    // line_hits 2 行 + final_query 1 行 + mesh 1 行 = 4 行。
+    expect(appendCalls.length).toBe(4);
   });
 
-  test('検証結果は store に保存され、コスト集計の setState による再描画後も表示が残る', async () => {
+  test('生成→検証後、検証結果は store に保存され再描画後も draft に表示が残る', async () => {
     const doc = buildDocument();
     const seedHeader = [...SHEET_HEADERS.SeedPapers];
     const { runtime, fetchMock } = makeRuntime({
       currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+      'apiKeys.gemini': 'KEY',
     });
     fetchMock.mockImplementation(async (url: string) => {
+      if (typeof url === 'string' && url.includes('generativelanguage.googleapis.com')) {
+        return geminiDraftSkillResponse();
+      }
+      if (typeof url === 'string' && url.includes('/upload/drive/v3/files')) {
+        return jsonResponse({ id: 'f', webViewLink: '' });
+      }
       if (typeof url === 'string' && url.includes('/values/SeedPapers')) {
         const seedRow = seedHeader.map((k) => {
           if (k === 'pmid') return '111';
@@ -1108,23 +1167,21 @@ describe('startApp - wiring 層', () => {
       return jsonResponse({});
     });
     const handle = startApp(doc, {
-      getHash: () => '#/validate',
+      getHash: () => '#/draft',
       onHashChange: jest.fn().mockReturnValue(() => undefined),
       setHash: jest.fn(),
       runtime,
     });
     await flush();
-    handle.store.setState((s) => ({
-      ...s,
-      currentFormulaVersionId: 'v-1',
-      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 diabetes\n```\n',
-    }));
+    seedDraftPrereqs(handle);
     const runBtn = doc.querySelector<HTMLButtonElement>('#app-content button')!;
     runBtn.click();
-    for (let i = 0; i < 10; i += 1) {
+    for (let i = 0; i < 30; i += 1) {
       await flush();
     }
-    expect(handle.store.getState().validationResult?.formulaVersionId).toBe('v-1');
+    const versionId = handle.store.getState().currentFormulaVersionId;
+    expect(versionId).toBeTruthy();
+    expect(handle.store.getState().validationResult?.formulaVersionId).toBe(versionId);
     expect(doc.querySelector('.validate__line-hits')).not.toBeNull();
 
     // LLM コスト集計（onCostAccumulate）相当の setState → 全ビュー再描画
@@ -1137,14 +1194,21 @@ describe('startApp - wiring 層', () => {
     expect(doc.querySelector('.validate__missed')?.textContent).toContain('111');
   });
 
-  test('apiKeys.ncbi が保存されていれば、validate の eutils 呼び出しに api_key が載る', async () => {
+  test('apiKeys.ncbi が保存されていれば、生成→検証の eutils 呼び出しに api_key が載る', async () => {
     const doc = buildDocument();
     const { runtime, fetchMock } = makeRuntime({
       currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+      'apiKeys.gemini': 'KEY',
       'apiKeys.ncbi': 'NCBI-KEY',
     });
     fetchMock.mockImplementation(async (url: string) => {
       const u = typeof url === 'string' ? url : String(url);
+      if (u.includes('generativelanguage.googleapis.com')) {
+        return geminiDraftSkillResponse();
+      }
+      if (u.includes('/upload/drive/v3/files')) {
+        return jsonResponse({ id: 'f', webViewLink: '' });
+      }
       if (u.includes('/values/SeedPapers')) {
         return jsonResponse({ values: [SHEET_HEADERS.SeedPapers] });
       }
@@ -1162,20 +1226,16 @@ describe('startApp - wiring 層', () => {
       return jsonResponse({});
     });
     const handle = startApp(doc, {
-      getHash: () => '#/validate',
+      getHash: () => '#/draft',
       onHashChange: jest.fn().mockReturnValue(() => undefined),
       setHash: jest.fn(),
       runtime,
     });
     await flush();
-    handle.store.setState((s) => ({
-      ...s,
-      currentFormulaVersionId: 'v-1',
-      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 diabetes\n```\n',
-    }));
+    seedDraftPrereqs(handle);
     const runBtn = doc.querySelector<HTMLButtonElement>('#app-content button')!;
     runBtn.click();
-    for (let i = 0; i < 10; i += 1) {
+    for (let i = 0; i < 30; i += 1) {
       await flush();
     }
     const eutilsCalls = fetchMock.mock.calls

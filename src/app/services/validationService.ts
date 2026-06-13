@@ -65,6 +65,11 @@ export interface ValidationServiceDeps {
   now?: () => string;
   /** 進捗通知（任意）。各検証段階の開始時などに呼ばれる */
   onProgress?: (progress: ValidationProgress) => void;
+  /**
+   * 生成ループで前倒し計測済みのブロックヒット数（blockId → hitCount）。
+   * 渡された概念ブロックは再 esearch せず再利用し、フィルタ行・結合行のみ新規計測する。
+   */
+  precomputedBlockHits?: ReadonlyMap<string, number>;
 }
 
 export interface ValidationSummary {
@@ -109,9 +114,14 @@ export async function runValidation(deps: ValidationServiceDeps): Promise<Valida
   const notify = deps.onProgress ?? (() => {});
 
   notify({ step: 'line_hits', blockIndex: 0, blockCount: formula.blocks.length });
-  const lineHits = await checkSearchLines(formula, deps.eutils, (done, count, _blockId) => {
-    notify({ step: 'line_hits', blockIndex: done, blockCount: count });
-  });
+  const lineHits = await checkSearchLines(
+    formula,
+    deps.eutils,
+    (done, count, _blockId) => {
+      notify({ step: 'line_hits', blockIndex: done, blockCount: count });
+    },
+    deps.precomputedBlockHits
+  );
 
   notify({ step: 'final_query' });
   let finalQuery = buildEmptyFinalQuery();

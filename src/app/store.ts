@@ -3,6 +3,7 @@ import type {
   AnalyzeMissedSeedsResult,
   ValidationSummary,
 } from './services/validationService';
+import type { DraftBlockHit } from './services/draftService';
 import { DEFAULT_ROUTE, type RouteName } from './router';
 
 /**
@@ -72,19 +73,26 @@ export interface MissedAnalysisEntry {
 }
 
 /**
- * 検索式ドラフト生成（#/draft）の実行状態。
+ * 検索式ドラフト「生成 → 検証」パイプライン（#/draft）の実行状態。
  * LLM コスト集計（cumulativeCostUsd）の setState による全ビュー再描画でも
  * 進捗・エラー表示を失わないよう、ローカル DOM ではなく store に保持する
  * （validationResult と同じ理由）。実行中は生成ボタンの二重クリック防止も兼ねる。
+ *
+ * phase は生成（generating）と、生成完了後に自動で続く検証（validating）の 2 段階。
+ * blockHits は「ブロックが出来上がるごと」に計測したヒット数をライブ表示するためのもの。
  */
 export interface DraftRunState {
   status: 'running' | 'error';
+  /** 実行中の段階。error 時は失敗した段階を保持する */
+  phase: 'generating' | 'validating';
   /** 現在処理中ステップの表示用ラベル（例: 「MeSH を提案中（ブロック 1/2）」） */
   progressLabel: string;
   /** 経過時間表示用の開始時刻（epoch ms）。view が 1 秒ごとに再計算する */
   startedAtMs: number;
   /** status='error' のときのメッセージ。running 中は null */
   error: string | null;
+  /** 生成途中に計測したブロックごとのヒット数（ライブ表示用） */
+  blockHits: DraftBlockHit[];
 }
 
 export interface AppState {

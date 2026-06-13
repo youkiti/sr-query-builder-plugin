@@ -1,26 +1,38 @@
-import type { DraftProgress } from '@/app/services';
+import type { DraftBlockHit, DraftProgress } from '@/app/services';
 import { parsePubmedFormulaMd, type PubmedFormula } from '@/lib/search-formula-md';
 import { ROUTE_LABELS } from '../router';
+import type { AppState } from '../store';
 import { tokenizeExpression } from './formulaDisplay';
 import type { RenderView } from './types';
+import {
+  readStoredAnalysis,
+  readStoredSummary,
+  renderValidationResults,
+  summaryStatusText,
+  type ValidationResultsCallbacks,
+} from './validationResults';
 
 /**
- * 検索式ドラフト生成画面（#/draft）。
+ * 検索式の生成・検証画面（#/draft）。
  *
- * - 「生成」ボタンで 4 skill パイプラインを発火
- * - 進捗・エラーは store の state.draftRun から描画する。
- *   LLM コスト集計（cumulativeCostUsd）の setState が走るたびに全ビューが
- *   再描画されるため、ローカル DOM に進捗を書くと最初の LLM 呼び出し完了時点で
- *   表示が消えてしまう（store 保持は validationResult と同じ理由）
- * - 実行中は経過時間を 1 秒ごとに更新して「動いている」ことを示す
- * - 完了後は store.currentFormulaMarkdown を <pre> で表示
+ * 旧 draft タブと validate タブを統合したもので、1 つの「生成して検証する」操作で
+ *   ① ブロックごとに block-designer → mesh → freeword を実行し、出来上がった瞬間に
+ *      そのブロックのヒット数（line_hits）を計測してライブ表示する
+ *   ② 全ブロックの組み立て・保存後、捕捉率（final_query）・MeSH・階層の検証を自動実行する
+ * を続けて行う。
  *
- * 実ロジック（generateDraft + draftRun の状態遷移）は bootstrap で差し込み、
- * 本 view は UI 描画のみ。
+ * - 進捗・エラー・ブロックごとのヒット数は store の state.draftRun から描画する。
+ *   LLM コスト集計（cumulativeCostUsd）の setState が走るたびに全ビューが再描画されるため、
+ *   ローカル DOM に進捗を書くと最初の LLM 呼び出し完了時点で表示が消えてしまう。
+ * - 検証結果は state.validationResult / state.missedAnalysis から復元して表示する。
+ * - 実行中は経過時間を 1 秒ごとに更新して「動いている」ことを示す。
+ *
+ * 実ロジック（generateDraft + runValidation の連結と draftRun の状態遷移）は bootstrap で
+ * 差し込み、本 view は UI 描画のみ。
  */
 
-export interface DraftViewCallbacks {
-  /** 「生成」ボタンが押されたとき。進捗・エラーは store.draftRun 経由で反映される */
+export interface DraftViewCallbacks extends ValidationResultsCallbacks {
+  /** 「生成して検証する」ボタンが押されたとき。進捗・エラーは store.draftRun 経由で反映される */
   onGenerate?: () => Promise<void>;
 }
 
@@ -63,7 +75,11 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
     actions.className = 'draft__actions';
     const generateBtn = doc.createElement('button');
     generateBtn.type = 'button';
-    generateBtn.textContent = running ? '生成中…' : existing ? '再生成する' : '生成する';
+    generateBtn.textContent = running
+      ? '実行中…'
+      : existing
+        ? '再生成して再検証する'
+        : '生成して検証する';
     generateBtn.disabled = running;
     actions.appendChild(generateBtn);
     container.appendChild(actions);
@@ -80,11 +96,33 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
 
     if (run) {
       if (run.status === 'running') {
-        status.textContent = runningStatusText(run.progressLabel, run.startedAtMs);
-        startElapsedTicker(status, run.progressLabel, run.startedAtMs);
+        status.textContent = runningStatusText(run.phase, run.progressLabel, run.startedAtMs);
+        startElapsedTicker(status, run.phase, run.progressLabel, run.startedAtMs);
       } else {
-        errorBox.textContent = `生成に失敗しました: ${run.error ?? '不明なエラー'}`;
+        const phaseLabel = run.phase === 'validating' ? '検証' : '生成';
+        errorBox.textContent = `${phaseLabel}に失敗しました: ${run.error ?? '不明なエラー'}`;
       }
+    }
+
+    // ブロックごとのライブヒット数。実行中（生成フェーズ）に「出来上がったブロックから順に
+    // 件数が出る」様子を見せる。生成済みの blockHits が残っていれば完了後も表示する。
+    const blockHits = run?.blockHits ?? [];
+    if (blockHits.length > 0 || running) {
+      container.appendChild(renderLiveBlockHits(doc, ctx.state, blockHits, running));
+    }
+
+    // 検証結果（捕捉率 / MeSH / 階層）。生成完了後に自動実行され store に保存される。
+    const storedSummary = readStoredSummary(ctx.state);
+    if (storedSummary && !running) {
+      const summaryStatus = doc.createElement('p');
+      summaryStatus.className = 'draft__validate-status';
+      summaryStatus.textContent = summaryStatusText(storedSummary);
+      container.appendChild(summaryStatus);
+
+      const results = doc.createElement('div');
+      results.className = 'validate__results';
+      container.appendChild(results);
+      renderValidationResults(doc, results, storedSummary, callbacks, readStoredAnalysis(ctx.state));
     }
 
     generateBtn.addEventListener('click', () => {
@@ -97,6 +135,53 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
       void callbacks.onGenerate();
     });
   };
+}
+
+/**
+ * ブロックごとのヒット数のライブ一覧。
+ * blocksDraft のブロック定義を基準に、計測済み（blockHits）があれば件数を、
+ * まだなら実行中は「計測中…」、停止後は何も足さずに表示する。
+ */
+function renderLiveBlockHits(
+  doc: Document,
+  state: AppState,
+  blockHits: DraftBlockHit[],
+  running: boolean
+): HTMLElement {
+  const section = doc.createElement('section');
+  section.className = 'draft__block-hits';
+  const h3 = doc.createElement('h3');
+  h3.textContent = 'ブロックごとのヒット数';
+  section.appendChild(h3);
+
+  const byIndex = new Map<number, DraftBlockHit>();
+  for (const hit of blockHits) {
+    byIndex.set(hit.blockIndex, hit);
+  }
+
+  const labels = state.blocksDraft?.blocks ?? [];
+  const ul = doc.createElement('ul');
+  labels.forEach((block, index) => {
+    const li = doc.createElement('li');
+    const hit = byIndex.get(index);
+    const label = block.blockLabel || `ブロック ${index + 1}`;
+    if (hit && hit.error !== null) {
+      li.className = 'draft__block-hit draft__block-hit--error';
+      li.textContent = `#${index + 1} ${label}: エラー — ${hit.error}`;
+    } else if (hit && hit.hitCount !== null) {
+      li.className = 'draft__block-hit draft__block-hit--done';
+      li.textContent = `#${index + 1} ${label}: ${hit.hitCount.toLocaleString()} 件`;
+    } else if (running) {
+      li.className = 'draft__block-hit draft__block-hit--pending';
+      li.textContent = `#${index + 1} ${label}: 計測中…`;
+    } else {
+      li.className = 'draft__block-hit draft__block-hit--pending';
+      li.textContent = `#${index + 1} ${label}: —`;
+    }
+    ul.appendChild(li);
+  });
+  section.appendChild(ul);
+  return section;
 }
 
 /**
@@ -179,7 +264,12 @@ function buildLegend(doc: Document): HTMLElement {
  * 再描画されると要素ごと DOM から外れるので、isConnected を見て自動停止する
  * （再描画後は新しい要素に対して新しい ticker が走る）。
  */
-function startElapsedTicker(status: HTMLElement, label: string, startedAtMs: number): void {
+function startElapsedTicker(
+  status: HTMLElement,
+  phase: DraftRunPhase,
+  label: string,
+  startedAtMs: number
+): void {
   const win = status.ownerDocument.defaultView;
   if (!win) {
     return;
@@ -189,12 +279,15 @@ function startElapsedTicker(status: HTMLElement, label: string, startedAtMs: num
       win.clearInterval(timer);
       return;
     }
-    status.textContent = runningStatusText(label, startedAtMs);
+    status.textContent = runningStatusText(phase, label, startedAtMs);
   }, 1000);
 }
 
-function runningStatusText(label: string, startedAtMs: number): string {
-  return `${label}（経過 ${formatElapsed(Date.now() - startedAtMs)}）`;
+type DraftRunPhase = 'generating' | 'validating';
+
+function runningStatusText(phase: DraftRunPhase, label: string, startedAtMs: number): string {
+  const phaseLabel = phase === 'validating' ? '検証' : '生成';
+  return `[${phaseLabel}] ${label}（経過 ${formatElapsed(Date.now() - startedAtMs)}）`;
 }
 
 function formatElapsed(ms: number): string {
@@ -210,6 +303,7 @@ export function formatDraftProgress(progress: DraftProgress): string {
     'block-designer': 'ブロック骨格を設計中',
     'mesh-suggester': 'MeSH を提案中',
     'freeword-designer': 'フリーワードを展開中',
+    'line-hits': 'ブロックのヒット数を計測中',
     'filter-designer': 'フィルタを決定中',
     assemble: '検索式を組み立て中',
     save: 'FormulaVersions に保存中',
@@ -220,3 +314,5 @@ export function formatDraftProgress(progress: DraftProgress): string {
   }
   return label;
 }
+
+export { formatValidationProgress } from './validationResults';

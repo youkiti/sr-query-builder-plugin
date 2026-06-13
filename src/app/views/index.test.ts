@@ -11,7 +11,6 @@ import {
   createExpandView,
   createHistoryView,
   createSeedsView,
-  createValidateView,
   renderDoneView,
   renderHomeView,
   renderProtocolView,
@@ -60,7 +59,6 @@ describe('buildViews', () => {
     expect(typeof createDraftView).toBe('function');
     expect(typeof createExportView).toBe('function');
     expect(typeof createSeedsView).toBe('function');
-    expect(typeof createValidateView).toBe('function');
     expect(typeof renderDoneView).toBe('function');
     expect(typeof createHistoryView).toBe('function');
     expect(typeof createEditView).toBe('function');
@@ -99,15 +97,18 @@ describe('buildViews', () => {
     expect(typeof views.export).toBe('function');
   });
 
-  test('seeds / validate callback も options 経由で差し込める', () => {
+  test('seeds callback も options 経由で差し込める', () => {
     const onIngest = jest.fn();
-    const onRun = jest.fn();
     const views = buildViews(createStore(), {
       seeds: { onIngest },
-      validate: { onRun },
     });
     expect(typeof views.seeds).toBe('function');
-    expect(typeof views.validate).toBe('function');
+  });
+
+  test('draft の onAnalyzeMissed callback も options 経由で差し込める', () => {
+    const onAnalyzeMissed = jest.fn();
+    const views = buildViews(createStore(), { draft: { onAnalyzeMissed } });
+    expect(typeof views.draft).toBe('function');
   });
 
   test('protocol callback も options 経由で差し込める', () => {

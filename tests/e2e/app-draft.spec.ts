@@ -26,17 +26,17 @@ test.describe('app-draft (#/draft)', () => {
 
     // currentFormulaVersionId が null かつ blocks 承認済みなので /draft は通る
     const btn = page.locator('.draft__actions button');
-    await expect(btn).toHaveText(/生成する/);
+    await expect(btn).toHaveText(/生成して検証する/);
     // 既存 formula の <pre> は出ない
     await expect(page.locator('.draft__formula')).toHaveCount(0);
   });
 
-  test('既存 formula 有り: 「再生成する」ボタンと pre が両方出る', async ({ page }) => {
+  test('既存 formula 有り: 「再生成して再検証する」ボタンと pre が両方出る', async ({ page }) => {
     await injectAppStub(page, fullStateScenario());
     await page.goto(APP_URL);
 
     const btn = page.locator('.draft__actions button');
-    await expect(btn).toHaveText(/再生成する/);
+    await expect(btn).toHaveText(/再生成して再検証する/);
     await expect(page.locator('.draft__formula')).toBeVisible();
     await expect(page.locator('.draft__formula')).toContainText('ARDS');
   });
@@ -49,9 +49,11 @@ test.describe('app-draft (#/draft)', () => {
           ...FULL_APP_STATE,
           draftRun: {
             status: 'running',
+            phase: 'generating',
             progressLabel: 'MeSH を提案中（ブロック 1/2）',
             startedAtMs: Date.now() - 65_000,
             error: null,
+            blockHits: [],
           },
         },
       })
@@ -60,7 +62,7 @@ test.describe('app-draft (#/draft)', () => {
 
     const btn = page.locator('.draft__actions button');
     await expect(btn).toBeDisabled();
-    await expect(btn).toHaveText('生成中…');
+    await expect(btn).toHaveText('実行中…');
     const status = page.locator('.draft__status');
     await expect(status).toContainText('MeSH を提案中（ブロック 1/2）');
     await expect(status).toContainText('経過 1分');
@@ -79,9 +81,11 @@ test.describe('app-draft (#/draft)', () => {
           ...FULL_APP_STATE,
           draftRun: {
             status: 'error',
+            phase: 'generating',
             progressLabel: '',
             startedAtMs: Date.now() - 10_000,
             error: 'Gemini API failed: HTTP 503',
+            blockHits: [],
           },
         },
       })

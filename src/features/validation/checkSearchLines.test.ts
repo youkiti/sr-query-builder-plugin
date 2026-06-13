@@ -70,4 +70,27 @@ describe('checkSearchLines', () => {
     const result = await checkSearchLines(formula([]), { fetch: jest.fn() });
     expect(result).toEqual([]);
   });
+
+  test('precomputed にあるブロックは再 esearch せず値を再利用する', async () => {
+    // esearch は結合行 #3 の 1 回だけ呼ばれる（#1/#2 は precomputed 再利用）
+    const fetch = makeFetch([777]);
+    const precomputed = new Map<string, number>([
+      ['1', 100],
+      ['2', 200],
+    ]);
+    const result = await checkSearchLines(
+      formula([
+        ['1', 'diabetes'],
+        ['2', 'metformin'],
+        ['3', '#1 AND #2', true],
+      ]),
+      { fetch },
+      undefined,
+      precomputed
+    );
+    expect(result.map((r) => r.hitCount)).toEqual([100, 200, 777]);
+    // 再利用ブロックでも expandedQuery は計算される
+    expect(result[0]?.expandedQuery).toBe('diabetes');
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
 });

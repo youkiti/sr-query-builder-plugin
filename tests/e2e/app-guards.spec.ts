@@ -1,5 +1,5 @@
 /**
- * ガード横断スモーク: 5 段階の state × 9 ルートで enabled / deny 文言を確認。
+ * ガード横断スモーク: 5 段階の state × 8 ルートで enabled / deny 文言を確認。
  *
  * jsdom テストでは属性のみだが、ここでは実 Chromium の「サイドバーのボタンが
  * クリック可能か + aria-disabled + title（deny reason）」と `#app-status` 文言を
@@ -22,8 +22,7 @@ const APP_URL = '/app/app.html#/home';
 const LABELS = {
   blocks: 'ブロック承認',
   seeds: 'シード論文',
-  draft: '検索式ドラフト',
-  validate: '検証',
+  draft: '検索式（生成・検証）',
   expand: '対話的シード拡張',
   edit: '検索式編集',
   export: 'エクスポート',
@@ -60,7 +59,6 @@ const MATRIX: Record<StateName, Record<keyof typeof LABELS, Expectation>> = {
     blocks: 'PROJECT',
     seeds: 'PROJECT',
     draft: 'PROJECT',
-    validate: 'PROJECT',
     expand: 'PROJECT',
     edit: 'PROJECT',
     export: 'PROJECT',
@@ -71,7 +69,6 @@ const MATRIX: Record<StateName, Record<keyof typeof LABELS, Expectation>> = {
     blocks: 'PROTOCOL',
     seeds: 'enabled',
     draft: 'BLOCKS',
-    validate: 'FORMULA',
     expand: 'FORMULA',
     edit: 'FORMULA',
     export: 'FORMULA',
@@ -82,7 +79,6 @@ const MATRIX: Record<StateName, Record<keyof typeof LABELS, Expectation>> = {
     blocks: 'enabled',
     seeds: 'enabled',
     draft: 'BLOCKS',
-    validate: 'FORMULA',
     expand: 'FORMULA',
     edit: 'FORMULA',
     export: 'FORMULA',
@@ -93,7 +89,6 @@ const MATRIX: Record<StateName, Record<keyof typeof LABELS, Expectation>> = {
     blocks: 'enabled',
     seeds: 'enabled',
     draft: 'enabled',
-    validate: 'FORMULA',
     expand: 'FORMULA',
     edit: 'FORMULA',
     export: 'FORMULA',
@@ -104,7 +99,6 @@ const MATRIX: Record<StateName, Record<keyof typeof LABELS, Expectation>> = {
     blocks: 'enabled',
     seeds: 'enabled',
     draft: 'enabled',
-    validate: 'enabled',
     expand: 'enabled',
     edit: 'enabled',
     export: 'enabled',
@@ -113,7 +107,7 @@ const MATRIX: Record<StateName, Record<keyof typeof LABELS, Expectation>> = {
   },
 };
 
-test.describe('app-guards: 5 state × 9 route のマトリクス', () => {
+test.describe('app-guards: 5 state × 8 route のマトリクス', () => {
   for (const stateName of Object.keys(MATRIX) as StateName[]) {
     test(`${stateName}: 各ルートの enabled / deny reason`, async ({ page }) => {
       await injectAppStub(page, {

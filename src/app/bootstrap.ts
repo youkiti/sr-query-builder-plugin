@@ -32,7 +32,9 @@ import {
   type BlockImprovementResult,
   type BoundaryCasesResult,
   type ChromeRuntimeDeps,
+  type DraftBlockHit,
   type DraftProgress,
+  type DraftResult,
   type ExportResult,
   type IngestInput,
   type IngestSummary,
@@ -49,7 +51,7 @@ import {
   type ValidationSummary,
 } from './services';
 import type { SeedPaper } from '@/domain/seedPaper';
-import { efetchArticles, type EfetchArticle } from '@/lib/ncbi';
+import { efetchArticles, esearch, type EfetchArticle } from '@/lib/ncbi';
 import { getLatestFormulaVersion, listFormulaVersions } from '@/features/formula';
 import type { FormulaVersion } from '@/domain/formulaVersion';
 import { getCurrentProject } from '@/features/project';
@@ -67,7 +69,7 @@ import {
 } from './router';
 import { createStore, type AppState, type AppStore } from './store';
 import { buildViews, type BuildViewsOptions, type ViewContext } from './views';
-import { formatDraftProgress } from './views/draftView';
+import { formatDraftProgress, formatValidationProgress } from './views/draftView';
 import { formatFormulaVersionShort } from './views/formatHelpers';
 
 export interface AppBootstrapOptions {
@@ -332,42 +334,28 @@ function buildDefaultViewOptions(
       },
     },
     draft: {
-      // 進捗・エラーは store.draftRun で管理する（LLM コスト集計の setState による
-      // 全ビュー再描画でローカル DOM の進捗表示が消えるため）。view は描画専任。
-      onGenerate: async () => {
-        if (store.getState().draftRun?.status === 'running') {
-          // 再描画タイミング次第でボタンが二度押せた場合の保険
-          return;
-        }
+      // 「生成して検証する」= 生成 → 検証 を 1 アクションで連結する。
+      // 進捗・エラー・ブロックごとのヒット数は store.draftRun で管理する（LLM コスト集計の
+      // setState による全ビュー再描画でローカル DOM の進捗表示が消えるため）。view は描画専任。
+      onGenerate: async () => runGenerateAndValidate(store, runtime, llmFactoryDepsBase()),
+      // 結果は store に保存する。再描画後も draft view が state から復元できるようにするため。
+      onAnalyzeMissed: async (
+        missedPmids: string[]
+      ): Promise<AnalyzeMissedSeedsResult> => {
+        const result = await runAnalyzeMissedSeeds(
+          store,
+          runtime,
+          llmFactoryDepsBase(),
+          missedPmids
+        );
         store.setState((s) => ({
           ...s,
-          draftRun: {
-            status: 'running',
-            progressLabel: '開始します…',
-            startedAtMs: Date.now(),
-            error: null,
-          },
+          missedAnalysis:
+            s.currentFormulaVersionId === null
+              ? null
+              : { formulaVersionId: s.currentFormulaVersionId, result },
         }));
-        try {
-          await runGenerateDraft(store, runtime, llmFactoryDepsBase(), (p) => {
-            store.setState((s) =>
-              s.draftRun === null
-                ? s
-                : { ...s, draftRun: { ...s.draftRun, progressLabel: formatDraftProgress(p) } }
-            );
-          });
-          store.setState((s) => ({ ...s, draftRun: null }));
-        } catch (err) {
-          store.setState((s) => ({
-            ...s,
-            draftRun: {
-              status: 'error',
-              progressLabel: '',
-              startedAtMs: s.draftRun?.startedAtMs ?? Date.now(),
-              error: err instanceof Error ? err.message : String(err),
-            },
-          }));
-        }
+        return result;
       },
     },
     export: {
@@ -390,43 +378,6 @@ function buildDefaultViewOptions(
         runFillPmidForRisRow(store, runtime, pmid),
       onFetchArticle: async (pmid: string): Promise<EfetchArticle | null> =>
         runFetchArticle(store, runtime, pmid),
-    },
-    validate: {
-      // 結果は store に保存する。LLM コスト集計（cumulativeCostUsd）の setState が
-      // ビュー全体を再描画しても、validate view が state から結果を復元できるようにするため。
-      onRun: async (
-        onProgress?: (progress: ValidationProgress) => void
-      ): Promise<ValidationSummary> => {
-        const summary = await runValidate(store, runtime, onProgress);
-        store.setState((s) => ({
-          ...s,
-          validationResult:
-            s.currentFormulaVersionId === null
-              ? null
-              : { formulaVersionId: s.currentFormulaVersionId, summary },
-          // 検証をやり直したら過去の原因分析は古くなるため破棄する
-          missedAnalysis: null,
-        }));
-        return summary;
-      },
-      onAnalyzeMissed: async (
-        missedPmids: string[]
-      ): Promise<AnalyzeMissedSeedsResult> => {
-        const result = await runAnalyzeMissedSeeds(
-          store,
-          runtime,
-          llmFactoryDepsBase(),
-          missedPmids
-        );
-        store.setState((s) => ({
-          ...s,
-          missedAnalysis:
-            s.currentFormulaVersionId === null
-              ? null
-              : { formulaVersionId: s.currentFormulaVersionId, result },
-        }));
-        return result;
-      },
     },
     history: {
       onList: async (): Promise<FormulaVersion[]> => runListHistory(store, runtime),
@@ -621,7 +572,8 @@ async function runFetchArticle(
 async function runValidate(
   store: AppStore,
   runtime: ChromeRuntimeDeps,
-  onProgress?: (progress: ValidationProgress) => void
+  onProgress?: (progress: ValidationProgress) => void,
+  precomputedBlockHits?: ReadonlyMap<string, number>
 ): Promise<ValidationSummary> {
   const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
   return runValidation({
@@ -629,6 +581,7 @@ async function runValidate(
     eutils,
     store,
     onProgress,
+    precomputedBlockHits,
   });
 }
 
@@ -684,16 +637,134 @@ async function runApprove(store: AppStore, runtime: ChromeRuntimeDeps): Promise<
   await approveBlocks({ google: runtime.google, profile: runtime.profile, store });
 }
 
+/**
+ * 「生成して検証する」パイプライン。生成（generateDraft）→ 検証（runValidation）を
+ * 1 アクションで連結し、draftRun の phase / progressLabel / blockHits と validationResult を
+ * すべて store 経由で更新する。各フェーズの失敗は draftRun.status='error' に落とす
+ * （生成済みの formula と blockHits は残すので、検証だけ失敗しても結果は確認できる）。
+ */
+async function runGenerateAndValidate(
+  store: AppStore,
+  runtime: ChromeRuntimeDeps,
+  baseDeps: Omit<LlmFactoryDeps, 'llmLogFolderId' | 'spreadsheetId'>
+): Promise<void> {
+  if (store.getState().draftRun?.status === 'running') {
+    // 再描画タイミング次第でボタンが二度押せた場合の保険
+    return;
+  }
+  store.setState((s) => ({
+    ...s,
+    draftRun: {
+      status: 'running',
+      phase: 'generating',
+      progressLabel: '開始します…',
+      startedAtMs: Date.now(),
+      error: null,
+      blockHits: [],
+    },
+  }));
+
+  // --- 生成フェーズ（ブロックごとにヒット数を前倒し計測）---
+  let draftResult: DraftResult;
+  try {
+    draftResult = await runGenerateDraft(
+      store,
+      runtime,
+      baseDeps,
+      (p) => {
+        store.setState((s) =>
+          s.draftRun === null
+            ? s
+            : { ...s, draftRun: { ...s.draftRun, progressLabel: formatDraftProgress(p) } }
+        );
+      },
+      (hit) => {
+        store.setState((s) =>
+          s.draftRun === null
+            ? s
+            : { ...s, draftRun: { ...s.draftRun, blockHits: [...s.draftRun.blockHits, hit] } }
+        );
+      }
+    );
+  } catch (err) {
+    setDraftRunError(store, 'generating', err);
+    return;
+  }
+
+  // --- 検証フェーズ（生成完了後に自動継続）---
+  store.setState((s) =>
+    s.draftRun === null
+      ? s
+      : {
+          ...s,
+          draftRun: { ...s.draftRun, phase: 'validating', progressLabel: '検証を開始します…' },
+        }
+  );
+  // 生成時に計測済みの概念ブロックは再 esearch せず再利用する
+  const precomputed = new Map<string, number>();
+  for (const hit of draftResult.blockHits) {
+    if (hit.error === null && hit.hitCount !== null) {
+      precomputed.set(hit.blockId, hit.hitCount);
+    }
+  }
+  try {
+    const summary = await runValidate(
+      store,
+      runtime,
+      (p) => {
+        store.setState((s) =>
+          s.draftRun === null
+            ? s
+            : { ...s, draftRun: { ...s.draftRun, progressLabel: formatValidationProgress(p) } }
+        );
+      },
+      precomputed
+    );
+    store.setState((s) => ({
+      ...s,
+      validationResult:
+        s.currentFormulaVersionId === null
+          ? null
+          : { formulaVersionId: s.currentFormulaVersionId, summary },
+      // 再生成・再検証したら過去の原因分析は古くなるため破棄する
+      missedAnalysis: null,
+      draftRun: null,
+    }));
+  } catch (err) {
+    setDraftRunError(store, 'validating', err);
+  }
+}
+
+/** draftRun を指定フェーズのエラー状態にする（生成済み blockHits は保持する） */
+function setDraftRunError(
+  store: AppStore,
+  phase: 'generating' | 'validating',
+  err: unknown
+): void {
+  store.setState((s) => ({
+    ...s,
+    draftRun: {
+      status: 'error',
+      phase,
+      progressLabel: '',
+      startedAtMs: s.draftRun?.startedAtMs ?? Date.now(),
+      error: err instanceof Error ? err.message : String(err),
+      blockHits: s.draftRun?.blockHits ?? [],
+    },
+  }));
+}
+
 async function runGenerateDraft(
   store: AppStore,
   runtime: ChromeRuntimeDeps,
   baseDeps: Omit<LlmFactoryDeps, 'llmLogFolderId' | 'spreadsheetId'>,
-  onProgress: (p: DraftProgress) => void
-): Promise<void> {
+  onProgress: (p: DraftProgress) => void,
+  onBlockCounted: (hit: DraftBlockHit) => void
+): Promise<DraftResult> {
   const project = store.getState().project;
   /* istanbul ignore if -- draft view は project 選択済みでしかボタンを出さない */
   if (!project) {
-    return;
+    throw new Error('プロジェクトが選択されていません');
   }
   const factory = await buildLlmProviderFactory({
     ...baseDeps,
@@ -701,12 +772,16 @@ async function runGenerateDraft(
     spreadsheetId: project.spreadsheetId,
   });
   const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
-  await generateDraft({
+  return generateDraft({
     google: runtime.google,
     store,
     eutils,
     llmFactory: factory,
     onProgress,
+    onBlockCounted,
+    // 概念ブロックは葉式なのでそのまま esearch count に投げられる
+    countBlockHits: async (expression) =>
+      (await esearch(expression, eutils, { retmax: 0 })).count,
   });
 }
 

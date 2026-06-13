@@ -61,7 +61,7 @@ export function assembleFormulaMd(input: AssembleInput): AssembledFormula {
   }
   const userBlocks: FormulaBlock[] = input.blocks.map((block, index) => ({
     id: String(index + 1),
-    expression: buildUserBlockExpression(block),
+    expression: buildBlockExpression(block),
     isCombination: false,
   }));
   const filterBlocks: FormulaBlock[] = input.filterResult.filters.map((filter) => ({
@@ -94,7 +94,12 @@ export function assembleFormulaMd(input: AssembleInput): AssembledFormula {
   return { formula, markdown };
 }
 
-function buildUserBlockExpression(block: BlockOutputs): string {
+/**
+ * 1 つの概念ブロック（mesh + freeword）を `(A OR B OR ...)` 形式の式へ組み立てる。
+ * assembleFormulaMd と、生成途中のブロック単体ヒット数計測（line_hits）で共有する。
+ * 概念ブロックは `#N` 参照を含まない葉なので、戻り値はそのまま esearch に投げられる。
+ */
+export function buildBlockExpression(block: BlockOutputs): string {
   const terms: string[] = [];
   for (const mesh of block.mesh) {
     const token = (mesh.tagSyntax || mesh.descriptor).trim();

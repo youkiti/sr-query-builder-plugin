@@ -27,7 +27,8 @@ export type LineHitProgress = (done: number, total: number, blockId: string) => 
 export async function checkSearchLines(
   formula: PubmedFormula,
   deps: EutilsDeps,
-  onProgress?: LineHitProgress
+  onProgress?: LineHitProgress,
+  precomputed?: ReadonlyMap<string, number>
 ): Promise<LineHitResult[]> {
   const results: LineHitResult[] = [];
   const total = formula.blocks.length;
@@ -35,7 +36,11 @@ export async function checkSearchLines(
   for (const block of formula.blocks) {
     try {
       const expandedQuery = expandFormula(formula, block.id);
-      const { count } = await esearch(expandedQuery, deps, { retmax: 0 });
+      // 生成ループで既に計測済みの概念ブロックは再 esearch せず値を再利用する
+      // （ドラフト生成と検証で同じブロックを 2 度引かないため）。
+      const cached = precomputed?.get(block.id);
+      const count =
+        cached !== undefined ? cached : (await esearch(expandedQuery, deps, { retmax: 0 })).count;
       results.push({
         blockId: block.id,
         expression: block.expression,
