@@ -62,6 +62,7 @@ function makeStateWithDrafts(): AppState {
     expandRun: null,
     validationResult: null,
     missedAnalysis: null,
+    editAutoSave: null,
   };
 }
 

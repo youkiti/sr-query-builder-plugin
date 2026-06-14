@@ -12,12 +12,15 @@ import {
   approveBlocks,
   buildEutilsDeps,
   buildLlmProviderFactory,
+  checkEditedCombination,
   createChromeRuntimeDeps,
   exportToAllDatabases,
   fetchBoundaryCandidates,
   fillPmidForRisRow,
   generateDraft,
   ingestSeeds,
+  overwriteCurrentFormula,
+  restoreFormulaVersion,
   invalidateSeed,
   setSeedEnabled,
   listSeeds,
@@ -33,6 +36,7 @@ import {
   type BlockImprovementContext,
   type BlockImprovementResult,
   type ChromeRuntimeDeps,
+  type CombinationCheckResult,
   type DraftBlockHit,
   type DraftProgress,
   type DraftResult,
@@ -45,6 +49,7 @@ import {
   type RecordDecisionInput,
   type RecordDecisionResult,
   type RequestBlockImprovementInput,
+  type RestoreFormulaResult,
   type SaveEditedFormulaInput,
   type SaveEditedFormulaResult,
   type SeedPaperWithRow,
@@ -68,7 +73,7 @@ import {
   parseRoute,
   type RouteName,
 } from './router';
-import { createStore, type AppState, type AppStore } from './store';
+import { createStore, type AppState, type AppStore, type EditAutoSaveState } from './store';
 import { buildViews, type BuildViewsOptions, type ViewContext } from './views';
 import { formatDraftProgress, formatValidationProgress } from './views/draftView';
 import { formatFormulaVersionShort } from './views/formatHelpers';
@@ -295,6 +300,10 @@ function buildDefaultViewOptions(
       }));
     },
   });
+  // #/edit の動的保存（上書き）。fire-and-forget で呼ばれるので、ここで多重実行を直列化し、
+  // 保存中に来た最新の md だけを次に保存する（連続編集で esearch/PUT が積み上がらないように）。
+  // 状態は store.editAutoSave に反映し、view は再描画でも表示を失わない。
+  const triggerEditAutoSave = makeEditAutoSaveRunner(store, runtime);
   return {
     home: {
       onOpenPopup: () => {
@@ -382,24 +391,28 @@ function buildDefaultViewOptions(
     },
     history: {
       onList: async (): Promise<FormulaVersion[]> => runListHistory(store, runtime),
-      onLoad: (version) => {
-        store.setState((s) => ({
-          ...s,
-          currentProtocolVersion: version.protocolVersion,
-          currentFormulaVersionId: version.versionId,
-          currentFormulaMarkdown: version.formulaMd,
-        }));
-      },
+      // 復元は元の履歴行を残したまま新しい作業バージョンへフォークする（動的上書き保存と両立）。
+      onLoad: (version): Promise<RestoreFormulaResult> =>
+        restoreFormulaVersion(version, { google: runtime.google, store }),
     },
     edit: {
       onSave: async (input: SaveEditedFormulaInput): Promise<SaveEditedFormulaResult> =>
         runSaveEditedFormula(store, runtime, input),
+      onAutoSave: (formulaMd: string): void => triggerEditAutoSave(formulaMd),
       onImproveBlock: async (
         input: RequestBlockImprovementInput
       ): Promise<BlockImprovementResult> =>
         runImproveBlock(store, runtime, llmFactoryDepsBase(), input),
       onGetImproveContext: (blockId: string): Promise<BlockImprovementContext | null> =>
         getBlockImprovementContext(blockId, { store, google: runtime.google }),
+      onCountHits: async (expression: string): Promise<number> => {
+        const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
+        return (await esearch(expression, eutils, { retmax: 0 })).count;
+      },
+      onCheckCombination: async (formulaMd: string): Promise<CombinationCheckResult> => {
+        const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
+        return checkEditedCombination(formulaMd, { store, google: runtime.google, eutils });
+      },
     },
     expand: {
       // 進捗・取得結果は store.expandRun 経由で反映される（draft の onGenerate と同じ思想）
@@ -414,6 +427,53 @@ function buildDefaultViewOptions(
       writeKey: (key, value) => runtime.store.write({ [key]: value }),
       removeKey: (key) => chrome.storage.local.remove(key),
     },
+  };
+}
+
+/**
+ * #/edit の動的保存（上書き）を直列化して実行するランナーを作る。
+ *
+ * - view からは編集確定のたびに fire-and-forget で呼ばれる
+ * - 保存中に新たな呼び出しが来たら「最新の md」だけを保持し、現在の保存完了後にもう一度走らせる
+ *   （連続編集で PUT が積み上がらないようにしつつ、最後の内容を取りこぼさない）
+ * - 各段階で store.editAutoSave を更新する（保存完了の setState による再描画でも表示が残る）
+ */
+function makeEditAutoSaveRunner(
+  store: AppStore,
+  runtime: ChromeRuntimeDeps
+): (formulaMd: string) => void {
+  let inFlight = false;
+  let pendingMd: string | null = null;
+  const setStatus = (state: EditAutoSaveState): void => {
+    store.setState((s) => ({ ...s, editAutoSave: state }));
+  };
+  const drain = async (): Promise<void> => {
+    inFlight = true;
+    try {
+      while (pendingMd !== null) {
+        const next = pendingMd;
+        pendingMd = null;
+        setStatus({ status: 'saving', message: '自動保存中…' });
+        try {
+          await overwriteCurrentFormula({ formulaMd: next }, { google: runtime.google, store });
+          setStatus({ status: 'saved', message: '✓ 上書き保存しました' });
+        } catch (err) {
+          setStatus({
+            status: 'error',
+            message: `自動保存に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
+          });
+        }
+      }
+    } finally {
+      inFlight = false;
+    }
+  };
+  return (formulaMd: string): void => {
+    pendingMd = formulaMd;
+    if (inFlight) {
+      return;
+    }
+    void drain();
   };
 }
 

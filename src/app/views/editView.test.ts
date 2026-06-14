@@ -32,6 +32,18 @@ const stateReadyFull: AppState = {
   currentFormulaMarkdown: FULL_MD,
 };
 
+const stateReadyFullWithBlocks: AppState = {
+  ...stateReadyFull,
+  blocksDraft: {
+    blocks: [
+      { blockLabel: 'Population', description: '', note: '', aiGenerated: true },
+      { blockLabel: 'Outcome', description: '', note: '', aiGenerated: true },
+    ],
+    combinationExpression: '#1 AND #2',
+    selectedFilterIds: [],
+  },
+};
+
 async function flushAsync(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -142,6 +154,246 @@ describe('createEditView', () => {
     expect(container.querySelector('.edit__block-empty')?.textContent).toContain(
       'ブロックがありません'
     );
+  });
+});
+
+describe('createEditView - ブロック名・MeSH リンク・ヒット数', () => {
+  test('概念ブロックには blocksDraft のラベルが #N の隣に出る', () => {
+    const view = createEditView();
+    const container = buildContainer();
+    view(container, { state: stateReadyFullWithBlocks, navigate: jest.fn() });
+    expect(blockRow(container, '1').querySelector('.edit__block-label')?.textContent).toBe(
+      'Population'
+    );
+    expect(blockRow(container, '2').querySelector('.edit__block-label')?.textContent).toBe(
+      'Outcome'
+    );
+  });
+
+  test('結合行は「結合行」と示し、ラベルは付かない', () => {
+    const view = createEditView();
+    const container = buildContainer();
+    view(container, { state: stateReadyFullWithBlocks, navigate: jest.fn() });
+    expect(blockRow(container, '3').querySelector('.edit__block-label')?.textContent).toBe('結合行');
+  });
+
+  test('MeSH 語はクリックで MeSH ブラウザに飛ぶリンクになる', () => {
+    const md = ['## PubMed/MEDLINE', '', '```', '#1 "Asthma"[Mesh]', '```', ''].join('\n');
+    const view = createEditView();
+    const container = buildContainer();
+    view(container, {
+      state: { ...stateReady, currentFormulaMarkdown: md },
+      navigate: jest.fn(),
+    });
+    const link = blockRow(container, '1').querySelector<HTMLAnchorElement>(
+      '.edit__block-current a.draft__term--mesh'
+    )!;
+    expect(link.getAttribute('href')).toContain('ncbi.nlm.nih.gov/mesh');
+    expect(link.getAttribute('href')).toContain(encodeURIComponent('Asthma'));
+    expect(link.getAttribute('target')).toBe('_blank');
+  });
+
+  test('onCountHits 注入時は概念ブロックの件数を計測して表示する（結合行は対象外）', async () => {
+    const onCountHits = jest.fn().mockResolvedValue(1234);
+    const view = createEditView({ onCountHits });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    // 概念ブロック #1 #2 は計測対象、結合行 #3 は対象外
+    expect(blockRow(container, '1').querySelector('.edit__block-hits')?.textContent).toBe('計測中…');
+    expect(blockRow(container, '3').querySelector('.edit__block-hits')).toBeNull();
+    await flushAsync();
+    await flushAsync();
+    expect(onCountHits).toHaveBeenCalledWith('asthma[tiab]');
+    expect(blockRow(container, '1').querySelector('.edit__block-hits')?.textContent).toBe('1,234 件');
+  });
+
+  test('onCountHits が失敗したら件数エラーを表示する', async () => {
+    const onCountHits = jest.fn().mockRejectedValue(new Error('esearch boom'));
+    const view = createEditView({ onCountHits });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    await flushAsync();
+    await flushAsync();
+    const badge = blockRow(container, '1').querySelector<HTMLElement>('.edit__block-hits')!;
+    expect(badge.textContent).toBe('件数エラー');
+    expect(badge.title).toContain('esearch boom');
+  });
+
+  test('onCountHits 未注入なら件数バッジは出ない', () => {
+    const view = createEditView();
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    expect(blockRow(container, '1').querySelector('.edit__block-hits')).toBeNull();
+  });
+});
+
+describe('createEditView - 動的保存（上書き）', () => {
+  test('インライン編集の反映で onAutoSave が最新 md 付きで呼ばれる', () => {
+    const onAutoSave = jest.fn();
+    const view = createEditView({ onAutoSave });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    blockRow(container, '1')
+      .querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!
+      .click();
+    const input = blockRow(container, '1').querySelector<HTMLTextAreaElement>(
+      '.edit__block-edit-input'
+    )!;
+    input.value = '"Asthma"[Mesh]';
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-edit-save')!.click();
+    expect(onAutoSave).toHaveBeenCalledTimes(1);
+    expect(onAutoSave.mock.calls[0]![0]).toContain('#1 "Asthma"[Mesh]');
+  });
+
+  test('AI 改善の accept でも onAutoSave が呼ばれる', async () => {
+    const onAutoSave = jest.fn();
+    const onImproveBlock = jest.fn().mockResolvedValue({
+      blockId: '1',
+      currentExpression: 'asthma[tiab]',
+      proposedExpression: '"Asthma"[Mesh]',
+      rationale: 'r',
+    });
+    const view = createEditView({ onAutoSave, onImproveBlock });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-ai-submit')!.click();
+    await flushAsync();
+    await flushAsync();
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-accept')!.click();
+    expect(onAutoSave).toHaveBeenCalledTimes(1);
+  });
+
+  test('onAutoSave 未注入なら自動保存は呼ばれない（手編集は動く）', () => {
+    const view = createEditView();
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!.click();
+    const input = blockRow(container, '1').querySelector<HTMLTextAreaElement>(
+      '.edit__block-edit-input'
+    )!;
+    input.value = 'x[tiab]';
+    expect(() =>
+      blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-edit-save')!.click()
+    ).not.toThrow();
+  });
+
+  test('state.editAutoSave の状態が status 行に描画される', () => {
+    const view = createEditView({ onAutoSave: jest.fn() });
+    const container = buildContainer();
+    view(container, {
+      state: { ...stateReadyFull, editAutoSave: { status: 'saved', message: '✓ 上書き保存しました' } },
+      navigate: jest.fn(),
+    });
+    const badge = container.querySelector('.edit__autosave')!;
+    expect(badge.textContent).toBe('✓ 上書き保存しました');
+    expect(badge.className).toContain('edit__autosave--saved');
+  });
+
+  test('editAutoSave が null なら status 行は出ない', () => {
+    const view = createEditView({ onAutoSave: jest.fn() });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    expect(container.querySelector('.edit__autosave')).toBeNull();
+  });
+});
+
+describe('createEditView - 結合行のシード捕捉確認', () => {
+  function makeResult(over: Partial<import('@/app/services').CombinationCheckResult> = {}) {
+    return {
+      finalQuery: '(asthma[tiab]) AND (children[tiab])',
+      totalHits: 4200,
+      captureRate: 1,
+      capturedPmids: ['111', '222'],
+      missedPmids: [],
+      eligibleSeedCount: 2,
+      totalSeedCount: 2,
+      ...over,
+    };
+  }
+
+  test('結合行にのみ確認ボタンが出る（概念ブロックには出ない）', () => {
+    const onCheckCombination = jest.fn();
+    const view = createEditView({ onCheckCombination });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    expect(blockRow(container, '3').querySelector('.edit__combo-check-btn')).toBeTruthy();
+    expect(blockRow(container, '1').querySelector('.edit__combo-check-btn')).toBeNull();
+  });
+
+  test('全シード捕捉なら ✓ 捕捉率 100% と総ヒット数を出す', async () => {
+    const onCheckCombination = jest.fn().mockResolvedValue(makeResult());
+    const view = createEditView({ onCheckCombination });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    const row = blockRow(container, '3');
+    row.querySelector<HTMLButtonElement>('.edit__combo-check-btn')!.click();
+    await flushAsync();
+    await flushAsync();
+    expect(onCheckCombination).toHaveBeenCalledWith(stateReadyFull.currentFormulaMarkdown);
+    const result = row.querySelector('.edit__combo-check-result')!;
+    expect(result.className).toContain('edit__combo-check-result--ok');
+    expect(result.querySelector('.edit__combo-check-hits')?.textContent).toContain('4,200 件');
+    expect(result.querySelector('.edit__combo-check-capture')?.textContent).toContain('✓');
+    expect(result.querySelector('.edit__combo-check-capture')?.textContent).toContain('100%');
+    expect(result.querySelector('.edit__combo-check-missed')).toBeNull();
+  });
+
+  test('未捕捉があれば ⚠ と未捕捉 PMID を出す', async () => {
+    const onCheckCombination = jest.fn().mockResolvedValue(
+      makeResult({ captureRate: 0.5, capturedPmids: ['111'], missedPmids: ['222'] })
+    );
+    const view = createEditView({ onCheckCombination });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    const row = blockRow(container, '3');
+    row.querySelector<HTMLButtonElement>('.edit__combo-check-btn')!.click();
+    await flushAsync();
+    await flushAsync();
+    const result = row.querySelector('.edit__combo-check-result')!;
+    expect(result.className).toContain('edit__combo-check-result--warn');
+    expect(result.querySelector('.edit__combo-check-capture')?.textContent).toContain('⚠');
+    expect(result.querySelector('.edit__combo-check-capture')?.textContent).toContain('50%');
+    expect(result.querySelector('.edit__combo-check-missed')?.textContent).toContain('222');
+  });
+
+  test('有効シード 0 件のときは捕捉率を確認できない旨を出す', async () => {
+    const onCheckCombination = jest.fn().mockResolvedValue(
+      makeResult({ captureRate: 0, capturedPmids: [], missedPmids: [], eligibleSeedCount: 0, totalSeedCount: 0 })
+    );
+    const view = createEditView({ onCheckCombination });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    const row = blockRow(container, '3');
+    row.querySelector<HTMLButtonElement>('.edit__combo-check-btn')!.click();
+    await flushAsync();
+    await flushAsync();
+    const result = row.querySelector('.edit__combo-check-result')!;
+    expect(result.className).toContain('edit__combo-check-result--info');
+    expect(result.querySelector('.edit__combo-check-capture')?.textContent).toContain('有効なシード論文が無い');
+  });
+
+  test('失敗時はエラーを表示しボタンは再び押せる', async () => {
+    const onCheckCombination = jest.fn().mockRejectedValue(new Error('esearch down'));
+    const view = createEditView({ onCheckCombination });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    const row = blockRow(container, '3');
+    const btn = row.querySelector<HTMLButtonElement>('.edit__combo-check-btn')!;
+    btn.click();
+    await flushAsync();
+    await flushAsync();
+    const result = row.querySelector('.edit__combo-check-result')!;
+    expect(result.className).toContain('edit__combo-check-result--error');
+    expect(result.textContent).toContain('esearch down');
+    expect(btn.disabled).toBe(false);
+  });
+
+  test('onCheckCombination 未注入なら確認ボタンは出ない', () => {
+    const view = createEditView();
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    expect(blockRow(container, '3').querySelector('.edit__combo-check-btn')).toBeNull();
   });
 });
 

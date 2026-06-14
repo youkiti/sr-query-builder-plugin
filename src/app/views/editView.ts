@@ -2,12 +2,15 @@ import {
   applyBlockImprovement,
   type BlockImprovementContext,
   type BlockImprovementResult,
+  type CombinationCheckResult,
   type RequestBlockImprovementInput,
   type SaveEditedFormulaInput,
   type SaveEditedFormulaResult,
 } from '@/app/services';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
 import { ROUTE_LABELS } from '../router';
+import type { BlocksDraft } from '../store';
+import { buildLegend, renderExpressionInto } from './formulaDisplay';
 import type { RenderView } from './types';
 
 /**
@@ -28,11 +31,74 @@ import type { RenderView } from './types';
  */
 
 export interface EditViewCallbacks {
+  /** 「新バージョンとして保存」: 履歴を残したいときだけ押す。新しい version を追記する */
   onSave?: (input: SaveEditedFormulaInput) => Promise<SaveEditedFormulaResult>;
+  /**
+   * 動的保存（上書き）。ブロックを編集／AI 改善を反映するたびに呼ばれ、現在の作業
+   * バージョン行を同じ場所に上書きする（履歴は増やさない）。fire-and-forget で呼び、
+   * 実行・多重制御・状態反映は呼び出し側（bootstrap）が store.editAutoSave 経由で行う。
+   */
+  onAutoSave?: (formulaMd: string) => void;
   /** 指定ブロックを LLM で改善させる（instruction はユーザー任意の指示） */
   onImproveBlock?: (input: RequestBlockImprovementInput) => Promise<BlockImprovementResult>;
   /** 「AI に渡す内容を見る」表示用の文脈スナップショットを取得する（SeedPapers 読み取りを伴う） */
   onGetImproveContext?: (blockId: string) => Promise<BlockImprovementContext | null>;
+  /**
+   * ブロック式単体のヒット数を計測する（esearch count）。注入された場合のみ、各概念ブロックの
+   * 件数をライブ表示する。結合行（`#1 AND #2`）は #N 参照を含み単体検索できないので対象外。
+   */
+  onCountHits?: (expression: string) => Promise<number>;
+  /**
+   * 結合行（最終検索式）を実際に検索し、同時に有効シード論文の捕捉状況を確認する。
+   * 注入された場合のみ、結合行に「検索してシード捕捉を確認」ボタンを出す。
+   * 引数は編集中の md 全文（保存前でも確認できるよう view が保持している現在値）。
+   */
+  onCheckCombination?: (formulaMd: string) => Promise<CombinationCheckResult>;
+}
+
+/**
+ * ブロック描画に必要な周辺情報。
+ * - blocksDraft: `#N` が何の概念ブロックかを示すラベル解決に使う
+ * - hitsCache: 同じ式を再計測しないための式→件数キャッシュ（view インスタンスで共有）
+ */
+interface BlockRenderContext {
+  blocksDraft: BlocksDraft | null;
+  hitsCache: Map<string, Promise<number>>;
+}
+
+/**
+ * 概念ブロック `#N`（数値 ID・非結合行）に対応する blocksDraft 上のラベルを返す。
+ * 結合行・フィルタ行（非数値 ID）・blocksDraft 外の ID では null。
+ */
+function blockLabelFor(
+  blocksDraft: BlocksDraft | null,
+  blockId: string,
+  isCombination: boolean
+): string | null {
+  if (isCombination || blocksDraft === null) {
+    return null;
+  }
+  const n = Number.parseInt(blockId, 10);
+  if (!Number.isFinite(n) || n < 1) {
+    return null;
+  }
+  const label = blocksDraft.blocks[n - 1]?.blockLabel?.trim();
+  return label ? label : null;
+}
+
+/** 式→件数のキャッシュ越しに onCountHits を呼ぶ（同一式の重複 esearch を防ぐ）。 */
+function countHitsCached(
+  onCountHits: NonNullable<EditViewCallbacks['onCountHits']>,
+  cache: Map<string, Promise<number>>,
+  expression: string
+): Promise<number> {
+  const cached = cache.get(expression);
+  if (cached) {
+    return cached;
+  }
+  const pending = onCountHits(expression);
+  cache.set(expression, pending);
+  return pending;
 }
 
 /** 検索式 Markdown 全文を保持し、更新時にブロック一覧を再描画する内部コントローラ。 */
@@ -48,6 +114,9 @@ interface ProposalEntry extends BlockImprovementResult {
 }
 
 export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
+  // ヒット数キャッシュは view インスタンスの生存期間で持ち越す（式→件数は安定なので、
+  // 自動保存などで全体が再描画されても同じ式は再 esearch しない）。
+  const hitsCache = new Map<string, Promise<number>>();
   return (container, ctx) => {
     container.innerHTML = '';
     const doc = container.ownerDocument;
@@ -72,9 +141,21 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
 
     const lead = doc.createElement('p');
     lead.className = 'edit__lead';
-    lead.textContent =
-      '各ブロックは鉛筆アイコンで直接編集するか、「AI に改善させる」で再設計できます。最後に「新バージョンとして保存」を押すと FormulaVersions に user_edit として追記されます。';
+    lead.textContent = callbacks.onAutoSave
+      ? '各ブロックは鉛筆アイコンで直接編集するか、「AI に改善させる」で再設計できます。編集は自動でシートに上書き保存されます。区切りとして履歴に残したいときだけ「新バージョンとして保存」を押してください。'
+      : '各ブロックは鉛筆アイコンで直接編集するか、「AI に改善させる」で再設計できます。最後に「新バージョンとして保存」を押すと FormulaVersions に user_edit として追記されます。';
     container.appendChild(lead);
+
+    // 動的保存（上書き）の状態行。実際の保存実行・多重制御は bootstrap が担い、
+    // 状態は store.editAutoSave に入る（保存完了の setState による再描画でも表示が残るよう、
+    // draftRun などと同じく store 経由で描画する）。
+    if (ctx.state.editAutoSave) {
+      const autoSaveStatus = doc.createElement('p');
+      autoSaveStatus.className = `edit__autosave edit__autosave--${ctx.state.editAutoSave.status}`;
+      autoSaveStatus.setAttribute('aria-live', 'polite');
+      autoSaveStatus.textContent = ctx.state.editAutoSave.message;
+      container.appendChild(autoSaveStatus);
+    }
 
     // 内部状態。テキストエリアは表示せず、この変数を単一の真実とする。
     let currentMd = ctx.state.currentFormulaMarkdown;
@@ -83,6 +164,9 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
       setMd: (next: string) => {
         currentMd = next;
         rerenderBlocks();
+        // ブロック編集 / AI 改善の反映が確定するたびに上書き保存する（fire-and-forget。
+        // 実行・多重制御・状態反映は bootstrap 側が store.editAutoSave 経由で行う）。
+        callbacks.onAutoSave?.(currentMd);
       },
     };
 
@@ -91,6 +175,8 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
     const blocksHeading = doc.createElement('h3');
     blocksHeading.textContent = 'ブロック';
     blocksSection.appendChild(blocksHeading);
+    // draft 画面と同じ MeSH / フリーワードの色分け凡例
+    blocksSection.appendChild(buildLegend(doc));
     const blocksList = doc.createElement('ul');
     blocksList.className = 'edit__block-list';
     blocksSection.appendChild(blocksList);
@@ -113,6 +199,9 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
     const saveBtn = doc.createElement('button');
     saveBtn.type = 'button';
     saveBtn.textContent = '新バージョンとして保存';
+    if (callbacks.onAutoSave) {
+      saveBtn.title = '現在の内容を履歴として別バージョンに残します（通常の編集は自動で上書き保存されます）';
+    }
     actions.appendChild(saveBtn);
     container.appendChild(actions);
 
@@ -126,8 +215,14 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
     errorBox.setAttribute('aria-live', 'polite');
     container.appendChild(errorBox);
 
+    // ラベル解決元の blocksDraft と、view インスタンス共通のヒット数キャッシュ。
+    const renderCtx: BlockRenderContext = {
+      blocksDraft: ctx.state.blocksDraft,
+      hitsCache,
+    };
+
     function rerenderBlocks(): void {
-      renderBlockList(doc, blocksList, editor, callbacks);
+      renderBlockList(doc, blocksList, editor, callbacks, renderCtx);
     }
     rerenderBlocks();
 
@@ -162,7 +257,8 @@ function renderBlockList(
   doc: Document,
   ul: HTMLElement,
   editor: FormulaEditor,
-  callbacks: EditViewCallbacks
+  callbacks: EditViewCallbacks,
+  renderCtx: BlockRenderContext
 ): void {
   ul.innerHTML = '';
   let formula;
@@ -183,7 +279,9 @@ function renderBlockList(
     return;
   }
   for (const block of formula.blocks) {
-    ul.appendChild(buildBlockRow(doc, block.id, block.expression, editor, callbacks));
+    ul.appendChild(
+      buildBlockRow(doc, block.id, block.expression, block.isCombination, editor, callbacks, renderCtx)
+    );
   }
 }
 
@@ -191,19 +289,45 @@ function buildBlockRow(
   doc: Document,
   blockId: string,
   expression: string,
+  isCombination: boolean,
   editor: FormulaEditor,
-  callbacks: EditViewCallbacks
+  callbacks: EditViewCallbacks,
+  renderCtx: BlockRenderContext
 ): HTMLElement {
   const li = doc.createElement('li');
   li.className = 'edit__block-row';
+  // 結合行（最終検索式）は draft 画面と同様に強調表示する
+  if (isCombination) {
+    li.classList.add('edit__block-row--combination');
+  }
   li.setAttribute('data-block-id', blockId);
 
   const header = doc.createElement('div');
   header.className = 'edit__block-header';
+
+  // `#N` とその概念ブロック名（ブロック承認画面のラベル）。結合行は「結合」と示す。
+  const idGroup = doc.createElement('div');
+  idGroup.className = 'edit__block-idgroup';
   const idSpan = doc.createElement('span');
   idSpan.className = 'edit__block-id';
   idSpan.textContent = `#${blockId}`;
-  header.appendChild(idSpan);
+  idGroup.appendChild(idSpan);
+  const label = blockLabelFor(renderCtx.blocksDraft, blockId, isCombination);
+  const labelSpan = doc.createElement('span');
+  labelSpan.className = 'edit__block-label';
+  if (label) {
+    labelSpan.textContent = label;
+  } else if (isCombination) {
+    labelSpan.textContent = '結合行';
+    labelSpan.classList.add('edit__block-label--muted');
+  }
+  idGroup.appendChild(labelSpan);
+
+  // 概念ブロックの単体ヒット数（リアルタイム）。結合行や onCountHits 未注入では出さない。
+  if (!isCombination && callbacks.onCountHits) {
+    idGroup.appendChild(buildHitsBadge(doc, expression, callbacks.onCountHits, renderCtx.hitsCache));
+  }
+  header.appendChild(idGroup);
 
   const tools = doc.createElement('div');
   tools.className = 'edit__block-tools';
@@ -224,7 +348,8 @@ function buildBlockRow(
 
   const currentPre = doc.createElement('pre');
   currentPre.className = 'edit__block-current';
-  currentPre.textContent = expression;
+  // MeSH 語はクリックで MeSH ブラウザに飛ぶリンク、フリーワードは色分け表示にする。
+  renderExpressionInto(currentPre, expression);
   li.appendChild(currentPre);
 
   // インライン手編集用スロット（鉛筆ボタンで開く）
@@ -268,7 +393,123 @@ function buildBlockRow(
     );
   });
 
+  // 結合行には「検索してシード捕捉を確認」を付ける（最終検索式の実検索 + 捕捉率）。
+  if (isCombination && callbacks.onCheckCombination) {
+    li.appendChild(buildCombinationCheck(doc, editor, callbacks.onCheckCombination));
+  }
+
   return li;
+}
+
+/**
+ * 結合行（最終検索式）用の「検索してシード捕捉を確認」UI。
+ * クリックで編集中の md 全文を onCheckCombination に渡し、総ヒット数と有効シードの
+ * 捕捉率（捕捉 / 未捕捉 PMID）を表示する。保存前でも何度でも実行できる確認用。
+ */
+function buildCombinationCheck(
+  doc: Document,
+  editor: FormulaEditor,
+  onCheckCombination: NonNullable<EditViewCallbacks['onCheckCombination']>
+): HTMLElement {
+  const wrap = doc.createElement('div');
+  wrap.className = 'edit__combo-check';
+
+  const btn = doc.createElement('button');
+  btn.type = 'button';
+  btn.className = 'edit__combo-check-btn';
+  btn.textContent = '検索してシード捕捉を確認';
+  wrap.appendChild(btn);
+
+  const result = doc.createElement('div');
+  result.className = 'edit__combo-check-result';
+  result.setAttribute('aria-live', 'polite');
+  wrap.appendChild(result);
+
+  btn.addEventListener('click', () => {
+    btn.disabled = true;
+    result.className = 'edit__combo-check-result edit__combo-check-result--pending';
+    result.textContent = '検索中…';
+    onCheckCombination(editor.getMd())
+      .then((res) => {
+        renderCombinationResult(doc, result, res);
+      })
+      .catch((err: unknown) => {
+        result.className = 'edit__combo-check-result edit__combo-check-result--error';
+        result.textContent = `確認に失敗しました: ${formatError(err)}`;
+      })
+      .finally(() => {
+        btn.disabled = false;
+      });
+  });
+
+  return wrap;
+}
+
+/** 結合行チェック結果（総ヒット数・捕捉率・捕捉/未捕捉 PMID）を描画する。 */
+function renderCombinationResult(
+  doc: Document,
+  result: HTMLElement,
+  res: CombinationCheckResult
+): void {
+  result.innerHTML = '';
+  const allCaptured = res.eligibleSeedCount > 0 && res.missedPmids.length === 0;
+  result.className = `edit__combo-check-result ${
+    res.eligibleSeedCount === 0
+      ? 'edit__combo-check-result--info'
+      : allCaptured
+        ? 'edit__combo-check-result--ok'
+        : 'edit__combo-check-result--warn'
+  }`;
+
+  const hits = doc.createElement('p');
+  hits.className = 'edit__combo-check-hits';
+  hits.textContent = `総ヒット数: ${res.totalHits.toLocaleString()} 件`;
+  result.appendChild(hits);
+
+  const capture = doc.createElement('p');
+  capture.className = 'edit__combo-check-capture';
+  if (res.eligibleSeedCount === 0) {
+    capture.textContent = '有効なシード論文が無いため捕捉率は確認できません（/seeds で登録してください）。';
+  } else {
+    const ratePct = Math.round(res.captureRate * 1000) / 10;
+    const mark = allCaptured ? '✓' : '⚠';
+    capture.textContent = `${mark} シード捕捉率: ${ratePct}%（${res.capturedPmids.length}/${res.eligibleSeedCount} 件）`;
+  }
+  result.appendChild(capture);
+
+  if (res.missedPmids.length > 0) {
+    const missed = doc.createElement('p');
+    missed.className = 'edit__combo-check-missed';
+    missed.textContent = `未捕捉 PMID: ${res.missedPmids.join(', ')}`;
+    result.appendChild(missed);
+  }
+}
+
+/**
+ * 概念ブロック式のヒット数バッジ。生成時に「計測中…」を出し、esearch 結果が返ったら
+ * 件数（またはエラー）へ差し替える。キャッシュ経由で同一式の重複計測を避ける。
+ */
+function buildHitsBadge(
+  doc: Document,
+  expression: string,
+  onCountHits: NonNullable<EditViewCallbacks['onCountHits']>,
+  cache: Map<string, Promise<number>>
+): HTMLElement {
+  const badge = doc.createElement('span');
+  badge.className = 'edit__block-hits edit__block-hits--pending';
+  badge.setAttribute('aria-live', 'polite');
+  badge.textContent = '計測中…';
+  countHitsCached(onCountHits, cache, expression)
+    .then((count) => {
+      badge.className = 'edit__block-hits edit__block-hits--done';
+      badge.textContent = `${count.toLocaleString()} 件`;
+    })
+    .catch((err: unknown) => {
+      badge.className = 'edit__block-hits edit__block-hits--error';
+      badge.textContent = '件数エラー';
+      badge.title = formatError(err);
+    });
+  return badge;
 }
 
 /** 鉛筆ボタンで開くインライン編集フォームを構築する。 */

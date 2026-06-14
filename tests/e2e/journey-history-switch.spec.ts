@@ -1,5 +1,8 @@
 /**
- * J2: バージョン履歴から別バージョンをロードして state が切り替わる。
+ * J2: バージョン履歴から過去バージョンを復元すると、作業中の Formula が切り替わる。
+ *
+ * 復元は元の履歴行を残したまま新しい作業バージョンへフォークする（restoreFormulaVersion）ため、
+ * クリック後の context には「新しい作業バージョンの Formula id」が載る（元の fv-B そのものではない）。
  *
  * historyView は `onList` で Sheets API（values:get）を呼ぶ → 結果を render。
  * 本スペックは `page.route` で Sheets の `FormulaVersions` タブ取得を mock する。
@@ -48,7 +51,7 @@ const FORMULA_VERSIONS_ROWS = [
 ];
 
 test.describe('journey-history-switch (J2)', () => {
-  test('2 バージョン一覧 → バージョン B をロード → context が Formula fv-B に切り替わる', async ({
+  test('2 バージョン一覧 → バージョン B を復元 → context の Formula が新しい作業版に切り替わる', async ({
     page,
   }) => {
     await injectAppStub(page, {
@@ -75,13 +78,12 @@ test.describe('journey-history-switch (J2)', () => {
     const items = page.locator('.history__item');
     await expect(items).toHaveCount(2);
 
-    // 現状 active = fv-A。B のロードボタンをクリック
+    // 現状 active = fv-A。fv-B（非 active）の復元ボタンをクリック → 新しい作業版へフォーク
     const itemB = page.locator('.history__item[data-version-id="fv-B"]');
     await expect(itemB).toBeVisible();
     await itemB.locator('button.history__load').click();
 
-    // context ラベル（#app-context, aria-live=polite）に Formula の新 id が載る
-    // formatFormulaVersionShort は id の末尾を短縮表示するので fv-B の短縮表記を部分一致で確認
+    // context ラベル（#app-context, aria-live=polite）に、フォークされた新しい作業版の Formula id が載る
     await expect(page.locator('#app-context')).toContainText('Formula');
   });
 });

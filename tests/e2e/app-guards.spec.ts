@@ -22,7 +22,7 @@ const APP_URL = '/app/app.html#/home';
 const LABELS = {
   blocks: 'ブロック承認',
   seeds: 'シード論文',
-  draft: '検索式（生成・検証）',
+  draft: '検索式（ドラフト）',
   expand: '対話的シード拡張',
   edit: '検索式編集',
   export: 'エクスポート',

@@ -1,3 +1,4 @@
+import type { RestoreFormulaResult } from '@/app/services';
 import type { FormulaVersion } from '@/domain/formulaVersion';
 import { ROUTE_LABELS } from '../router';
 import type { RenderView } from './types';
@@ -6,16 +7,17 @@ import type { RenderView } from './types';
  * 検索式バージョン履歴画面（#/history）。
  *
  * - FormulaVersions タブから全履歴を新しい順で取得して一覧表示
- * - 各行に「このバージョンを読み込む」ボタンがあり、store の
- *   currentFormulaVersionId / currentFormulaMarkdown を差し替える
- * - 現在読み込み中のバージョンはバッジ表示
+ * - 各行に「このバージョンを復元」ボタンがあり、その内容を**新しい作業バージョンとして
+ *   フォーク**してから読み込む（元の履歴行は無傷のまま。動的上書き保存と両立させるため）
+ * - 現在読み込み中のバージョンはバッジ表示し、復元ボタンは無効化する
  *
- * 実ロジック（onList / onLoad）は bootstrap で formulaRepository をラップして渡す。
+ * 実ロジック（onList / onLoad）は bootstrap で formulaRepository / editService をラップして渡す。
  */
 
 export interface HistoryViewCallbacks {
   onList?: () => Promise<FormulaVersion[]>;
-  onLoad?: (version: FormulaVersion) => void;
+  /** 選択バージョンを復元する。新しい作業バージョンへフォークして読み込む（restoreFormulaVersion） */
+  onLoad?: (version: FormulaVersion) => void | Promise<RestoreFormulaResult>;
 }
 
 export function createHistoryView(callbacks: HistoryViewCallbacks = {}): RenderView {
@@ -33,6 +35,12 @@ export function createHistoryView(callbacks: HistoryViewCallbacks = {}): RenderV
       container.appendChild(warn);
       return;
     }
+
+    const lede = doc.createElement('p');
+    lede.className = 'history__lede';
+    lede.textContent =
+      '「このバージョンを復元」を押すと、その内容を新しい作業バージョンとして複製してから読み込みます。選んだ過去バージョンの履歴行はそのまま残ります。';
+    container.appendChild(lede);
 
     const status = doc.createElement('p');
     status.className = 'history__status';
@@ -63,7 +71,9 @@ export function createHistoryView(callbacks: HistoryViewCallbacks = {}): RenderV
         }
         status.textContent = `${versions.length} 件のバージョンが見つかりました。`;
         for (const v of versions) {
-          list.appendChild(buildItem(doc, v, ctx.state.currentFormulaVersionId, callbacks.onLoad));
+          list.appendChild(
+            buildItem(doc, v, ctx.state.currentFormulaVersionId, callbacks.onLoad, errorBox)
+          );
         }
       })
       .catch((err: unknown) => {
@@ -77,11 +87,13 @@ function buildItem(
   doc: Document,
   version: FormulaVersion,
   activeVersionId: string | null,
-  onLoad: HistoryViewCallbacks['onLoad']
+  onLoad: HistoryViewCallbacks['onLoad'],
+  errorBox: HTMLElement
 ): HTMLElement {
   const li = doc.createElement('li');
   li.className = 'history__item';
   li.dataset['versionId'] = version.versionId;
+  const isActive = version.versionId === activeVersionId;
 
   const head = doc.createElement('p');
   head.className = 'history__head';
@@ -93,7 +105,7 @@ function buildItem(
   const parent = version.parentVersionId ? ` ← ${version.parentVersionId}` : '';
   metaSpan.textContent = ` / ${version.createdBy} / ${version.createdAt}${parent}`;
   head.appendChild(metaSpan);
-  if (version.versionId === activeVersionId) {
+  if (isActive) {
     const badge = doc.createElement('span');
     badge.className = 'history__badge';
     badge.textContent = '読み込み中';
@@ -116,12 +128,28 @@ function buildItem(
   const btn = doc.createElement('button');
   btn.type = 'button';
   btn.className = 'history__load';
-  btn.textContent = 'このバージョンを読み込む';
-  btn.addEventListener('click', () => {
-    if (onLoad) {
-      onLoad(version);
-    }
-  });
+  if (isActive) {
+    // 既に読み込み中のバージョンは復元（フォーク）の意味がないので無効化する
+    btn.textContent = '読み込み中';
+    btn.disabled = true;
+  } else {
+    btn.textContent = 'このバージョンを復元';
+    btn.addEventListener('click', () => {
+      if (!onLoad) {
+        return;
+      }
+      errorBox.textContent = '';
+      btn.disabled = true;
+      btn.textContent = '復元中…';
+      // 成功時は store 更新 → 再描画でこのボタンごと作り直されるため、ここでは復帰処理は不要。
+      // 失敗時のみ（store が変わらず再描画されない）この場でエラーを出して再度押せるようにする。
+      Promise.resolve(onLoad(version)).catch((err: unknown) => {
+        errorBox.textContent = `復元に失敗しました: ${formatError(err)}`;
+        btn.disabled = false;
+        btn.textContent = 'このバージョンを復元';
+      });
+    });
+  }
   li.appendChild(btn);
   return li;
 }

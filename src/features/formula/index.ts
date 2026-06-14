@@ -11,6 +11,8 @@ export {
   getLatestFormulaVersion,
   listFormulaVersions,
   getFormulaVersionById,
+  updateFormulaVersion,
+  type FormulaVersionPatch,
   type FormulaVersionRow,
 } from './formulaRepository';
 export {

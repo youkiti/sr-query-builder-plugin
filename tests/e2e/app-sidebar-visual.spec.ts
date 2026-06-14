@@ -13,7 +13,7 @@ test.describe('app-sidebar-visual', () => {
     await injectAppStub(page, fullStateScenario());
     await page.goto('/app/app.html#/draft');
 
-    const activeBtn = page.locator('#app-sidebar nav button:has-text("検索式（生成・検証）")');
+    const activeBtn = page.locator('#app-sidebar nav button:has-text("検索式（ドラフト）")');
     await expect(activeBtn).toHaveAttribute('aria-current', 'page');
     await expect(activeBtn).toHaveClass(/is-active/);
 
@@ -29,7 +29,7 @@ test.describe('app-sidebar-visual', () => {
     await page.locator('#app-sidebar nav button:has-text("エクスポート")').click();
     const nextActive = page.locator('#app-sidebar nav button:has-text("エクスポート")');
     await expect(nextActive).toHaveAttribute('aria-current', 'page');
-    const prevActive = page.locator('#app-sidebar nav button:has-text("検索式（生成・検証）")');
+    const prevActive = page.locator('#app-sidebar nav button:has-text("検索式（ドラフト）")');
     await expect(prevActive).not.toHaveAttribute('aria-current', 'page');
   });
 

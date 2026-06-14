@@ -2,12 +2,16 @@ import {
   appendFormulaVersion,
   getFormulaVersionById,
   improveBlockExpression,
+  updateFormulaVersion,
   type ImproveBlockProposal,
 } from '@/features/formula';
-import { listSeedPapersWithRows } from '@/features/seeds';
+import { listSeedPapers, listSeedPapersWithRows } from '@/features/seeds';
+import { checkFinalQuery, type FinalQueryResult } from '@/features/validation';
 import { isSeedEligibleForValidation } from '@/domain/seedPaper';
+import type { FormulaVersion } from '@/domain/formulaVersion';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
 import type { GoogleApiDeps } from '@/lib/google';
+import type { EutilsDeps } from '@/lib/ncbi';
 import { nowIso } from '@/utils/iso8601';
 import { newUuid } from '@/utils/uuid';
 import type { LlmProviderFactory } from './llmProviderService';
@@ -83,6 +87,179 @@ export async function saveEditedFormula(
   }));
 
   return { versionId, parentVersionId };
+}
+
+export interface OverwriteFormulaInput {
+  /** 上書き後の formula_md 全文（`## PubMed/MEDLINE` セクションを含む） */
+  formulaMd: string;
+}
+
+export interface OverwriteFormulaResult {
+  /** 上書きした（または新規作成した）バージョン ID */
+  versionId: string;
+  /** 既存行を上書きしたら false、対象が無く新規追記にフォールバックしたら true */
+  created: boolean;
+}
+
+/**
+ * #/edit の作業バージョンを「動的保存（上書き）」する。
+ *
+ * - 現在の currentFormulaVersionId の行を `updateFormulaVersion` で同じ場所に上書きし、
+ *   created_by='user_edit' / created_at=now に更新する（version_id は変えない＝履歴を増やさない）
+ * - currentFormulaVersionId が無い（まだ 1 度も保存していない）場合は saveEditedFormula に
+ *   フォールバックして新規 1 行を追記する
+ * - 履歴を残したいときは別途 saveEditedFormula（「新バージョンとして保存」）を使う
+ */
+export async function overwriteCurrentFormula(
+  input: OverwriteFormulaInput,
+  deps: EditServiceDeps
+): Promise<OverwriteFormulaResult> {
+  const state = deps.store.getState();
+  if (state.project === null) {
+    throw new Error('プロジェクトが選択されていません');
+  }
+  if (input.formulaMd.trim() === '') {
+    throw new Error('検索式が空です');
+  }
+  // フォーマット妥当性をパースで検証（壊れた md を保存しない）。
+  parsePubmedFormulaMd(input.formulaMd);
+
+  const versionId = state.currentFormulaVersionId;
+  if (versionId === null) {
+    // 上書き対象が無いので新規追記にフォールバックする。
+    const saved = await saveEditedFormula({ formulaMd: input.formulaMd, note: '' }, deps);
+    return { versionId: saved.versionId, created: true };
+  }
+
+  const createdAt = (deps.now ?? nowIso)();
+  const updated = await updateFormulaVersion(
+    state.project.spreadsheetId,
+    versionId,
+    { formulaMd: input.formulaMd, createdBy: 'user_edit', createdAt },
+    deps.google
+  );
+  if (!updated) {
+    // version_id がシート上に見つからない（履歴削除など）の場合も追記でフォールバック。
+    const saved = await saveEditedFormula({ formulaMd: input.formulaMd, note: '' }, deps);
+    return { versionId: saved.versionId, created: true };
+  }
+
+  deps.store.setState((s) => ({ ...s, currentFormulaMarkdown: input.formulaMd }));
+  return { versionId, created: false };
+}
+
+export interface RestoreFormulaResult {
+  /** 復元後の作業バージョン ID（新規フォーク時は新 ID、現バージョン再読込なら同じ ID） */
+  versionId: string;
+  /** 復元元のバージョン ID */
+  restoredFrom: string;
+  /** 新しい作業バージョンを追記したら true、現バージョンの再読込なら false */
+  created: boolean;
+}
+
+/**
+ * #/history で選んだ過去バージョンを「復元」する。
+ *
+ * 動的上書き保存と両立させるため、復元は**元の履歴行を一切変更せず**、その内容を
+ * コピーした**新しい作業バージョンを追記**して作業ポインタをそこへ移す（git revert 相当）。
+ * こうすることで、復元後に #/edit で編集して自動上書きが走っても、復元元の履歴行は無傷で残る。
+ *
+ * - 新バージョン: parent_version_id=復元元 / created_by=user_edit / note=「復元元: {id}」
+ * - 復元先が現在の作業バージョンと同じ場合はフォークせず、内容の読み込みだけ行う（no-op フォーク回避）
+ */
+export async function restoreFormulaVersion(
+  version: FormulaVersion,
+  deps: EditServiceDeps
+): Promise<RestoreFormulaResult> {
+  const state = deps.store.getState();
+  if (state.project === null) {
+    throw new Error('プロジェクトが選択されていません');
+  }
+
+  // 既に作業中のバージョンなら、新しい行は作らず内容を読み込むだけにする。
+  if (version.versionId === state.currentFormulaVersionId) {
+    deps.store.setState((s) => ({
+      ...s,
+      currentProtocolVersion: version.protocolVersion,
+      currentFormulaMarkdown: version.formulaMd,
+      editAutoSave: null,
+    }));
+    return { versionId: version.versionId, restoredFrom: version.versionId, created: false };
+  }
+
+  const newVersionId = (deps.newUuid ?? newUuid)();
+  const createdAt = (deps.now ?? nowIso)();
+  await appendFormulaVersion(
+    state.project.spreadsheetId,
+    {
+      versionId: newVersionId,
+      parentVersionId: version.versionId,
+      protocolVersion: version.protocolVersion,
+      protocolSnapshotRef: version.protocolSnapshotRef,
+      formulaMd: version.formulaMd,
+      createdBy: 'user_edit',
+      createdAt,
+      note: `復元元: ${version.versionId}`,
+    },
+    deps.google
+  );
+
+  deps.store.setState((s) => ({
+    ...s,
+    currentProtocolVersion: version.protocolVersion,
+    currentFormulaVersionId: newVersionId,
+    currentFormulaMarkdown: version.formulaMd,
+    editAutoSave: null,
+  }));
+  return { versionId: newVersionId, restoredFrom: version.versionId, created: true };
+}
+
+/**
+ * /edit 画面の結合行（最終検索式）に対する「検索 + シード捕捉確認」結果。
+ * checkFinalQuery（final_query 検証）をそのまま編集中の md に適用したもの。
+ */
+export interface CombinationCheckResult extends FinalQueryResult {
+  /** 検証対象になった有効 seed 件数（include + 初期未判定） */
+  eligibleSeedCount: number;
+  /** SeedPapers の総件数（無効・除外含む） */
+  totalSeedCount: number;
+}
+
+export interface CombinationCheckDeps {
+  store: AppStore;
+  google: GoogleApiDeps;
+  eutils: EutilsDeps;
+}
+
+/**
+ * 編集中の検索式 md の結合行（最終クエリ）を実際に PubMed 検索し、同時に有効シード論文が
+ * 捕捉できているかを確認する（requirements.md §4.6 final_query の単発実行）。
+ *
+ * - Sheets への記録は行わない（保存前の編集中 md に対して何度でも押せる確認用）
+ * - 引数の formulaMd は view が握っている編集中の md（store の currentFormulaMarkdown とは別物）
+ *
+ * @throws プロジェクト未選択、または md がパースできない場合
+ */
+export async function checkEditedCombination(
+  formulaMd: string,
+  deps: CombinationCheckDeps
+): Promise<CombinationCheckResult> {
+  const state = deps.store.getState();
+  if (state.project === null) {
+    throw new Error('プロジェクトが選択されていません');
+  }
+  const formula = parsePubmedFormulaMd(formulaMd);
+  const seeds = await listSeedPapers(state.project.spreadsheetId, deps.google);
+  const eligible = seeds.filter((seed) => isSeedEligibleForValidation(seed));
+  const eligiblePmids = eligible
+    .map((seed) => seed.pmid)
+    .filter((pmid): pmid is string => pmid !== null);
+  const result = await checkFinalQuery(formula, eligiblePmids, deps.eutils);
+  return {
+    ...result,
+    eligibleSeedCount: eligible.length,
+    totalSeedCount: seeds.length,
+  };
 }
 
 export interface RequestBlockImprovementInput {

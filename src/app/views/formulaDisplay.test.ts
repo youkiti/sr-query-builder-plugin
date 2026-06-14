@@ -1,4 +1,10 @@
-import { classifyFieldTag, tokenizeExpression } from './formulaDisplay';
+import {
+  MESH_BROWSER_BASE,
+  classifyFieldTag,
+  extractMeshTerm,
+  renderExpressionInto,
+  tokenizeExpression,
+} from './formulaDisplay';
 
 describe('classifyFieldTag', () => {
   test('MeSH 系タグは mesh', () => {
@@ -69,5 +75,39 @@ describe('tokenizeExpression', () => {
   test('結合された全テキストは入力と一致する（情報欠落なし）', () => {
     const expr = '(Community-Acquired Pneumonia[Mesh] OR "CAP"[tiab]) AND Glucocorticoids[Mesh]';
     expect(tokenizeExpression(expr).map((s) => s.text).join('')).toBe(expr);
+  });
+});
+
+describe('extractMeshTerm', () => {
+  test('末尾タグ・前後クォート・末尾ワイルドカードを落とす', () => {
+    expect(extractMeshTerm('"Heart Failure"[Mesh]')).toBe('Heart Failure');
+    expect(extractMeshTerm('Asthma[mh]')).toBe('Asthma');
+    expect(extractMeshTerm('"Diabetes"[Majr]')).toBe('Diabetes');
+    expect(extractMeshTerm('Neoplasm*[Mesh]')).toBe('Neoplasm');
+  });
+});
+
+describe('renderExpressionInto', () => {
+  function render(expr: string): HTMLElement {
+    const doc = document.implementation.createHTMLDocument('t');
+    const parent = doc.createElement('div');
+    renderExpressionInto(parent, expr);
+    return parent;
+  }
+
+  test('MeSH 語はリンク（別タブ）になり、MeSH ブラウザ URL を指す', () => {
+    const parent = render('"Heart Failure"[Mesh] OR hf[tiab]');
+    const link = parent.querySelector<HTMLAnchorElement>('a.draft__term--mesh')!;
+    expect(link.textContent).toBe('"Heart Failure"[Mesh]');
+    expect(link.getAttribute('href')).toBe(`${MESH_BROWSER_BASE}${encodeURIComponent('Heart Failure')}`);
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
+  test('フリーワードは span、演算子は地のまま、全文は欠落しない', () => {
+    const expr = '"Heart Failure"[Mesh] OR hf[tiab]';
+    const parent = render(expr);
+    expect(parent.querySelector('span.draft__term--freeword')?.textContent).toBe('hf[tiab]');
+    expect(parent.textContent).toBe(expr);
   });
 });

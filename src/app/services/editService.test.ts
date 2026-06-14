@@ -7,11 +7,15 @@ import {
 } from '../store';
 import {
   applyBlockImprovement,
+  checkEditedCombination,
   getBlockImprovementContext,
+  overwriteCurrentFormula,
+  restoreFormulaVersion,
   requestBlockImprovement,
   saveEditedFormula,
   type BlockImprovementDeps,
 } from './editService';
+import type { FormulaVersion } from '@/domain/formulaVersion';
 import type { LlmProviderFactory } from './llmProviderService';
 import type { LLMProvider } from '@/lib/llm';
 
@@ -90,6 +94,7 @@ function makeState(overrides: Partial<AppState> = {}): AppState {
     expandRun: null,
     validationResult: null,
     missedAnalysis: null,
+    editAutoSave: null,
     ...overrides,
   };
 }
@@ -650,5 +655,238 @@ describe('applyBlockImprovement', () => {
 
   test('見つからない blockId は例外', () => {
     expect(() => applyBlockImprovement(VALID_MD, 'ZZ', 'x')).toThrow(/#ZZ/);
+  });
+});
+
+describe('checkEditedCombination', () => {
+  function eutilsMock(
+    fetchMock: jest.Mock
+  ): { fetch: typeof fetch; sleep: () => Promise<void>; maxRetries: number } {
+    return {
+      fetch: fetchMock as unknown as typeof fetch,
+      sleep: async () => undefined,
+      maxRetries: 0,
+    };
+  }
+
+  test('プロジェクト未選択なら例外', async () => {
+    const store = createStore(makeState({ project: null }));
+    const google = { fetch: jest.fn(), getAccessToken: jest.fn().mockResolvedValue('t') };
+    await expect(
+      checkEditedCombination(VALID_MD, { store, google, eutils: eutilsMock(jest.fn()) })
+    ).rejects.toThrow('プロジェクト');
+  });
+
+  test('有効シードが捕捉されていれば捕捉率と総ヒット数を返す', async () => {
+    const store = createStore(makeState());
+    const google = seedsGoogle([
+      { pmid: '111', title: 'Seed', source: 'initial', is_valid: 'true', ingest_format: 'pmid_direct' },
+    ]);
+    // checkFinalQuery: esearch(total) → esearch(captured)
+    const eutilsFetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '4200', idlist: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '1', idlist: ['111'] } }));
+    const result = await checkEditedCombination(VALID_MD, {
+      store,
+      google,
+      eutils: eutilsMock(eutilsFetchMock),
+    });
+    expect(result.totalHits).toBe(4200);
+    expect(result.captureRate).toBe(1);
+    expect(result.capturedPmids).toEqual(['111']);
+    expect(result.missedPmids).toEqual([]);
+    expect(result.eligibleSeedCount).toBe(1);
+    expect(result.totalSeedCount).toBe(1);
+  });
+
+  test('未捕捉シードは missedPmids に出る', async () => {
+    const store = createStore(makeState());
+    const google = seedsGoogle([
+      { pmid: '111', title: 'A', source: 'initial', is_valid: 'true', ingest_format: 'pmid_direct' },
+      { pmid: '222', title: 'B', source: 'initial', is_valid: 'true', ingest_format: 'pmid_direct' },
+    ]);
+    const eutilsFetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '4200', idlist: [] } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '1', idlist: ['111'] } }));
+    const result = await checkEditedCombination(VALID_MD, {
+      store,
+      google,
+      eutils: eutilsMock(eutilsFetchMock),
+    });
+    expect(result.captureRate).toBe(0.5);
+    expect(result.missedPmids).toEqual(['222']);
+    expect(result.eligibleSeedCount).toBe(2);
+  });
+
+  test('有効シード 0 件でも総ヒット数は返る（捕捉率 0）', async () => {
+    const store = createStore(makeState());
+    const google = emptySeedsGoogle();
+    const eutilsFetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '4200', idlist: [] } }));
+    const result = await checkEditedCombination(VALID_MD, {
+      store,
+      google,
+      eutils: eutilsMock(eutilsFetchMock),
+    });
+    expect(result.totalHits).toBe(4200);
+    expect(result.eligibleSeedCount).toBe(0);
+    expect(result.capturedPmids).toEqual([]);
+  });
+});
+
+describe('overwriteCurrentFormula', () => {
+  const FV_HEADER = [...SHEET_HEADERS.FormulaVersions];
+  // version_id, parent_version_id, protocol_version, protocol_snapshot_ref, formula_md, created_by, created_at, note
+  function fvGoogle(rows: string[][]): { fetch: jest.Mock; getAccessToken: jest.Mock } {
+    const values = [FV_HEADER, ...rows];
+    return {
+      fetch: jest.fn().mockResolvedValue(jsonResponse({ values })),
+      getAccessToken: jest.fn().mockResolvedValue('t'),
+    };
+  }
+  const hasMethod = (fetchMock: jest.Mock, method: string): boolean =>
+    fetchMock.mock.calls.some((c) => ((c[1] as RequestInit | undefined)?.method ?? 'GET') === method);
+  const hasAppend = (fetchMock: jest.Mock): boolean =>
+    fetchMock.mock.calls.some((c) => String(c[0]).includes(':append'));
+
+  test('プロジェクト未選択なら例外', async () => {
+    const store = createStore(makeState({ project: null }));
+    const google = fvGoogle([]);
+    await expect(
+      overwriteCurrentFormula({ formulaMd: VALID_MD }, { google, store })
+    ).rejects.toThrow('プロジェクト');
+  });
+
+  test('空 md は例外', async () => {
+    const store = createStore(makeState());
+    const google = fvGoogle([]);
+    await expect(
+      overwriteCurrentFormula({ formulaMd: '   \n' }, { google, store })
+    ).rejects.toThrow('検索式が空');
+  });
+
+  test('現バージョン行を PUT で上書きし、append はしない／store も更新する', async () => {
+    const store = createStore(makeState());
+    const google = fvGoogle([['parent-v', '', '3', 'snap', 'OLD', 'ai_draft', 't0', '']]);
+    const result = await overwriteCurrentFormula(
+      { formulaMd: VALID_MD },
+      { google, store, now: () => 'NOW' }
+    );
+    expect(result.created).toBe(false);
+    expect(result.versionId).toBe('parent-v');
+    expect(hasMethod(google.fetch, 'PUT')).toBe(true);
+    expect(hasAppend(google.fetch)).toBe(false);
+    expect(store.getState().currentFormulaMarkdown).toBe(VALID_MD);
+  });
+
+  test('currentFormulaVersionId が無ければ新規追記にフォールバック', async () => {
+    const store = createStore(makeState({ currentFormulaVersionId: null }));
+    const google = fvGoogle([]);
+    const result = await overwriteCurrentFormula(
+      { formulaMd: VALID_MD },
+      { google, store, newUuid: () => 'new-id', now: () => 'NOW' }
+    );
+    expect(result.created).toBe(true);
+    expect(result.versionId).toBe('new-id');
+    expect(hasAppend(google.fetch)).toBe(true);
+    expect(store.getState().currentFormulaVersionId).toBe('new-id');
+  });
+
+  test('version_id がシート上に無ければ追記にフォールバック', async () => {
+    const store = createStore(makeState());
+    const google = fvGoogle([['other', '', '3', 'snap', 'OLD', 'ai_draft', 't0', '']]);
+    const result = await overwriteCurrentFormula(
+      { formulaMd: VALID_MD },
+      { google, store, newUuid: () => 'fb-id', now: () => 'NOW' }
+    );
+    expect(result.created).toBe(true);
+    expect(result.versionId).toBe('fb-id');
+    expect(hasAppend(google.fetch)).toBe(true);
+  });
+});
+
+describe('restoreFormulaVersion', () => {
+  function versionFixture(over: Partial<FormulaVersion> = {}): FormulaVersion {
+    return {
+      versionId: 'old-v',
+      parentVersionId: 'root',
+      protocolVersion: 5,
+      protocolSnapshotRef: 'snap-old',
+      formulaMd: '## PubMed/MEDLINE\n\n```\n#1 restored[tiab]\n```\n',
+      createdBy: 'ai_draft',
+      createdAt: 't-old',
+      note: null,
+      ...over,
+    };
+  }
+  const captureGoogle = (): { fetch: jest.Mock; getAccessToken: jest.Mock } => ({
+    fetch: jest.fn().mockResolvedValue(jsonResponse({})),
+    getAccessToken: jest.fn().mockResolvedValue('t'),
+  });
+
+  test('プロジェクト未選択なら例外', async () => {
+    const store = createStore(makeState({ project: null }));
+    await expect(
+      restoreFormulaVersion(versionFixture(), { google: captureGoogle(), store })
+    ).rejects.toThrow('プロジェクト');
+  });
+
+  test('過去バージョンは新しい作業バージョンへフォークする（元行は触らない・store も更新）', async () => {
+    // 現在の作業バージョンは parent-v、復元するのは old-v（別物）
+    const store = createStore(makeState());
+    const google = captureGoogle();
+    const result = await restoreFormulaVersion(versionFixture(), {
+      google,
+      store,
+      newUuid: () => 'fork-id',
+      now: () => 'NOW',
+    });
+    expect(result).toEqual({ versionId: 'fork-id', restoredFrom: 'old-v', created: true });
+    // append のみ（上書き PUT はしない）
+    const appendCall = google.fetch.mock.calls.find((c) => String(c[0]).includes(':append'));
+    expect(appendCall).toBeTruthy();
+    expect(google.fetch.mock.calls.some((c) => (c[1] as RequestInit | undefined)?.method === 'PUT')).toBe(
+      false
+    );
+    const body = JSON.parse((appendCall![1] as RequestInit).body as string) as { values: string[][] };
+    const map: Record<string, string> = {};
+    SHEET_HEADERS.FormulaVersions.forEach((k, i) => (map[k] = body.values[0]![i] as string));
+    expect(map['version_id']).toBe('fork-id');
+    expect(map['parent_version_id']).toBe('old-v');
+    expect(map['protocol_version']).toBe(5);
+    expect(map['created_by']).toBe('user_edit');
+    expect(map['formula_md']).toContain('restored[tiab]');
+    expect(map['note']).toContain('復元元: old-v');
+    // store は新しい作業バージョンに切り替わる
+    expect(store.getState().currentFormulaVersionId).toBe('fork-id');
+    expect(store.getState().currentProtocolVersion).toBe(5);
+    expect(store.getState().currentFormulaMarkdown).toContain('restored[tiab]');
+  });
+
+  test('現在の作業バージョンと同じなら追記せず内容を読み込むだけ', async () => {
+    const store = createStore(makeState({ currentFormulaVersionId: 'old-v' }));
+    const google = captureGoogle();
+    const result = await restoreFormulaVersion(versionFixture(), { google, store });
+    expect(result).toEqual({ versionId: 'old-v', restoredFrom: 'old-v', created: false });
+    // どのみち append しない
+    expect(google.fetch.mock.calls.some((c) => String(c[0]).includes(':append'))).toBe(false);
+    expect(store.getState().currentFormulaVersionId).toBe('old-v');
+    expect(store.getState().currentFormulaMarkdown).toContain('restored[tiab]');
+  });
+
+  test('復元すると editAutoSave はクリアされる', async () => {
+    const store = createStore(
+      makeState({ editAutoSave: { status: 'saved', message: '✓ 上書き保存しました' } })
+    );
+    await restoreFormulaVersion(versionFixture(), {
+      google: captureGoogle(),
+      store,
+      newUuid: () => 'fork-id',
+      now: () => 'NOW',
+    });
+    expect(store.getState().editAutoSave).toBeNull();
   });
 });

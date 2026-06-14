@@ -62,6 +62,7 @@ describe('startApp', () => {
       expandRun: null,
       validationResult: null,
       missedAnalysis: null,
+      editAutoSave: null,
     });
     startApp(doc, { ...noopHashOptions('#/home'), store });
     expect(doc.getElementById('app-status')?.textContent).toContain('My SR');
@@ -103,6 +104,7 @@ describe('startApp', () => {
       expandRun: null,
       validationResult: null,
       missedAnalysis: null,
+      editAutoSave: null,
     });
     startApp(doc, { ...noopHashOptions('#/home'), setHash, store });
     const protocolBtn = Array.from(
@@ -830,7 +832,7 @@ describe('startApp - wiring 層', () => {
     expect(appendCalls.length).toBeGreaterThan(0);
   });
 
-  test('history view 既定 onList が FormulaVersions を読み、onLoad で store を差し替える', async () => {
+  test('history view 既定: onList が FormulaVersions を読み、復元は新しい作業バージョンへフォークする', async () => {
     const doc = buildDocument();
     const { runtime, fetchMock } = makeRuntime({
       currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
@@ -864,20 +866,60 @@ describe('startApp - wiring 層', () => {
     }
     const items = doc.querySelectorAll('.history__item');
     expect(items.length).toBe(2);
-    // 上の方（最新）は v2
-    const loadBtn = items[0]!.querySelector<HTMLButtonElement>('.history__load')!;
-    loadBtn.click();
-    expect(handle.store.getState().currentProtocolVersion).toBe(7);
-    expect(handle.store.getState().currentFormulaVersionId).toBe('v2');
-    expect(handle.store.getState().currentFormulaMarkdown).toContain('md-v2');
+    // hydrate で最新（v2）が作業バージョンになっているので、v2 の復元ボタンは無効
+    expect(items[0]!.querySelector<HTMLButtonElement>('.history__load')!.disabled).toBe(true);
+    // v1（過去）を復元する → 新しい作業バージョンへフォーク（v1 行は無傷で残す）
+    const restoreV1 = items[1]!.querySelector<HTMLButtonElement>('.history__load')!;
+    expect(restoreV1.disabled).toBe(false);
+    restoreV1.click();
+    for (let i = 0; i < 5; i += 1) {
+      await flush();
+    }
+    // 新しい version_id（v1 とも v2 とも違う UUID）に切り替わり、内容は v1 由来
+    const st = handle.store.getState();
+    expect(st.currentProtocolVersion).toBe(1);
+    expect(st.currentFormulaVersionId).not.toBe('v1');
+    expect(st.currentFormulaVersionId).not.toBe('v2');
+    expect(st.currentFormulaMarkdown).toContain('md-v1');
+    // FormulaVersions に復元コピーが 1 行追記され、parent=v1 / created_by=user_edit / note に復元元
+    const appendCall = fetchMock.mock.calls.find(
+      (c) => (c[0] as string).includes('FormulaVersions') && (c[0] as string).includes(':append')
+    );
+    expect(appendCall).toBeTruthy();
+    const body = JSON.parse((appendCall![1] as RequestInit).body as string) as { values: string[][] };
+    const map: Record<string, string> = {};
+    header.forEach((k, i) => (map[k] = body.values[0]![i] as string));
+    expect(map['parent_version_id']).toBe('v1');
+    expect(map['created_by']).toBe('user_edit');
+    expect(map['formula_md']).toContain('md-v1');
+    expect(map['note']).toContain('復元元: v1');
   });
 
-  test('edit view 既定 onSave が FormulaVersions に user_edit 行を追加する', async () => {
+  test('edit view: 編集は自動上書き保存、明示「新バージョンとして保存」は履歴を 1 行追記する', async () => {
     const doc = buildDocument();
     const { runtime, fetchMock } = makeRuntime({
       currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
     });
-    fetchMock.mockResolvedValue(jsonResponse({}));
+    // FormulaVersions GET には parent-v 行を返す → 自動保存は append ではなく既存行の上書き（PUT）になる
+    const fvHeader = SHEET_HEADERS.FormulaVersions;
+    const fvRow = [
+      'parent-v',
+      '',
+      '0',
+      '',
+      '## PubMed/MEDLINE\n\n```\n#1 old\n```\n',
+      'ai_draft',
+      '2026-01-01T00:00:00.000Z',
+      '',
+    ];
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      const method = init?.method ?? 'GET';
+      if (u.includes('/values/FormulaVersions') && method === 'GET') {
+        return jsonResponse({ values: [fvHeader, fvRow] });
+      }
+      return jsonResponse({});
+    });
     const handle = startApp(doc, {
       getHash: () => '#/edit',
       onHashChange: jest.fn().mockReturnValue(() => undefined),
@@ -902,13 +944,29 @@ describe('startApp - wiring 層', () => {
       currentFormulaVersionId: 'parent-v',
       currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 old\n```\n',
     }));
-    // 鉛筆インライン編集で #1 を書き換える
+    // 鉛筆インライン編集で #1 を書き換える → 自動上書き保存が走る
     doc
       .querySelector<HTMLButtonElement>('.edit__block-row[data-block-id="1"] .edit__block-edit-toggle')!
       .click();
     const blockInput = doc.querySelector<HTMLTextAreaElement>('.edit__block-edit-input')!;
     blockInput.value = 'edited';
     doc.querySelector<HTMLButtonElement>('.edit__block-edit-save')!.click();
+    for (let i = 0; i < 5; i += 1) {
+      await flush();
+    }
+    // 自動保存は既存行を上書き（FormulaVersions への PUT）し、append はしない
+    const fvUpdateCalls = fetchMock.mock.calls.filter(
+      (c) =>
+        (c[0] as string).includes('/values/FormulaVersions') &&
+        ((c[1] as RequestInit | undefined)?.method ?? 'GET') === 'PUT'
+    );
+    expect(fvUpdateCalls.length).toBeGreaterThanOrEqual(1);
+    expect(
+      fetchMock.mock.calls.filter((c) => (c[0] as string).includes('FormulaVersions') && (c[0] as string).includes(':append'))
+    ).toHaveLength(0);
+    expect(doc.querySelector('.edit__autosave')?.textContent).toContain('上書き保存');
+
+    // 明示ボタンを押したときだけ新バージョンを 1 行追記する
     const saveBtn = doc.querySelector<HTMLButtonElement>('.edit__actions button')!;
     saveBtn.click();
     for (let i = 0; i < 5; i += 1) {

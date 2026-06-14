@@ -1361,6 +1361,18 @@
   color: #1f6b3a;
 }
 
+/* MeSH 語はクリックで MeSH ブラウザに飛ぶ。リンクとわかるよう下線を付ける。 */
+a.draft__term--mesh {
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  cursor: pointer;
+}
+
+a.draft__term--mesh:hover,
+a.draft__term--mesh:focus-visible {
+  text-decoration-style: solid;
+}
+
 .draft__term--freeword {
   background: rgba(42, 99, 214, 0.1);
   color: #1f4fb8;
@@ -1402,9 +1414,126 @@
   margin-bottom: var(--space-2);
 }
 
+.edit__block-idgroup {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
 .edit__block-id {
   font-weight: bold;
   font-family: var(--font-mono, monospace);
+}
+
+/* `#N` の隣に出す概念ブロック名（ブロック承認画面のラベル） */
+.edit__block-label {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.edit__block-label--muted {
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+
+/* 概念ブロック単体のヒット数バッジ（リアルタイム） */
+.edit__block-hits {
+  font-size: var(--font-size-sm);
+  font-family: var(--font-family-mono);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-muted);
+}
+
+.edit__block-hits--pending {
+  color: var(--color-text-muted);
+}
+
+.edit__block-hits--error {
+  color: var(--color-danger);
+}
+
+/* 結合行（最終検索式）は draft 画面の結合ブロックと同様に強調する */
+.edit__block-row--combination {
+  border-left: 3px solid var(--color-primary);
+  background: var(--color-bg-muted);
+}
+
+/* 結合行の「検索してシード捕捉を確認」 */
+.edit__combo-check {
+  margin-top: var(--space-2);
+}
+
+.edit__combo-check-result {
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+}
+
+.edit__combo-check-result:empty {
+  display: none;
+}
+
+.edit__combo-check-result--pending {
+  color: var(--color-text-muted);
+}
+
+.edit__combo-check-result--ok {
+  background: rgba(46, 140, 79, 0.12);
+  color: #1f6b3a;
+}
+
+.edit__combo-check-result--warn {
+  background: rgba(214, 158, 46, 0.14);
+  color: #8a6116;
+}
+
+.edit__combo-check-result--info {
+  background: var(--color-bg-muted);
+}
+
+.edit__combo-check-result--error {
+  color: var(--color-danger);
+}
+
+.edit__combo-check-result p {
+  margin: 0;
+}
+
+.edit__combo-check-result p + p {
+  margin-top: var(--space-1, 4px);
+}
+
+.edit__combo-check-missed {
+  font-family: var(--font-family-mono);
+  overflow-wrap: anywhere;
+}
+
+/* 動的保存（上書き）の状態行 */
+.edit__autosave {
+  margin: var(--space-1, 4px) 0 0;
+  font-size: var(--font-size-sm);
+  min-height: 1.2em;
+}
+
+.edit__autosave:empty {
+  display: none;
+}
+
+.edit__autosave--saving {
+  color: var(--color-text-muted);
+}
+
+.edit__autosave--saved {
+  color: #1f6b3a;
+}
+
+.edit__autosave--error {
+  color: var(--color-danger);
 }
 
 .edit__block-tools {

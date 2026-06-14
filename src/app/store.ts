@@ -139,6 +139,16 @@ export interface ExpandRunState {
   result: BoundaryCasesResult | null;
 }
 
+/**
+ * #/edit の動的保存（上書き）状態。編集のたびに走る overwriteCurrentFormula の進捗・結果を
+ * draftRun などと同じく store に持たせ、保存完了時の setState（再描画）でも表示を失わないようにする。
+ */
+export interface EditAutoSaveState {
+  status: 'saving' | 'saved' | 'error';
+  /** 状態表示用メッセージ（例: 「✓ 上書き保存しました」「自動保存に失敗しました: …」） */
+  message: string;
+}
+
 export interface AppState {
   /** 現在のハッシュルート */
   route: RouteName;
@@ -170,6 +180,8 @@ export interface AppState {
   validationResult: ValidationResultEntry | null;
   /** 未捕捉 PMID の AI 原因分析結果。未実行なら null */
   missedAnalysis: MissedAnalysisEntry | null;
+  /** #/edit の動的保存（上書き）状態。未保存・別画面なら null */
+  editAutoSave: EditAutoSaveState | null;
 }
 
 export const INITIAL_STATE: AppState = {
@@ -186,6 +198,7 @@ export const INITIAL_STATE: AppState = {
   expandRun: null,
   validationResult: null,
   missedAnalysis: null,
+  editAutoSave: null,
 };
 
 export type Updater = (prev: AppState) => AppState;

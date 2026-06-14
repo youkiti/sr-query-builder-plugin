@@ -2,7 +2,7 @@ import type { DraftBlockHit, DraftProgress } from '@/app/services';
 import { parsePubmedFormulaMd, type PubmedFormula } from '@/lib/search-formula-md';
 import { ROUTE_LABELS } from '../router';
 import type { AppState, DraftRunProgressDetail, DraftRunState } from '../store';
-import { tokenizeExpression } from './formulaDisplay';
+import { buildLegend, renderExpressionInto } from './formulaDisplay';
 import type { RenderView } from './types';
 import {
   readStoredAnalysis,
@@ -416,38 +416,13 @@ function renderFormula(doc: Document, markdown: string): HTMLElement {
 
     const expr = doc.createElement('div');
     expr.className = 'draft__block-expr';
-    for (const segment of tokenizeExpression(block.expression)) {
-      if (segment.kind === 'plain') {
-        expr.appendChild(doc.createTextNode(segment.text));
-      } else {
-        const span = doc.createElement('span');
-        span.className = `draft__term draft__term--${segment.kind}`;
-        span.textContent = segment.text;
-        expr.appendChild(span);
-      }
-    }
+    renderExpressionInto(expr, block.expression);
     row.appendChild(expr);
     wrap.appendChild(row);
   }
 
   wrap.appendChild(buildLegend(doc));
   return wrap;
-}
-
-/** MeSH / フリーワードの色分け凡例 */
-function buildLegend(doc: Document): HTMLElement {
-  const legend = doc.createElement('div');
-  legend.className = 'draft__legend';
-  for (const [kind, label] of [
-    ['mesh', 'MeSH'],
-    ['freeword', 'フリーワード'],
-  ] as const) {
-    const item = doc.createElement('span');
-    item.className = `draft__legend-item draft__term--${kind}`;
-    item.textContent = label;
-    legend.appendChild(item);
-  }
-  return legend;
 }
 
 /**

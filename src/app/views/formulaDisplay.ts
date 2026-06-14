@@ -7,6 +7,9 @@
  * 描画するための分解ロジックを提供する（描画自体は draftView 側）。
  */
 
+/** NCBI MeSH ブラウザの検索 URL。seedsView と同じ宛先（クリックで別タブに開く） */
+export const MESH_BROWSER_BASE = 'https://www.ncbi.nlm.nih.gov/mesh/?term=';
+
 export type TermKind = 'mesh' | 'freeword' | 'plain';
 
 /** 検索式 1 ブロックを表示用に分割した 1 セグメント */
@@ -81,6 +84,67 @@ export function tokenizeExpression(expr: string): ExprSegment[] {
     segments.push({ text: expr.slice(cursor), kind: 'plain' });
   }
   return segments;
+}
+
+/**
+ * MeSH / フリーワードの色分け凡例。draft / edit 双方で同じ見た目を使うための共通ヘルパー。
+ */
+export function buildLegend(doc: Document): HTMLElement {
+  const legend = doc.createElement('div');
+  legend.className = 'draft__legend';
+  for (const [kind, label] of [
+    ['mesh', 'MeSH'],
+    ['freeword', 'フリーワード'],
+  ] as const) {
+    const item = doc.createElement('span');
+    item.className = `draft__legend-item draft__term--${kind}`;
+    item.textContent = label;
+    legend.appendChild(item);
+  }
+  return legend;
+}
+
+/**
+ * MeSH セグメント（`"Heart Failure"[Mesh]` / `Asthma[mh]` 等）から、MeSH ブラウザ検索に
+ * 使う用語だけを取り出す。末尾のフィールドタグ・前後の引用符・末尾ワイルドカードを落とす。
+ */
+export function extractMeshTerm(segmentText: string): string {
+  return segmentText
+    .replace(/\[[^\]]*\]\s*$/, '') // 末尾の [tag]
+    .trim()
+    .replace(/^"+|"+$/g, '') // 前後の引用符
+    .replace(/\*+$/, '') // 末尾ワイルドカード
+    .trim();
+}
+
+/**
+ * tokenizeExpression の結果を parent へ DOM 描画する共通ヘルパー。
+ * - MeSH セグメントは NCBI MeSH ブラウザへのリンク（別タブ）にする
+ * - フリーワードは色分け span、演算子・括弧は地のテキスト
+ *
+ * 連結したテキスト内容は expr と一致するため、textContent ベースのテストやコピーは壊れない。
+ */
+export function renderExpressionInto(parent: HTMLElement, expr: string): void {
+  const doc = parent.ownerDocument;
+  for (const segment of tokenizeExpression(expr)) {
+    if (segment.kind === 'plain') {
+      parent.appendChild(doc.createTextNode(segment.text));
+    } else if (segment.kind === 'mesh') {
+      const a = doc.createElement('a');
+      a.className = 'draft__term draft__term--mesh';
+      a.href = `${MESH_BROWSER_BASE}${encodeURIComponent(extractMeshTerm(segment.text))}`;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.title = 'MeSH ブラウザで開く';
+      a.textContent = segment.text;
+      parent.appendChild(a);
+    } else {
+      const span = doc.createElement('span');
+      span.className = `draft__term draft__term--${segment.kind}`;
+      span.textContent = segment.text;
+      parent.appendChild(span);
+    }
+  }
 }
 
 /** slice 内で最後に現れる演算子・括弧の直後（＝語の開始位置）を返す */

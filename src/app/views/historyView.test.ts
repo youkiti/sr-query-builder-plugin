@@ -144,12 +144,77 @@ describe('createHistoryView', () => {
   });
 
   test('onLoad 未指定でもクリックで例外にならない', async () => {
-    const onList = jest.fn().mockResolvedValue([buildVersion()]);
+    const onList = jest.fn().mockResolvedValue([buildVersion({ versionId: 'other' })]);
     const view = createHistoryView({ onList });
     const container = buildContainer();
-    view(container, { state: stateWithProject, navigate: jest.fn() });
+    view(container, {
+      state: { ...stateWithProject, currentFormulaVersionId: 'active' },
+      navigate: jest.fn(),
+    });
     await flushAsync();
     const btn = container.querySelector<HTMLButtonElement>('.history__load')!;
     expect(() => btn.click()).not.toThrow();
+  });
+
+  test('読み込み中（active）バージョンの復元ボタンは無効化される', async () => {
+    const onList = jest.fn().mockResolvedValue([
+      buildVersion({ versionId: 'v2', parentVersionId: 'v1' }),
+      buildVersion({ versionId: 'v1' }),
+    ]);
+    const onLoad = jest.fn();
+    const view = createHistoryView({ onList, onLoad });
+    const container = buildContainer();
+    view(container, {
+      state: { ...stateWithProject, currentFormulaVersionId: 'v2' },
+      navigate: jest.fn(),
+    });
+    await flushAsync();
+    const items = Array.from(container.querySelectorAll('.history__item'));
+    // v2（active）は無効・「読み込み中」、v1 は「このバージョンを復元」で有効
+    const v2Btn = items[0]!.querySelector<HTMLButtonElement>('.history__load')!;
+    const v1Btn = items[1]!.querySelector<HTMLButtonElement>('.history__load')!;
+    expect(v2Btn.disabled).toBe(true);
+    expect(v2Btn.textContent).toBe('読み込み中');
+    expect(v1Btn.disabled).toBe(false);
+    expect(v1Btn.textContent).toBe('このバージョンを復元');
+    v2Btn.click();
+    expect(onLoad).not.toHaveBeenCalled();
+  });
+
+  test('復元クリックでボタンが「復元中…」になり onLoad が呼ばれる', async () => {
+    let resolve!: () => void;
+    const onLoad = jest.fn().mockReturnValue(new Promise<void>((r) => (resolve = r)));
+    const onList = jest.fn().mockResolvedValue([buildVersion({ versionId: 'v1' })]);
+    const view = createHistoryView({ onList, onLoad });
+    const container = buildContainer();
+    view(container, {
+      state: { ...stateWithProject, currentFormulaVersionId: 'active' },
+      navigate: jest.fn(),
+    });
+    await flushAsync();
+    const btn = container.querySelector<HTMLButtonElement>('.history__load')!;
+    btn.click();
+    expect(onLoad).toHaveBeenCalledWith(expect.objectContaining({ versionId: 'v1' }));
+    expect(btn.disabled).toBe(true);
+    expect(btn.textContent).toBe('復元中…');
+    resolve();
+  });
+
+  test('復元が失敗したらエラーを表示しボタンは再び押せる', async () => {
+    const onLoad = jest.fn().mockRejectedValue(new Error('append boom'));
+    const onList = jest.fn().mockResolvedValue([buildVersion({ versionId: 'v1' })]);
+    const view = createHistoryView({ onList, onLoad });
+    const container = buildContainer();
+    view(container, {
+      state: { ...stateWithProject, currentFormulaVersionId: 'active' },
+      navigate: jest.fn(),
+    });
+    await flushAsync();
+    const btn = container.querySelector<HTMLButtonElement>('.history__load')!;
+    btn.click();
+    await flushAsync();
+    expect(container.querySelector('.history__error')?.textContent).toContain('append boom');
+    expect(btn.disabled).toBe(false);
+    expect(btn.textContent).toBe('このバージョンを復元');
   });
 });

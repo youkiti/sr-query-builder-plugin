@@ -1,10 +1,13 @@
 import type { FormulaVersion } from '@/domain/formulaVersion';
 import { SHEET_HEADERS } from '@/domain/sheetsSchema';
-import { appendRow, getSheetValues, type GoogleApiDeps } from '@/lib/google';
+import { appendRow, getSheetValues, updateRow, type GoogleApiDeps } from '@/lib/google';
 
 /**
- * FormulaVersions タブの読み書き。requirements.md §3.1 の列順を保ち、
- * 追記型・上書き禁止のポリシー（全てのバージョンを履歴として残す）。
+ * FormulaVersions タブの読み書き。requirements.md §3.1 の列順を保つ。
+ *
+ * 基本は追記型（全バージョンを履歴として残す）だが、#/edit の編集中の作業バージョンは
+ * `updateFormulaVersion` で同じ行を上書きする（動的保存。履歴を残したいときだけ
+ * `appendFormulaVersion` で新バージョンを切る）。
  */
 
 const HEADER = SHEET_HEADERS.FormulaVersions;
@@ -85,6 +88,54 @@ export async function getFormulaVersionById(
     }
   }
   return null;
+}
+
+/** updateFormulaVersion で部分更新できるフィールド。指定しなかったものは既存値を保つ。 */
+export interface FormulaVersionPatch {
+  formulaMd?: string;
+  createdBy?: FormulaVersion['createdBy'];
+  createdAt?: string;
+  note?: string | null;
+}
+
+/**
+ * version_id が一致する既存行を探し、patch のフィールドだけ差し替えて同じ行を上書きする。
+ * #/edit の作業バージョンを動的保存（上書き）するために使う。version_id / parent_version_id /
+ * protocol_* など patch に無い列は既存値を保持する。
+ *
+ * @returns 上書きできたら true、対象 version_id が無ければ false（呼び出し側で追記にフォールバック）
+ */
+export async function updateFormulaVersion(
+  spreadsheetId: string,
+  versionId: string,
+  patch: FormulaVersionPatch,
+  deps: GoogleApiDeps
+): Promise<boolean> {
+  const rows = await getSheetValues(spreadsheetId, 'FormulaVersions', deps);
+  if (rows.length <= 1) {
+    return false;
+  }
+  const idIdx = HEADER.indexOf('version_id');
+  /* istanbul ignore if -- HEADER に version_id は必ず含まれる */
+  if (idIdx < 0) return false;
+  for (let i = 1; i < rows.length; i += 1) {
+    const row = rows[i];
+    if (!Array.isArray(row)) continue;
+    /* istanbul ignore next -- noUncheckedIndexedAccess 対策 */
+    const cell = row[idIdx] ?? '';
+    if (cell !== versionId) continue;
+    const merged: FormulaVersionRow = {
+      ...fromRow(row),
+      ...(patch.formulaMd !== undefined ? { formulaMd: patch.formulaMd } : {}),
+      ...(patch.createdBy !== undefined ? { createdBy: patch.createdBy } : {}),
+      ...(patch.createdAt !== undefined ? { createdAt: patch.createdAt } : {}),
+      ...(patch.note !== undefined ? { note: patch.note } : {}),
+    };
+    // rows[0] がヘッダ（シート行 1）なので、rows[i] のシート行番号は i + 1。
+    await updateRow(spreadsheetId, 'FormulaVersions', i + 1, toRow(merged), deps);
+    return true;
+  }
+  return false;
 }
 
 function toRow(v: FormulaVersionRow): (string | number | boolean | null)[] {
