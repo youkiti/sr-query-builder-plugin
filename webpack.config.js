@@ -85,7 +85,21 @@ module.exports = (env, argv) => {
           { from: 'src/options/options.html', to: 'options/options.html' },
           { from: 'src/options/options.css', to: 'options/options.css' },
           { from: 'src/styles', to: 'styles' },
-          { from: 'src/_locales', to: '_locales' },
+          {
+            from: 'src/_locales',
+            to: '_locales',
+            // 開発ビルドでは拡張機能名に "(dev)" を付与し、ストア版と区別できるようにする
+            transform(content, absoluteFilename) {
+              if (isProduction || !absoluteFilename.endsWith('messages.json')) {
+                return content;
+              }
+              const messages = JSON.parse(content.toString('utf8'));
+              if (messages.extName?.message && !messages.extName.message.includes('(dev)')) {
+                messages.extName.message = `${messages.extName.message} (dev)`;
+              }
+              return JSON.stringify(messages, null, 2);
+            },
+          },
         ],
       }),
     ],

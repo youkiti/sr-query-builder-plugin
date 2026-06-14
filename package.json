@@ -12,6 +12,7 @@
     "watch": "webpack --mode development --watch",
     "build": "webpack --mode production",
     "build:zip": "npm run build && cd dist && zip -r ../sr-query-builder-plugin.zip .",
+    "release:alpha": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release-alpha.ps1",
     "lint": "eslint src tests --ext .ts",
     "lint:css": "stylelint \"src/**/*.css\"",
     "typecheck": "tsc --noEmit",

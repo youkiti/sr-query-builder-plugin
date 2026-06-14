@@ -16,7 +16,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm run dev          # webpack 開発ビルド（dist/ へ出力。完了報告前に必ず通すこと）
 npm run watch        # 開発ビルドの watch
 npm run build        # 本番ビルド（.env の OAUTH_CLIENT_ID 必須）
-npm run build:zip    # ストア配布用 zip
+npm run build:zip    # ストア配布用 zip（※ zip コマンド依存。Windows では未動作。アルファは release:alpha を使う）
+npm run release:alpha # アルファ配布: dev ビルド → zip 化 → Drive アップロードを一発（詳細は「アルファ配布」節）
 npm test             # jest（jsdom）unit テスト
 npm run test:e2e     # Playwright E2E（実 Chromium + axe a11y。API はすべて stub）
 npm run test:e2e:ui  # Playwright UI モード
@@ -26,6 +27,26 @@ npm run lint:css     # stylelint
 ```
 
 単一テストの実行: `npx jest src/app/views/blocksView.test.ts`、E2E 単体: `npx playwright test tests/e2e/app-blocks.spec.ts`。
+
+## アルファ配布（Chrome Web Store 申請前のテスター配布）
+
+ストア申請前に、信頼できるテスターへ「パッケージ化されていない拡張機能」として zip を配る運用。リリースまでの中継フェーズ。手順書は [docs/alpha-test-guide.md](docs/alpha-test-guide.md)（テスター向け。Drive 同梱）。
+
+```bash
+npm run release:alpha                 # dev ビルド → zip → Drive アップロードを一発
+npm run release:alpha -- -NoUpload    # zip 化まで（アップロードしない）
+npm run release:alpha -- -SkipBuild   # 既存 dist をそのまま zip → アップロード
+```
+
+実体は [scripts/release-alpha.ps1](scripts/release-alpha.ps1)（**UTF-8 BOM 必須** — npm が呼ぶ Windows PowerShell 5.1 が BOM 無しだと日本語を文字化けさせ parse エラーになる）。
+
+- **dev ビルドは拡張名に `(dev)` を自動付与**（webpack の `_locales` transform。production ビルドには付かない）。ストア版とテスター版を見分けるため
+- **固定 `key`（manifest）により拡張機能 ID は常に `bckokafmjighegpjiocopkagghppnjld`**。誰がどの PC で unpacked 読み込みしても同一 ID になり、**既存の OAuth client_id がそのまま効く**。アルファ配布が成立する前提条件
+- zip 名は `package.json` の `version` 由来（`sr-query-builder-plugin-dev-v<version>.zip`）。バージョンを上げるときは `package.json` と [src/manifest.json](src/manifest.json) の `version` を揃えて更新する
+- source map（`*.map`）は除外して圧縮
+- アップロードは `rclone` の `gdrive:` リモート経由、宛先は `.env` の `GOOGLE_DRIVE`（フォルダ URL でも ID でも可）。`docs/alpha-test-guide.md` も同時アップロード
+- **自動化できない 2 点（毎回手動）**: ① 新規テスターの Gmail を OAuth テストユーザーに登録（<https://console.cloud.google.com/auth/audience>。同意画面が Testing 状態のため未登録だと他アカウントはログイン不可）／ ② Drive ファイルの共有権限付与（rclone は転送のみ）
+- **本番リリース時の注意**: `npm run build`（production）は manifest から `key` を削除し ID が変わるため、**ストア用の別 OAuth client_id**（ストア発行 ID を登録）が必要。スコープに `spreadsheets` / `drive.file`（センシティブ）を含むので Production 公開には OAuth 検証が要る。アルファのうちは Testing + テストユーザー方式が早い
 
 ## アーキテクチャ
 
