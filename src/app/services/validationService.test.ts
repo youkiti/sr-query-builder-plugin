@@ -133,12 +133,12 @@ describe('runValidation', () => {
           `<?xml version="1.0"?><PubmedArticleSet><PubmedArticle><MedlineCitation><PMID>111</PMID><Article><ArticleTitle>X</ArticleTitle></Article><MeshHeadingList><MeshHeading><DescriptorName>Diabetes Mellitus</DescriptorName></MeshHeading></MeshHeadingList></MedlineCitation></PubmedArticle></PubmedArticleSet>`
         )
       )
-      // mesh tree 解決: db=mesh esearch → efetch
+      // mesh tree 解決: db=mesh esearch → esummary(json)
       .mockResolvedValueOnce(jsonResponse({ esearchresult: { idlist: ['2001'] } }))
       .mockResolvedValueOnce(
-        xmlResponse(
-          `<?xml version="1.0"?><DescriptorRecordSet><DescriptorRecord><DescriptorName><String>Diabetes Mellitus</String></DescriptorName><TreeNumberList><TreeNumber>C18.452.394</TreeNumber></TreeNumberList></DescriptorRecord></DescriptorRecordSet>`
-        )
+        jsonResponse({
+          result: { uids: ['2001'], '2001': { ds_idxlinks: [{ treenum: 'C18.452.394' }] } },
+        })
       );
     const summary = await runValidation(deps);
     expect(summary.lineHits).toHaveLength(3);
@@ -182,9 +182,9 @@ describe('runValidation', () => {
       )
       .mockResolvedValueOnce(jsonResponse({ esearchresult: { idlist: ['2001'] } }))
       .mockResolvedValueOnce(
-        xmlResponse(
-          `<?xml version="1.0"?><DescriptorRecordSet><DescriptorRecord><DescriptorName><String>Diabetes Mellitus</String></DescriptorName><TreeNumberList><TreeNumber>C18.452.394</TreeNumber></TreeNumberList></DescriptorRecord></DescriptorRecordSet>`
-        )
+        jsonResponse({
+          result: { uids: ['2001'], '2001': { ds_idxlinks: [{ treenum: 'C18.452.394' }] } },
+        })
       );
     const progress: import('./validationService').ValidationProgress[] = [];
     await runValidation({ ...deps, onProgress: (p) => progress.push(p) });

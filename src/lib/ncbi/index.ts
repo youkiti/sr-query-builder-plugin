@@ -13,8 +13,8 @@ export {
 } from './eutils';
 export {
   fetchMeshTreeNumbers,
-  parseMeshTreeXml,
-  type MeshTreeRecord,
+  parseMeshSummaryJson,
+  type MeshEsummaryJson,
 } from './mesh';
 export { buildPubmedSearchUrl } from './pubmedUrl';
 export {

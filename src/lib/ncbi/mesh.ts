@@ -6,11 +6,15 @@ import { retryWithBackoff } from './rateLimit';
  * NCBI `db=mesh` を叩いて、各 MeSH descriptor の tree number を取得する。
  *
  * - `esearch db=mesh&term=<descriptor>[mh]` で UID を 1 件に解決
- * - `efetch db=mesh&id=<UIDs>` をバッチで 1 回だけ呼び、XML をパース
+ * - `esummary db=mesh&id=<UIDs>&retmode=json` をバッチで 1 回だけ呼び、JSON をパース
  * - TreeNumber は 1 descriptor に 0〜複数個。全件を保持する
  *
  * PubMed 側の `efetch db=pubmed` の XML は DescriptorName を返すのみで
  * TreeNumber は入っていないため、階層可視化には別途この関数が必要。
+ *
+ * 注意: `efetch db=mesh` は `retmode=xml` を指定しても常に text/plain（ASCII MeSH
+ * レコード）を返し XML パースが無言で失敗する。tree number を構造化取得できるのは
+ * `esummary db=mesh&retmode=json` の `ds_idxlinks[].treenum` 経由のみ。
  */
 
 const BASE_URL = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils';
@@ -86,52 +90,68 @@ export async function fetchMeshTreeNumbers(
   const params = new URLSearchParams({
     db: 'mesh',
     id: Array.from(uidToDescriptor.keys()).join(','),
-    retmode: 'xml',
+    retmode: 'json',
   });
   appendCommonParams(params, deps);
-  const url = `${BASE_URL}/efetch.fcgi?${params.toString()}`;
-  const xml = await retryWithBackoff(
+  const url = `${BASE_URL}/esummary.fcgi?${params.toString()}`;
+  const json = await retryWithBackoff(
     async () => {
       const res = await deps.fetch(url);
       if (!res.ok) {
-        throw new EutilsError(`mesh efetch failed: HTTP ${res.status}`, res.status);
+        throw new EutilsError(`mesh esummary failed: HTTP ${res.status}`, res.status);
       }
-      return await res.text();
+      return (await res.json()) as MeshEsummaryJson;
     },
     { sleep: deps.sleep, maxRetries: deps.maxRetries ?? 5 }
   );
 
-  // MeSH の efetch XML は DescriptorRecord/DescriptorName/String + TreeNumberList/TreeNumber の
-  // 構造。一括 id の場合は DescriptorRecordSet 下に複数 DescriptorRecord が並ぶ。
-  const records = parseMeshTreeXml(xml);
-  for (const record of records) {
-    if (record.descriptor !== null) {
-      result.set(record.descriptor, record.treeNumbers);
+  // esummary db=mesh の JSON は result[uid].ds_idxlinks[].treenum に tree number を持つ。
+  // uid → descriptor は esearch 時に作った uidToDescriptor で逆引きする（名前マッチ不要）。
+  const treeByUid = parseMeshSummaryJson(json);
+  for (const [uid, descriptor] of uidToDescriptor) {
+    const treeNumbers = treeByUid.get(uid);
+    if (treeNumbers !== undefined) {
+      result.set(descriptor, treeNumbers);
     }
   }
   return result;
 }
 
-export interface MeshTreeRecord {
-  descriptor: string | null;
-  treeNumbers: string[];
+/** esummary db=mesh&retmode=json のうち、tree number 抽出に使うフィールドだけを表す型。 */
+export interface MeshEsummaryJson {
+  result?: {
+    uids?: string[];
+    [uid: string]: { ds_idxlinks?: Array<{ treenum?: string }> } | string[] | undefined;
+  };
 }
 
-export function parseMeshTreeXml(xml: string): MeshTreeRecord[] {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(xml, 'text/xml');
-  const out: MeshTreeRecord[] = [];
-  for (const record of Array.from(doc.getElementsByTagName('DescriptorRecord'))) {
-    const nameEl = record.getElementsByTagName('DescriptorName')[0];
-    const descriptor = nameEl?.getElementsByTagName('String')[0]?.textContent?.trim() ?? null;
+/**
+ * esummary db=mesh の JSON から Map<uid, treeNumbers[]> を構築する。
+ *
+ * - `ds_idxlinks` が空 / 欠落の uid は Map に入れない（呼び出し側で「解決不能」と同じ扱い）
+ * - `treenum` が空文字や欠落の要素は除外する
+ */
+export function parseMeshSummaryJson(json: MeshEsummaryJson): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  const result = json.result;
+  if (!result) {
+    return out;
+  }
+  for (const uid of result.uids ?? []) {
+    const entry = result[uid];
+    if (!entry || Array.isArray(entry)) {
+      continue;
+    }
     const treeNumbers: string[] = [];
-    for (const tn of Array.from(record.getElementsByTagName('TreeNumber'))) {
-      const text = tn.textContent?.trim();
-      if (text) {
-        treeNumbers.push(text);
+    for (const link of entry.ds_idxlinks ?? []) {
+      const treenum = link.treenum?.trim();
+      if (treenum) {
+        treeNumbers.push(treenum);
       }
     }
-    out.push({ descriptor, treeNumbers });
+    if (treeNumbers.length > 0) {
+      out.set(uid, treeNumbers);
+    }
   }
   return out;
 }
