@@ -64,6 +64,8 @@ export interface EditViewCallbacks {
 interface BlockRenderContext {
   blocksDraft: BlocksDraft | null;
   hitsCache: Map<string, Promise<number>>;
+  /** 結合行チェックの md→結果キャッシュ（同一 md の重複 esearch を防ぐ） */
+  comboCache: Map<string, Promise<CombinationCheckResult>>;
 }
 
 /**
@@ -117,6 +119,8 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
   // ヒット数キャッシュは view インスタンスの生存期間で持ち越す（式→件数は安定なので、
   // 自動保存などで全体が再描画されても同じ式は再 esearch しない）。
   const hitsCache = new Map<string, Promise<number>>();
+  // 結合行チェックの結果も view インスタンスで持ち越す（同一 md なら自動再実行でも再 esearch しない）。
+  const comboCache = new Map<string, Promise<CombinationCheckResult>>();
   return (container, ctx) => {
     container.innerHTML = '';
     const doc = container.ownerDocument;
@@ -142,8 +146,8 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
     const lead = doc.createElement('p');
     lead.className = 'edit__lead';
     lead.textContent = callbacks.onAutoSave
-      ? '各ブロックは鉛筆アイコンで直接編集するか、「AI に改善させる」で再設計できます。編集は自動でシートに上書き保存されます。区切りとして履歴に残したいときだけ「新バージョンとして保存」を押してください。'
-      : '各ブロックは鉛筆アイコンで直接編集するか、「AI に改善させる」で再設計できます。最後に「新バージョンとして保存」を押すと FormulaVersions に user_edit として追記されます。';
+      ? '各ブロックは鉛筆アイコンで直接編集するか、「AI に改善させる」で再設計できます。編集は自動でシートに上書き保存され、結合行のヒット数とシード捕捉も自動で再確認されます。あとで戻れる区切りを残したいときだけ、上の「この状態を履歴に残す」を押してください。'
+      : '各ブロックは鉛筆アイコンで直接編集するか、「AI に改善させる」で再設計できます。「この状態を履歴に残す」を押すと FormulaVersions に user_edit として追記されます。';
     container.appendChild(lead);
 
     // 動的保存（上書き）の状態行。実際の保存実行・多重制御は bootstrap が担い、
@@ -170,6 +174,54 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
       },
     };
 
+    // 「この状態を履歴に残す」（=スナップショット / 旧「新バージョンとして保存」）を上部に置く。
+    // 通常の編集は自動上書き保存されるので、これは「あとで戻れる区切り」を明示的に残すための操作。
+    // 「フォーク」という語は使わず、何が起きるかを文言と補足説明で伝える。
+    const historyBar = doc.createElement('section');
+    historyBar.className = 'edit__history-bar';
+
+    const actions = doc.createElement('div');
+    actions.className = 'edit__actions';
+    const saveBtn = doc.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.className = 'edit__save-snapshot';
+    saveBtn.textContent = '📌 この状態を履歴に残す';
+    saveBtn.title =
+      'あとで戻れる区切りとして、いまの検索式を履歴のスナップショットに保存します（ふだんの編集は自動で上書き保存されています）。';
+    actions.appendChild(saveBtn);
+    historyBar.appendChild(actions);
+
+    const historyHelp = doc.createElement('p');
+    historyHelp.className = 'edit__history-help';
+    historyHelp.textContent = callbacks.onAutoSave
+      ? 'あとで戻れる区切りとして履歴に保存します。ふだんの編集は自動で保存されているので、ここぞという区切りのときだけ押せば十分です。保存した時点には「バージョン履歴」からいつでも戻れます。'
+      : 'いまの検索式を履歴に 1 件保存します（FormulaVersions に user_edit として追記）。保存した時点には「バージョン履歴」から戻れます。';
+    historyBar.appendChild(historyHelp);
+
+    const noteRow = doc.createElement('p');
+    noteRow.className = 'edit__note-row';
+    const noteLabel = doc.createElement('label');
+    noteLabel.textContent = '編集メモ:';
+    const noteInput = doc.createElement('input');
+    noteInput.type = 'text';
+    noteInput.className = 'edit__note-input';
+    noteInput.placeholder = '変更理由・気づきなど（任意）';
+    noteLabel.appendChild(noteInput);
+    noteRow.appendChild(noteLabel);
+    historyBar.appendChild(noteRow);
+
+    const status = doc.createElement('p');
+    status.className = 'edit__status';
+    status.setAttribute('aria-live', 'polite');
+    historyBar.appendChild(status);
+
+    const errorBox = doc.createElement('p');
+    errorBox.className = 'edit__error';
+    errorBox.setAttribute('aria-live', 'polite');
+    historyBar.appendChild(errorBox);
+
+    container.appendChild(historyBar);
+
     const blocksSection = doc.createElement('section');
     blocksSection.className = 'edit__blocks';
     const blocksHeading = doc.createElement('h3');
@@ -182,43 +234,11 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
     blocksSection.appendChild(blocksList);
     container.appendChild(blocksSection);
 
-    const noteRow = doc.createElement('p');
-    noteRow.className = 'edit__note-row';
-    const noteLabel = doc.createElement('label');
-    noteLabel.textContent = '編集メモ:';
-    const noteInput = doc.createElement('input');
-    noteInput.type = 'text';
-    noteInput.className = 'edit__note-input';
-    noteInput.placeholder = '変更理由・気づきなど（任意）';
-    noteLabel.appendChild(noteInput);
-    noteRow.appendChild(noteLabel);
-    container.appendChild(noteRow);
-
-    const actions = doc.createElement('div');
-    actions.className = 'edit__actions';
-    const saveBtn = doc.createElement('button');
-    saveBtn.type = 'button';
-    saveBtn.textContent = '新バージョンとして保存';
-    if (callbacks.onAutoSave) {
-      saveBtn.title = '現在の内容を履歴として別バージョンに残します（通常の編集は自動で上書き保存されます）';
-    }
-    actions.appendChild(saveBtn);
-    container.appendChild(actions);
-
-    const status = doc.createElement('p');
-    status.className = 'edit__status';
-    status.setAttribute('aria-live', 'polite');
-    container.appendChild(status);
-
-    const errorBox = doc.createElement('p');
-    errorBox.className = 'edit__error';
-    errorBox.setAttribute('aria-live', 'polite');
-    container.appendChild(errorBox);
-
     // ラベル解決元の blocksDraft と、view インスタンス共通のヒット数キャッシュ。
     const renderCtx: BlockRenderContext = {
       blocksDraft: ctx.state.blocksDraft,
       hitsCache,
+      comboCache,
     };
 
     function rerenderBlocks(): void {
@@ -393,23 +413,29 @@ function buildBlockRow(
     );
   });
 
-  // 結合行には「検索してシード捕捉を確認」を付ける（最終検索式の実検索 + 捕捉率）。
+  // 結合行には最終検索式の実検索 + シード捕捉確認を付ける（表示時・編集後に自動実行）。
   if (isCombination && callbacks.onCheckCombination) {
-    li.appendChild(buildCombinationCheck(doc, editor, callbacks.onCheckCombination));
+    li.appendChild(
+      buildCombinationCheck(doc, editor, callbacks.onCheckCombination, renderCtx.comboCache)
+    );
   }
 
   return li;
 }
 
 /**
- * 結合行（最終検索式）用の「検索してシード捕捉を確認」UI。
- * クリックで編集中の md 全文を onCheckCombination に渡し、総ヒット数と有効シードの
- * 捕捉率（捕捉 / 未捕捉 PMID）を表示する。保存前でも何度でも実行できる確認用。
+ * 結合行（最終検索式）用の「検索 + シード捕捉確認」UI。
+ *
+ * 概念ブロックのヒット数バッジと同じく、**表示時に自動実行**する。編集でブロック一覧が
+ * 再描画されるたびにこの UI も作り直されるので、その都度「新しい md」で自動的に再確認される
+ * （= 表示時 + 編集後に自動）。同一 md の重複 esearch は md→結果キャッシュで防ぐ。
+ * 「再検索」ボタンはキャッシュを無視して明示的に取り直すための手段として残す。
  */
 function buildCombinationCheck(
   doc: Document,
   editor: FormulaEditor,
-  onCheckCombination: NonNullable<EditViewCallbacks['onCheckCombination']>
+  onCheckCombination: NonNullable<EditViewCallbacks['onCheckCombination']>,
+  cache: Map<string, Promise<CombinationCheckResult>>
 ): HTMLElement {
   const wrap = doc.createElement('div');
   wrap.className = 'edit__combo-check';
@@ -417,7 +443,8 @@ function buildCombinationCheck(
   const btn = doc.createElement('button');
   btn.type = 'button';
   btn.className = 'edit__combo-check-btn';
-  btn.textContent = '検索してシード捕捉を確認';
+  btn.textContent = '再検索';
+  btn.title = '結合行を検索し直してシード捕捉を再確認します（表示時と編集後は自動で実行されます）。';
   wrap.appendChild(btn);
 
   const result = doc.createElement('div');
@@ -425,11 +452,21 @@ function buildCombinationCheck(
   result.setAttribute('aria-live', 'polite');
   wrap.appendChild(result);
 
-  btn.addEventListener('click', () => {
+  /** force=true でキャッシュを無視して取り直す。false なら同一 md のキャッシュを再利用。 */
+  function run(force: boolean): void {
+    const md = editor.getMd();
     btn.disabled = true;
     result.className = 'edit__combo-check-result edit__combo-check-result--pending';
     result.textContent = '検索中…';
-    onCheckCombination(editor.getMd())
+    let pending = force ? undefined : cache.get(md);
+    if (!pending) {
+      // 呼び出しは microtask に逃がし、同期 throw も reject として扱えるようにする。
+      pending = Promise.resolve().then(() => onCheckCombination(md));
+      cache.set(md, pending);
+      // 失敗は握りつぶさず、次の表示・編集・再検索で再試行できるよう cache から外す。
+      pending.catch(() => cache.delete(md));
+    }
+    pending
       .then((res) => {
         renderCombinationResult(doc, result, res);
       })
@@ -440,7 +477,11 @@ function buildCombinationCheck(
       .finally(() => {
         btn.disabled = false;
       });
-  });
+  }
+
+  btn.addEventListener('click', () => run(true));
+  // 表示時に自動実行（編集による再描画のたびに、新しい md で自動的に再確認される）。
+  run(false);
 
   return wrap;
 }

@@ -23,9 +23,9 @@ test.describe('app-edit (#/edit)', () => {
     const firstRow = page.locator('.edit__block-row').first();
     await expect(firstRow.locator('.edit__block-edit-toggle')).toHaveCount(1);
     await expect(firstRow.locator('.edit__block-improve')).toHaveCount(1);
-    // note input + 保存ボタン
+    // note input + スナップショット保存ボタン（「この状態を履歴に残す」）
     await expect(page.locator('input.edit__note-input')).toBeVisible();
-    await expect(page.locator('.edit__actions button')).toHaveText(/保存/);
+    await expect(page.locator('.edit__actions button')).toHaveText(/履歴に残す/);
   });
 
   test('AI 改善ボタンでプロンプト入力欄が開く', async ({ page }) => {

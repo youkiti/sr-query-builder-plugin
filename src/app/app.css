@@ -1389,6 +1389,25 @@ a.draft__term--mesh:focus-visible {
   font-family: var(--font-family-mono);
 }
 
+/* 上部の「この状態を履歴に残す」（スナップショット）バー */
+.edit__history-bar {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--color-bg-muted);
+}
+
+.edit__save-snapshot {
+  font-weight: 600;
+}
+
+.edit__history-help {
+  margin: var(--space-2) 0 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
 .edit__blocks {
   margin-top: var(--space-4);
 }

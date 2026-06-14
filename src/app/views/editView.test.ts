@@ -313,12 +313,26 @@ describe('createEditView - 結合行のシード捕捉確認', () => {
   }
 
   test('結合行にのみ確認ボタンが出る（概念ブロックには出ない）', () => {
-    const onCheckCombination = jest.fn();
+    const onCheckCombination = jest.fn().mockResolvedValue(makeResult());
     const view = createEditView({ onCheckCombination });
     const container = buildContainer();
     view(container, { state: stateReadyFull, navigate: jest.fn() });
     expect(blockRow(container, '3').querySelector('.edit__combo-check-btn')).toBeTruthy();
     expect(blockRow(container, '1').querySelector('.edit__combo-check-btn')).toBeNull();
+  });
+
+  test('表示時にクリックなしで自動実行され、結果が描画される', async () => {
+    const onCheckCombination = jest.fn().mockResolvedValue(makeResult());
+    const view = createEditView({ onCheckCombination });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    await flushAsync();
+    await flushAsync();
+    // クリックしていないのに onCheckCombination が呼ばれ、結果が出ている
+    expect(onCheckCombination).toHaveBeenCalledWith(stateReadyFull.currentFormulaMarkdown);
+    const result = blockRow(container, '3').querySelector('.edit__combo-check-result')!;
+    expect(result.className).toContain('edit__combo-check-result--ok');
+    expect(result.querySelector('.edit__combo-check-hits')?.textContent).toContain('4,200 件');
   });
 
   test('全シード捕捉なら ✓ 捕捉率 100% と総ヒット数を出す', async () => {

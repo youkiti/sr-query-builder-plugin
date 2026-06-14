@@ -895,7 +895,7 @@ describe('startApp - wiring 層', () => {
     expect(map['note']).toContain('復元元: v1');
   });
 
-  test('edit view: 編集は自動上書き保存、明示「新バージョンとして保存」は履歴を 1 行追記する', async () => {
+  test('edit view: 編集は自動上書き保存、明示「この状態を履歴に残す」は履歴を 1 行追記する', async () => {
     const doc = buildDocument();
     const { runtime, fetchMock } = makeRuntime({
       currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
