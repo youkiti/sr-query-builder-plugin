@@ -1,4 +1,4 @@
-import type { SeedPaper, SeedUserDecision } from '@/domain/seedPaper';
+import { isSeedEligibleForValidation, type SeedPaper, type SeedUserDecision } from '@/domain/seedPaper';
 import {
   buildBroadenedFormula,
   buildMarginQuery,
@@ -8,6 +8,7 @@ import {
 import {
   expandQueryForRecall,
   pickBoundaryCases,
+  pickSeedCandidates,
   type BoundaryPick,
   type BoundaryCandidate,
 } from '@/features/formula/skills';
@@ -15,7 +16,7 @@ import { getProtocolByVersion } from '@/features/protocol';
 import { appendSeedPaper, listSeedPapers } from '@/features/seeds';
 import { expandFormula } from '@/features/validation';
 import type { GoogleApiDeps } from '@/lib/google';
-import { efetchArticles, esearch, type EutilsDeps } from '@/lib/ncbi';
+import { efetchArticles, esearch, type EfetchArticle, type EutilsDeps } from '@/lib/ncbi';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
 import { nowIso } from '@/utils/iso8601';
 import type { AppStore } from '../store';
@@ -73,23 +74,42 @@ export interface BoundaryCaseView {
   meshHeadings: string[];
 }
 
+/**
+ * 取得モード。
+ * - `margin`: 通常。現式を緩めた拡張式の **外側**（拡張式 NOT 現式）から境界事例を拾う。
+ *   有効 seed が 1 件以上あるときに使う（取りこぼし発見が目的）。
+ * - `inside`: 有効 seed が 0 件のときの初期シードブートストラップ。現式の **内側**
+ *   （現式ヒット集合）から「明確に該当しそうな代表例」を拾い、include で初期 seed を育てる。
+ */
+export type ExpandMode = 'margin' | 'inside';
+
 export interface BoundaryCasesResult {
+  /** この取得がどちらのモードで走ったか。UI のメッセージ切替に使う。 */
+  mode: ExpandMode;
   candidates: BoundaryCaseView[];
   /** 現検索式のヒット数。 */
   originalHits: number;
-  /** 拡張式（現式 ⊆ 拡張式）のヒット数。= originalHits + marginHits。 */
+  /** 拡張式（現式 ⊆ 拡張式）のヒット数。inside モードでは originalHits と同値。 */
   broadenedHits: number;
-  /** 式の外側（margin = 拡張式 NOT 現式）のヒット数。 */
+  /** 式の外側（margin = 拡張式 NOT 現式）のヒット数。inside モードでは 0。 */
   marginHits: number;
   /** 重複除去後に skill に渡した候補の件数 */
   evaluatedCount: number;
-  /** LLM が提案した拡張語（ブロック別）。ラウンド完了時の更新提案の集計に使う。 */
+  /** LLM が提案した拡張語（ブロック別）。ラウンド完了時の更新提案の集計に使う。inside では []。 */
   additions: BlockRecallAdditions[];
 }
 
 /**
- * 現在の検索式で PubMed を検索し、既存 seed と重複しない上位候補を
- * pick-boundary-cases skill に渡して境界事例を抽出する。
+ * 現在の検索式から判定候補を取得するエントリ。
+ *
+ * 有効 seed（{@link isSeedEligibleForValidation}）の件数で 2 モードに分岐する:
+ * - 1 件以上 → margin モード（式の外側から境界事例を拾い、取りこぼしを発見）
+ * - 0 件   → inside モード（式の内側から代表例を拾い、初期シードをブートストラップ）
+ *
+ * seed が 0 件のときは捕捉率の基準が無く、式の外側を探しても include の意味が薄い。
+ * その局面では「まず確度の高い初期シードを作る」ことが先決なので、式の内側から
+ * 明確に該当しそうな論文を候補に出す（include しても捕捉率は構造上 100% だが、
+ * これはブートストラップとして正しい挙動）。
  */
 export async function fetchBoundaryCandidates(
   deps: ExpandServiceDeps
@@ -109,6 +129,29 @@ export async function fetchBoundaryCandidates(
     throw new Error('検索式の展開結果が空です');
   }
 
+  // 既存 seed を 1 回だけ取得し、重複除去（existingPmids）とモード判定（eligible 件数）に使う。
+  const seeds = await listSeedPapers(state.project.spreadsheetId, deps.google);
+  const existingPmids = new Set(
+    seeds.map((s) => s.pmid).filter((p): p is string => p !== null)
+  );
+  const eligibleSeedCount = seeds.filter((seed) => isSeedEligibleForValidation(seed)).length;
+
+  if (eligibleSeedCount === 0) {
+    return fetchInsideCandidates(deps, protocol, originalQuery, existingPmids);
+  }
+  return fetchMarginCandidates(deps, protocol, formula, originalQuery, existingPmids);
+}
+
+/**
+ * margin モード（有効 seed ≥ 1）。現式を 2 軸で緩めた拡張式の外側から境界事例を拾う。
+ */
+async function fetchMarginCandidates(
+  deps: ExpandServiceDeps,
+  protocol: BoundaryProtocol,
+  formula: ReturnType<typeof parsePubmedFormulaMd>,
+  originalQuery: string,
+  existingPmids: ReadonlySet<string>
+): Promise<BoundaryCasesResult> {
   // 各概念ブロックを 2 軸（MeSH 一段上 / フリーワード）で広げる拡張語を LLM に提案させる。
   deps.onProgress?.('broaden');
   const conceptBlocks = formula.blocks
@@ -123,6 +166,7 @@ export async function fetchBoundaryCandidates(
   if (additions.length === 0) {
     const original = await esearch(originalQuery, deps.eutils, { retmax: 0 });
     return {
+      mode: 'margin',
       candidates: [],
       originalHits: original.count,
       broadenedHits: original.count,
@@ -146,15 +190,12 @@ export async function fetchBoundaryCandidates(
   const marginHits = marginResult.count;
 
   deps.onProgress?.('dedup');
-  const seeds = await listSeedPapers(state.project.spreadsheetId, deps.google);
-  const existingPmids = new Set(
-    seeds.map((s) => s.pmid).filter((p): p is string => p !== null)
-  );
   const novelPmids = marginResult.pmids.filter((p) => !existingPmids.has(p));
   const limit = deps.skillCandidateLimit ?? 20;
   const toFetch = novelPmids.slice(0, limit);
   if (toFetch.length === 0) {
     return {
+      mode: 'margin',
       candidates: [],
       originalHits,
       broadenedHits: originalHits + marginHits,
@@ -164,9 +205,96 @@ export async function fetchBoundaryCandidates(
     };
   }
   deps.onProgress?.('efetch');
-  const articles = await efetchArticles(toFetch, deps.eutils);
+  const { articleMap, candidates } = await fetchCandidateArticles(toFetch, deps);
+
+  deps.onProgress?.('pick-boundary');
+  const picks = await pickBoundaryCases(
+    {
+      researchQuestion: protocol.researchQuestion,
+      inclusionCriteria: protocol.inclusionCriteria,
+      exclusionCriteria: protocol.exclusionCriteria,
+      candidates,
+    },
+    deps.llmFactory.forPurpose('pick_boundary')
+  );
+
+  return {
+    mode: 'margin',
+    candidates: picksToViews(picks, articleMap),
+    originalHits,
+    broadenedHits: originalHits + marginHits,
+    marginHits,
+    evaluatedCount: candidates.length,
+    additions,
+  };
+}
+
+/**
+ * inside モード（有効 seed = 0）。現式の内側から「明確に該当しそうな代表例」を拾い、
+ * 初期シード集合をブートストラップする。broaden は行わない（式は広げない）。
+ */
+async function fetchInsideCandidates(
+  deps: ExpandServiceDeps,
+  protocol: BoundaryProtocol,
+  originalQuery: string,
+  existingPmids: ReadonlySet<string>
+): Promise<BoundaryCasesResult> {
+  // 現式（内側）をそのまま検索。式は広げないので broaden ステップは踏まない。
+  deps.onProgress?.('esearch');
+  const insideResult = await esearch(originalQuery, deps.eutils, {
+    retmax: deps.retmax ?? 50,
+  });
+  const originalHits = insideResult.count;
+
+  deps.onProgress?.('dedup');
+  // 既に判定済み（exclude/maybe など）の seed 行と重複する PMID は再提示しない。
+  const novelPmids = insideResult.pmids.filter((p) => !existingPmids.has(p));
+  const limit = deps.skillCandidateLimit ?? 20;
+  const toFetch = novelPmids.slice(0, limit);
+  if (toFetch.length === 0) {
+    return {
+      mode: 'inside',
+      candidates: [],
+      originalHits,
+      broadenedHits: originalHits,
+      marginHits: 0,
+      evaluatedCount: 0,
+      additions: [],
+    };
+  }
+  deps.onProgress?.('efetch');
+  const { articleMap, candidates } = await fetchCandidateArticles(toFetch, deps);
+
+  deps.onProgress?.('pick-boundary');
+  const picks = await pickSeedCandidates(
+    {
+      researchQuestion: protocol.researchQuestion,
+      inclusionCriteria: protocol.inclusionCriteria,
+      exclusionCriteria: protocol.exclusionCriteria,
+      candidates,
+    },
+    deps.llmFactory.forPurpose('pick_seed')
+  );
+
+  return {
+    mode: 'inside',
+    candidates: picksToViews(picks, articleMap),
+    originalHits,
+    broadenedHits: originalHits,
+    marginHits: 0,
+    evaluatedCount: candidates.length,
+    additions: [],
+  };
+}
+
+/** efetch して articleMap と pick skill 用の候補配列を組み立てる（両モード共通）。 */
+async function fetchCandidateArticles(
+  pmids: string[],
+  deps: ExpandServiceDeps
+): Promise<{ articleMap: Map<string, EfetchArticle>; candidates: BoundaryCandidate[] }> {
+  const articles = await efetchArticles(pmids, deps.eutils);
   const articleMap = new Map(articles.map((a) => [a.pmid, a]));
-  const candidates: BoundaryCandidate[] = toFetch
+  const candidates: BoundaryCandidate[] = pmids
     .map((pmid) => {
       const a = articleMap.get(pmid);
       if (!a) return null;
@@ -178,27 +306,7 @@ export async function fetchBoundaryCandidates(
       };
     })
     .filter((v): v is BoundaryCandidate => v !== null);
-
-  deps.onProgress?.('pick-boundary');
-  const provider = deps.llmFactory.forPurpose('pick_boundary');
-  const picks = await pickBoundaryCases(
-    {
-      researchQuestion: protocol.researchQuestion,
-      inclusionCriteria: protocol.inclusionCriteria,
-      exclusionCriteria: protocol.exclusionCriteria,
-      candidates,
-    },
-    provider
-  );
-
-  return {
-    candidates: picksToViews(picks, articleMap),
-    originalHits,
-    broadenedHits: originalHits + marginHits,
-    marginHits,
-    evaluatedCount: candidates.length,
-    additions,
-  };
+  return { articleMap, candidates };
 }
 
 export interface RecordDecisionInput {
@@ -254,19 +362,11 @@ export async function recordDecision(
 
 function picksToViews(
   picks: BoundaryPick[],
-  articleMap: Map<
-    string,
-    { title: string | null; year: number | null; abstract: string | null; meshHeadings: string[] }
-  >
+  articleMap: Map<string, EfetchArticle>
 ): BoundaryCaseView[] {
   return picks.map((pick) => {
     // pick.pmid は必ず articleMap のキーに含まれる（呼び出し側で allowedPmids でフィルタ済）
-    const a = articleMap.get(pick.pmid) as {
-      title: string | null;
-      year: number | null;
-      abstract: string | null;
-      meshHeadings: string[];
-    };
+    const a = articleMap.get(pick.pmid) as EfetchArticle;
     return {
       pmid: pick.pmid,
       title: a.title,
@@ -278,13 +378,14 @@ function picksToViews(
   });
 }
 
-async function resolveBoundaryProtocol(
-  deps: ExpandServiceDeps
-): Promise<{
+/** 候補抽出に渡すプロトコル要素（resolveBoundaryProtocol の戻り値）。 */
+interface BoundaryProtocol {
   researchQuestion: string;
   inclusionCriteria: string;
   exclusionCriteria: string;
-}> {
+}
+
+async function resolveBoundaryProtocol(deps: ExpandServiceDeps): Promise<BoundaryProtocol> {
   const state = deps.store.getState();
   /* istanbul ignore if -- fetchBoundaryCandidates が呼び出し前に project を検証済み */
   if (state.project === null) {

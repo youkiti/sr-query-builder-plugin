@@ -18,6 +18,7 @@ const stateReady: AppState = {
 
 function sampleResult(overrides: Partial<BoundaryCasesResult> = {}): BoundaryCasesResult {
   return {
+    mode: 'margin',
     candidates: [
       {
         pmid: '111',
@@ -278,6 +279,35 @@ describe('createExpandView', () => {
       expect(items[1]?.querySelector('.expand__candidate-reason')?.textContent).toContain('(無し)');
       // 各候補には 3 つの判定ボタン
       expect(items[0]?.querySelectorAll('button')).toHaveLength(3);
+    });
+
+    test('inside モードは初期シードバナーと内側ステータスを表示する', () => {
+      const view = createExpandView();
+      const container = buildContainer();
+      view(container, {
+        state: readyState(sampleResult({ mode: 'inside', marginHits: 0, additions: [] })),
+        navigate: jest.fn(),
+      });
+      expect(container.querySelector('.expand__inside-banner')).not.toBeNull();
+      const status = container.querySelector('.expand__status')?.textContent ?? '';
+      expect(status).toContain('初期シード候補');
+      expect(status).toContain('式の内側 500 件');
+      // 候補自体は通常どおり描画される
+      expect(container.querySelectorAll('.expand__candidate')).toHaveLength(2);
+    });
+
+    test('inside モードで候補 0 件のときは内側用の空メッセージを出す', () => {
+      const view = createExpandView();
+      const container = buildContainer();
+      view(container, {
+        state: readyState(
+          sampleResult({ mode: 'inside', candidates: [], marginHits: 0, evaluatedCount: 0, additions: [] })
+        ),
+        navigate: jest.fn(),
+      });
+      expect(container.querySelector('.expand__status')?.textContent).toContain(
+        'すべて既存 seed と重複'
+      );
     });
 
     test('各候補にアブストラクト本文を描画し、無い場合はプレースホルダを出す', () => {
@@ -817,6 +847,31 @@ describe('createExpandView', () => {
       await flushAsync();
       await flushAsync();
       expect(container.querySelector('.expand__round-summary')?.textContent).toContain('計算不能');
+    });
+
+    test('inside モードのラウンド完了は初期シードの補足を表示する', async () => {
+      const onDecide = jest.fn().mockResolvedValue({ seed: {} });
+      const onRoundComplete = jest.fn().mockResolvedValue(buildValidationSummary());
+      const view = createExpandView({ onDecide, onRoundComplete });
+      const container = buildContainer();
+      view(container, {
+        state: readyState(
+          sampleResult({
+            mode: 'inside',
+            additions: [],
+            candidates: sampleResult().candidates.slice(0, 1),
+          })
+        ),
+        navigate: jest.fn(),
+      });
+      const list = container.querySelector<HTMLElement>('.expand__candidates')!;
+      pressKey(list, 'i');
+      await flushAsync();
+      await flushAsync();
+      const note = container.querySelector('.expand__round-note');
+      expect(note?.textContent).toContain('初期シードを 1 件登録しました');
+      // inside は additions=[] なので更新提案は出ない
+      expect(container.querySelector('.expand__proposals')).toBeNull();
     });
 
     test('取得中（running）へ再描画すると候補・ラウンド表示がクリアされる', async () => {

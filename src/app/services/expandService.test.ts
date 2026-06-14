@@ -343,7 +343,8 @@ describe('fetchBoundaryCandidates', () => {
     const googleFetch = jest.fn();
     googleFetch.mockImplementation(async (url: string) => {
       if (url.includes('/values/SeedPapers')) {
-        return jsonResponse({ values: [SHEET_HEADERS.SeedPapers] });
+        // 有効 seed を 1 件置いて margin モードを選ばせる（inside モードに落ちないように）
+        return jsonResponse({ values: [SHEET_HEADERS.SeedPapers, seedRowWithPmid('111', true)] });
       }
       return jsonResponse({});
     });
@@ -389,7 +390,8 @@ describe('fetchBoundaryCandidates', () => {
     const googleFetch = jest.fn();
     googleFetch.mockImplementation(async (url: string) => {
       if (url.includes('/values/SeedPapers')) {
-        return jsonResponse({ values: [SHEET_HEADERS.SeedPapers] });
+        // 有効 seed '999' を 1 件置き margin モードへ。候補（1..5）とは衝突しない PMID にする
+        return jsonResponse({ values: [SHEET_HEADERS.SeedPapers, seedRowWithPmid('999', true)] });
       }
       return jsonResponse({});
     });
@@ -444,7 +446,7 @@ describe('fetchBoundaryCandidates', () => {
     );
     const googleFetch = jest.fn().mockImplementation(async (url: string) => {
       if (url.includes('/values/SeedPapers')) {
-        return jsonResponse({ values: [SHEET_HEADERS.SeedPapers] });
+        return jsonResponse({ values: [SHEET_HEADERS.SeedPapers, seedRowWithPmid('111', true)] });
       }
       if (url.includes('/values/FormulaVersions')) {
         return jsonResponse({
@@ -524,7 +526,7 @@ describe('fetchBoundaryCandidates', () => {
     );
     const googleFetch = jest.fn().mockImplementation(async (url: string) => {
       if (url.includes('/values/SeedPapers')) {
-        return jsonResponse({ values: [SHEET_HEADERS.SeedPapers] });
+        return jsonResponse({ values: [SHEET_HEADERS.SeedPapers, seedRowWithPmid('111', true)] });
       }
       if (url.includes('/values/FormulaVersions')) {
         return jsonResponse({
@@ -588,6 +590,139 @@ describe('fetchBoundaryCandidates', () => {
       llmFactory: { forPurpose: () => provider },
     });
     expect(provider.chat).toHaveBeenCalled();
+  });
+
+  describe('inside モード（有効 seed 0 件）', () => {
+    test('有効 seed が 0 件なら式の内側から代表例を pick_seed で選ぶ', async () => {
+      const store = createStore(makeState());
+      const googleFetch = jest.fn().mockImplementation(async (url: string) => {
+        if (url.includes('/values/SeedPapers')) {
+          // ヘッダのみ = 有効 seed 0 件 → inside モード
+          return jsonResponse({ values: [SHEET_HEADERS.SeedPapers] });
+        }
+        return jsonResponse({});
+      });
+      const esearchUrls: string[] = [];
+      const eutilsFetch = jest.fn().mockImplementation(async (url: string) => {
+        if (url.includes('esearch.fcgi')) {
+          esearchUrls.push(url);
+          return jsonResponse({
+            esearchresult: { count: '300', idlist: ['222', '333', '444'] },
+          });
+        }
+        return textResponse(
+          buildEfetchXml([
+            { pmid: '222', title: 'Core paper 222', abstract: 'Clearly relevant.' },
+            { pmid: '333', title: 'Core paper 333' },
+            { pmid: '444', title: 'Core paper 444' },
+          ])
+        );
+      });
+      const forPurpose = jest.fn().mockReturnValue(
+        branchingProvider({ picks: [{ pmid: '222', reason: '組入基準に明確に合致' }] })
+      );
+      const result = await fetchBoundaryCandidates({
+        google: {
+          fetch: googleFetch as unknown as typeof fetch,
+          getAccessToken: jest.fn().mockResolvedValue('t'),
+        },
+        eutils: {
+          fetch: eutilsFetch as unknown as typeof fetch,
+          sleep: async () => undefined,
+          maxRetries: 0,
+        },
+        store,
+        llmFactory: { forPurpose },
+      });
+      expect(result.mode).toBe('inside');
+      expect(result.originalHits).toBe(300);
+      expect(result.broadenedHits).toBe(300);
+      expect(result.marginHits).toBe(0);
+      expect(result.additions).toEqual([]);
+      expect(result.candidates.map((c) => c.pmid)).toEqual(['222']);
+      // 式は広げない: pick_seed を使い、expand_recall / pick_boundary は呼ばない
+      expect(forPurpose).toHaveBeenCalledWith('pick_seed');
+      expect(forPurpose).not.toHaveBeenCalledWith('expand_recall');
+      expect(forPurpose).not.toHaveBeenCalledWith('pick_boundary');
+      // 内側検索なので NOT を含む margin クエリは投げない
+      expect(esearchUrls.some((u) => u.includes('NOT'))).toBe(false);
+    });
+
+    test('exclude / maybe だけの seed も有効 0 件として inside モードになり、判定済み PMID は再提示しない', async () => {
+      const store = createStore(makeState());
+      const excludeRow = SHEET_HEADERS.SeedPapers.map(() => '');
+      excludeRow[SHEET_HEADERS.SeedPapers.indexOf('pmid')] = '222';
+      excludeRow[SHEET_HEADERS.SeedPapers.indexOf('is_valid')] = 'true';
+      excludeRow[SHEET_HEADERS.SeedPapers.indexOf('user_decision')] = 'exclude';
+      const googleFetch = jest.fn().mockImplementation(async (url: string) => {
+        if (url.includes('/values/SeedPapers')) {
+          return jsonResponse({ values: [SHEET_HEADERS.SeedPapers, excludeRow] });
+        }
+        return jsonResponse({});
+      });
+      const eutilsFetch = jest.fn().mockImplementation(async (url: string) => {
+        if (url.includes('esearch.fcgi')) {
+          return jsonResponse({
+            esearchresult: { count: '2', idlist: ['222', '333'] },
+          });
+        }
+        return textResponse(buildEfetchXml([{ pmid: '333', title: 'Core 333' }]));
+      });
+      const forPurpose = jest.fn().mockReturnValue(
+        branchingProvider({ picks: [{ pmid: '333', reason: 'ok' }] })
+      );
+      const result = await fetchBoundaryCandidates({
+        google: {
+          fetch: googleFetch as unknown as typeof fetch,
+          getAccessToken: jest.fn().mockResolvedValue('t'),
+        },
+        eutils: {
+          fetch: eutilsFetch as unknown as typeof fetch,
+          sleep: async () => undefined,
+          maxRetries: 0,
+        },
+        store,
+        llmFactory: { forPurpose },
+      });
+      expect(result.mode).toBe('inside');
+      // 既に exclude 判定済みの 222 は除かれ、333 のみが候補
+      expect(result.candidates.map((c) => c.pmid)).toEqual(['333']);
+      expect(forPurpose).toHaveBeenCalledWith('pick_seed');
+    });
+
+    test('内側の新規候補が 0 件なら skill を呼ばず空で返す', async () => {
+      const store = createStore(makeState());
+      const googleFetch = jest.fn().mockImplementation(async (url: string) => {
+        if (url.includes('/values/SeedPapers')) {
+          return jsonResponse({ values: [SHEET_HEADERS.SeedPapers] });
+        }
+        return jsonResponse({});
+      });
+      const eutilsFetch = jest.fn().mockImplementation(async (url: string) => {
+        if (url.includes('esearch.fcgi')) {
+          return jsonResponse({ esearchresult: { count: '0', idlist: [] } });
+        }
+        return jsonResponse({});
+      });
+      const forPurpose = jest.fn().mockImplementation(() => branchingProvider());
+      const result = await fetchBoundaryCandidates({
+        google: {
+          fetch: googleFetch as unknown as typeof fetch,
+          getAccessToken: jest.fn().mockResolvedValue('t'),
+        },
+        eutils: {
+          fetch: eutilsFetch as unknown as typeof fetch,
+          sleep: async () => undefined,
+          maxRetries: 0,
+        },
+        store,
+        llmFactory: { forPurpose },
+      });
+      expect(result.mode).toBe('inside');
+      expect(result.candidates).toEqual([]);
+      expect(result.originalHits).toBe(0);
+      expect(forPurpose).not.toHaveBeenCalledWith('pick_seed');
+    });
   });
 
   test('指定 protocol version が Sheet に存在しなければ例外', async () => {

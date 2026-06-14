@@ -117,7 +117,11 @@ MIT ライセンスの OSS Chrome 拡張 **sr-query-builder-plugin**。ユーザ
 
 ### シード論文の対話的拡張フロー
 
-検索式ドラフト後、現式を 2 軸（MeSH 一段上＋explode / フリーワード synonym）で広げた拡張式の**外側**（margin = 拡張式 NOT 現式）を検索し、その中から AI が**境界事例っぽい数件**を選んでユーザーに include / exclude / maybe をワンクリック判定させる。`include` は `SeedPapers` に `source=interactive` として追加される。margin は現式の外側なので、include されれば `check_final_query` 相当の再検証で捕捉率が 100% を割り、取りこぼしが顕在化する。あわせて「どの拡張語が拾えたか」を集計して検索式の**更新提案**（ブロック #N にこの語を足すと M 件回収）を提示する（採用は `#/draft` で手動）。**実験的機能（dev）** として UI に明示。詳細は [docs/requirements.md §4.5](docs/requirements.md)。
+検索式ドラフト後、現式を 2 軸（MeSH 一段上＋explode / フリーワード synonym）で広げた拡張式の**外側**（margin = 拡張式 NOT 現式）を検索し、その中から AI が**境界事例っぽい数件**を選んでユーザーに include / exclude / maybe をワンクリック判定させる。`include` は `SeedPapers` に `source=interactive` として追加される。margin は現式の外側なので、include されれば `check_final_query` 相当の再検証で捕捉率が 100% を割り、取りこぼしが顕在化する。あわせて「どの拡張語が拾えたか」を集計して検索式の**更新提案**（ブロック #N にこの語を足すと M 件回収）を提示する（採用は `#/draft` で手動）。**実験的機能（dev）** として UI に明示。
+
+**モード自動分岐**: 有効 seed（`isSeedEligibleForValidation`）が **0 件のときは margin ではなく「内側（inside）」モード**になる。式を広げず現式の内側を検索し、AI（`pick-seed-candidates` skill / `purpose=pick_seed`）が「組入基準に明確に該当しそうな代表例」を選ぶ。include が初期シードになる（捕捉率 100% は想定どおり。更新提案は出さない）。シードができれば次回から margin モードに戻る。分岐は [src/app/services/expandService.ts](src/app/services/expandService.ts) の `fetchBoundaryCandidates` が `BoundaryCasesResult.mode` を返し、view が表示を切替える。
+
+詳細は [docs/requirements.md §4.5](docs/requirements.md)。
 
 ### Python CLI の移植方針
 

@@ -177,8 +177,13 @@ export function createExpandView(callbacks: ExpandViewCallbacks = {}): RenderVie
     }
     if (run?.status === 'ready' && run.result) {
       const result = run.result;
+      if (result.mode === 'inside') {
+        container.insertBefore(renderInsideBanner(doc), actions);
+      }
       if (result.candidates.length === 0) {
         status.textContent = emptyResultText(result);
+      } else if (result.mode === 'inside') {
+        status.textContent = `${result.candidates.length} 件の初期シード候補（有効 seed 0 件のため、式の内側 ${result.originalHits} 件から代表例 ${result.evaluatedCount} 件を評価）`;
       } else {
         status.textContent = `${result.candidates.length} 件の境界事例（現式 ${result.originalHits} 件 → 拡張式 ${result.broadenedHits} 件 / 外側 ${result.marginHits} 件から評価 ${result.evaluatedCount} 件）`;
       }
@@ -255,7 +260,14 @@ function setupCandidates(
         abstract: c.abstract,
         meshHeadings: c.meshHeadings,
       }));
-    runRoundComplete(doc, round, callbacks.onRoundComplete, includedPapers, result.additions);
+    runRoundComplete(
+      doc,
+      round,
+      callbacks.onRoundComplete,
+      includedPapers,
+      result.additions,
+      result.mode
+    );
   };
 
   list.addEventListener('keydown', (event) => {
@@ -599,10 +611,12 @@ function runRoundComplete(
   round: HTMLElement,
   onRoundComplete: ExpandViewCallbacks['onRoundComplete'],
   includedPapers: IncludedPaper[],
-  additions: BoundaryCasesResult['additions']
+  additions: BoundaryCasesResult['additions'],
+  mode: BoundaryCasesResult['mode']
 ): void {
   round.innerHTML = '';
   // 再検証（捕捉率）とは独立に、include した「式の外側」論文から更新提案を組み立てる。
+  // inside モードは additions=[] なので提案は出ない（式の内側で seed を作る作業のため）。
   const proposals = buildUpdateProposals(includedPapers, additions);
   if (!onRoundComplete) {
     const note = doc.createElement('p');
@@ -610,6 +624,9 @@ function runRoundComplete(
     note.textContent =
       'ラウンド完了。/validate を開いて捕捉率を再確認してください（自動再検証は無効）。';
     round.appendChild(note);
+    if (mode === 'inside') {
+      round.appendChild(buildInsideRoundNote(doc, includedPapers.length));
+    }
     if (proposals.length > 0) {
       round.appendChild(buildProposals(doc, proposals));
     }
@@ -624,6 +641,9 @@ function runRoundComplete(
     .then((summary) => {
       round.innerHTML = '';
       round.appendChild(buildRoundSummary(doc, summary));
+      if (mode === 'inside') {
+        round.appendChild(buildInsideRoundNote(doc, includedPapers.length));
+      }
       if (proposals.length > 0) {
         round.appendChild(buildProposals(doc, proposals));
       }
@@ -683,8 +703,38 @@ function buildProposals(doc: Document, proposals: UpdateProposal[]): HTMLElement
   return wrap;
 }
 
-/** 候補 0 件のときのステータス文（理由を分けて伝える）。 */
+/**
+ * inside モード（有効 seed 0 件）であることを冒頭で知らせるバナー。
+ * 「式の外側探索」を期待しているユーザーに、今回は初期シード作りだと伝える。
+ */
+function renderInsideBanner(doc: Document): HTMLElement {
+  const banner = doc.createElement('p');
+  banner.className = 'expand__inside-banner';
+  banner.setAttribute('role', 'note');
+  banner.textContent =
+    '有効なシード論文がまだ 0 件のため、今回は式の「内側」から組入基準に該当しそうな代表例を提示します。include した論文が初期シードになります（この段階では捕捉率は 100% が正常）。シードができたら、もう一度実行すると式の外側の取りこぼし探索に切り替わります。';
+  return banner;
+}
+
+/** inside モードのラウンド完了時に添える補足（捕捉率 100% は想定どおりであること）。 */
+function buildInsideRoundNote(doc: Document, includedCount: number): HTMLElement {
+  const note = doc.createElement('p');
+  note.className = 'expand__round-note';
+  note.textContent =
+    includedCount > 0
+      ? `初期シードを ${includedCount} 件登録しました。これらは式の内側なので捕捉率 100% は想定どおりです。次回の実行から式の外側（取りこぼし）探索に切り替わります。`
+      : 'include 判定が無かったため初期シードは追加されていません。条件を見直すか、別の候補で再実行してください。';
+  return note;
+}
+
+/** 候補 0 件のときのステータス文（理由・モードを分けて伝える）。 */
 function emptyResultText(result: BoundaryCasesResult): string {
+  if (result.mode === 'inside') {
+    if (result.originalHits === 0) {
+      return '現検索式のヒットが 0 件のため、内側から初期シード候補を出せませんでした（式を /draft で見直してください）。';
+    }
+    return `式の内側 ${result.originalHits} 件はすべて既存 seed と重複しており、新たな初期シード候補がありませんでした。`;
+  }
   if (result.additions.length === 0) {
     return '拡張語が提案されなかったため、式の外側を探索できませんでした（式が網羅的か、拡張が弱い可能性）。';
   }

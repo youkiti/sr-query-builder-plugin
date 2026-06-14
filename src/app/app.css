@@ -574,6 +574,17 @@
   font-size: var(--font-size-sm);
 }
 
+/* inside モード（有効 seed 0 件）の初期シードブートストラップ案内バナー。 */
+.expand__inside-banner {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-accent, #2e7d32);
+  border-radius: var(--radius-md);
+  background: var(--color-accent-bg, #e8f5e9);
+  color: var(--color-accent-text, #1b5e20);
+  font-size: var(--font-size-sm);
+}
+
 /* 検索式の更新提案ブロック。 */
 .expand__proposals {
   margin-top: var(--space-4);
