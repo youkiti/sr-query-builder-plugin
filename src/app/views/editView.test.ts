@@ -696,6 +696,58 @@ describe('createEditView - ブロック単位 AI 改善', () => {
   });
 });
 
+describe('createEditView - ブロック・インスペクタ', () => {
+  test('鉛筆編集を開くとインスペクタが展開され、onFetchMeshTrees が呼ばれる', async () => {
+    const onFetchMeshTrees = jest
+      .fn()
+      .mockResolvedValue([{ descriptor: 'Asthma', treeNumbers: ['C08.127.108'] }]);
+    const onCountHits = jest.fn().mockResolvedValue(100);
+    const md = ['## PubMed/MEDLINE', '', '```', '#1 "Asthma"[Mesh]', '```', ''].join('\n');
+    const view = createEditView({ onFetchMeshTrees, onCountHits });
+    const container = buildContainer();
+    view(container, { state: { ...stateReady, currentFormulaMarkdown: md }, navigate: jest.fn() });
+    const row = blockRow(container, '1');
+    expect(row.querySelector('.bins')).toBeNull();
+    row.querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!.click();
+    expect(row.querySelector('.bins')).toBeTruthy();
+    await flushAsync();
+    expect(onFetchMeshTrees).toHaveBeenCalledWith(['Asthma']);
+    expect(row.querySelector('.bins__tree-term')?.textContent).toBe('Asthma');
+  });
+
+  test('AI 改善パネルを開くとインスペクタが展開される', () => {
+    const onImproveBlock = jest.fn();
+    const onCountHits = jest.fn().mockResolvedValue(1);
+    const view = createEditView({ onImproveBlock, onCountHits });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    const row = blockRow(container, '1');
+    row.querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
+    expect(row.querySelector('.bins')).toBeTruthy();
+    expect(row.querySelector('.bins__freeword')).toBeTruthy();
+  });
+
+  test('結合行にはインスペクタを出さない', () => {
+    const onCountHits = jest.fn().mockResolvedValue(1);
+    const view = createEditView({ onCountHits });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    // 結合行 #3 は鉛筆編集はできるがインスペクタは付かない
+    const row = blockRow(container, '3');
+    row.querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!.click();
+    expect(row.querySelector('.bins')).toBeNull();
+  });
+
+  test('callback 未注入ならインスペクタは出ない', () => {
+    const view = createEditView();
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    const row = blockRow(container, '1');
+    row.querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!.click();
+    expect(row.querySelector('.bins')).toBeNull();
+  });
+});
+
 describe('createEditView - AI に渡す内容を見る（文脈開示）', () => {
   const context: BlockImprovementContext = {
     researchQuestion: 'RQ text',

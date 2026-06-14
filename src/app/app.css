@@ -2607,3 +2607,195 @@ a.draft__term--mesh:focus-visible {
   justify-content: flex-start;
   max-width: 720px;
 }
+
+/* ============================================================
+   ブロック・インスペクタ（編集 / AI 改善パネルを開いたときに展開）
+   MeSH ツリー / フリーワード Δ / 他ブロック重複を可視化する
+   ============================================================ */
+.bins {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-muted);
+  font-size: var(--font-size-sm);
+}
+
+.bins__heading {
+  margin: 0 0 var(--space-2);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.bins__section {
+  margin-top: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px dashed var(--color-border);
+}
+
+.bins__section:first-of-type {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+.bins__section-title {
+  margin: 0 0 var(--space-2);
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.bins__muted,
+.bins__loading {
+  margin: var(--space-1) 0;
+  color: var(--color-text-muted);
+}
+
+/* ---- MeSH ツリー ---- */
+.bins__tree,
+.bins__tree ul {
+  list-style: none;
+  margin: 0;
+  padding-left: var(--space-4);
+}
+
+.bins__tree {
+  padding-left: 0;
+}
+
+.bins__tree-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 1px 0;
+}
+
+.bins__tree-id {
+  font-family: var(--font-family-mono);
+  color: var(--color-text-muted);
+}
+
+.bins__tree-line--structural .bins__tree-id {
+  opacity: 0.65;
+}
+
+.bins__tree-term {
+  background: rgba(46, 140, 79, 0.12);
+  color: #1f6b3a;
+  border-radius: 3px;
+  padding: 0 4px;
+  font-weight: 600;
+}
+
+.bins__badge {
+  font-size: var(--font-size-sm);
+  border-radius: 3px;
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
+.bins__badge--explode {
+  background: rgba(42, 99, 214, 0.12);
+  color: var(--color-primary-hover);
+}
+
+.bins__badge--redundant {
+  background: rgba(201, 54, 47, 0.12);
+  color: var(--color-danger);
+}
+
+.bins__divergence {
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-muted);
+}
+
+.bins__divergence--spread {
+  color: var(--color-warning);
+}
+
+/* ---- フリーワード Δ 表 ---- */
+.bins__delta-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.bins__delta-row td {
+  padding: 2px var(--space-2);
+  vertical-align: middle;
+}
+
+.bins__delta-term {
+  font-family: var(--font-family-mono);
+}
+
+.bins__delta-individual,
+.bins__delta-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.bins__delta-value {
+  font-weight: 600;
+}
+
+.bins__delta-barcell {
+  width: 120px;
+}
+
+.bins__delta-bar {
+  display: block;
+  height: 8px;
+  min-width: 1px;
+  border-radius: 4px;
+  background: var(--color-primary);
+}
+
+.bins__delta-flag {
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+/* Δ=0（完全内包）= 削除候補。行を弱め、フラグを危険色に */
+.bins__delta-row--redundant {
+  opacity: 0.7;
+}
+
+.bins__delta-row--redundant .bins__delta-bar {
+  background: var(--color-danger);
+}
+
+.bins__delta-row--redundant .bins__delta-flag {
+  color: var(--color-danger);
+}
+
+.bins__delta-row--lowYield .bins__delta-bar {
+  background: var(--color-warning);
+}
+
+.bins__delta-row--lowYield .bins__delta-flag {
+  color: var(--color-warning);
+}
+
+.bins__delta-total {
+  margin: var(--space-2) 0 0;
+  font-weight: 600;
+}
+
+.bins__count {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.bins__count--error {
+  color: var(--color-danger);
+}
+
+/* ---- 他ブロックとの重複 ---- */
+.bins__overlap-line {
+  margin: var(--space-1) 0;
+  color: var(--color-warning);
+}

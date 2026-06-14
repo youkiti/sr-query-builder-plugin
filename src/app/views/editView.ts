@@ -8,8 +8,10 @@ import {
   type SaveEditedFormulaResult,
 } from '@/app/services';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
+import type { MeshTreeEntry } from '@/features/validation';
 import { ROUTE_LABELS } from '../router';
 import type { BlocksDraft } from '../store';
+import { buildBlockInspector, type SiblingBlock } from './blockInspector';
 import { buildLegend, renderExpressionInto } from './formulaDisplay';
 import type { RenderView } from './types';
 
@@ -49,6 +51,11 @@ export interface EditViewCallbacks {
    */
   onCountHits?: (expression: string) => Promise<number>;
   /**
+   * MeSH descriptor 群の tree number を取得する（db=mesh）。注入された場合のみ、ブロック編集／
+   * AI 改善パネルを開いたときにブロック・インスペクタの MeSH ツリーを描画する。
+   */
+  onFetchMeshTrees?: (descriptors: string[]) => Promise<MeshTreeEntry[]>;
+  /**
    * 結合行（最終検索式）を実際に検索し、同時に有効シード論文の捕捉状況を確認する。
    * 注入された場合のみ、結合行に「検索してシード捕捉を確認」ボタンを出す。
    * 引数は編集中の md 全文（保存前でも確認できるよう view が保持している現在値）。
@@ -66,6 +73,8 @@ interface BlockRenderContext {
   hitsCache: Map<string, Promise<number>>;
   /** 結合行チェックの md→結果キャッシュ（同一 md の重複 esearch を防ぐ） */
   comboCache: Map<string, Promise<CombinationCheckResult>>;
+  /** インスペクタ MeSH ツリーの descriptor 群→tree entries キャッシュ */
+  meshTreeCache: Map<string, Promise<MeshTreeEntry[]>>;
 }
 
 /**
@@ -121,6 +130,8 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
   const hitsCache = new Map<string, Promise<number>>();
   // 結合行チェックの結果も view インスタンスで持ち越す（同一 md なら自動再実行でも再 esearch しない）。
   const comboCache = new Map<string, Promise<CombinationCheckResult>>();
+  // インスペクタの MeSH ツリー取得結果も view インスタンスで持ち越す。
+  const meshTreeCache = new Map<string, Promise<MeshTreeEntry[]>>();
   return (container, ctx) => {
     container.innerHTML = '';
     const doc = container.ownerDocument;
@@ -239,6 +250,7 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
       blocksDraft: ctx.state.blocksDraft,
       hitsCache,
       comboCache,
+      meshTreeCache,
     };
 
     function rerenderBlocks(): void {
@@ -300,9 +312,40 @@ function renderBlockList(
   }
   for (const block of formula.blocks) {
     ul.appendChild(
-      buildBlockRow(doc, block.id, block.expression, block.isCombination, editor, callbacks, renderCtx)
+      buildBlockRow(
+        doc,
+        block.id,
+        block.expression,
+        block.isCombination,
+        editor,
+        callbacks,
+        renderCtx,
+        formula.blocks
+      )
     );
   }
+}
+
+/**
+ * 当該ブロック以外の概念ブロック（結合行を除く）を、インスペクタの重複判定用に整形する。
+ */
+function buildSiblings(
+  blockId: string,
+  allBlocks: ReadonlyArray<{ id: string; expression: string; isCombination: boolean }>,
+  blocksDraft: BlocksDraft | null
+): SiblingBlock[] {
+  const siblings: SiblingBlock[] = [];
+  for (const b of allBlocks) {
+    if (b.isCombination || b.id === blockId) {
+      continue;
+    }
+    siblings.push({
+      id: b.id,
+      label: blockLabelFor(blocksDraft, b.id, false),
+      expression: b.expression,
+    });
+  }
+  return siblings;
 }
 
 function buildBlockRow(
@@ -312,8 +355,25 @@ function buildBlockRow(
   isCombination: boolean,
   editor: FormulaEditor,
   callbacks: EditViewCallbacks,
-  renderCtx: BlockRenderContext
+  renderCtx: BlockRenderContext,
+  allBlocks: ReadonlyArray<{ id: string; expression: string; isCombination: boolean }>
 ): HTMLElement {
+  // 概念ブロックの編集／AI 改善パネルを開いたときに展開するインスペクタの生成器。
+  // 結合行には付けない。callback 未注入時は buildBlockInspector が null を返す。
+  const makeInspector = (): HTMLElement | null => {
+    if (isCombination) {
+      return null;
+    }
+    return buildBlockInspector(doc, {
+      blockId,
+      expression,
+      siblings: buildSiblings(blockId, allBlocks, renderCtx.blocksDraft),
+      onCountHits: callbacks.onCountHits,
+      onFetchMeshTrees: callbacks.onFetchMeshTrees,
+      hitsCache: renderCtx.hitsCache,
+      meshTreeCache: renderCtx.meshTreeCache,
+    });
+  };
   const li = doc.createElement('li');
   li.className = 'edit__block-row';
   // 結合行（最終検索式）は draft 画面と同様に強調表示する
@@ -389,7 +449,7 @@ function buildBlockRow(
       closeInlineEdit(editSlot, currentPre, editToggle);
       return;
     }
-    openInlineEdit(doc, editSlot, currentPre, editToggle, blockId, expression, editor);
+    openInlineEdit(doc, editSlot, currentPre, editToggle, blockId, expression, editor, makeInspector);
   });
 
   improveBtn.addEventListener('click', () => {
@@ -409,7 +469,8 @@ function buildBlockRow(
       expression,
       editor,
       callbacks.onImproveBlock,
-      callbacks.onGetImproveContext
+      callbacks.onGetImproveContext,
+      makeInspector
     );
   });
 
@@ -561,7 +622,8 @@ function openInlineEdit(
   editToggle: HTMLButtonElement,
   blockId: string,
   expression: string,
-  editor: FormulaEditor
+  editor: FormulaEditor,
+  makeInspector: () => HTMLElement | null
 ): void {
   currentPre.style.display = 'none';
   editToggle.setAttribute('aria-expanded', 'true');
@@ -595,6 +657,11 @@ function openInlineEdit(
   form.appendChild(editError);
 
   slot.appendChild(form);
+  // 編集に入った瞬間にインスペクタを展開する（当該ブロックの MeSH ツリー / フリーワード Δ）。
+  const inspector = makeInspector();
+  if (inspector) {
+    slot.appendChild(inspector);
+  }
   input.focus();
 
   saveBtn.addEventListener('click', () => {
@@ -640,7 +707,8 @@ function openAiPromptForm(
   expression: string,
   editor: FormulaEditor,
   onImproveBlock: NonNullable<EditViewCallbacks['onImproveBlock']>,
-  onGetImproveContext: EditViewCallbacks['onGetImproveContext']
+  onGetImproveContext: EditViewCallbacks['onGetImproveContext'],
+  makeInspector: () => HTMLElement | null
 ): void {
   slot.innerHTML = '';
   const form = doc.createElement('div');
@@ -693,6 +761,11 @@ function openAiPromptForm(
   form.appendChild(aiActions);
 
   slot.appendChild(form);
+  // AI 改善パネルに入った瞬間にインスペクタを展開する（編集画面と同じ補助ビュー）。
+  const inspector = makeInspector();
+  if (inspector) {
+    slot.appendChild(inspector);
+  }
   instruction.focus();
 
   cancelBtn.addEventListener('click', () => {
