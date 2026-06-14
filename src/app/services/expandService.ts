@@ -1,6 +1,12 @@
 import type { SeedPaper, SeedUserDecision } from '@/domain/seedPaper';
-import { getFormulaVersionById } from '@/features/formula';
 import {
+  buildBroadenedFormula,
+  buildMarginQuery,
+  getFormulaVersionById,
+  type BlockRecallAdditions,
+} from '@/features/formula';
+import {
+  expandQueryForRecall,
   pickBoundaryCases,
   type BoundaryPick,
   type BoundaryCandidate,
@@ -33,7 +39,8 @@ import type { LlmProviderFactory } from './llmProviderService';
  */
 export type ExpandFetchStep =
   | 'protocol' // プロトコル（RQ・組入/除外基準）を取得
-  | 'esearch' // 検索式を展開して PubMed を検索
+  | 'broaden' // LLM に各ブロックの拡張語（MeSH 一段上 / フリーワード）を提案させる
+  | 'esearch' // 拡張式の外側（margin = 拡張式 NOT 現式）を PubMed で検索
   | 'dedup' // 既存 seed と重複する PMID を除去
   | 'efetch' // 候補論文のメタデータ（title/year/MeSH）を取得
   | 'pick-boundary'; // LLM に境界事例を選定させる
@@ -62,14 +69,22 @@ export interface BoundaryCaseView {
   reason: string;
   /** efetch で取得したアブストラクト本文。無ければ null */
   abstract: string | null;
+  /** efetch で取得した MeSH 見出し（更新提案の由来照合に使う）。 */
+  meshHeadings: string[];
 }
 
 export interface BoundaryCasesResult {
   candidates: BoundaryCaseView[];
-  /** esearch のヒット数（上限チェック用） */
-  totalHits: number;
+  /** 現検索式のヒット数。 */
+  originalHits: number;
+  /** 拡張式（現式 ⊆ 拡張式）のヒット数。= originalHits + marginHits。 */
+  broadenedHits: number;
+  /** 式の外側（margin = 拡張式 NOT 現式）のヒット数。 */
+  marginHits: number;
   /** 重複除去後に skill に渡した候補の件数 */
   evaluatedCount: number;
+  /** LLM が提案した拡張語（ブロック別）。ラウンド完了時の更新提案の集計に使う。 */
+  additions: BlockRecallAdditions[];
 }
 
 /**
@@ -89,29 +104,63 @@ export async function fetchBoundaryCandidates(
   deps.onProgress?.('protocol');
   const protocol = await resolveBoundaryProtocol(deps);
   const formula = parsePubmedFormulaMd(state.currentFormulaMarkdown);
-  const query = expandFormula(formula).trim();
-  if (query === '') {
+  const originalQuery = expandFormula(formula).trim();
+  if (originalQuery === '') {
     throw new Error('検索式の展開結果が空です');
   }
 
+  // 各概念ブロックを 2 軸（MeSH 一段上 / フリーワード）で広げる拡張語を LLM に提案させる。
+  deps.onProgress?.('broaden');
+  const conceptBlocks = formula.blocks
+    .filter((b) => !b.isCombination)
+    .map((b) => ({ id: b.id, expression: b.expression }));
+  const additions = await expandQueryForRecall(
+    { researchQuestion: protocol.researchQuestion, blocks: conceptBlocks },
+    deps.llmFactory.forPurpose('expand_recall')
+  );
+
+  // 拡張式が広がらなかった（提案 0）なら margin は空。式の外側に候補なしとして早期に返す。
+  if (additions.length === 0) {
+    const original = await esearch(originalQuery, deps.eutils, { retmax: 0 });
+    return {
+      candidates: [],
+      originalHits: original.count,
+      broadenedHits: original.count,
+      marginHits: 0,
+      evaluatedCount: 0,
+      additions: [],
+    };
+  }
+
+  const broadenedFormula = buildBroadenedFormula(formula, additions);
+  const broadenedQuery = expandFormula(broadenedFormula).trim();
+  const marginQuery = buildMarginQuery(broadenedQuery, originalQuery);
+
+  // 式の外側（margin）を検索。現式は拡張式の部分集合なので broadenedHits = originalHits + marginHits。
   deps.onProgress?.('esearch');
-  const esearchResult = await esearch(query, deps.eutils, {
+  const marginResult = await esearch(marginQuery, deps.eutils, {
     retmax: deps.retmax ?? 50,
   });
+  const original = await esearch(originalQuery, deps.eutils, { retmax: 0 });
+  const originalHits = original.count;
+  const marginHits = marginResult.count;
 
   deps.onProgress?.('dedup');
   const seeds = await listSeedPapers(state.project.spreadsheetId, deps.google);
   const existingPmids = new Set(
     seeds.map((s) => s.pmid).filter((p): p is string => p !== null)
   );
-  const novelPmids = esearchResult.pmids.filter((p) => !existingPmids.has(p));
+  const novelPmids = marginResult.pmids.filter((p) => !existingPmids.has(p));
   const limit = deps.skillCandidateLimit ?? 20;
   const toFetch = novelPmids.slice(0, limit);
   if (toFetch.length === 0) {
     return {
       candidates: [],
-      totalHits: esearchResult.count,
+      originalHits,
+      broadenedHits: originalHits + marginHits,
+      marginHits,
       evaluatedCount: 0,
+      additions,
     };
   }
   deps.onProgress?.('efetch');
@@ -144,8 +193,11 @@ export async function fetchBoundaryCandidates(
 
   return {
     candidates: picksToViews(picks, articleMap),
-    totalHits: esearchResult.count,
+    originalHits,
+    broadenedHits: originalHits + marginHits,
+    marginHits,
     evaluatedCount: candidates.length,
+    additions,
   };
 }
 
@@ -202,7 +254,10 @@ export async function recordDecision(
 
 function picksToViews(
   picks: BoundaryPick[],
-  articleMap: Map<string, { title: string | null; year: number | null; abstract: string | null }>
+  articleMap: Map<
+    string,
+    { title: string | null; year: number | null; abstract: string | null; meshHeadings: string[] }
+  >
 ): BoundaryCaseView[] {
   return picks.map((pick) => {
     // pick.pmid は必ず articleMap のキーに含まれる（呼び出し側で allowedPmids でフィルタ済）
@@ -210,6 +265,7 @@ function picksToViews(
       title: string | null;
       year: number | null;
       abstract: string | null;
+      meshHeadings: string[];
     };
     return {
       pmid: pick.pmid,
@@ -217,6 +273,7 @@ function picksToViews(
       year: a.year,
       reason: pick.reason,
       abstract: a.abstract,
+      meshHeadings: a.meshHeadings,
     };
   });
 }

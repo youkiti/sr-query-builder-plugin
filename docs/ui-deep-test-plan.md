@@ -51,7 +51,7 @@ CLAUDE.md §目的 と [ui-flow.md §2](ui-flow.md) から逆算した 6 本。
 | J1 | 新規プロジェクト作成 → protocol 入力（手入力）→ blocks 承認 → seeds 登録 → draft 生成 → validate → export → done | 高 | 高 |
 | J2 | 既存プロジェクトを popup から選択 → home → history でバージョン切替 → validate 再読込 | 中 | 中 |
 | J3 | protocol.md / .docx アップロード（docx パース失敗含む）| 低 | 中 |
-| J4 | expand 画面で `i` / `e` / `m` キーで 5 件判定 → 自動再検証 | 中 | 高（keyboard は jsdom で弱い）|
+| J4 | expand 画面で margin 候補を `i` / `e` / `m` キーで判定 → 自動再検証＋更新提案 | 中 | 高（keyboard は jsdom で弱い）|
 | J5 | OAuth 失効 / Sheets 403 / NCBI 429 / LLM 500 からの復帰 | 高 | 高 |
 | J6 | Options で BYOK 保存 → app から利用 | 低 | 低 |
 
@@ -89,7 +89,7 @@ CLAUDE.md §目的 と [ui-flow.md §2](ui-flow.md) から逆算した 6 本。
 | `app-seeds.spec.ts` | `#/seeds` | 3 | 0 件 / N 件、PMID バリデーション |
 | `app-draft.spec.ts` | `#/draft` | 2 | 生成中スケルトン、完了後のコードブロック表示 |
 | `app-validate.spec.ts` | `#/validate` | 3 | 捕捉率バッジ、行ヒット数、missed PMIDs 一覧 |
-| `app-expand.spec.ts` | `#/expand` | 3 | 5 件候補表示、0 件の空状態、キーボード i/e/m（J4 兼用）|
+| `app-expand.spec.ts` | `#/expand` | 4 | dev バナー + 取得ボタン表示、0 件の空状態、キーボード i/e/m（J4 兼用）、axe |
 | `app-edit.spec.ts` | `#/edit` | 2 | diff ペイン、空 diff でスクロール無し |
 | `app-export.spec.ts` | `#/export` | 3 | 4 DB 変換結果、コピー／DL、未変換時の完了ボタン非表示 |
 | `app-done.spec.ts` | `#/done` | 1 | nbib DL 案内リンク |
@@ -120,7 +120,7 @@ CLAUDE.md §目的 と [ui-flow.md §2](ui-flow.md) から逆算した 6 本。
 1. **`journey-new-project.spec.ts`** (J1): popup → 新規作成ボタンクリック → `chrome.tabs.create` が呼ばれたことを検証 → app.html 直接 goto で続きを再現（`chrome.tabs.create` 経路は拡張パッケージロードが必要なため疑似）
 2. **`journey-history-switch.spec.ts`** (J2): 2 件の `formulaVersions` を持つ状態で `#/history` → クリック → `#/validate` に state 反映を確認
 3. **`journey-docx-upload.spec.ts`** (J3): file input に `.docx` Buffer を set → パース成功 / 壊れた docx で UI が固まらない
-4. **`journey-expand-keyboard.spec.ts`** (J4): `page.keyboard.press('i')` を 5 連打 → **Sheets API 書き込みの録音**で assertion する。[expandService.ts:146-172](../src/app/services/expandService.ts#L146-L172) の `recordDecision` は `appendSeedPaper(spreadsheetId, seed, deps.google)` で Sheets に直接書き込み、`AppState` には `seedPapers` を持たない（[store.ts:50-77](../src/app/store.ts#L50-L77)）。assertion は以下いずれかの方式：
+4. **`journey-expand-keyboard.spec.ts`** (J4): `page.keyboard.press('i')` を候補件数ぶん連打 → **Sheets API 書き込みの録音**で assertion する。[expandService.ts](../src/app/services/expandService.ts) の `recordDecision` は `appendSeedPaper(spreadsheetId, seed, deps.google)` で Sheets に直接書き込み、`AppState` には `seedPapers` を持たない（[store.ts:50-77](../src/app/store.ts#L50-L77)）。assertion は以下いずれかの方式：
    - **方式 a**: `page.route('**/sheets.googleapis.com/**/values:append*', ...)` で 5 回の append リクエストを handler で録音し、body に `source=interactive` の行が 5 本入っていることを確認
    - **方式 b**: Phase A の E2E hook を経由して `deps.google.fetch` をテスト用 spy に差し替え、呼び出し回数と引数を assertion する
    - **注意**: `store.getState().seedPapers` を見る書き方は実装と乖離するので避ける

@@ -1001,7 +1001,7 @@ describe('startApp - wiring 層', () => {
       currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
       'apiKeys.gemini': 'KEY',
     });
-    fetchMock.mockImplementation(async (url: string) => {
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
       const u = typeof url === 'string' ? url : String(url);
       if (u.includes('/values/SeedPapers')) {
         return jsonResponse({ values: [SHEET_HEADERS.SeedPapers] });
@@ -1019,15 +1019,28 @@ describe('startApp - wiring 層', () => {
         } as Response;
       }
       if (u.includes('generativelanguage.googleapis.com')) {
+        // 1 回目は expand-query-for-recall（拡張語）、2 回目は pick-boundary-cases（候補選定）。
+        // system プロンプトに 'recall' が含まれるかで返答を切り替える。
+        const body = typeof init?.body === 'string' ? init.body : '';
+        const llmText = body.includes('recall')
+          ? JSON.stringify({
+              blocks: [
+                {
+                  id: '1',
+                  additions: [
+                    { term: '"Lung Diseases"[Mesh]', axis: 'mesh', rationale: '親概念へ拡張' },
+                  ],
+                },
+              ],
+            })
+          : JSON.stringify({ picks: [{ pmid: '111', reason: 'subset' }] });
         return jsonResponse({
           candidates: [
             {
               content: {
                 parts: [
                   {
-                    text: JSON.stringify({
-                      picks: [{ pmid: '111', reason: 'subset' }],
-                    }),
+                    text: llmText,
                   },
                 ],
               },

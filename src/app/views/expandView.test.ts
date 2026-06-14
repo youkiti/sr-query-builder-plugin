@@ -19,11 +19,21 @@ const stateReady: AppState = {
 function sampleResult(overrides: Partial<BoundaryCasesResult> = {}): BoundaryCasesResult {
   return {
     candidates: [
-      { pmid: '111', title: 'Paper A', year: 2020, reason: 'subset', abstract: 'Body of A.' },
-      { pmid: '222', title: null, year: null, reason: '', abstract: null },
+      {
+        pmid: '111',
+        title: 'Paper A',
+        year: 2020,
+        reason: 'subset',
+        abstract: 'Body of A.',
+        meshHeadings: [],
+      },
+      { pmid: '222', title: null, year: null, reason: '', abstract: null, meshHeadings: [] },
     ],
-    totalHits: 500,
+    originalHits: 500,
+    broadenedHits: 700,
+    marginHits: 200,
     evaluatedCount: 20,
+    additions: [],
     ...overrides,
   };
 }
@@ -157,25 +167,26 @@ describe('createExpandView', () => {
   });
 
   describe('進捗トラッカー（取得中）', () => {
-    test('5 段階のチップを done / active / pending で描画する', () => {
+    test('6 段階のチップを done / active / pending で描画する', () => {
       const view = createExpandView();
       const container = buildContainer();
-      // dedup（index 2）実行中: protocol/esearch=done, dedup=active, efetch/pick-boundary=pending
+      // dedup（index 3）実行中: protocol/broaden/esearch=done, dedup=active, efetch/pick-boundary=pending
       view(container, { state: runningState('dedup'), navigate: jest.fn() });
       const tracker = container.querySelector('.expand__tracker');
       expect(tracker).not.toBeNull();
       const chips = container.querySelectorAll('.draft__step');
-      expect(chips).toHaveLength(5);
+      expect(chips).toHaveLength(6);
       expect(chips[0]?.classList.contains('draft__step--done')).toBe(true);
       expect(chips[1]?.classList.contains('draft__step--done')).toBe(true);
-      expect(chips[2]?.classList.contains('draft__step--active')).toBe(true);
-      expect(chips[3]?.classList.contains('draft__step--pending')).toBe(true);
+      expect(chips[2]?.classList.contains('draft__step--done')).toBe(true);
+      expect(chips[3]?.classList.contains('draft__step--active')).toBe(true);
       expect(chips[4]?.classList.contains('draft__step--pending')).toBe(true);
+      expect(chips[5]?.classList.contains('draft__step--pending')).toBe(true);
       // プログレスバーとカウンタ
       const bar = container.querySelector<HTMLProgressElement>('.draft__progressbar')!;
-      expect(bar.max).toBe(5);
-      expect(bar.value).toBe(2);
-      expect(container.querySelector('.draft__step-counter')?.textContent).toBe('ステップ 3 / 5');
+      expect(bar.max).toBe(6);
+      expect(bar.value).toBe(3);
+      expect(container.querySelector('.draft__step-counter')?.textContent).toBe('ステップ 4 / 6');
     });
 
     test('ステータスに現在の段階と経過時間を表示する（経過が分を超える場合）', () => {
@@ -254,8 +265,9 @@ describe('createExpandView', () => {
       const items = container.querySelectorAll('.expand__candidate');
       expect(items).toHaveLength(2);
       expect(container.querySelector('.expand__status')?.textContent).toContain('2 件');
-      expect(container.querySelector('.expand__status')?.textContent).toContain('全ヒット 500');
-      expect(container.querySelector('.expand__status')?.textContent).toContain('評価対象 20');
+      expect(container.querySelector('.expand__status')?.textContent).toContain('現式 500 件');
+      expect(container.querySelector('.expand__status')?.textContent).toContain('外側 200 件');
+      expect(container.querySelector('.expand__status')?.textContent).toContain('評価 20 件');
       // 1 つ目は title あり・理由あり
       expect(items[0]?.querySelector('.expand__candidate-meta')?.textContent).toContain('Paper A');
       expect(items[0]?.querySelector('.expand__candidate-meta')?.textContent).toContain('(2020)');
@@ -290,7 +302,9 @@ describe('createExpandView', () => {
       view(container, {
         state: readyState(
           sampleResult({
-            candidates: [{ pmid: '111', title: 'A', year: 2020, reason: 'r', abstract: malicious }],
+            candidates: [
+              { pmid: '111', title: 'A', year: 2020, reason: 'r', abstract: malicious, meshHeadings: [] },
+            ],
           })
         ),
         navigate: jest.fn(),
@@ -445,6 +459,85 @@ describe('createExpandView', () => {
       expect(onDecide.mock.calls[1]![0].pmid).toBe('222');
     });
 
+    test('判定が保存されると自動で次の未判定候補へアクティブが下がる', async () => {
+      const onDecide = jest.fn().mockResolvedValue({ seed: {} });
+      const view = createExpandView({ onDecide });
+      const container = buildContainer();
+      view(container, { state: readyState(), navigate: jest.fn() });
+      const items = container.querySelectorAll<HTMLElement>('.expand__candidate');
+      const list = container.querySelector<HTMLElement>('.expand__candidates')!;
+      // 初期は 1 件目がアクティブ
+      expect(items[0]?.classList.contains('expand__candidate--focused')).toBe(true);
+      // 'i' で 1 件目を判定 → 保存確定後に 2 件目へ自動で下がる（'n' を押さない）
+      pressKey(list, 'i');
+      await flushAsync();
+      await flushAsync();
+      expect(items[1]?.classList.contains('expand__candidate--focused')).toBe(true);
+      expect(items[0]?.classList.contains('expand__candidate--focused')).toBe(false);
+      // そのまま 'm' で 2 件目を判定できる（フォーカス移動の手入力が不要）
+      pressKey(list, 'm');
+      await flushAsync();
+      await flushAsync();
+      expect(onDecide.mock.calls[1]![0]).toMatchObject({ pmid: '222', decision: 'maybe' });
+    });
+
+    test('保存中（pending）は自動前進せず、同じカードに留まる', async () => {
+      type EmptySeedResult = { seed: Record<string, never> };
+      let resolveDecision: ((value: EmptySeedResult) => void) | null = null;
+      const onDecide = jest.fn().mockImplementation(
+        () =>
+          new Promise<EmptySeedResult>((resolve) => {
+            resolveDecision = resolve;
+          })
+      );
+      const view = createExpandView({ onDecide });
+      const container = buildContainer();
+      view(container, { state: readyState(), navigate: jest.fn() });
+      const items = container.querySelectorAll<HTMLElement>('.expand__candidate');
+      const list = container.querySelector<HTMLElement>('.expand__candidates')!;
+      pressKey(list, 'i');
+      // 保存解決前はまだ 1 件目がアクティブ（誤って 2 件目へ進まない）
+      expect(items[0]?.classList.contains('expand__candidate--focused')).toBe(true);
+      resolveDecision!({ seed: {} });
+      await flushAsync();
+      await flushAsync();
+      expect(items[1]?.classList.contains('expand__candidate--focused')).toBe(true);
+    });
+
+    test('"ArrowDown" / "ArrowUp" で判定状態を問わず上下移動できる', () => {
+      const view = createExpandView();
+      const container = buildContainer();
+      view(container, { state: readyState(), navigate: jest.fn() });
+      const items = container.querySelectorAll<HTMLElement>('.expand__candidate');
+      const list = container.querySelector<HTMLElement>('.expand__candidates')!;
+      expect(items[0]?.classList.contains('expand__candidate--focused')).toBe(true);
+      pressKey(list, 'ArrowDown');
+      expect(items[1]?.classList.contains('expand__candidate--focused')).toBe(true);
+      // 端ではそれ以上進まない
+      pressKey(list, 'ArrowDown');
+      expect(items[1]?.classList.contains('expand__candidate--focused')).toBe(true);
+      pressKey(list, 'ArrowUp');
+      expect(items[0]?.classList.contains('expand__candidate--focused')).toBe(true);
+      pressKey(list, 'ArrowUp');
+      expect(items[0]?.classList.contains('expand__candidate--focused')).toBe(true);
+    });
+
+    test('マウスで判定ボタンを押すと、そのカードへアクティブが同期される', async () => {
+      const onDecide = jest.fn().mockResolvedValue({ seed: {} });
+      const view = createExpandView({ onDecide });
+      const container = buildContainer();
+      view(container, { state: readyState(), navigate: jest.fn() });
+      const items = container.querySelectorAll<HTMLElement>('.expand__candidate');
+      // 初期は 1 件目がアクティブ。2 件目（pmid 222）の include をマウスで押す
+      const btn = items[1]!.querySelector<HTMLButtonElement>('button[data-decision=include]')!;
+      btn.click();
+      // クリック時点でアクティブが 2 件目へ同期される
+      expect(items[1]?.classList.contains('expand__candidate--focused')).toBe(true);
+      await flushAsync();
+      await flushAsync();
+      expect(onDecide.mock.calls[0]![0]).toMatchObject({ pmid: '222', decision: 'include' });
+    });
+
     test('"n" / "ArrowRight" は次の未判定候補へ、判定済みはスキップする', async () => {
       const onDecide = jest.fn().mockResolvedValue({ seed: {} });
       const view = createExpandView({ onDecide });
@@ -496,11 +589,11 @@ describe('createExpandView', () => {
       const container = buildContainer();
       // 候補 0 件（toFetch が空など）。keydown ハンドラは配線されるが items が空
       view(container, {
-        state: readyState(sampleResult({ candidates: [], evaluatedCount: 0 })),
+        state: readyState(sampleResult({ candidates: [], evaluatedCount: 0, additions: [] })),
         navigate: jest.fn(),
       });
       expect(container.querySelector('.expand__candidate')).toBeNull();
-      expect(container.querySelector('.expand__status')?.textContent).toContain('0 件');
+      expect(container.querySelector('.expand__status')?.textContent).toContain('探索できませんでした');
       const list = container.querySelector<HTMLElement>('.expand__candidates')!;
       expect(() => pressKey(list, 'i')).not.toThrow();
       expect(onDecide).not.toHaveBeenCalled();
@@ -562,6 +655,75 @@ describe('createExpandView', () => {
       expect(summary?.textContent).toContain('80.0%');
       expect(summary?.textContent).toContain('4/5');
       expect(summary?.textContent).toContain('5 / 6');
+    });
+
+    test('include した式の外側論文から検索式の更新提案を表示する', async () => {
+      const onDecide = jest.fn().mockResolvedValue({ seed: {} });
+      const onRoundComplete = jest.fn().mockResolvedValue(buildValidationSummary());
+      const view = createExpandView({ onDecide, onRoundComplete });
+      const container = buildContainer();
+      const result = sampleResult({
+        candidates: [
+          {
+            pmid: '111',
+            title: 'Wheezing cohort',
+            year: 2021,
+            reason: 'boundary',
+            abstract: '',
+            meshHeadings: ['Lung Diseases'],
+          },
+        ],
+        additions: [
+          {
+            blockId: '1',
+            additions: [
+              { term: '"Lung Diseases"[Mesh]', axis: 'mesh', rationale: '親概念へ拡張' },
+              { term: '"wheez*"[tiab]', axis: 'freeword', rationale: '同義表現' },
+            ],
+          },
+        ],
+      });
+      view(container, { state: readyState(result), navigate: jest.fn() });
+      const list = container.querySelector<HTMLElement>('.expand__candidates')!;
+      pressKey(list, 'i');
+      await flushAsync();
+      await flushAsync();
+      const proposals = container.querySelector('.expand__proposals');
+      expect(proposals).not.toBeNull();
+      expect(proposals?.textContent).toContain('ブロック #1');
+      expect(proposals?.textContent).toContain('"Lung Diseases"[Mesh]');
+      expect(proposals?.textContent).toContain('"wheez*"[tiab]');
+    });
+
+    test('exclude のみなら更新提案は出ない', async () => {
+      const onDecide = jest.fn().mockResolvedValue({ seed: {} });
+      const onRoundComplete = jest.fn().mockResolvedValue(buildValidationSummary());
+      const view = createExpandView({ onDecide, onRoundComplete });
+      const container = buildContainer();
+      const result = sampleResult({
+        candidates: [
+          {
+            pmid: '111',
+            title: 'Wheezing cohort',
+            year: 2021,
+            reason: 'boundary',
+            abstract: '',
+            meshHeadings: ['Lung Diseases'],
+          },
+        ],
+        additions: [
+          {
+            blockId: '1',
+            additions: [{ term: '"Lung Diseases"[Mesh]', axis: 'mesh', rationale: '親概念' }],
+          },
+        ],
+      });
+      view(container, { state: readyState(result), navigate: jest.fn() });
+      const list = container.querySelector<HTMLElement>('.expand__candidates')!;
+      pressKey(list, 'e');
+      await flushAsync();
+      await flushAsync();
+      expect(container.querySelector('.expand__proposals')).toBeNull();
     });
 
     test('onRoundComplete 未指定の場合は手動 /validate 誘導の案内を表示', async () => {

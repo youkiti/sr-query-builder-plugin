@@ -104,11 +104,16 @@ src/
 │   │   ├── verifyPmid.ts
 │   │   └── seedRepository.ts      # SeedPapers タブ I/O
 │   ├── formula/
-│   │   ├── skills/                # 4 skill
+│   │   ├── skills/
 │   │   │   ├── blockDesigner.ts
 │   │   │   ├── meshSuggester.ts
 │   │   │   ├── freewordDesigner.ts
-│   │   │   └── filterDesigner.ts
+│   │   │   ├── filterDesigner.ts
+│   │   │   ├── pickBoundaryCases.ts     # 対話的拡張: 境界事例選定
+│   │   │   ├── expandQueryForRecall.ts  # 対話的拡張: 2 軸の拡張語提案（MeSH 一段上 / フリーワード）
+│   │   │   ├── improveBlock.ts
+│   │   │   └── interpretResult.ts
+│   │   ├── recallExpansion.ts     # margin 探索の純粋ロジック（拡張式生成 / margin / 更新提案）
 │   │   ├── assembleFormulaMd.ts
 │   │   └── parseFormulaMd.ts
 │   ├── validation/                # search-formula-developper からの TS 移植
@@ -122,10 +127,6 @@ src/
 │   │   ├── toClinicalTrials.ts
 │   │   ├── toIctrp.ts
 │   │   └── generateAll.ts
-│   └── interactive/
-│       ├── pickBoundaryCases.ts
-│       └── recordDecision.ts
-│
 ├── lib/                           # 外部 API / 低レベルユーティリティ
 │   ├── google/
 │   │   ├── auth.ts                # chrome.identity.getAuthToken ラッパ

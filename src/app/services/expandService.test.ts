@@ -86,6 +86,32 @@ function mockProvider(json: string): LLMProvider {
   };
 }
 
+/** 検索式 makeState（#1,#2 が概念ブロック）に対する既定の拡張語。margin を非空にするため #1 を広げる。 */
+const DEFAULT_RECALL_BLOCKS = [
+  { id: '1', additions: [{ term: '"Lung Diseases"[Mesh]', axis: 'mesh', rationale: 'broader' }] },
+];
+
+/**
+ * 1 つの provider で expand-query-for-recall（拡張語提案）と pick-boundary-cases（候補選定）の
+ * 両方に応じる。system プロンプトに 'recall' が含まれるかで返す JSON を切り替える。
+ */
+function branchingProvider(
+  opts: { blocks?: unknown[]; picks?: unknown[] } = {}
+): LLMProvider {
+  return {
+    providerId: 'gemini',
+    model: 'test',
+    chat: async (messages: readonly { content: string }[]) => {
+      const sys = messages[0]?.content ?? '';
+      const isRecall = sys.includes('recall');
+      const text = isRecall
+        ? JSON.stringify({ blocks: opts.blocks ?? DEFAULT_RECALL_BLOCKS })
+        : JSON.stringify({ picks: opts.picks ?? [] });
+      return { text, tokensIn: null, tokensOut: null, raw: {} };
+    },
+  };
+}
+
 function buildEfetchXml(
   pmids: Array<{ pmid: string; title: string; year?: number; abstract?: string }>
 ): string {
@@ -229,14 +255,12 @@ describe('fetchBoundaryCandidates', () => {
       return jsonResponse({});
     });
     const forPurpose = jest.fn().mockReturnValue(
-      mockProvider(
-        JSON.stringify({
-          picks: [
-            { pmid: '222', reason: 'subset match' },
-            { pmid: '333', reason: 'intervention varies' },
-          ],
-        })
-      )
+      branchingProvider({
+        picks: [
+          { pmid: '222', reason: 'subset match' },
+          { pmid: '333', reason: 'intervention varies' },
+        ],
+      })
     );
     const result = await fetchBoundaryCandidates({
       google: {
@@ -251,7 +275,11 @@ describe('fetchBoundaryCandidates', () => {
       store,
       llmFactory: { forPurpose },
     });
-    expect(result.totalHits).toBe(1000);
+    // 現式ヒット数（original count）と外側ヒット数（margin count）はモックの count を反映する
+    expect(result.originalHits).toBe(1000);
+    expect(result.marginHits).toBe(1000);
+    expect(result.broadenedHits).toBe(2000);
+    expect(result.additions.length).toBeGreaterThan(0);
     expect(result.evaluatedCount).toBe(3);
     expect(result.candidates.map((c) => c.pmid)).toEqual(['222', '333']);
     expect(result.candidates[0]).toMatchObject({
@@ -259,9 +287,11 @@ describe('fetchBoundaryCandidates', () => {
       title: 'Paper 222',
       reason: 'subset match',
       abstract: 'Background of 222.',
+      meshHeadings: [],
     });
     // Abstract が無い候補は null になる
     expect(result.candidates[1]).toMatchObject({ pmid: '333', abstract: null });
+    expect(forPurpose).toHaveBeenCalledWith('expand_recall');
     expect(forPurpose).toHaveBeenCalledWith('pick_boundary');
   });
 
@@ -285,7 +315,7 @@ describe('fetchBoundaryCandidates', () => {
       }
       return jsonResponse({});
     });
-    const forPurpose = jest.fn();
+    const forPurpose = jest.fn().mockImplementation(() => branchingProvider());
     const result = await fetchBoundaryCandidates({
       google: {
         fetch: googleFetch as unknown as typeof fetch,
@@ -299,10 +329,13 @@ describe('fetchBoundaryCandidates', () => {
       store,
       llmFactory: { forPurpose },
     });
+    // margin が既存 seed のみ（111）→ 新規候補 0。pick_boundary は呼ばれない
     expect(result.candidates).toEqual([]);
     expect(result.evaluatedCount).toBe(0);
-    expect(result.totalHits).toBe(10);
-    expect(forPurpose).not.toHaveBeenCalled();
+    expect(result.originalHits).toBe(10);
+    expect(result.marginHits).toBe(10);
+    expect(forPurpose).toHaveBeenCalledWith('expand_recall');
+    expect(forPurpose).not.toHaveBeenCalledWith('pick_boundary');
   });
 
   test('efetch で取れなかった候補は candidates から除外される', async () => {
@@ -335,12 +368,18 @@ describe('fetchBoundaryCandidates', () => {
       },
       store,
       llmFactory: {
-        forPurpose: () =>
-          mockProvider(JSON.stringify({ picks: [{ pmid: '666', reason: 'ok' }] })),
+        forPurpose: () => branchingProvider({ picks: [{ pmid: '666', reason: 'ok' }] }),
       },
     });
     expect(result.candidates).toEqual([
-      { pmid: '666', title: 'Only 666', year: 2020, reason: 'ok', abstract: null },
+      {
+        pmid: '666',
+        title: 'Only 666',
+        year: 2020,
+        reason: 'ok',
+        abstract: null,
+        meshHeadings: [],
+      },
     ]);
     expect(result.evaluatedCount).toBe(1);
   });
@@ -357,7 +396,12 @@ describe('fetchBoundaryCandidates', () => {
     const eutilsFetch = jest.fn();
     eutilsFetch.mockImplementation(async (url: string) => {
       if (url.includes('esearch.fcgi')) {
-        expect(url).toContain('retmax=5');
+        // margin 検索（拡張式 NOT 現式）だけ retmax を反映する。現式ヒット数の count 取得は retmax=0。
+        if (url.includes('NOT')) {
+          expect(url).toContain('retmax=5');
+        } else {
+          expect(url).toContain('retmax=0');
+        }
         return jsonResponse({
           esearchresult: { count: '100', idlist: ['1', '2', '3', '4', '5'] },
         });
@@ -384,7 +428,7 @@ describe('fetchBoundaryCandidates', () => {
         maxRetries: 0,
       },
       store,
-      llmFactory: { forPurpose: () => mockProvider(JSON.stringify({ picks: [] })) },
+      llmFactory: { forPurpose: () => branchingProvider({ picks: [] }) },
       retmax: 5,
       skillCandidateLimit: 2,
     });
@@ -429,16 +473,21 @@ describe('fetchBoundaryCandidates', () => {
       }
       return textResponse(buildEfetchXml([{ pmid: '222', title: 'Sheet-backed candidate' }]));
     });
-    const provider: LLMProvider = {
-      providerId: 'gemini',
-      model: 'test',
-      chat: jest.fn().mockResolvedValue({
-        text: JSON.stringify({ picks: [{ pmid: '222', reason: 'sheet protocol used' }] }),
-        tokensIn: null,
-        tokensOut: null,
-        raw: {},
-      }),
-    };
+    const chat = jest
+      .fn()
+      .mockImplementation(async (messages: Array<{ content: string }>) => {
+        const sys = messages[0]?.content ?? '';
+        const isRecall = sys.includes('recall');
+        return {
+          text: isRecall
+            ? JSON.stringify({ blocks: DEFAULT_RECALL_BLOCKS })
+            : JSON.stringify({ picks: [{ pmid: '222', reason: 'sheet protocol used' }] }),
+          tokensIn: null,
+          tokensOut: null,
+          raw: {},
+        };
+      });
+    const provider: LLMProvider = { providerId: 'gemini', model: 'test', chat };
     const result = await fetchBoundaryCandidates({
       google: {
         fetch: googleFetch as unknown as typeof fetch,
@@ -459,6 +508,7 @@ describe('fetchBoundaryCandidates', () => {
         year: 2020,
         reason: 'sheet protocol used',
         abstract: null,
+        meshHeadings: [],
       },
     ]);
     expect(provider.chat).toHaveBeenCalled();
@@ -512,8 +562,12 @@ describe('fetchBoundaryCandidates', () => {
       model: 'test',
       chat: jest.fn().mockImplementation(async (messages: Array<{ content: string }>) => {
         capturedPrompts.push(messages.map((m) => m.content).join('\n'));
+        const sys = messages[0]?.content ?? '';
+        const isRecall = sys.includes('recall');
         return {
-          text: JSON.stringify({ picks: [{ pmid: '999', reason: 'any' }] }),
+          text: isRecall
+            ? JSON.stringify({ blocks: DEFAULT_RECALL_BLOCKS })
+            : JSON.stringify({ picks: [{ pmid: '999', reason: 'any' }] }),
           tokensIn: null,
           tokensOut: null,
           raw: {},

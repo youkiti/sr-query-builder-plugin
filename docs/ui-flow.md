@@ -61,7 +61,7 @@ flowchart TD
 | `#/seeds` | シード論文登録 | PMID 直接入力 / NBIB / RIS の 3 タブ。ingest サマリ表示 | `SeedPapers` 追記 |
 | `#/draft` | 検索式ドラフト生成 | 4 skill を順次実行する進捗ビュー（block-designer → mesh-suggester → freeword-designer → filter-designer） | `FormulaVersions`（`ai_draft`）, `LLMApiLog` |
 | `#/validate` | 検証 | 行ごとヒット数バッジ、シード捕捉率サマリ、MeSH ダイアグラム（Mermaid）、ブロック重複（P1） | `ValidationLog` |
-| `#/expand` | 対話的シード拡張 | 50 件抽出 → 5 件提示 → include/exclude/maybe 判定 | `SeedPapers`（`source=interactive`）, 自動再検証 |
+| `#/expand` | 対話的シード拡張（margin 探索・**dev**） | 現式を 2 軸で拡張 → 外側（拡張式 NOT 現式）を検索 → 境界事例提示 → include/exclude/maybe 判定 → 再検証＋更新提案 | `SeedPapers`（`source=interactive`）, 自動再検証 |
 | `#/edit` | 検索式編集 | ブロックカード一覧（textarea は廃止）。ホバーの鉛筆ボタンで各ブロックをインライン手編集／「AI に改善させる」で指示文入力＋文脈開示（RQ・ブロック定義・シード論文・直近検証の捕捉率/取りこぼし）→ improve-block skill 実行 → diff → accept/reject | `FormulaVersions`（`user_edit` / `auto_optimize`） |
 | `#/export` | 4 DB 変換 | ワンクリックで CENTRAL / Embase / CT.gov / ICTRP に変換、`.md` ダウンロード | `Conversions` |
 | `#/done` | 完了案内 | PubMed 検索ページを新規タブで開くリンク、CT.gov / ICTRP リンク、nbib ダウンロード手順 | （読み取りのみ） |
@@ -76,7 +76,7 @@ flowchart TD
 | `→ #/blocks` | `Protocol` に少なくとも 1 行存在 | サイドバーでディム、クリック時はトーストで誘導 |
 | `→ #/draft` | `ProtocolBlocks` が承認済み（`block_count >= 1`） | 同上 |
 | `→ #/validate` | `FormulaVersions` に少なくとも 1 行存在 | 同上 |
-| `→ #/expand` | 直近 `ValidationLog` に `check_type=final_query` の行が存在 | 「先に検証を実行してください」 |
+| `→ #/expand` | 検索式（`FormulaVersions` / `currentFormulaVersionId`）が存在 | 「先に /draft で検索式を生成してください」（MVP 実装は formula 有無で近似） |
 | `→ #/export` | 検証済みの `version_id` が選択されている | 「エクスポート対象 version を選択してください」 |
 
 ## 4. グローバル UI 要素

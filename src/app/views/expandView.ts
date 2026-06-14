@@ -7,6 +7,11 @@ import type {
   ValidationSummary,
 } from '@/app/services';
 import type { SeedUserDecision } from '@/domain/seedPaper';
+import {
+  buildUpdateProposals,
+  type IncludedPaper,
+  type UpdateProposal,
+} from '@/features/formula';
 import { ROUTE_LABELS } from '../router';
 import type { ExpandRunState } from '../store';
 import type { RenderView } from './types';
@@ -15,14 +20,16 @@ import type { RenderView } from './types';
  * 対話的 seed 拡張画面（#/expand）。
  *
  * - 「境界事例を取得」ボタンで onFetch（bootstrap が fetchBoundaryCandidates をラップ）を実行
- * - 取得の進捗（プロトコル取得 → PubMed 検索 → 重複除去 → 候補論文取得 → AI 選定）を
+ * - 取得の進捗（プロトコル取得 → 拡張語提案 → 外側を検索 → 重複除去 → 候補論文取得 → AI 選定）を
  *   進捗トラッカーで可視化する。draft 画面（生成・検証）と同じく「いま何をやっているか」を
  *   見せるのが狙い。進捗・取得結果は store.expandRun から描画する（理由は後述）
+ * - 現検索式を 2 軸（MeSH 一段上 / フリーワード）で緩めた拡張式の **外側**（margin = 拡張式 NOT 現式）
+ *   から候補を拾うのが要点。式の中ではなく外側を見るので、include すれば現式が逃した取りこぼしが顕在化する
  * - 取得した候補を一覧表示し、include / exclude / maybe ボタンを提示
  * - 判定が押されたら onDecide（recordDecision）を呼び、対応カードの状態を更新
  * - 1 ラウンド（候補すべて）を判定し終えたら onRoundComplete で
- *   check_final_query 相当の再検証を自動実行し、新しい捕捉率を表示する
- *   （requirements.md §4.5）
+ *   check_final_query 相当の再検証を自動実行し、新しい捕捉率を表示する（requirements.md §4.5）。
+ *   あわせて、include した「式の外側」論文をどの拡張語が拾えたかを集計し、検索式の更新提案を出す
  *
  * **なぜ進捗・候補を store に持たせるか**:
  * fetchBoundaryCandidates の最後の AI 選定（LLM）完了時に LLM コスト集計
@@ -34,13 +41,21 @@ import type { RenderView } from './types';
  * ローカル DOM で扱う。
  *
  * **キーボードショートカット**（requirements.md §7、ui-flow.md §6）:
- * - `i` / `e` / `m`: 現在フォーカス中の候補を include / exclude / maybe で判定
- * - `n` / `→`: 次の未判定候補へフォーカス移動（無ければ次のカードへ）
- * - `p` / `←`: 前のカードへフォーカス移動
+ * - `i` / `e` / `m`: 現在アクティブな候補を include / exclude / maybe で判定。
+ *   判定が保存され次第、アクティブ表示は自動で次の未判定候補へ下りていく
+ *   （全件判定済みになったらラウンド完了の再検証へ進む）
+ * - `↓` / `↑`: アクティブ表示を 1 つ下／上のカードへ移動（判定済みも含めて自由に移動）
+ * - `n` / `→`: 次の未判定候補へ移動（判定済みはスキップ。無ければ次のカードへ）
+ * - `p` / `←`: 前のカードへ移動
  *
- * アブストラクト本文はフォーカス中のカードにだけ全文を展開する。各カードに常時
- * Abstract 要素を置き、表示/非表示は `.expand__candidate--focused` への CSS で
- * 切り替えるため、フォーカスロジック（setFocus / focusNext）側の改修は不要。
+ * アクティブ表示（`.expand__candidate--focused`）は DOM フォーカスではなく
+ * `focusIndex` と CSS クラスで管理し、キー入力は list 要素の keydown で一括して拾う。
+ * このため判定で list から DOM フォーカスが外れない限りキーボード操作が続く。
+ * マウスで判定ボタンを押した場合は、そのカードへアクティブ表示を同期しつつ list へ
+ * フォーカスを戻し、以降もキーボードで操作できるようにする。
+ *
+ * アブストラクト本文はアクティブなカードにだけ全文を展開する（常時 DOM に置き、
+ * 表示/非表示は CSS で切り替えるためフォーカスロジック側の改修は不要）。
  *
  * 実ロジック（onFetch / onDecide / onRoundComplete）は bootstrap で service を
  * ラップして渡す。
@@ -84,16 +99,23 @@ export function createExpandView(callbacks: ExpandViewCallbacks = {}): RenderVie
       return;
     }
 
+    const devNote = doc.createElement('p');
+    devNote.className = 'expand__dev';
+    devNote.setAttribute('role', 'note');
+    devNote.textContent =
+      '⚠ 実験的機能（dev）: 検索ヒット数をあえて増やし、検索式の「外側」に潜む境界事例を探します。動作・精度は発展途上です。';
+    container.appendChild(devNote);
+
     const lead = doc.createElement('p');
     lead.className = 'expand__lead';
     lead.textContent =
-      '現在の検索式で PubMed を検索し、判定が迷いやすい候補を数件抽出します。include 判定は SeedPapers に追加され、ラウンド終了時に自動で再検証して新しい捕捉率を表示します。';
+      '現検索式を 2 軸（MeSH を一段広く / フリーワード追加）で緩めた拡張式を作り、その外側（拡張式 NOT 現式）から判定が迷いやすい候補を抽出します。include 判定は SeedPapers に追加され、ラウンド終了時に再検証します。現式の外側を include した場合は捕捉率が下がり、どの拡張語で拾えたか＝検索式の更新提案として表示します。';
     container.appendChild(lead);
 
     const shortcuts = doc.createElement('p');
     shortcuts.className = 'expand__shortcuts';
     shortcuts.textContent =
-      'ショートカット: i = include / e = exclude / m = maybe / n または → = 次へ / p または ← = 前へ（アブストラクト本文はフォーカス中のカードに表示）';
+      'ショートカット: i = include / e = exclude / m = maybe（判定すると自動で次の未判定へ下がります） / ↓↑ = 上下移動 / n または → = 次の未判定へ / p または ← = 前へ（アブストラクト本文はアクティブなカードに表示）';
     container.appendChild(shortcuts);
 
     const run = ctx.state.expandRun;
@@ -155,7 +177,11 @@ export function createExpandView(callbacks: ExpandViewCallbacks = {}): RenderVie
     }
     if (run?.status === 'ready' && run.result) {
       const result = run.result;
-      status.textContent = `${result.candidates.length} 件の境界事例が見つかりました（全ヒット ${result.totalHits} / 評価対象 ${result.evaluatedCount}）`;
+      if (result.candidates.length === 0) {
+        status.textContent = emptyResultText(result);
+      } else {
+        status.textContent = `${result.candidates.length} 件の境界事例（現式 ${result.originalHits} 件 → 拡張式 ${result.broadenedHits} 件 / 外側 ${result.marginHits} 件から評価 ${result.evaluatedCount} 件）`;
+      }
       setupCandidates(doc, list, round, result, callbacks);
     }
   };
@@ -177,6 +203,8 @@ function setupCandidates(
   callbacks: ExpandViewCallbacks
 ): void {
   const items: CandidateItemHandle[] = [];
+  // include 判定された候補の PMID。ラウンド完了時に更新提案の集計対象にする。
+  const includedPmids = new Set<string>();
   let focusIndex = -1;
   let roundTriggered = false;
 
@@ -219,7 +247,15 @@ function setupCandidates(
     if (items.length === 0) return;
     if (!items.every((it) => it.isDecided())) return;
     roundTriggered = true;
-    runRoundComplete(doc, round, callbacks.onRoundComplete);
+    const includedPapers: IncludedPaper[] = result.candidates
+      .filter((c) => includedPmids.has(c.pmid))
+      .map((c) => ({
+        pmid: c.pmid,
+        title: c.title,
+        abstract: c.abstract,
+        meshHeadings: c.meshHeadings,
+      }));
+    runRoundComplete(doc, round, callbacks.onRoundComplete, includedPapers, result.additions);
   };
 
   list.addEventListener('keydown', (event) => {
@@ -227,14 +263,37 @@ function setupCandidates(
     const handler = KEY_HANDLERS[event.key];
     if (!handler) return;
     event.preventDefault();
-    handler({ focusNext, focusPrev, decide: (d) => decideFocused(items, focusIndex, d) });
+    handler({
+      focusNext,
+      focusPrev,
+      // ↓↑ は判定状態を問わない単純な上下移動（端で止まる）
+      focusDown: () => setFocus(focusIndex + 1),
+      focusUp: () => setFocus(focusIndex - 1),
+      decide: (d) => decideFocused(items, focusIndex, d),
+    });
   });
 
-  for (const candidate of result.candidates) {
-    const handle = buildCandidateItem(doc, candidate, callbacks.onDecide, checkRoundComplete);
+  result.candidates.forEach((candidate, index) => {
+    const handle = buildCandidateItem(doc, candidate, callbacks.onDecide, {
+      // 判定が保存され次第、アクティブを次の未判定へ下ろし、全件終了ならラウンド完了へ。
+      // 保存確定後に進めることで、連打で隣のカードを誤判定する事故も防ぐ。
+      onDecided: (decision) => {
+        if (decision === 'include') {
+          includedPmids.add(candidate.pmid);
+        }
+        focusNext();
+        checkRoundComplete();
+      },
+      // マウスで判定ボタンを押したらアクティブ表示をそのカードへ同期し、list に
+      // フォーカスを戻して以降もキーボードで操作できるようにする。
+      onInteract: () => {
+        setFocus(index);
+        list.focus();
+      },
+    });
     list.appendChild(handle.element);
     items.push(handle);
-  }
+  });
   if (items.length > 0) {
     setFocus(0);
     list.focus();
@@ -245,13 +304,14 @@ function setupCandidates(
 // チップ／プログレスバーは draft 画面（生成・検証）と見た目を揃えるため、draft__ の
 // 視覚プリミティブ（.draft__step / .draft__progressbar / .draft__substeps）を再利用する。
 
-/** 取得パイプラインのステップ（順序固定）。1 回の取得でこの 5 段階を踏む */
-const FETCH_STEPS = ['protocol', 'esearch', 'dedup', 'efetch', 'pick-boundary'] as const;
+/** 取得パイプラインのステップ（順序固定）。1 回の取得でこの 6 段階を踏む */
+const FETCH_STEPS = ['protocol', 'broaden', 'esearch', 'dedup', 'efetch', 'pick-boundary'] as const;
 
 /** チップに出す短いラベル */
 const FETCH_STEP_LABELS: Record<ExpandFetchStep, string> = {
   protocol: 'プロトコル取得',
-  esearch: 'PubMed 検索',
+  broaden: '拡張語の提案',
+  esearch: '外側を検索',
   dedup: '重複除去',
   efetch: '候補論文の取得',
   'pick-boundary': 'AI 選定',
@@ -263,7 +323,8 @@ const FETCH_STEP_LABELS: Record<ExpandFetchStep, string> = {
  */
 const FETCH_STEP_ACTIVE_LABELS: Record<ExpandFetchStep | 'done', string> = {
   protocol: 'プロトコルを取得中',
-  esearch: '検索式で PubMed を検索中',
+  broaden: 'AI が拡張語（MeSH/フリーワード）を提案中',
+  esearch: '検索式の外側（margin）を検索中',
   dedup: '既存 seed と重複を除去中',
   efetch: '候補論文のメタデータを取得中',
   'pick-boundary': 'AI が境界事例を選定中',
@@ -367,6 +428,8 @@ function formatElapsed(ms: number): string {
 type ShortcutAction = (ctx: {
   focusNext: () => void;
   focusPrev: () => void;
+  focusDown: () => void;
+  focusUp: () => void;
   decide: (decision: SeedUserDecision) => void;
 }) => void;
 
@@ -376,8 +439,10 @@ const KEY_HANDLERS: Record<string, ShortcutAction> = {
   m: ({ decide }) => decide('maybe'),
   n: ({ focusNext }) => focusNext(),
   ArrowRight: ({ focusNext }) => focusNext(),
+  ArrowDown: ({ focusDown }) => focusDown(),
   p: ({ focusPrev }) => focusPrev(),
   ArrowLeft: ({ focusPrev }) => focusPrev(),
+  ArrowUp: ({ focusUp }) => focusUp(),
 };
 
 function decideFocused(
@@ -401,11 +466,18 @@ function clampIndex(index: number, length: number): number {
   return index;
 }
 
+interface CandidateItemHooks {
+  /** 判定が保存され確定した直後に呼ぶ（アクティブ移動・ラウンド完了判定・include 集計） */
+  onDecided: (decision: SeedUserDecision) => void;
+  /** ユーザーがこのカードの判定ボタンをマウスで押したときに呼ぶ（アクティブ同期） */
+  onInteract: () => void;
+}
+
 function buildCandidateItem(
   doc: Document,
   candidate: BoundaryCaseView,
   onDecide: ExpandViewCallbacks['onDecide'],
-  onDecided: () => void
+  hooks: CandidateItemHooks
 ): CandidateItemHandle {
   const li = doc.createElement('li');
   li.className = 'expand__candidate';
@@ -485,7 +557,7 @@ function buildCandidateItem(
         li.classList.add('expand__candidate--decided');
         pending = false;
         decided = true;
-        onDecided();
+        hooks.onDecided(decision);
       })
       .catch((err: unknown) => {
         pending = false;
@@ -497,7 +569,12 @@ function buildCandidateItem(
 
   for (const decision of ['include', 'exclude', 'maybe'] as const) {
     const btn = buttons[decision];
-    btn.addEventListener('click', () => triggerDecision(decision));
+    btn.addEventListener('click', () => {
+      // クリックしたカードへアクティブ表示を寄せてから判定する。判定後の自動前進
+      // （onDecided → focusNext）が正しい起点（このカード）から走るようにする。
+      hooks.onInteract();
+      triggerDecision(decision);
+    });
     decisionRow.appendChild(btn);
   }
   li.appendChild(decisionRow);
@@ -520,15 +597,22 @@ function makeBtn(doc: Document, label: string, decision: SeedUserDecision): HTML
 function runRoundComplete(
   doc: Document,
   round: HTMLElement,
-  onRoundComplete: ExpandViewCallbacks['onRoundComplete']
+  onRoundComplete: ExpandViewCallbacks['onRoundComplete'],
+  includedPapers: IncludedPaper[],
+  additions: BoundaryCasesResult['additions']
 ): void {
   round.innerHTML = '';
+  // 再検証（捕捉率）とは独立に、include した「式の外側」論文から更新提案を組み立てる。
+  const proposals = buildUpdateProposals(includedPapers, additions);
   if (!onRoundComplete) {
     const note = doc.createElement('p');
     note.className = 'expand__round-note';
     note.textContent =
       'ラウンド完了。/validate を開いて捕捉率を再確認してください（自動再検証は無効）。';
     round.appendChild(note);
+    if (proposals.length > 0) {
+      round.appendChild(buildProposals(doc, proposals));
+    }
     return;
   }
   const status = doc.createElement('p');
@@ -540,6 +624,9 @@ function runRoundComplete(
     .then((summary) => {
       round.innerHTML = '';
       round.appendChild(buildRoundSummary(doc, summary));
+      if (proposals.length > 0) {
+        round.appendChild(buildProposals(doc, proposals));
+      }
     })
     .catch((err: unknown) => {
       round.innerHTML = '';
@@ -548,6 +635,63 @@ function runRoundComplete(
       error.textContent = `再検証に失敗しました: ${formatError(err)}`;
       round.appendChild(error);
     });
+}
+
+/**
+ * 検索式更新提案の描画。include したのに現式が逃した論文を、どの拡張語が拾えたかで
+ * ブロック単位に集計したもの（buildUpdateProposals の出力）。採用はユーザーが /draft で
+ * 行う前提で、ここでは「ブロック #N にこの語を足すと M 件回収」を提示する（推定）。
+ */
+function buildProposals(doc: Document, proposals: UpdateProposal[]): HTMLElement {
+  const wrap = doc.createElement('section');
+  wrap.className = 'expand__proposals';
+  const title = doc.createElement('h3');
+  title.textContent = '検索式の更新提案（推定）';
+  wrap.appendChild(title);
+
+  const note = doc.createElement('p');
+  note.className = 'expand__proposals-note';
+  note.textContent =
+    'include した「式の外側」の論文を拾うために、各ブロックへ追加すると有効そうな語です。/draft で式を編集して採用してください。';
+  wrap.appendChild(note);
+
+  for (const proposal of proposals) {
+    const block = doc.createElement('div');
+    block.className = 'expand__proposal';
+    const head = doc.createElement('p');
+    head.className = 'expand__proposal-head';
+    head.textContent = `ブロック #${proposal.blockId}（${proposal.recoveredPmids.length} 件回収）`;
+    block.appendChild(head);
+
+    const ul = doc.createElement('ul');
+    ul.className = 'expand__proposal-terms';
+    for (const term of proposal.terms) {
+      const li = doc.createElement('li');
+      const axis = term.axis === 'mesh' ? 'MeSH' : 'freeword';
+      const code = doc.createElement('code');
+      code.textContent = term.term;
+      li.appendChild(code);
+      const meta = doc.createElement('span');
+      meta.className = 'expand__proposal-term-meta';
+      meta.textContent = ` [${axis}] ${term.recoveredPmids.length} 件: ${term.rationale}`;
+      li.appendChild(meta);
+      ul.appendChild(li);
+    }
+    block.appendChild(ul);
+    wrap.appendChild(block);
+  }
+  return wrap;
+}
+
+/** 候補 0 件のときのステータス文（理由を分けて伝える）。 */
+function emptyResultText(result: BoundaryCasesResult): string {
+  if (result.additions.length === 0) {
+    return '拡張語が提案されなかったため、式の外側を探索できませんでした（式が網羅的か、拡張が弱い可能性）。';
+  }
+  if (result.marginHits === 0) {
+    return `式の外側に新規論文が見つかりませんでした（現式 ${result.originalHits} 件 / 拡張しても増分 0）。`;
+  }
+  return `式の外側 ${result.marginHits} 件はすべて既存 seed と重複していました（現式 ${result.originalHits} 件）。`;
 }
 
 function buildRoundSummary(doc: Document, summary: ValidationSummary): HTMLElement {

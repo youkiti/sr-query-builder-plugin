@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "grep -q 'npm run dev' && printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PostToolUse\",\"additionalContext\":\"dev build（npm run dev）が完了しました。これはユーザーが手動でブラウザ拡張をテストする合図です。完了報告だけで終わらせず、今回の変更で影響する画面・操作を優先度の上位に置いた『手動確認手順』を、順序立ててチャットで案内してください（自動テストの実行報告とは別物として、人間がブラウザで何をどの順で確認すべきかを書く）。\"}}' || true",
+            "statusMessage": "dev build 後の手動確認リマインダ"
+          }
+        ]
+      }
+    ]
+  }
+}

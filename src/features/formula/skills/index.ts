@@ -53,6 +53,13 @@ export {
   type PickBoundaryCasesInput,
 } from './pickBoundaryCases';
 export {
+  expandQueryForRecall,
+  EXPAND_RECALL_SYSTEM_PROMPT,
+  EXPAND_RECALL_USER_PROMPT_TEMPLATE,
+  type ExpandQueryForRecallInput,
+  type RecallBlockInput,
+} from './expandQueryForRecall';
+export {
   improveBlockExpression,
   IMPROVE_BLOCK_SYSTEM_PROMPT,
   IMPROVE_BLOCK_USER_PROMPT_TEMPLATE,

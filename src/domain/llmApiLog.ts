@@ -11,6 +11,7 @@ export type LlmPurpose =
   | 'expand_freeword'
   | 'design_filter'
   | 'pick_boundary'
+  | 'expand_recall'
   | 'interpret_result'
   | 'extract_protocol'
   | 'improve_block'
