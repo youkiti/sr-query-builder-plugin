@@ -382,8 +382,13 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
 }
 
 /**
- * editor.getMd() を parsePubmedFormulaMd でブロック分解し、各ブロックのカードを再描画する。
- * パースに失敗した場合はその旨を表示する。
+ * editor.getMd() を parsePubmedFormulaMd でブロック分解し、各ブロックのカードを差分再描画する。
+ *
+ * 1 ブロックを編集しただけで全ブロックを作り直すと、進行中の MeSH ツリー取得・件数計測・
+ * インスペクタ展開などが全行で巻き戻り、体感が重くなる。そこで現在描画済みの行（DOM）と
+ * 新しいパース結果を突き合わせ、**式が変わった概念行**と**結合行（最終検索式の結果が変わりうる）**
+ * だけを作り直す。構造（ブロックの増減・並び・結合フラグ）が変わったときや、初回・パース/空状態
+ * からの復帰時は従来どおり全置換する。パースに失敗した場合はその旨を表示する。
  */
 function renderBlockList(
   doc: Document,
@@ -392,11 +397,11 @@ function renderBlockList(
   callbacks: EditViewCallbacks,
   renderCtx: BlockRenderContext
 ): void {
-  ul.innerHTML = '';
   let formula;
   try {
     formula = parsePubmedFormulaMd(editor.getMd());
   } catch (err) {
+    ul.innerHTML = '';
     const warn = doc.createElement('li');
     warn.className = 'edit__block-error';
     warn.textContent = `現状の検索式が PubMed セクション形式としてパースできません: ${formatError(err)}`;
@@ -404,26 +409,55 @@ function renderBlockList(
     return;
   }
   if (formula.blocks.length === 0) {
+    ul.innerHTML = '';
     const empty = doc.createElement('li');
     empty.className = 'edit__block-empty';
     empty.textContent = 'ブロックがありません。';
     ul.appendChild(empty);
     return;
   }
-  for (const block of formula.blocks) {
-    ul.appendChild(
-      buildBlockRow(
-        doc,
-        block.id,
-        block.expression,
-        block.isCombination,
-        editor,
-        callbacks,
-        renderCtx,
-        formula.blocks
-      )
+
+  const build = (block: { id: string; expression: string; isCombination: boolean }): HTMLElement =>
+    buildBlockRow(
+      doc,
+      block.id,
+      block.expression,
+      block.isCombination,
+      editor,
+      callbacks,
+      renderCtx,
+      formula.blocks
     );
+
+  // 現在描画済みのブロック行（パースエラー／空の li は data-block-id を持たないので対象外）。
+  const existing = Array.from(ul.children).filter(
+    (c): c is HTMLElement => c instanceof HTMLElement && c.classList.contains('edit__block-row')
+  );
+  // 構造（行数・各行の id・結合フラグ）が一致するときだけ差分更新できる。
+  const sameStructure =
+    existing.length === formula.blocks.length &&
+    formula.blocks.every(
+      (b, i) =>
+        existing[i]!.getAttribute('data-block-id') === b.id &&
+        (existing[i]!.dataset.combination === '1') === b.isCombination
+    );
+
+  if (!sameStructure) {
+    ul.innerHTML = '';
+    for (const block of formula.blocks) {
+      ul.appendChild(build(block));
+    }
+    return;
   }
+
+  // 構造は同じ。式が変わった概念行と、結合行（ブロック内容が変われば結果も変わりうる）だけ差し替える。
+  formula.blocks.forEach((block, i) => {
+    const el = existing[i]!;
+    const changed = block.isCombination || el.dataset.expression !== block.expression;
+    if (changed) {
+      el.replaceWith(build(block));
+    }
+  });
 }
 
 /**
@@ -500,6 +534,10 @@ function buildBlockRow(
     li.classList.add('edit__block-row--combination');
   }
   li.setAttribute('data-block-id', blockId);
+  // 差分再描画（reconcile）用のマーカー。renderBlockList が「式が変わった概念行」と
+  // 「結合行（結果が変わりうる）」だけを作り直すために、現在の式と結合フラグを保持する。
+  li.dataset.expression = expression;
+  li.dataset.combination = isCombination ? '1' : '0';
 
   const header = doc.createElement('div');
   header.className = 'edit__block-header';

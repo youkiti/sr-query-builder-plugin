@@ -555,6 +555,30 @@ describe('createEditView - 鉛筆インライン編集', () => {
     expect(onSave.mock.calls[0]![0].formulaMd).toContain('#1 "Asthma"[Mesh]');
   });
 
+  test('1 ブロック編集では変更行と結合行だけ作り直し、無関係な行の DOM ノードは維持する', () => {
+    const view = createEditView({ onAutoSave: jest.fn() });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    // 編集前の #2 / #3 のノード参照を握る。
+    const beforeRow2 = blockRow(container, '2');
+    const beforeRow3 = blockRow(container, '3');
+    // #1 を編集して保存する。
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!.click();
+    const input = blockRow(container, '1').querySelector<HTMLTextAreaElement>(
+      '.edit__block-edit-input'
+    )!;
+    input.value = '"Asthma"[Mesh]';
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-edit-save')!.click();
+    // 無関係な概念行 #2 は同じ DOM ノードのまま（作り直されない）。
+    expect(blockRow(container, '2')).toBe(beforeRow2);
+    // 結合行 #3 は結果が変わりうるので作り直される（別ノード）。
+    expect(blockRow(container, '3')).not.toBe(beforeRow3);
+    // #1 は新しい式で再生成される。
+    expect(blockRow(container, '1').querySelector('.edit__block-current')?.textContent).toBe(
+      '"Asthma"[Mesh]'
+    );
+  });
+
   test('空文字での保存はエラーを出して更新しない', () => {
     const view = createEditView();
     const container = buildContainer();

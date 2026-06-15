@@ -335,7 +335,7 @@ describe('buildBlockInspector', () => {
     expect(occRow.querySelector('.bins__row-id')).toBeNull();
   });
 
-  test('起点配下の子を自動展開し、名前クリックで置換、OR追加で OR される', async () => {
+  test('起点配下の子を ▸ で遅延展開し、名前クリックで置換、OR追加で OR される', async () => {
     const doc = buildDoc();
     const onFetchMeshTrees = jest
       .fn()
@@ -362,7 +362,12 @@ describe('buildBlockInspector', () => {
       })
     )!;
     await flushAsync();
-    // 起点 Surgeons の子が自動で出る
+    // 初期表示では子は取りに行かない（枝だけ）。起点に ▸ が出る。
+    expect(onFetchMeshChildren).not.toHaveBeenCalled();
+    const originRow = el.querySelector('.bins__row--origin')!;
+    originRow.querySelector<HTMLButtonElement>('.bins__row-toggle')!.click();
+    await flushAsync();
+    // ▸ クリックで起点 Surgeons の子を取得して展開する。
     expect(onFetchMeshChildren).toHaveBeenCalledWith('M01.526.485.810.910');
     const rows = Array.from(el.querySelectorAll('.bins__row'));
     const neuroRow = rows.find((r) => r.querySelector('.bins__row-name')?.textContent === 'Neurosurgeons')!;
@@ -436,6 +441,13 @@ describe('buildBlockInspector', () => {
       })
     )!;
     await flushAsync();
+    // 初期表示では起点の子も取りに行かない。起点 ▸ を押して 1 段目（Physicians）を展開する。
+    expect(onFetchMeshChildren).not.toHaveBeenCalled();
+    el.querySelector('.bins__row--origin')!
+      .querySelector<HTMLButtonElement>('.bins__row-toggle')!
+      .click();
+    await flushAsync();
+    expect(onFetchMeshChildren).toHaveBeenCalledWith('M01.526.485');
     // 起点 Health Personnel の子 Physicians（hasChildren=true）に ▸ が出る
     const physRow = Array.from(el.querySelectorAll('.bins__row')).find(
       (r) => r.querySelector('.bins__row-name')?.textContent === 'Physicians'
@@ -449,5 +461,39 @@ describe('buildBlockInspector', () => {
     // 孫 Surgeons が出る
     const names = Array.from(el.querySelectorAll('.bins__row-name')).map((n) => n.textContent);
     expect(names).toContain('Surgeons');
+  });
+
+  test('保持された展開状態は再構築時に子を復元する（起点が展開済みなら ▾）', async () => {
+    const doc = buildDoc();
+    const onFetchMeshTrees = jest
+      .fn()
+      .mockResolvedValue([{ descriptor: 'Surgeons', treeNumbers: ['M01.526.485.810.910'] }]);
+    const onFetchMeshChildren = jest.fn((tn: string) => {
+      if (tn === 'M01.526.485.810.910') {
+        return Promise.resolve([
+          { treeNumber: 'M01.526.485.810.910.750', descriptorUi: 'D000069471', label: 'Neurosurgeons', hasChildren: false },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+    // 起点 tree number を「展開済み」として渡す。
+    const meshExpandedState = new Map<string, Set<string>>([['1', new Set(['M01.526.485.810.910'])]]);
+    const el = buildBlockInspector(
+      doc,
+      baseParams({
+        expression: '"Surgeons"[Mesh]',
+        onFetchMeshTrees,
+        onFetchMeshChildren,
+        onCountHits: jest.fn().mockResolvedValue(1),
+        meshExpandedState,
+      })
+    )!;
+    await flushAsync();
+    // クリック無しで子が復元され、起点トグルは ▾。
+    expect(onFetchMeshChildren).toHaveBeenCalledWith('M01.526.485.810.910');
+    const originRow = el.querySelector('.bins__row--origin')!;
+    expect(originRow.querySelector('.bins__row-toggle')?.textContent).toBe('▾');
+    const names = Array.from(el.querySelectorAll('.bins__row-name')).map((n) => n.textContent);
+    expect(names).toContain('Neurosurgeons');
   });
 });

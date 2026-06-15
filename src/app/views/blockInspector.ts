@@ -428,15 +428,23 @@ function buildMeshBranch(
           originDescriptor,
           params,
           // 枝（spine）の中間ノードは展開トグルを出さない（起点までの一本道）。
-          expandable: false,
+          // 起点にだけ ▸ を出し、子ノードは展開時に遅延取得する（初期表示は枝だけに留める）。
+          expandable: isOrigin && !!params.onFetchMeshChildren,
         })
       );
     }
-    // 起点配下の子をぶら下げる（自動展開）。
+    // 起点配下の子の受け皿（▸ クリック、または保持された展開状態のときだけ埋める）。
     const childHost = doc.createElement('div');
     childHost.className = 'bins__branch-children';
     branch.appendChild(childHost);
-    if (params.onFetchMeshChildren) {
+    // 再描画をまたいで起点が展開済みなら、その場で子を描き直して開いた状態を保つ。
+    if (params.onFetchMeshChildren && expandedSetFor(params).has(originTreeNumber)) {
+      const originRow = branch.querySelector<HTMLElement>('.bins__row--origin');
+      const toggle = originRow?.querySelector<HTMLButtonElement>('.bins__row-toggle');
+      if (toggle) {
+        toggle.textContent = '▾';
+      }
+      originRow?.setAttribute('data-expanded', 'true');
       renderChildren(doc, childHost, originTreeNumber, spine.length, originDescriptor, params);
     }
   };
@@ -911,7 +919,14 @@ function buildOverlapSection(
 
 // ---- 共通ヘルパー ---------------------------------------------------------
 
-/** 「計測中…」→件数 に差し替わる小さな件数バッジ。 */
+/**
+ * 「…」→件数 に差し替わる小さな件数バッジ。
+ *
+ * MeSH ブラウザは枝＋子ノードで行数が多くなりやすいので、件数の esearch は **その行が
+ * 表示範囲に入ったとき**（IntersectionObserver）にだけ走らせる。スクロールで初めて見える
+ * 下位ノードの件数を、開いた瞬間に全行ぶん一気に取りに行かないようにするための遅延。
+ * IntersectionObserver が無い環境（jsdom 等）では即時取得にフォールバックする。
+ */
 function buildCountBadge(
   doc: Document,
   query: string,
@@ -921,16 +936,38 @@ function buildCountBadge(
   const badgeEl = doc.createElement('span');
   badgeEl.className = 'bins__count bins__count--pending';
   badgeEl.textContent = '…';
-  cachedCount(onCountHits, params.hitsCache, query)
-    .then((count) => {
-      badgeEl.className = 'bins__count bins__count--done';
-      badgeEl.textContent = `${count.toLocaleString()} 件`;
-    })
-    .catch(() => {
-      badgeEl.className = 'bins__count bins__count--error';
-      badgeEl.textContent = '件数エラー';
-    });
+  observeInView(badgeEl, () => {
+    cachedCount(onCountHits, params.hitsCache, query)
+      .then((count) => {
+        badgeEl.className = 'bins__count bins__count--done';
+        badgeEl.textContent = `${count.toLocaleString()} 件`;
+      })
+      .catch(() => {
+        badgeEl.className = 'bins__count bins__count--error';
+        badgeEl.textContent = '件数エラー';
+      });
+  });
   return badgeEl;
+}
+
+/**
+ * 要素が初めて表示範囲に入ったら一度だけ onEnter を呼ぶ（その後 observer は破棄）。
+ * IntersectionObserver が使えない環境（jsdom 等）では遅延せず即時に onEnter を呼ぶ。
+ */
+function observeInView(el: HTMLElement, onEnter: () => void): void {
+  const view = el.ownerDocument.defaultView;
+  const IO = view?.IntersectionObserver;
+  if (!IO) {
+    onEnter();
+    return;
+  }
+  const observer = new IO((entries) => {
+    if (entries.some((entry) => entry.isIntersecting)) {
+      observer.disconnect();
+      onEnter();
+    }
+  });
+  observer.observe(el);
 }
 
 function badge(doc: Document, text: string, className: string): HTMLElement {
