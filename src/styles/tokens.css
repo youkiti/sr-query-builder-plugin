@@ -11,6 +11,14 @@
   --color-warning: #c57d1b;
   --color-success: #2e8c4f;
 
+  /* 検索式の語種カラー（MeSH=緑 / フリーワード=青）。読み取り表示・編集・インスペクタで共通 */
+  --color-mesh: #1f6b3a;
+  --color-mesh-bg: rgba(46, 140, 79, 0.12);
+  --color-mesh-border: rgba(46, 140, 79, 0.4);
+  --color-freeword: #1f4fb8;
+  --color-freeword-bg: rgba(42, 99, 214, 0.1);
+  --color-freeword-border: rgba(42, 99, 214, 0.4);
+
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;

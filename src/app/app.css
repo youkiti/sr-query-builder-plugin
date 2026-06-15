@@ -1357,8 +1357,8 @@
 }
 
 .draft__term--mesh {
-  background: rgba(46, 140, 79, 0.12);
-  color: #1f6b3a;
+  background: var(--color-mesh-bg);
+  color: var(--color-mesh);
 }
 
 /* MeSH 語はクリックで MeSH ブラウザに飛ぶ。リンクとわかるよう下線を付ける。 */
@@ -1374,8 +1374,8 @@ a.draft__term--mesh:focus-visible {
 }
 
 .draft__term--freeword {
-  background: rgba(42, 99, 214, 0.1);
-  color: #1f4fb8;
+  background: var(--color-freeword-bg);
+  color: var(--color-freeword);
 }
 
 .draft__legend {
@@ -2886,6 +2886,25 @@ a.draft__term--mesh:focus-visible {
   color: var(--color-text-muted);
 }
 
+/* セクションの基調色（MeSH=緑 / フリーワード=青）。左アクセントと見出し色で示す */
+.bins__mesh {
+  border-left: 3px solid var(--color-mesh-border);
+  padding-left: var(--space-2);
+}
+
+.bins__mesh .bins__section-title {
+  color: var(--color-mesh);
+}
+
+.bins__freeword {
+  border-left: 3px solid var(--color-freeword-border);
+  padding-left: var(--space-2);
+}
+
+.bins__freeword .bins__section-title {
+  color: var(--color-freeword);
+}
+
 .bins__muted,
 .bins__loading {
   margin: var(--space-1) 0;
@@ -2928,8 +2947,8 @@ a.draft__term--mesh:focus-visible {
 }
 
 .bins__tree-term {
-  background: rgba(46, 140, 79, 0.12);
-  color: #1f6b3a;
+  background: var(--color-mesh-bg);
+  color: var(--color-mesh);
   border-radius: 3px;
   padding: 0 4px;
   font-weight: 600;
@@ -3107,7 +3126,7 @@ a.draft__term--mesh:focus-visible {
   align-items: center;
   gap: var(--space-2);
   padding: 2px var(--space-1);
-  border-left: 3px solid var(--color-primary-hover);
+  border-left: 3px solid var(--color-mesh);
 }
 
 .bins__group-name {
@@ -3162,7 +3181,7 @@ a.draft__term--mesh:focus-visible {
 }
 
 .bins__row--origin {
-  background: rgba(42, 99, 214, 0.1);
+  background: var(--color-mesh-bg);
   border-radius: 3px;
 }
 
@@ -3201,7 +3220,7 @@ a.draft__term--mesh:focus-visible {
 .bins__row-name {
   border: none;
   background: transparent;
-  color: var(--color-primary-hover);
+  color: var(--color-mesh);
   cursor: pointer;
   padding: 0;
   font: inherit;
@@ -3222,18 +3241,18 @@ a.draft__term--mesh:focus-visible {
 }
 
 .bins__badge--origin {
-  background: rgba(42, 99, 214, 0.12);
-  color: var(--color-primary-hover);
+  background: var(--color-mesh-bg);
+  color: var(--color-mesh);
 }
 
 /* OR追加（平常時は控えめ、hover/focus で前面に） */
 .bins__row-or {
   font-size: var(--font-size-sm);
-  border: 1px solid rgba(42, 99, 214, 0.4);
+  border: 1px solid var(--color-mesh-border);
   border-radius: 3px;
   padding: 0 6px;
   background: var(--color-surface, #fff);
-  color: var(--color-primary-hover);
+  color: var(--color-mesh);
   cursor: pointer;
   white-space: nowrap;
   opacity: 0;
