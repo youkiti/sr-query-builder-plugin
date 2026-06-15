@@ -6,10 +6,15 @@ import {
   type ImproveBlockProposal,
 } from '@/features/formula';
 import { listSeedPapers, listSeedPapersWithRows } from '@/features/seeds';
-import { checkFinalQuery, type FinalQueryResult } from '@/features/validation';
+import {
+  analyzeFreewordDelta,
+  checkFinalQuery,
+  type FinalQueryResult,
+} from '@/features/validation';
 import { isSeedEligibleForValidation } from '@/domain/seedPaper';
 import type { FormulaVersion } from '@/domain/formulaVersion';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
+import { deriveKeywordQueries } from '../views/formulaDisplay';
 import type { GoogleApiDeps } from '@/lib/google';
 import type { EutilsDeps } from '@/lib/ncbi';
 import { nowIso } from '@/utils/iso8601';
@@ -285,6 +290,27 @@ export interface ValidationContext {
   missedPmids: string[];
 }
 
+/** キーワード 1 語の単体ヒット数 + 寄与情報（AI 文脈・開示用）。 */
+export interface KeywordHitEntry {
+  term: string;
+  kind: 'mesh' | 'freeword';
+  /** 単体 esearch ヒット数。計測失敗・未注入時は null */
+  hits: number | null;
+  /**
+   * フリーワードのみ: 個別ヒット数の多い順に OR で累積したときの純増（Δ）。インスペクタの Δ 表と同じ。
+   * MeSH・計測不可時は null。
+   */
+  delta: number | null;
+  /**
+   * フリーワードのみ: 寄与区分（normal=相応に寄与 / lowYield=ほぼ寄与なし / redundant=他語に内包＝削除候補）。
+   * MeSH・計測不可時は null。
+   */
+  status: 'normal' | 'lowYield' | 'redundant' | null;
+}
+
+/** プロンプト肥大化を防ぐためのキーワード件数上限 */
+const MAX_KEYWORD_CONTEXT = 60;
+
 /**
  * AI 改善に渡る文脈のスナップショット。/edit 画面で「AI に渡す内容を見る」を
  * 開いたときに表示するためのもの。requestBlockImprovement と同じ抽出ロジックを使う。
@@ -294,6 +320,18 @@ export interface BlockImprovementContext {
   blockLabel: string;
   blockDescription: string;
   currentExpression: string;
+  /**
+   * 現在の expression を PubMed で実検索したヒット数（esearch count）。画面のヒット数バッジと
+   * 同じ実数。結合行・未注入・計測失敗時は null（AI 文脈・開示の双方で「未計測」扱い）。
+   */
+  currentHits: number | null;
+  /**
+   * 式を構成するキーワード（MeSH / フリーワード）ごとの単体ヒット数 + フリーワードの寄与（Δ・区分）。
+   * 編集画面のインスペクタと同じ計測（同一キャッシュ）。結合行・未注入時は空配列。
+   */
+  keywordHits: KeywordHitEntry[];
+  /** フリーワードを OR で結合し重複除去した合計ヒット数（インスペクタの「tiab 合計」）。無ければ null */
+  freewordDedupTotal: number | null;
   /** 検証対象になりうるシード論文（include 判定 + 初期登録の未判定）。対話拡張分も含む */
   seedPapers: SeedContextEntry[];
   /** 直近の検証で得た捕捉情報。現バージョンと一致する結果のみ。なければ null */
@@ -308,6 +346,11 @@ const MAX_PMID_CONTEXT = 50;
 export interface BlockImprovementContextDeps {
   store: AppStore;
   google: GoogleApiDeps;
+  /**
+   * 概念ブロックの式を実検索してヒット数を返す（esearch count）。画面のヒット数バッジと
+   * 同じ計測を共有するため、bootstrap が同一キャッシュ越しに注入する。未注入なら currentHits=null。
+   */
+  countHits?: (expression: string) => Promise<number>;
 }
 
 /**
@@ -337,14 +380,106 @@ export async function getBlockImprovementContext(
   }
   const blockContext = findBlockContext(deps.store, target.id);
   const seedPapers = await collectSeedContext(deps);
+  const [currentHits, keywords] = await Promise.all([
+    collectCurrentHits(target.expression, target.isCombination, deps),
+    collectKeywordHits(target.expression, target.isCombination, deps),
+  ]);
   return {
     researchQuestion: state.protocolDraft?.researchQuestion ?? '',
     blockLabel: blockContext.label,
     blockDescription: blockContext.description,
     currentExpression: target.expression,
+    currentHits,
+    keywordHits: keywords.entries,
+    freewordDedupTotal: keywords.freewordDedupTotal,
     seedPapers,
     validation: collectValidationContext(deps.store),
   };
+}
+
+/**
+ * ブロック式を構成するキーワードごとの単体ヒット数 + フリーワードの寄与（Δ・区分）を集める。
+ * クエリ・累積 OR の式は blockInspector と同じなので、編集画面で計測済みのキャッシュを再利用する
+ * （= 改めて全件 esearch しない）。MeSH は個別件数、フリーワードは analyzeFreewordDelta で
+ * Δ（純増）と区分（削除候補 / ほぼ寄与なし）まで求める。結合行・countHits 未注入なら空。
+ * 計測失敗時も改善は続けたいので、失敗語は hits=null・Δ=null にして他語は活かす。
+ */
+async function collectKeywordHits(
+  expression: string,
+  isCombination: boolean,
+  deps: BlockImprovementContextDeps
+): Promise<{ entries: KeywordHitEntry[]; freewordDedupTotal: number | null }> {
+  if (isCombination || deps.countHits === undefined) {
+    return { entries: [], freewordDedupTotal: null };
+  }
+  const countHits = deps.countHits;
+  const keywords = deriveKeywordQueries(expression);
+  const meshKeywords = keywords.filter((k) => k.kind === 'mesh');
+  const freewordKeywords = keywords.filter((k) => k.kind === 'freeword');
+
+  // MeSH: 個別件数のみ（Δ 分析はフリーワード専用）。
+  const meshEntries = await Promise.all(
+    meshKeywords.map(async (kw): Promise<KeywordHitEntry> => {
+      try {
+        return { term: kw.display, kind: 'mesh', hits: await countHits(kw.query), delta: null, status: null };
+      } catch {
+        return { term: kw.display, kind: 'mesh', hits: null, delta: null, status: null };
+      }
+    })
+  );
+
+  // フリーワード: Δ（純増）と区分まで。インスペクタと同じ累積 OR クエリでキャッシュを共有する。
+  let freewordEntries: KeywordHitEntry[] = [];
+  let freewordDedupTotal: number | null = null;
+  if (freewordKeywords.length > 0) {
+    try {
+      const delta = await analyzeFreewordDelta(
+        freewordKeywords.map((k) => ({ display: k.display, query: k.query })),
+        countHits
+      );
+      freewordDedupTotal = delta.totalDeduped;
+      freewordEntries = delta.rows.map((r) => ({
+        term: r.display,
+        kind: 'freeword',
+        hits: r.individual,
+        delta: r.delta,
+        status: r.status,
+      }));
+    } catch {
+      // Δ 計算が失敗したら個別件数だけでフォールバックする。
+      freewordEntries = await Promise.all(
+        freewordKeywords.map(async (kw): Promise<KeywordHitEntry> => {
+          try {
+            return { term: kw.display, kind: 'freeword', hits: await countHits(kw.query), delta: null, status: null };
+          } catch {
+            return { term: kw.display, kind: 'freeword', hits: null, delta: null, status: null };
+          }
+        })
+      );
+    }
+  }
+
+  const entries = [...meshEntries, ...freewordEntries].slice(0, MAX_KEYWORD_CONTEXT);
+  return { entries, freewordDedupTotal };
+}
+
+/**
+ * 概念ブロックの式を実検索してヒット数を返す。結合行（#N 参照を含む）は単体検索できないので
+ * 計測しない。countHits 未注入・計測失敗時も改善自体は続けたいので null を返す。
+ */
+async function collectCurrentHits(
+  expression: string,
+  isCombination: boolean,
+  deps: BlockImprovementContextDeps
+): Promise<number | null> {
+  if (isCombination || deps.countHits === undefined) {
+    return null;
+  }
+  try {
+    return await deps.countHits(expression);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -412,6 +547,8 @@ export interface BlockImprovementDeps {
   store: AppStore;
   google: GoogleApiDeps;
   llmFactory: LlmProviderFactory;
+  /** 概念ブロックの式を実検索してヒット数を返す（esearch count）。未注入なら currentHits は省略。 */
+  countHits?: (expression: string) => Promise<number>;
 }
 
 /**
@@ -435,6 +572,7 @@ export async function requestBlockImprovement(
   const context = await getBlockImprovementContext(input.blockId, {
     store: deps.store,
     google: deps.google,
+    countHits: deps.countHits,
   });
   if (context === null) {
     throw new Error(`ブロック #${input.blockId} が見つかりません`);
@@ -443,6 +581,9 @@ export async function requestBlockImprovement(
   const proposal: ImproveBlockProposal = await improveBlockExpression(
     {
       currentExpression: context.currentExpression,
+      currentHits: context.currentHits,
+      keywordHits: context.keywordHits,
+      freewordDedupTotal: context.freewordDedupTotal,
       blockLabel: context.blockLabel,
       blockDescription: context.blockDescription,
       researchQuestion: context.researchQuestion,

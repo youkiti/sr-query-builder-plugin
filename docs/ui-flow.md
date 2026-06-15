@@ -62,7 +62,7 @@ flowchart TD
 | `#/draft` | 検索式ドラフト生成 | 4 skill を順次実行する進捗ビュー（block-designer → mesh-suggester → freeword-designer → filter-designer） | `FormulaVersions`（`ai_draft`）, `LLMApiLog` |
 | `#/validate` | 検証 | 行ごとヒット数バッジ、シード捕捉率サマリ、MeSH ダイアグラム（Mermaid）、ブロック重複（P1） | `ValidationLog` |
 | `#/expand` | 対話的シード拡張（margin 探索・**dev**） | 現式を 2 軸で拡張 → 外側（拡張式 NOT 現式）を検索 → 境界事例提示 → include/exclude/maybe 判定 → 再検証＋更新提案 | `SeedPapers`（`source=interactive`）, 自動再検証 |
-| `#/edit` | 検索式編集 | ブロックカード一覧（textarea は廃止）。ホバーの鉛筆ボタンで各ブロックをインライン手編集／「AI に改善させる」で指示文入力＋文脈開示（RQ・ブロック定義・シード論文・直近検証の捕捉率/取りこぼし）→ improve-block skill 実行 → diff → accept/reject | `FormulaVersions`（`user_edit` / `auto_optimize`） |
+| `#/edit` | 検索式編集 | ブロックカード一覧（textarea は廃止）。**鉛筆ボタン 1 つ**で各ブロックを開くと手編集フォームと AI 改善フォーム（+ インスペクタ）が同時に出る。AI 改善は指示文入力＋文脈開示（RQ・ブロック定義・シード論文・直近検証の捕捉率/取りこぼし・現在の総ヒット数・キーワード別ヒット数）→ improve-block skill 実行 → 句単位 diff（削除/追加サマリー）→ accept/reject | `FormulaVersions`（`user_edit` / `auto_optimize`） |
 | `#/export` | 4 DB 変換 | ワンクリックで CENTRAL / Embase / CT.gov / ICTRP に変換、`.md` ダウンロード | `Conversions` |
 | `#/done` | 完了案内 | PubMed 検索ページを新規タブで開くリンク、CT.gov / ICTRP リンク、nbib ダウンロード手順 | （読み取りのみ） |
 | `#/history` | バージョン履歴 | `FormulaVersions` 一覧。各バージョンの protocol_version / capture_rate / 作成種別を表示。クリックで `#/validate` に該当 version を読み込む | `FormulaVersions` / `ValidationLog` |

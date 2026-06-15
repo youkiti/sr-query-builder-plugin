@@ -1033,9 +1033,9 @@ describe('startApp - wiring 層', () => {
       currentFormulaVersionId: 'v1',
       currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 asthma[tiab]\n```\n',
     }));
-    const improveBtn = doc.querySelector<HTMLButtonElement>('.edit__block-improve')!;
-    improveBtn.click();
-    // 新フロー: 改善ボタンはプロンプト欄を開くだけ。「改善案を取得」で実行する。
+    // 新フロー: 鉛筆で統合パネル（手編集 + AI 改善フォーム）を開き、「改善案を取得」で実行する。
+    const editToggle = doc.querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!;
+    editToggle.click();
     for (let i = 0; i < 5; i += 1) {
       await flush();
     }

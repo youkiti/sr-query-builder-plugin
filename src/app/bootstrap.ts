@@ -305,6 +305,24 @@ function buildDefaultViewOptions(
   // 保存中に来た最新の md だけを次に保存する（連続編集で esearch/PUT が積み上がらないように）。
   // 状態は store.editAutoSave に反映し、view は再描画でも表示を失わない。
   const triggerEditAutoSave = makeEditAutoSaveRunner(store, runtime);
+  // #/edit のブロック別ヒット数（esearch count）。ヒット数バッジ・「AI に渡す内容を見る」開示・
+  // 改善プロンプトの「現在のヒット数」が同じ実数を共有し、同一式の重複 esearch を避けるための
+  // 式→件数キャッシュ。
+  const blockHitCountCache = new Map<string, Promise<number>>();
+  const countBlockHits = (expression: string): Promise<number> => {
+    const cached = blockHitCountCache.get(expression);
+    if (cached) {
+      return cached;
+    }
+    const pending = (async (): Promise<number> => {
+      const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
+      return (await esearch(expression, eutils, { retmax: 0 })).count;
+    })();
+    blockHitCountCache.set(expression, pending);
+    // 失敗は握りつぶさず、次回再試行できるようキャッシュから外す。
+    pending.catch(() => blockHitCountCache.delete(expression));
+    return pending;
+  };
   return {
     home: {
       onOpenPopup: () => {
@@ -403,13 +421,14 @@ function buildDefaultViewOptions(
       onImproveBlock: async (
         input: RequestBlockImprovementInput
       ): Promise<BlockImprovementResult> =>
-        runImproveBlock(store, runtime, llmFactoryDepsBase(), input),
+        runImproveBlock(store, runtime, llmFactoryDepsBase(), countBlockHits, input),
       onGetImproveContext: (blockId: string): Promise<BlockImprovementContext | null> =>
-        getBlockImprovementContext(blockId, { store, google: runtime.google }),
-      onCountHits: async (expression: string): Promise<number> => {
-        const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
-        return (await esearch(expression, eutils, { retmax: 0 })).count;
-      },
+        getBlockImprovementContext(blockId, {
+          store,
+          google: runtime.google,
+          countHits: countBlockHits,
+        }),
+      onCountHits: (expression: string): Promise<number> => countBlockHits(expression),
       onFetchMeshTrees: async (descriptors: string[]): Promise<MeshTreeEntry[]> => {
         const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
         const treeMap = await fetchMeshTreeNumbers(descriptors, eutils);
@@ -510,6 +529,7 @@ async function runImproveBlock(
   store: AppStore,
   runtime: ChromeRuntimeDeps,
   baseDeps: Omit<LlmFactoryDeps, 'llmLogFolderId' | 'spreadsheetId'>,
+  countHits: (expression: string) => Promise<number>,
   input: RequestBlockImprovementInput
 ): Promise<BlockImprovementResult> {
   const project = store.getState().project;
@@ -526,6 +546,7 @@ async function runImproveBlock(
     store,
     google: runtime.google,
     llmFactory: factory,
+    countHits,
   });
 }
 

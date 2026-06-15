@@ -11,7 +11,7 @@ import { fullStateScenario } from './fixtures/scenarios/fullState';
 const APP_URL = '/app/app.html#/edit';
 
 test.describe('app-edit (#/edit)', () => {
-  test('formula 有り: ブロックに分解表示され、鉛筆編集と AI 改善 UI が出る', async ({ page }) => {
+  test('formula 有り: ブロックに分解表示され、鉛筆編集 UI が出る', async ({ page }) => {
     await injectAppStub(page, fullStateScenario());
     await page.goto(APP_URL);
 
@@ -19,20 +19,23 @@ test.describe('app-edit (#/edit)', () => {
     await expect(page.locator('textarea.edit__formula')).toHaveCount(0);
     await expect(page.locator('.edit__block-list')).toBeVisible();
     await expect(page.locator('.edit__block-current').first()).toContainText(/ARDS/);
-    // 各ブロックに鉛筆ボタンと AI 改善ボタン
+    // 編集導線は鉛筆 1 つに統一（旧「AI に改善させる」ボタンは無い）
     const firstRow = page.locator('.edit__block-row').first();
     await expect(firstRow.locator('.edit__block-edit-toggle')).toHaveCount(1);
-    await expect(firstRow.locator('.edit__block-improve')).toHaveCount(1);
+    await expect(firstRow.locator('.edit__block-improve')).toHaveCount(0);
     // note input + スナップショット保存ボタン（「この状態を履歴に残す」）
     await expect(page.locator('input.edit__note-input')).toBeVisible();
     await expect(page.locator('.edit__actions button')).toHaveText(/履歴に残す/);
   });
 
-  test('AI 改善ボタンでプロンプト入力欄が開く', async ({ page }) => {
+  test('鉛筆で手編集と AI 改善フォームが同時に開く', async ({ page }) => {
     await injectAppStub(page, fullStateScenario());
     await page.goto(APP_URL);
     const firstRow = page.locator('.edit__block-row').first();
-    await firstRow.locator('.edit__block-improve').click();
+    await firstRow.locator('.edit__block-edit-toggle').click();
+    // 手編集フォーム
+    await expect(firstRow.locator('.edit__block-edit-input')).toBeVisible();
+    // AI 改善フォーム
     await expect(firstRow.locator('.edit__block-ai-instruction')).toBeVisible();
     await expect(firstRow.locator('.edit__block-ai-submit')).toBeVisible();
   });

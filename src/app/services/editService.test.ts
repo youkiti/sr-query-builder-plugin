@@ -624,6 +624,124 @@ describe('getBlockImprovementContext', () => {
       missedPmids: ['222'],
     });
   });
+
+  test('countHits 注入時は概念ブロックの式を計測して currentHits に入れる', async () => {
+    const store = createStore(makeState({ currentFormulaMarkdown: VALID_MD }));
+    const countHits = jest.fn().mockResolvedValue(4321);
+    const ctx = await getBlockImprovementContext('1', {
+      store,
+      google: emptySeedsGoogle(),
+      countHits,
+    });
+    expect(countHits).toHaveBeenCalledWith('asthma[tiab]');
+    expect(ctx!.currentHits).toBe(4321);
+  });
+
+  test('countHits 未注入なら currentHits は null', async () => {
+    const store = createStore(makeState({ currentFormulaMarkdown: VALID_MD }));
+    const ctx = await getBlockImprovementContext('1', { store, google: emptySeedsGoogle() });
+    expect(ctx!.currentHits).toBeNull();
+  });
+
+  test('結合行は計測せず currentHits=null（countHits を呼ばない）', async () => {
+    const md = [
+      '## PubMed/MEDLINE',
+      '',
+      '```',
+      '#1 asthma[tiab]',
+      '#2 children[tiab]',
+      '#3 #1 AND #2',
+      '```',
+      '',
+    ].join('\n');
+    const store = createStore(makeState({ currentFormulaMarkdown: md }));
+    const countHits = jest.fn().mockResolvedValue(10);
+    const ctx = await getBlockImprovementContext('3', {
+      store,
+      google: emptySeedsGoogle(),
+      countHits,
+    });
+    expect(countHits).not.toHaveBeenCalled();
+    expect(ctx!.currentHits).toBeNull();
+  });
+
+  test('countHits が失敗しても改善は続行できるよう currentHits=null', async () => {
+    const store = createStore(makeState({ currentFormulaMarkdown: VALID_MD }));
+    const countHits = jest.fn().mockRejectedValue(new Error('esearch down'));
+    const ctx = await getBlockImprovementContext('1', {
+      store,
+      google: emptySeedsGoogle(),
+      countHits,
+    });
+    expect(ctx!.currentHits).toBeNull();
+  });
+
+  test('keywordHits は MeSH=個別件数 / フリーワード=Δ・区分まで計測する', async () => {
+    const md = [
+      '## PubMed/MEDLINE',
+      '',
+      '```',
+      '#1 "Asthma"[Mesh] OR asthma[tiab] OR wheeze[tiab]',
+      '#2 children[tiab]',
+      '#3 #1 AND #2',
+      '```',
+      '',
+    ].join('\n');
+    const store = createStore(makeState({ currentFormulaMarkdown: md }));
+    // wheeze は asthma に完全内包（OR しても件数が増えない）→ redundant（削除候補）
+    const countHits = jest.fn().mockImplementation(async (q: string) => {
+      if (q === '"Asthma"[Mesh]') return 100;
+      if (q === 'asthma[tiab]') return 5000;
+      if (q === 'wheeze[tiab]') return 30;
+      if (q === '(asthma[tiab]) OR (wheeze[tiab])') return 5000; // 純増 0
+      return -1;
+    });
+    const ctx = await getBlockImprovementContext('1', {
+      store,
+      google: emptySeedsGoogle(),
+      countHits,
+    });
+    expect(ctx!.keywordHits).toEqual([
+      { term: 'Asthma', kind: 'mesh', hits: 100, delta: null, status: null },
+      { term: 'asthma[tiab]', kind: 'freeword', hits: 5000, delta: 5000, status: 'normal' },
+      { term: 'wheeze[tiab]', kind: 'freeword', hits: 30, delta: 0, status: 'redundant' },
+    ]);
+    expect(ctx!.freewordDedupTotal).toBe(5000);
+  });
+
+  test('countHits 未注入なら keywordHits は空配列・freewordDedupTotal は null', async () => {
+    const store = createStore(makeState({ currentFormulaMarkdown: VALID_MD }));
+    const ctx = await getBlockImprovementContext('1', { store, google: emptySeedsGoogle() });
+    expect(ctx!.keywordHits).toEqual([]);
+    expect(ctx!.freewordDedupTotal).toBeNull();
+  });
+
+  test('Δ 計算が失敗してもフォールバックで個別件数だけは渡す', async () => {
+    const md = [
+      '## PubMed/MEDLINE',
+      '',
+      '```',
+      '#1 "Asthma"[Mesh] OR wheeze[tiab]',
+      '#2 children[tiab]',
+      '#3 #1 AND #2',
+      '```',
+      '',
+    ].join('\n');
+    const store = createStore(makeState({ currentFormulaMarkdown: md }));
+    const countHits = jest.fn().mockImplementation(async (q: string) => {
+      if (q === 'wheeze[tiab]') throw new Error('boom');
+      return 100;
+    });
+    const ctx = await getBlockImprovementContext('1', {
+      store,
+      google: emptySeedsGoogle(),
+      countHits,
+    });
+    expect(ctx!.keywordHits).toEqual([
+      { term: 'Asthma', kind: 'mesh', hits: 100, delta: null, status: null },
+      { term: 'wheeze[tiab]', kind: 'freeword', hits: null, delta: null, status: null },
+    ]);
+  });
 });
 
 describe('applyBlockImprovement', () => {
