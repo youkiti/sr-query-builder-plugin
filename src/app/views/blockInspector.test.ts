@@ -44,6 +44,14 @@ describe('extractBlockTerms', () => {
     expect(terms.freewordTerms).toHaveLength(1);
     expect(terms.meshTerms).toEqual([{ descriptor: 'A', explode: true }]);
   });
+
+  test('引用符内に and を含む descriptor を分割しない', () => {
+    const terms = extractBlockTerms('"Oral and Maxillofacial Surgeons"[Mesh] OR surgeon*[tiab]');
+    expect(terms.meshTerms).toEqual([
+      { descriptor: 'Oral and Maxillofacial Surgeons', explode: true },
+    ]);
+    expect(terms.freewordTerms.map((t) => t.query)).toEqual(['surgeon*[tiab]']);
+  });
 });
 
 describe('buildBlockInspector', () => {
@@ -74,6 +82,35 @@ describe('buildBlockInspector', () => {
     // 件数バッジ（"Asthma"[Mesh] で explode count）
     expect(onCountHits).toHaveBeenCalledWith('"Asthma"[Mesh]');
     expect(el.querySelector('.bins__count--done')?.textContent).toBe('12,300 件');
+  });
+
+  test('同じ語の枝をグループ化し、「この語を削除」でブロックから外す', async () => {
+    const doc = buildDoc();
+    // 1 つの descriptor が 2 系統（別カテゴリ）の tree number に乗るケース
+    const onFetchMeshTrees = jest.fn().mockResolvedValue([
+      { descriptor: 'Surgeons', treeNumbers: ['M01.526.485.810.910', 'N02.360.140'] },
+    ]);
+    const onApplyExpression = jest.fn();
+    const el = buildBlockInspector(
+      doc,
+      baseParams({
+        expression: '"Surgeons"[Mesh] OR surgeon*[tiab]',
+        onFetchMeshTrees,
+        onCountHits: jest.fn().mockResolvedValue(1),
+        onApplyExpression,
+      })
+    )!;
+    await flushAsync();
+    // 1 descriptor = 1 グループ、2 tree number = 2 枝
+    const groups = el.querySelectorAll('.bins__group');
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.querySelector('.bins__group-name')?.textContent).toBe('Surgeons');
+    expect(groups[0]!.querySelectorAll('.bins__branch')).toHaveLength(2);
+    // 複数系統バッジ
+    expect(groups[0]!.querySelector('.bins__badge--multi')?.textContent).toBe('2 系統');
+    // 削除はフリーワードを残して MeSH 句だけ外す
+    groups[0]!.querySelector<HTMLButtonElement>('.bins__group-delete')!.click();
+    expect(onApplyExpression).toHaveBeenCalledWith('surgeon*[tiab]');
   });
 
   test('ブロック内 MeSH の冗長（内包）を 1 行で示す', async () => {

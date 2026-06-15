@@ -31,7 +31,12 @@ import {
 } from '@/features/validation';
 import type { MeshTreeNode } from '@/lib/ncbi';
 import { extractMeshTerm, tokenizeExpression } from './formulaDisplay';
-import { addMeshDescriptor, hasMeshDescriptor, replaceMeshDescriptor } from './meshExpressionEdit';
+import {
+  addMeshDescriptor,
+  hasMeshDescriptor,
+  removeMeshDescriptor,
+  replaceMeshDescriptor,
+} from './meshExpressionEdit';
 
 /** インスペクタが必要とする計測 callback とキャッシュ。 */
 export interface BlockInspectorDeps {
@@ -233,12 +238,15 @@ function buildMeshSection(
       const analysis = buildBlockMeshTree(inputs);
 
       body.innerHTML = '';
-      // 各 MeSH 用語 × tree number ごとに 1 本のブラウザ枝を出す。
+      // 同じ語（descriptor）の枝はグループにまとめ、「同じ単語」だと一目で分かるようにする。
+      // 1 語が複数 tree number に乗る場合（別カテゴリにも分類される語）も 1 グループに束ねる。
       for (const term of meshTerms) {
         const treeNumbers = treeByDescriptor.get(term.descriptor) ?? [];
-        for (const treeNumber of treeNumbers) {
-          body.appendChild(buildMeshBranch(doc, term.descriptor, treeNumber, params));
+        if (treeNumbers.length === 0) {
+          // tree 未解決の語は枝を描けないので、下の unresolved 行でまとめて出す。
+          continue;
         }
+        body.appendChild(buildMeshGroup(doc, term.descriptor, treeNumbers, params));
       }
       // 補助情報（1〜数行）。
       body.appendChild(buildDivergenceLine(doc, analysis.categories));
@@ -336,6 +344,55 @@ function spineTreeNumbers(treeNumber: string): string[] {
     out.push(acc);
   }
   return out;
+}
+
+/**
+ * 同一 MeSH 用語（同じ descriptor）の枝を 1 グループにまとめる。
+ * - header に語名を出し、複数 tree number に乗る語は「N 系統」バッジを添えて
+ *   「同じ単語」だと一目で分かるようにする。
+ * - header の「この語を削除」ボタンで、ブロック式からその語の MeSH 句を丸ごと外す
+ *   （onApplyExpression が注入されているときのみ）。
+ */
+function buildMeshGroup(
+  doc: Document,
+  descriptor: string,
+  treeNumbers: string[],
+  params: BlockInspectorParams
+): HTMLElement {
+  const group = doc.createElement('div');
+  group.className = 'bins__group';
+  group.setAttribute('data-descriptor', descriptor);
+
+  const head = doc.createElement('div');
+  head.className = 'bins__group-head';
+
+  const name = doc.createElement('span');
+  name.className = 'bins__group-name';
+  name.textContent = descriptor;
+  head.appendChild(name);
+
+  if (treeNumbers.length > 1) {
+    head.appendChild(badge(doc, `${treeNumbers.length} 系統`, 'bins__badge--multi'));
+  }
+
+  if (params.onApplyExpression) {
+    const del = doc.createElement('button');
+    del.type = 'button';
+    del.className = 'bins__group-delete';
+    del.textContent = 'この語を削除';
+    del.title = `"${descriptor}" をこのブロックから外す`;
+    del.addEventListener('click', () => {
+      params.onApplyExpression!(removeMeshDescriptor(params.expression, descriptor));
+    });
+    head.appendChild(del);
+  }
+
+  group.appendChild(head);
+
+  for (const treeNumber of treeNumbers) {
+    group.appendChild(buildMeshBranch(doc, descriptor, treeNumber, params));
+  }
+  return group;
 }
 
 /**

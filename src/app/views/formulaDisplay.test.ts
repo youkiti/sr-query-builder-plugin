@@ -70,6 +70,24 @@ describe('tokenizeExpression', () => {
     expect(tokenizeExpression('#1 AND #2')).toEqual([{ text: '#1 AND #2', kind: 'plain' }]);
   });
 
+  test('引用符内の and/or は演算子として割らず、語全体を 1 セグメントにする', () => {
+    // `"Oral and Maxillofacial Surgeons"` の and を境界扱いすると descriptor が壊れる回帰防止
+    expect(tokenizeExpression('"Oral and Maxillofacial Surgeons"[Mesh]')).toEqual([
+      { text: '"Oral and Maxillofacial Surgeons"[Mesh]', kind: 'mesh' },
+    ]);
+    expect(extractMeshTerm(tokenizeExpression('"Oral and Maxillofacial Surgeons"[Mesh]')[0]!.text)).toBe(
+      'Oral and Maxillofacial Surgeons'
+    );
+  });
+
+  test('引用符内 and を含む語を OR で連結しても両側が壊れない', () => {
+    expect(tokenizeExpression('"Heart Failure"[Mesh] OR "Oral and Maxillofacial Surgeons"[Mesh]')).toEqual([
+      { text: '"Heart Failure"[Mesh]', kind: 'mesh' },
+      { text: ' OR ', kind: 'plain' },
+      { text: '"Oral and Maxillofacial Surgeons"[Mesh]', kind: 'mesh' },
+    ]);
+  });
+
   test('フィルタ系タグの語は plain 扱い', () => {
     expect(tokenizeExpression('Randomized Controlled Trial[pt]')).toEqual([
       { text: 'Randomized Controlled Trial[pt]', kind: 'plain' },

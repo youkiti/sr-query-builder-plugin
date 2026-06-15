@@ -1,9 +1,11 @@
 import {
   addMeshDescriptor,
+  dedupeOperands,
   hasMeshDescriptor,
   operandMeshDescriptor,
   removeMeshDescriptor,
   replaceMeshDescriptor,
+  sortOperandsMeshFirst,
 } from './meshExpressionEdit';
 
 describe('operandMeshDescriptor', () => {
@@ -92,6 +94,69 @@ describe('removeMeshDescriptor', () => {
   test('大小違いでも取り除く', () => {
     const expr = '("Surgeons"[Mesh] OR surgeon*[tiab])';
     expect(removeMeshDescriptor(expr, 'surgeons')).toBe('(surgeon*[tiab])');
+  });
+});
+
+describe('dedupeOperands', () => {
+  test('OR で二重化した MeSH 句を初出だけ残して掃除する', () => {
+    const expr =
+      '("Surgeons"[Mesh] OR surgeon*[tiab] OR "Oral and Maxillofacial Surgeons"[Mesh] OR "Neurosurgeons"[Mesh] OR "Oral and Maxillofacial Surgeons"[Mesh])';
+    expect(dedupeOperands(expr)).toBe(
+      '("Surgeons"[Mesh] OR surgeon*[tiab] OR "Oral and Maxillofacial Surgeons"[Mesh] OR "Neurosurgeons"[Mesh])'
+    );
+  });
+
+  test('重複フリーワードも除去する（初出を残す）', () => {
+    expect(dedupeOperands('surgeon*[tiab] OR cough[tiab] OR surgeon*[tiab]')).toBe(
+      'surgeon*[tiab] OR cough[tiab]'
+    );
+  });
+
+  test('MeSH は descriptor で判定（引用符・タグ表記の差を吸収）', () => {
+    // "Surgeons"[Mesh] と Surgeons[mh] は同一 descriptor → 後者を落とす
+    expect(dedupeOperands('"Surgeons"[Mesh] OR Surgeons[mh]')).toBe('"Surgeons"[Mesh]');
+  });
+
+  test('フリーワードのタグ違いは別物として残す', () => {
+    expect(dedupeOperands('x[tiab] OR x[tw]')).toBe('x[tiab] OR x[tw]');
+  });
+
+  test('重複が無ければ原文のまま', () => {
+    const expr = '("Surgeons"[Mesh] OR surgeon*[tiab])';
+    expect(dedupeOperands(expr)).toBe(expr);
+  });
+
+  test('全部が同一なら 1 つに畳む', () => {
+    expect(dedupeOperands('("A"[Mesh] OR "A"[Mesh] OR "A"[Mesh])')).toBe('("A"[Mesh])');
+  });
+});
+
+describe('sortOperandsMeshFirst', () => {
+  test('MeSH を前・フリーワードを後に並べ替え、各グループ内の順序は保つ', () => {
+    const expr = '(surgeon*[tiab] OR "Surgeons"[Mesh] OR cough[tiab] OR "Neurosurgeons"[Mesh])';
+    expect(sortOperandsMeshFirst(expr)).toBe(
+      '("Surgeons"[Mesh] OR "Neurosurgeons"[Mesh] OR surgeon*[tiab] OR cough[tiab])'
+    );
+  });
+
+  test('括弧なしでも並べ替える', () => {
+    expect(sortOperandsMeshFirst('a[tiab] OR "B"[Mesh]')).toBe('"B"[Mesh] OR a[tiab]');
+  });
+
+  test('既に MeSH 先頭なら原文のまま', () => {
+    const expr = '("Surgeons"[Mesh] OR surgeon*[tiab])';
+    expect(sortOperandsMeshFirst(expr)).toBe(expr);
+  });
+
+  test('最上位に AND/NOT を含む式は順序が意味を持つので並べ替えない', () => {
+    expect(sortOperandsMeshFirst('a[tiab] AND "B"[Mesh]')).toBe('a[tiab] AND "B"[Mesh]');
+    const expr2 = '("B"[Mesh] OR a[tiab]) NOT c[tiab]';
+    expect(sortOperandsMeshFirst(expr2)).toBe(expr2);
+  });
+
+  test('句が 1 つ以下なら原文のまま', () => {
+    expect(sortOperandsMeshFirst('"B"[Mesh]')).toBe('"B"[Mesh]');
+    expect(sortOperandsMeshFirst('')).toBe('');
   });
 });
 

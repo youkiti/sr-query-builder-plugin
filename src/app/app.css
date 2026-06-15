@@ -2922,6 +2922,49 @@ a.draft__term--mesh:focus-visible {
 }
 
 /* ---- MeSH ブラウザ（PubMed 風インデントツリー）---- */
+/* 同じ語（descriptor）の枝をまとめるグループ */
+.bins__group {
+  margin: var(--space-3) 0 0;
+}
+
+.bins__group:first-child {
+  margin-top: 0;
+}
+
+.bins__group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 2px var(--space-1);
+  border-left: 3px solid var(--color-primary-hover);
+}
+
+.bins__group-name {
+  font-weight: 600;
+}
+
+.bins__badge--multi {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--color-text-muted);
+}
+
+/* 「この語を削除」: グループ単位で descriptor を式から外す */
+.bins__group-delete {
+  margin-left: auto;
+  font-size: var(--font-size-sm);
+  border: 1px solid rgba(214, 42, 42, 0.4);
+  border-radius: 3px;
+  padding: 0 6px;
+  background: var(--color-surface, #fff);
+  color: var(--color-danger);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.bins__group-delete:hover {
+  background: rgba(214, 42, 42, 0.08);
+}
+
 .bins__branch {
   margin: var(--space-2) 0 0;
   border: 1px solid var(--color-border);

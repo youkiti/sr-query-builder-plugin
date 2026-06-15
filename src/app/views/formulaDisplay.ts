@@ -267,7 +267,7 @@ export function tokenizeOperands(expr: string): DiffToken[] {
 }
 
 /** 句の同一判定キー（空白の差・大文字小文字を無視） */
-function normalizeOperand(text: string): string {
+export function normalizeOperand(text: string): string {
   return text.replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
@@ -382,13 +382,29 @@ export function deriveKeywordQueries(expression: string): KeywordQuery[] {
   return [...meshByDescriptor.values(), ...freewordByQuery.values()];
 }
 
-/** slice 内で最後に現れる演算子・括弧の直後（＝語の開始位置）を返す */
+/** slice 内で最後に現れる（引用符の外の）演算子・括弧の直後（＝語の開始位置）を返す */
 function findTermStart(slice: string): number {
   let start = 0;
   let match: RegExpExecArray | null;
   BOUNDARY_PATTERN.lastIndex = 0;
   while ((match = BOUNDARY_PATTERN.exec(slice)) !== null) {
+    // 引用符の内側にある AND/OR/NOT（例: `"Oral and Maxillofacial Surgeons"`）は
+    // ブール演算子ではなく語の一部なので、境界として扱わない。
+    if (isInsideQuotes(slice, match.index)) {
+      continue;
+    }
     start = match.index + match[0].length;
   }
   return start;
+}
+
+/** s の index 位置が引用符（"）の内側か（先頭から数えた " の数が奇数なら内側）。 */
+function isInsideQuotes(s: string, index: number): boolean {
+  let quotes = 0;
+  for (let i = 0; i < index; i += 1) {
+    if (s[i] === '"') {
+      quotes += 1;
+    }
+  }
+  return quotes % 2 === 1;
 }

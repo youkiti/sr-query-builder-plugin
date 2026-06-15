@@ -19,6 +19,7 @@ import {
   renderDiffSideInto,
   renderExpressionInto,
 } from './formulaDisplay';
+import { dedupeOperands, sortOperandsMeshFirst } from './meshExpressionEdit';
 import type { RenderView } from './types';
 
 /**
@@ -466,9 +467,11 @@ function buildBlockRow(
       onFetchMeshChildren: callbacks.onFetchMeshChildren,
       onFetchMeshLabels: callbacks.onFetchMeshLabels,
       // MeSH ブラウザからの追加・削除はこのブロックの式を書き換えて自動保存へ流す。
+      // 適用時に重複句を掃除し（dedupe）、MeSH 句を先・フリーワードを後に並べ替える（sort）。
       onApplyExpression: (next: string): void => {
         try {
-          editor.setMd(applyBlockImprovement(editor.getMd(), blockId, next));
+          const normalized = sortOperandsMeshFirst(dedupeOperands(next));
+          editor.setMd(applyBlockImprovement(editor.getMd(), blockId, normalized));
         } catch {
           // 不正な式（空など）は適用しない。UI 側で空は弾いている。
         }

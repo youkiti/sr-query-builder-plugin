@@ -10,7 +10,13 @@
  * - 同じ descriptor が既にあれば追加は無視（重複させない）。
  */
 
-import { extractMeshTerm, tokenizeExpression, tokenizeOperands, type DiffToken } from './formulaDisplay';
+import {
+  extractMeshTerm,
+  normalizeOperand,
+  tokenizeExpression,
+  tokenizeOperands,
+  type DiffToken,
+} from './formulaDisplay';
 
 /** operand が「単一の MeSH 句」なら、その descriptor を返す（そうでなければ null）。 */
 export function operandMeshDescriptor(operandText: string): string | null {
@@ -106,6 +112,92 @@ export function replaceMeshDescriptor(
     }
   }
   return joinTokens(tokens);
+}
+
+/**
+ * ブロック式（最上位 OR/AND リスト）の重複句を取り除く。前方優先で初出を残し、
+ * 2 回目以降の同一句を隣接演算子ごと落とす。MeSH ブラウザ追加・AI 生成・手入力の
+ * 経路によらず「同じ語を OR で二重に持つ」状態を正規化する。
+ *
+ * 同一判定:
+ * - MeSH 句は descriptor で判定（explode/noexp・引用符・タグ表記の差を吸収）
+ * - それ以外（フリーワード等）は正規化テキスト（大小・連続空白を無視）で判定。
+ *   タグ違い（`x[tiab]` と `x[tw]`）は別物として残す。
+ *
+ * 重複が無ければ原文のまま返す（無駄な再整形をしない）。
+ */
+export function dedupeOperands(expression: string): string {
+  const tokens = tokenizeOperands(expression);
+  const seen = new Set<string>();
+  const removeIdx = new Set<number>();
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i]!;
+    if (!token.isOperand) {
+      continue;
+    }
+    const descriptor = operandMeshDescriptor(token.text);
+    const key =
+      descriptor !== null
+        ? `mesh:${descriptorKey(descriptor)}`
+        : `op:${normalizeOperand(token.text)}`;
+    if (seen.has(key)) {
+      removeIdx.add(i);
+    } else {
+      seen.add(key);
+    }
+  }
+  if (removeIdx.size === 0) {
+    return expression;
+  }
+  // 後ろから削除してインデックスのずれを避ける（removeMeshDescriptor と同じ glue 始末）。
+  for (let i = tokens.length - 1; i >= 0; i -= 1) {
+    if (!removeIdx.has(i)) {
+      continue;
+    }
+    const prev = tokens[i - 1];
+    const nextGlue = tokens[i + 1];
+    if (prev && !prev.isOperand && /\b(OR|AND|NOT)\b/i.test(prev.text)) {
+      tokens.splice(i - 1, 2);
+    } else if (nextGlue && !nextGlue.isOperand && /\b(OR|AND|NOT)\b/i.test(nextGlue.text)) {
+      tokens.splice(i, 2);
+    } else {
+      tokens.splice(i, 1);
+    }
+  }
+  const result = joinTokens(tokens);
+  if (/^\(\s*\)$/.test(result)) {
+    return '';
+  }
+  return result;
+}
+
+/**
+ * ブロック式の OR リストを「MeSH 句を先・フリーワード等を後」に並べ替える。
+ * 各グループ内の元の順序は保つ（安定ソート）。
+ *
+ * 安全策: 最上位に AND / NOT を含む式は並べ替えると意味が変わるので触らず原文のまま返す
+ * （例 `a[tiab] NOT "b"[Mesh]`）。純粋な OR リストのときだけ並べ替える。外側括弧は保つ。
+ */
+export function sortOperandsMeshFirst(expression: string): string {
+  const tokens = tokenizeOperands(expression);
+  // 最上位に AND/NOT があれば順序が意味を持つので触らない。
+  if (tokens.some((t) => !t.isOperand && /\b(AND|NOT)\b/i.test(t.text))) {
+    return expression;
+  }
+  const operands = tokens.filter((t) => t.isOperand);
+  if (operands.length < 2) {
+    return expression;
+  }
+  const rank = (t: DiffToken): number => (operandMeshDescriptor(t.text) !== null ? 0 : 1);
+  // Array.prototype.sort は安定なので各グループ内の元順は保たれる。
+  const sorted = [...operands].sort((a, b) => rank(a) - rank(b));
+  // 既に同順なら原文のまま（無駄な再整形をしない）。
+  if (sorted.every((t, i) => t === operands[i])) {
+    return expression;
+  }
+  const hasOuter = tokens[0]?.text === '(' && tokens[tokens.length - 1]?.text === ')';
+  const body = sorted.map((t) => t.text).join(' OR ');
+  return hasOuter ? `(${body})` : body;
 }
 
 /**
