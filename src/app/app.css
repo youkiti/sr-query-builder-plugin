@@ -1521,6 +1521,16 @@ a.draft__term--mesh:focus-visible {
   color: var(--color-danger);
 }
 
+/* 編集直後、古い結果を残したまま「再確認中」を重ねる（最新式で再計算中の合図） */
+.edit__combo-check-result--rechecking {
+  opacity: 0.7;
+}
+
+.edit__combo-check-rechecking {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
 .edit__combo-check-result p {
   margin: 0;
 }

@@ -25,6 +25,7 @@ import {
   meshCategoryName,
   type BlockMeshTermInput,
   type BlockMeshTermMeta,
+  type FreewordDeltaResult,
   type FreewordDeltaRow,
   type FreewordTermInput,
   type MeshTreeEntry,
@@ -56,6 +57,13 @@ export interface BlockInspectorDeps {
   onApplyExpression?: (nextExpression: string) => void;
   /** 式→件数キャッシュ（edit view インスタンスと共有） */
   hitsCache: Map<string, Promise<number>>;
+  /**
+   * フリーワード Δ の結果キャッシュ（edit view インスタンスと共有）。キーはフリーワード語の集合。
+   * 個別件数は hitsCache でキャッシュ済みでも、表全体（並べ替え＋累積 OR）はインスペクタ再構築の
+   * たびに作り直され「計算中…」が一瞬戻る。語の集合が同じ式（MeSH だけ編集した等）では
+   * 計算結果をそのまま使い回し、再表示時の再計算とちらつきを避ける。
+   */
+  freewordDeltaCache: Map<string, Promise<FreewordDeltaResult>>;
   /** descriptor 群→tree entries キャッシュ（edit view インスタンスと共有） */
   meshTreeCache: Map<string, Promise<MeshTreeEntry[]>>;
   /** tree number→子ノード キャッシュ（edit view インスタンスと共有） */
@@ -688,6 +696,33 @@ function buildRedundancyLine(
   return p;
 }
 
+/**
+ * フリーワード Δ をキャッシュ越しに計算する。キーは語（query）の集合。
+ * analyzeFreewordDelta は内部で個別件数の降順に並べ替えるので、入力順は結果に影響しない。
+ * よって順不同で安定なキー（query をソートして連結）にし、同じ語集合なら計算を 1 回に抑える。
+ */
+function freewordDeltaCached(
+  params: BlockInspectorParams,
+  freewordTerms: FreewordTermInput[],
+  onCountHits: NonNullable<BlockInspectorDeps['onCountHits']>
+): Promise<FreewordDeltaResult> {
+  const key = freewordTerms
+    .map((t) => t.query)
+    .sort()
+    .join('');
+  const cached = params.freewordDeltaCache.get(key);
+  if (cached) {
+    return cached;
+  }
+  const pending = analyzeFreewordDelta(freewordTerms, (q) =>
+    cachedCount(onCountHits, params.hitsCache, q)
+  );
+  params.freewordDeltaCache.set(key, pending);
+  // 失敗は握りつぶさず、次回再試行できるようキャッシュから外す。
+  pending.catch(() => params.freewordDeltaCache.delete(key));
+  return pending;
+}
+
 // ---- フリーワード Δ セクション --------------------------------------------
 
 function buildFreewordSection(
@@ -718,7 +753,7 @@ function buildFreewordSection(
   wrap.appendChild(body);
 
   const onCountHits = params.onCountHits!;
-  analyzeFreewordDelta(freewordTerms, (q) => cachedCount(onCountHits, params.hitsCache, q))
+  freewordDeltaCached(params, freewordTerms, onCountHits)
     .then((res) => {
       body.innerHTML = '';
       const maxDelta = res.rows.reduce((m, r) => Math.max(m, r.delta), 0);

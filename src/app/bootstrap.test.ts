@@ -266,6 +266,38 @@ describe('startApp', () => {
     const ctx = doc.getElementById('app-context')?.textContent ?? '';
     expect(ctx).toBe('Protocol v1');
   });
+
+  test('#/edit で自動保存ステータスだけ変わった setState は edit ビュー全体を描き直さない', () => {
+    const doc = buildDocument();
+    const store = createStore({
+      ...INITIAL_STATE,
+      route: 'edit',
+      project: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'd', title: 'T' },
+      currentFormulaVersionId: 'v1',
+      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 asthma[tiab]\n```\n',
+    });
+    startApp(doc, { ...noopHashOptions('#/edit'), store });
+    const content = doc.getElementById('app-content')!;
+    const rowBefore = content.querySelector('.edit__block-row[data-block-id="1"]')!;
+    expect(rowBefore).toBeTruthy();
+
+    // 自動保存ステータスだけを更新する setState。構造的入力は不変なので全体は描き直されない。
+    store.setState((s) => ({
+      ...s,
+      editAutoSave: { status: 'saving', message: '自動保存中…' },
+    }));
+    // ブロック行の DOM ノードは作り直されず同一のまま。
+    expect(content.querySelector('.edit__block-row[data-block-id="1"]')).toBe(rowBefore);
+    // ステータス行だけが差分更新される。
+    expect(content.querySelector('.edit__autosave')?.textContent).toBe('自動保存中…');
+
+    // 検索式そのものが変わる setState は従来どおり全体を描き直す（行ノードが変わる）。
+    store.setState((s) => ({
+      ...s,
+      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 wheeze[tiab]\n```\n',
+    }));
+    expect(content.querySelector('.edit__block-row[data-block-id="1"]')).not.toBe(rowBefore);
+  });
 });
 
 describe('startApp - wiring 層', () => {

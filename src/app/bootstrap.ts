@@ -84,6 +84,7 @@ import {
 } from './router';
 import { createStore, type AppState, type AppStore, type EditAutoSaveState } from './store';
 import { buildViews, type BuildViewsOptions, type ViewContext } from './views';
+import { syncEditAutoSaveStatus } from './views/editView';
 import { formatDraftProgress, formatValidationProgress } from './views/draftView';
 import { formatFormulaVersionShort } from './views/formatHelpers';
 
@@ -160,6 +161,9 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
     settingsLinkBtn.addEventListener('click', () => navigate('settings'));
   }
 
+  // 直近に描画した state。edit ビューを「構造的入力が変わっていない setState（自動保存ステータス・
+  // LLM コスト集計など）」では描き直さず、ステータス行だけ差分更新するための比較元。
+  let lastRendered: AppState | null = null;
   const render = (): void => {
     const route = parseRoute(opts.getHash());
     if (route !== store.getState().route) {
@@ -182,11 +186,22 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
         // ハッシュ直変更や外部導線から未達ルートに入った場合の防御。
         // views[route] を描画せずに、理由を明示したプレースホルダを出す。
         renderGuardedPlaceholder(content as HTMLElement, route, guard.reason);
+      } else if (
+        route === 'edit' &&
+        lastRendered !== null &&
+        lastRendered.route === 'edit' &&
+        canSkipEditFullRender(lastRendered, snapshot)
+      ) {
+        // edit ビューの構造的入力（プロジェクト・検索式 md・バージョン・ブロック）が不変。
+        // 自動保存ステータスや LLM コスト集計の setState で全体を描き直すと、進行中の MeSH ツリー
+        // 取得・件数計測・インスペクタ展開・手編集が巻き戻るため、ステータス行だけ差分更新する。
+        syncEditAutoSaveStatus(content as HTMLElement, snapshot.editAutoSave);
       } else {
         const ctx: ViewContext = { state: snapshot, navigate };
         views[route](content as HTMLElement, ctx);
       }
     }
+    lastRendered = snapshot;
   };
 
   // 起動時に chrome.storage から currentProject を取り込む（runtime が無い場合はスキップ）。
@@ -208,6 +223,22 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
       unsubscribe();
     },
   };
+}
+
+/**
+ * edit ビューを「全体描き直しせずステータス行だけ差分更新」してよいかを判定する。
+ *
+ * edit ビューの描画が依存する構造的入力（プロジェクト識別子・検索式 md・FormulaVersions の
+ * version_id・ブロックドラフト）がすべて前回描画時と同一なら、変わったのは自動保存ステータスや
+ * LLM コスト集計など edit の DOM 構造に影響しない state だけなので、全体再描画を省ける。
+ */
+function canSkipEditFullRender(prev: AppState, next: AppState): boolean {
+  return (
+    (prev.project?.projectId ?? null) === (next.project?.projectId ?? null) &&
+    prev.currentFormulaMarkdown === next.currentFormulaMarkdown &&
+    prev.currentFormulaVersionId === next.currentFormulaVersionId &&
+    prev.blocksDraft === next.blocksDraft
+  );
 }
 
 /**

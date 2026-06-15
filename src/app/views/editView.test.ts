@@ -492,6 +492,69 @@ describe('createEditView - 結合行のシード捕捉確認', () => {
     view(container, { state: stateReadyFull, navigate: jest.fn() });
     expect(blockRow(container, '3').querySelector('.edit__combo-check-btn')).toBeNull();
   });
+
+  test('同一 md の無関係な再描画では再検索しない（初回結果を再利用）', async () => {
+    const onCheckCombination = jest.fn().mockResolvedValue(makeResult());
+    const view = createEditView({ onCheckCombination });
+    const container = buildContainer();
+    const ctx = { state: stateReadyFull, navigate: jest.fn() };
+    view(container, ctx);
+    await flushAsync();
+    await flushAsync();
+    expect(onCheckCombination).toHaveBeenCalledTimes(1);
+    // 同じ state での全ビュー再描画（setState 相当）。md は変わっていないので再検索しない。
+    view(container, ctx);
+    await flushAsync();
+    expect(onCheckCombination).toHaveBeenCalledTimes(1);
+    // 結果はそのまま描画されている（「検索中…」へ戻らない）。
+    expect(blockRow(container, '3').querySelector('.edit__combo-check-result')?.className).toContain(
+      'edit__combo-check-result--ok'
+    );
+  });
+
+  test('編集後は古い結果を「再確認中」で残し、debounce 後に最新だけ検索する', async () => {
+    jest.useFakeTimers();
+    // fake timer 下でも promise の連鎖を確実に解決するため、microtask を多めに流す。
+    const flushMicro = async (): Promise<void> => {
+      for (let i = 0; i < 6; i += 1) {
+        await Promise.resolve();
+      }
+    };
+    try {
+      const onCheckCombination = jest.fn().mockResolvedValue(makeResult());
+      const view = createEditView({ onCheckCombination, onAutoSave: jest.fn() });
+      const container = buildContainer();
+      view(container, { state: stateReadyFull, navigate: jest.fn() });
+      // 初回は即時実行（debounce なし）。
+      await flushMicro();
+      expect(onCheckCombination).toHaveBeenCalledTimes(1);
+
+      // #1 を編集 → 結合行が作り直され、古い結果を残したまま「再確認中」になる。
+      blockRow(container, '1')
+        .querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!
+        .click();
+      const input = blockRow(container, '1').querySelector<HTMLTextAreaElement>(
+        '.edit__block-edit-input'
+      )!;
+      input.value = '"Asthma"[Mesh]';
+      blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-edit-save')!.click();
+      // 直後は古い結果（--ok）＋「再確認中」が出ており、まだ再検索していない。
+      const combo = blockRow(container, '3').querySelector('.edit__combo-check-result')!;
+      expect(combo.className).toContain('edit__combo-check-result--rechecking');
+      expect(combo.querySelector('.edit__combo-check-rechecking')).toBeTruthy();
+      expect(onCheckCombination).toHaveBeenCalledTimes(1);
+
+      // debounce 経過で最新 md（1 回だけ）を検索する。
+      jest.advanceTimersByTime(500);
+      await flushMicro();
+      expect(onCheckCombination).toHaveBeenCalledTimes(2);
+      expect(onCheckCombination).toHaveBeenLastCalledWith(
+        expect.stringContaining('#1 "Asthma"[Mesh]')
+      );
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });
 
 describe('createEditView - 鉛筆インライン編集', () => {

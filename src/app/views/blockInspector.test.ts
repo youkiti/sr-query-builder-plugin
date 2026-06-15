@@ -20,6 +20,7 @@ function baseParams(over: Partial<BlockInspectorParams> = {}): BlockInspectorPar
     meshTreeCache: new Map(),
     meshChildrenCache: new Map(),
     meshLabelCache: new Map(),
+    freewordDeltaCache: new Map(),
     meshExpandedState: new Map(),
     ...over,
   };

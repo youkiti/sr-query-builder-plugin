@@ -8,10 +8,10 @@ import {
   type SaveEditedFormulaResult,
 } from '@/app/services';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
-import type { MeshTreeEntry } from '@/features/validation';
+import type { FreewordDeltaResult, MeshTreeEntry } from '@/features/validation';
 import type { MeshTreeNode } from '@/lib/ncbi';
 import { ROUTE_LABELS } from '../router';
-import type { BlocksDraft } from '../store';
+import type { BlocksDraft, EditAutoSaveState } from '../store';
 import { buildBlockInspector, type SiblingBlock } from './blockInspector';
 import {
   buildLegend,
@@ -87,6 +87,39 @@ export interface EditViewCallbacks {
 }
 
 /**
+ * #/edit の自動保存ステータス行（`.edit__autosave`）を冪等に同期する。
+ *
+ * edit ビューの初回描画でも、bootstrap からの「ステータスだけ部分更新」でも同じ関数を通すことで、
+ * 自動保存の状態変化（saving / saved / error）で edit ビュー全体を描き直さずにこの 1 行だけ
+ * 差し替えられる。
+ * - state が null なら既存行を消す
+ * - state があれば既存行を更新（無ければ `.edit__lead` の直後に作る）
+ */
+export function syncEditAutoSaveStatus(
+  container: HTMLElement,
+  state: EditAutoSaveState | null
+): void {
+  const doc = container.ownerDocument;
+  let el = container.querySelector<HTMLElement>('.edit__autosave');
+  if (!state) {
+    el?.remove();
+    return;
+  }
+  if (!el) {
+    el = doc.createElement('p');
+    el.setAttribute('aria-live', 'polite');
+    const lead = container.querySelector('.edit__lead');
+    if (lead && lead.parentElement === container) {
+      lead.after(el);
+    } else {
+      container.appendChild(el);
+    }
+  }
+  el.className = `edit__autosave edit__autosave--${state.status}`;
+  el.textContent = state.message;
+}
+
+/**
  * ブロック描画に必要な周辺情報。
  * - blocksDraft: `#N` が何の概念ブロックかを示すラベル解決に使う
  * - hitsCache: 同じ式を再計測しないための式→件数キャッシュ（view インスタンスで共有）
@@ -96,12 +129,20 @@ interface BlockRenderContext {
   hitsCache: Map<string, Promise<number>>;
   /** 結合行チェックの md→結果キャッシュ（同一 md の重複 esearch を防ぐ） */
   comboCache: Map<string, Promise<CombinationCheckResult>>;
+  /**
+   * 結合行チェックの debounce / stale 表示の状態（view インスタンスで持ち越す）。
+   * 結合行は編集のたびに作り直されるが、直近の結果・最新 md・debounce タイマーを行の外で
+   * 保持することで、編集直後は古い結果を「再確認中」として残しつつ、最新 md だけを遅延検索する。
+   */
+  comboCheck: ComboCheckState;
   /** インスペクタ MeSH ツリーの descriptor 群→tree entries キャッシュ */
   meshTreeCache: Map<string, Promise<MeshTreeEntry[]>>;
   /** MeSH ブラウザの tree number→子ノード キャッシュ */
   meshChildrenCache: Map<string, Promise<MeshTreeNode[]>>;
   /** MeSH ブラウザの tree number 群→ラベル Map キャッシュ */
   meshLabelCache: Map<string, Promise<Map<string, MeshTreeNode>>>;
+  /** フリーワード Δ の語集合→結果キャッシュ（再表示時の再計算・ちらつき防止） */
+  freewordDeltaCache: Map<string, Promise<FreewordDeltaResult>>;
   /** MeSH ブラウザの展開状態（blockId→展開済み tree number 集合）。再描画をまたいで保持 */
   meshExpandedState: Map<string, Set<string>>;
   /**
@@ -123,6 +164,19 @@ interface BlockRenderContext {
    */
   refreshPanel: (blockId: string) => void;
 }
+
+/** 結合行チェックの debounce / stale 表示の状態。 */
+interface ComboCheckState {
+  /** 直近に取得できた結果（stale 表示に使う）。未取得なら null */
+  lastResult: CombinationCheckResult | null;
+  /** lastResult を取得したときの md（現在の md と異なれば「再確認中」表示にする） */
+  lastMd: string | null;
+  /** debounce 中のタイマー。次の編集で張り直す（最新 md だけを検索するため） */
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
+/** 結合行チェックの編集後 debounce の待ち時間（ms）。 */
+const COMBO_CHECK_DEBOUNCE_MS = 500;
 
 /** ブロック単位 AI 改善パネルの状態（再描画をまたいで保持する）。 */
 type AiPanelState =
@@ -178,11 +232,15 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
   const hitsCache = new Map<string, Promise<number>>();
   // 結合行チェックの結果も view インスタンスで持ち越す（同一 md なら自動再実行でも再 esearch しない）。
   const comboCache = new Map<string, Promise<CombinationCheckResult>>();
+  // 結合行チェックの debounce / stale 表示の状態も view インスタンスで持ち越す。
+  const comboCheck: ComboCheckState = { lastResult: null, lastMd: null, timer: null };
   // インスペクタの MeSH ツリー取得結果も view インスタンスで持ち越す。
   const meshTreeCache = new Map<string, Promise<MeshTreeEntry[]>>();
   // MeSH ブラウザの子ノード / ラベル逆引きも view インスタンスで持ち越す。
   const meshChildrenCache = new Map<string, Promise<MeshTreeNode[]>>();
   const meshLabelCache = new Map<string, Promise<Map<string, MeshTreeNode>>>();
+  // フリーワード Δ の結果も view インスタンスで持ち越す（語集合が同じなら再計算しない）。
+  const freewordDeltaCache = new Map<string, Promise<FreewordDeltaResult>>();
   // MeSH ブラウザの展開状態も view インスタンスで持ち越す（置換/追加の再描画をまたぐ）。
   const meshExpandedState = new Map<string, Set<string>>();
   // store.setState による全ビュー再描画をまたいで保持する「作業中の md」。
@@ -243,14 +301,9 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
 
     // 動的保存（上書き）の状態行。実際の保存実行・多重制御は bootstrap が担い、
     // 状態は store.editAutoSave に入る（保存完了の setState による再描画でも表示が残るよう、
-    // draftRun などと同じく store 経由で描画する）。
-    if (ctx.state.editAutoSave) {
-      const autoSaveStatus = doc.createElement('p');
-      autoSaveStatus.className = `edit__autosave edit__autosave--${ctx.state.editAutoSave.status}`;
-      autoSaveStatus.setAttribute('aria-live', 'polite');
-      autoSaveStatus.textContent = ctx.state.editAutoSave.message;
-      container.appendChild(autoSaveStatus);
-    }
+    // draftRun などと同じく store 経由で描画する）。bootstrap はこの行だけを差分更新して、
+    // 自動保存ステータスの変化で edit ビュー全体を描き直さずに済むよう、同じ同期関数を使う。
+    syncEditAutoSaveStatus(container, ctx.state.editAutoSave);
 
     // 内部状態。テキストエリアは表示せず、closure の workingMd を単一の真実とする。
     const editor: FormulaEditor = {
@@ -329,9 +382,11 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
       blocksDraft: ctx.state.blocksDraft,
       hitsCache,
       comboCache,
+      comboCheck,
       meshTreeCache,
       meshChildrenCache,
       meshLabelCache,
+      freewordDeltaCache,
       meshExpandedState,
       aiPanels,
       openEditPanels,
@@ -524,6 +579,7 @@ function buildBlockRow(
       meshTreeCache: renderCtx.meshTreeCache,
       meshChildrenCache: renderCtx.meshChildrenCache,
       meshLabelCache: renderCtx.meshLabelCache,
+      freewordDeltaCache: renderCtx.freewordDeltaCache,
       meshExpandedState: renderCtx.meshExpandedState,
     });
   };
@@ -661,11 +717,9 @@ function buildBlockRow(
   header.addEventListener('click', rowToggleHandler);
   currentPre.addEventListener('click', rowToggleHandler);
 
-  // 結合行には最終検索式の実検索 + シード捕捉確認を付ける（表示時・編集後に自動実行）。
+  // 結合行には最終検索式の実検索 + シード捕捉確認を付ける（表示時は自動、編集後は debounce）。
   if (isCombination && callbacks.onCheckCombination) {
-    li.appendChild(
-      buildCombinationCheck(doc, editor, callbacks.onCheckCombination, renderCtx.comboCache)
-    );
+    li.appendChild(buildCombinationCheck(doc, editor, callbacks.onCheckCombination, renderCtx));
   }
 
   return li;
@@ -674,17 +728,21 @@ function buildBlockRow(
 /**
  * 結合行（最終検索式）用の「検索 + シード捕捉確認」UI。
  *
- * 概念ブロックのヒット数バッジと同じく、**表示時に自動実行**する。編集でブロック一覧が
- * 再描画されるたびにこの UI も作り直されるので、その都度「新しい md」で自動的に再確認される
- * （= 表示時 + 編集後に自動）。同一 md の重複 esearch は md→結果キャッシュで防ぐ。
- * 「再検索」ボタンはキャッシュを無視して明示的に取り直すための手段として残す。
+ * **初回表示は即時実行**、**編集後は debounce**（既定 500ms）して最新 md だけを検索する。
+ * 結合行は編集のたびに作り直されるが、直近結果・最新 md・debounce タイマーは view インスタンス
+ * （renderCtx.comboCheck）で保持するので、編集直後は**古い結果を「再確認中」として残したまま**、
+ * レンダリングとネットワーク待ちを切り離せる。同一 md なら再検索しない（無関係な setState 再描画で
+ * 重複 esearch が走らない）。「再検索」ボタンは debounce を飛ばし、キャッシュを無視して取り直す。
  */
 function buildCombinationCheck(
   doc: Document,
   editor: FormulaEditor,
   onCheckCombination: NonNullable<EditViewCallbacks['onCheckCombination']>,
-  cache: Map<string, Promise<CombinationCheckResult>>
+  renderCtx: BlockRenderContext
 ): HTMLElement {
+  const cache = renderCtx.comboCache;
+  const state = renderCtx.comboCheck;
+
   const wrap = doc.createElement('div');
   wrap.className = 'edit__combo-check';
 
@@ -692,7 +750,7 @@ function buildCombinationCheck(
   btn.type = 'button';
   btn.className = 'edit__combo-check-btn';
   btn.textContent = '再検索';
-  btn.title = '結合行を検索し直してシード捕捉を再確認します（表示時と編集後は自動で実行されます）。';
+  btn.title = '結合行を検索し直してシード捕捉を再確認します（表示時は自動、編集後は少し待ってから自動実行されます）。';
   wrap.appendChild(btn);
 
   const result = doc.createElement('div');
@@ -700,12 +758,22 @@ function buildCombinationCheck(
   result.setAttribute('aria-live', 'polite');
   wrap.appendChild(result);
 
-  /** force=true でキャッシュを無視して取り直す。false なら同一 md のキャッシュを再利用。 */
-  function run(force: boolean): void {
-    const md = editor.getMd();
+  /** 現在の状態を result に描く。md が直近結果と異なれば古い結果を残しつつ「再確認中」を重ねる。 */
+  const renderCurrent = (md: string): void => {
+    if (state.lastResult !== null && state.lastMd !== null) {
+      renderCombinationResult(doc, result, state.lastResult);
+      if (state.lastMd !== md) {
+        markRechecking(doc, result);
+      }
+    } else {
+      result.className = 'edit__combo-check-result edit__combo-check-result--pending';
+      result.textContent = '検索中…';
+    }
+  };
+
+  /** 実際に検索して結果を反映する。force=true でキャッシュ無視。成功時は直近結果を更新する。 */
+  const fetchAndRender = (md: string, force: boolean): void => {
     btn.disabled = true;
-    result.className = 'edit__combo-check-result edit__combo-check-result--pending';
-    result.textContent = '検索中…';
     let pending = force ? undefined : cache.get(md);
     if (!pending) {
       // 呼び出しは microtask に逃がし、同期 throw も reject として扱えるようにする。
@@ -716,22 +784,65 @@ function buildCombinationCheck(
     }
     pending
       .then((res) => {
-        renderCombinationResult(doc, result, res);
+        state.lastResult = res;
+        state.lastMd = md;
+        // 作り直し前の古い result 要素には描かない（最新の行だけ更新する）。
+        if (result.isConnected) {
+          renderCombinationResult(doc, result, res);
+        }
       })
       .catch((err: unknown) => {
-        result.className = 'edit__combo-check-result edit__combo-check-result--error';
-        result.textContent = `確認に失敗しました: ${formatError(err)}`;
+        if (result.isConnected) {
+          result.className = 'edit__combo-check-result edit__combo-check-result--error';
+          result.textContent = `確認に失敗しました: ${formatError(err)}`;
+        }
       })
       .finally(() => {
         btn.disabled = false;
       });
+  };
+
+  /** 編集後の debounce。既存タイマーを張り直し、最新 md だけを検索する。 */
+  const scheduleDebounced = (md: string): void => {
+    if (state.timer !== null) {
+      clearTimeout(state.timer);
+    }
+    state.timer = setTimeout(() => {
+      state.timer = null;
+      fetchAndRender(md, false);
+    }, COMBO_CHECK_DEBOUNCE_MS);
+  };
+
+  btn.addEventListener('click', () => {
+    if (state.timer !== null) {
+      clearTimeout(state.timer);
+      state.timer = null;
+    }
+    fetchAndRender(editor.getMd(), true);
+  });
+
+  const md = editor.getMd();
+  renderCurrent(md);
+  if (state.lastMd === md && state.lastResult !== null) {
+    // 既に最新の結果がある（無関係な再描画）。再検索しない。
+  } else if (state.lastMd === null && state.lastResult === null) {
+    // 初回表示は待たせず即時実行する。
+    fetchAndRender(md, false);
+  } else {
+    // 編集で md が変わった: 古い結果を「再確認中」で残しつつ debounce して最新だけ検索する。
+    scheduleDebounced(md);
   }
 
-  btn.addEventListener('click', () => run(true));
-  // 表示時に自動実行（編集による再描画のたびに、新しい md で自動的に再確認される）。
-  run(false);
-
   return wrap;
+}
+
+/** stale な結合行チェック結果に「再確認中…」を重ねる（古い結果は残す）。 */
+function markRechecking(doc: Document, result: HTMLElement): void {
+  result.classList.add('edit__combo-check-result--rechecking');
+  const badge = doc.createElement('p');
+  badge.className = 'edit__combo-check-rechecking';
+  badge.textContent = '🔄 再確認中…（最新の検索式で再計算しています）';
+  result.insertBefore(badge, result.firstChild);
 }
 
 /** 結合行チェック結果（総ヒット数・捕捉率・捕捉/未捕捉 PMID）を描画する。 */
