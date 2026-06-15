@@ -9,8 +9,10 @@ import { listSeedPapers, listSeedPapersWithRows } from '@/features/seeds';
 import {
   analyzeFreewordDelta,
   checkFinalQuery,
+  isMeshCheckTag,
   type FinalQueryResult,
 } from '@/features/validation';
+import { efetchArticles } from '@/lib/ncbi';
 import { isSeedEligibleForValidation } from '@/domain/seedPaper';
 import type { FormulaVersion } from '@/domain/formulaVersion';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
@@ -281,6 +283,16 @@ export interface SeedContextEntry {
   /** include / maybe / initial 等。対話拡張で追加されたものは source=interactive */
   decision: string;
   source: 'initial' | 'interactive';
+  /**
+   * この論文に付与された MeSH 記述子（チェックタグ除外済み）。efetch 失敗・eutils 未注入なら空配列。
+   * AI が「どの索引語を式へ足せば seed に当たるか」を判断する材料。
+   */
+  meshHeadings: string[];
+  /**
+   * アブストラクト抜粋（冒頭 MAX_SEED_ABSTRACT_CHARS 字で切り詰め済み）。
+   * 抄録なし・efetch 失敗・eutils 未注入なら null。本文に出る同義語の根拠。
+   */
+  abstract: string | null;
 }
 
 /** 直近の検証で得た捕捉情報（現バージョンの結果のみ）。 */
@@ -342,6 +354,10 @@ export interface BlockImprovementContext {
 const MAX_SEED_CONTEXT = 40;
 /** captured / missed PMID の表示上限 */
 const MAX_PMID_CONTEXT = 50;
+/** seed 1 件あたりのアブストラクト同梱量（冒頭からの最大文字数）。トークン肥大化対策 */
+const MAX_SEED_ABSTRACT_CHARS = 500;
+/** seed 1 件あたりの MeSH 記述子の最大数（チェックタグ除外後） */
+const MAX_SEED_MESH = 25;
 
 export interface BlockImprovementContextDeps {
   store: AppStore;
@@ -351,6 +367,11 @@ export interface BlockImprovementContextDeps {
    * 同じ計測を共有するため、bootstrap が同一キャッシュ越しに注入する。未注入なら currentHits=null。
    */
   countHits?: (expression: string) => Promise<number>;
+  /**
+   * seed PMID から MeSH・アブストラクトを取得するための E-utilities 依存。
+   * 未注入なら seed の meshHeadings は空・abstract は null になる（改善自体は続行）。
+   */
+  eutils?: EutilsDeps;
 }
 
 /**
@@ -485,7 +506,10 @@ async function collectCurrentHits(
 /**
  * SeedPapers タブから「検証対象になりうる」シード（include / 初期未判定）を取り出し、
  * 対話拡張で追加された interactive シードも含めて文脈用エントリに整形する。
+ * eutils が注入されていれば各 seed の MeSH・アブストラクト抜粋も付与する
+ * （どの索引語・同義語を式へ足せば seed に当たるかの判断材料）。
  * Sheets 読み取りに失敗しても改善自体は続けたいので、その場合は空配列を返す。
+ * efetch（MeSH/abstract 取得）に失敗しても seed の基本情報だけで続行する。
  */
 async function collectSeedContext(
   deps: BlockImprovementContextDeps
@@ -500,16 +524,74 @@ async function collectSeedContext(
   } catch {
     return [];
   }
-  return rows
+  const eligible = rows
     .map((r) => r.seed)
     .filter((s) => isSeedEligibleForValidation(s) && s.pmid !== null)
-    .slice(0, MAX_SEED_CONTEXT)
-    .map((s) => ({
-      pmid: s.pmid as string,
+    .slice(0, MAX_SEED_CONTEXT);
+
+  // eutils が注入されていれば MeSH・アブストラクトを一括取得する。失敗時は空 Map で続行。
+  const enrichment = await fetchSeedEnrichment(
+    eligible.map((s) => s.pmid as string),
+    deps.eutils
+  );
+
+  return eligible.map((s) => {
+    const pmid = s.pmid as string;
+    const extra = enrichment.get(pmid);
+    return {
+      pmid,
       title: s.title ?? '(タイトル不明)',
       decision: s.userDecision ?? '(未判定)',
       source: s.source,
-    }));
+      meshHeadings: extra?.meshHeadings ?? [],
+      abstract: extra?.abstract ?? null,
+    };
+  });
+}
+
+/**
+ * seed PMID 群を efetch し、PMID → {MeSH（チェックタグ除外・上限あり） / アブストラクト抜粋} の
+ * Map を返す。eutils 未注入・PMID 空・取得失敗のいずれでも空 Map を返し、呼び出し側は基本情報だけで続行する。
+ */
+async function fetchSeedEnrichment(
+  pmids: string[],
+  eutils: EutilsDeps | undefined
+): Promise<Map<string, { meshHeadings: string[]; abstract: string | null }>> {
+  const map = new Map<string, { meshHeadings: string[]; abstract: string | null }>();
+  if (eutils === undefined || pmids.length === 0) {
+    return map;
+  }
+  let articles;
+  try {
+    articles = await efetchArticles(pmids, eutils);
+  } catch {
+    return map;
+  }
+  for (const article of articles) {
+    const meshHeadings = article.meshHeadings
+      .filter((descriptor) => !isMeshCheckTag(descriptor))
+      .slice(0, MAX_SEED_MESH);
+    map.set(article.pmid, {
+      meshHeadings,
+      abstract: truncateAbstract(article.abstract),
+    });
+  }
+  return map;
+}
+
+/** アブストラクトを冒頭 MAX_SEED_ABSTRACT_CHARS 字へ切り詰める。空・null は null。 */
+function truncateAbstract(abstract: string | null): string | null {
+  if (abstract === null) {
+    return null;
+  }
+  const trimmed = abstract.trim();
+  if (trimmed === '') {
+    return null;
+  }
+  if (trimmed.length <= MAX_SEED_ABSTRACT_CHARS) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, MAX_SEED_ABSTRACT_CHARS)}…`;
 }
 
 /**
@@ -549,6 +631,8 @@ export interface BlockImprovementDeps {
   llmFactory: LlmProviderFactory;
   /** 概念ブロックの式を実検索してヒット数を返す（esearch count）。未注入なら currentHits は省略。 */
   countHits?: (expression: string) => Promise<number>;
+  /** seed の MeSH・アブストラクト取得用。未注入なら seed 文脈は基本情報のみになる。 */
+  eutils?: EutilsDeps;
 }
 
 /**
@@ -573,6 +657,7 @@ export async function requestBlockImprovement(
     store: deps.store,
     google: deps.google,
     countHits: deps.countHits,
+    eutils: deps.eutils,
   });
   if (context === null) {
     throw new Error(`ブロック #${input.blockId} が見つかりません`);
@@ -592,6 +677,8 @@ export async function requestBlockImprovement(
         pmid: s.pmid,
         title: s.title,
         decision: s.decision,
+        meshHeadings: s.meshHeadings,
+        abstract: s.abstract,
       })),
       validation: context.validation,
     },

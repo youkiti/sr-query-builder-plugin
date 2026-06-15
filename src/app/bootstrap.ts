@@ -461,12 +461,17 @@ function buildDefaultViewOptions(
         input: RequestBlockImprovementInput
       ): Promise<BlockImprovementResult> =>
         runImproveBlock(store, runtime, llmFactoryDepsBase(), countBlockHits, input),
-      onGetImproveContext: (blockId: string): Promise<BlockImprovementContext | null> =>
-        getBlockImprovementContext(blockId, {
+      onGetImproveContext: async (
+        blockId: string
+      ): Promise<BlockImprovementContext | null> => {
+        const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
+        return getBlockImprovementContext(blockId, {
           store,
           google: runtime.google,
           countHits: countBlockHits,
-        }),
+          eutils,
+        });
+      },
       onCountHits: (expression: string): Promise<number> => countBlockHits(expression),
       onFetchMeshTrees: async (descriptors: string[]): Promise<MeshTreeEntry[]> => {
         const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
@@ -589,11 +594,13 @@ async function runImproveBlock(
     llmLogFolderId: project.driveFolderId,
     spreadsheetId: project.spreadsheetId,
   });
+  const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
   return requestBlockImprovement(input, {
     store,
     google: runtime.google,
     llmFactory: factory,
     countHits,
+    eutils,
   });
 }
 

@@ -615,14 +615,86 @@ describe('getBlockImprovementContext', () => {
     expect(ctx!.researchQuestion).toBe('RQ');
     expect(ctx!.blockLabel).toBe('Population');
     expect(ctx!.currentExpression).toBe('asthma[tiab]');
+    // eutils 未注入なので MeSH・abstract は空のまま（基本情報だけで続行）
     expect(ctx!.seedPapers).toEqual([
-      { pmid: '111', title: 'Seed A', decision: 'include', source: 'initial' },
+      {
+        pmid: '111',
+        title: 'Seed A',
+        decision: 'include',
+        source: 'initial',
+        meshHeadings: [],
+        abstract: null,
+      },
     ]);
     expect(ctx!.validation).toEqual({
       captureRate: 0.5,
       capturedPmids: ['111'],
       missedPmids: ['222'],
     });
+  });
+
+  test('eutils 注入時は seed の MeSH（チェックタグ除外）と抄録抜粋を付与する', async () => {
+    const store = createStore(makeState({ currentFormulaMarkdown: VALID_MD }));
+    const google = seedsGoogle([
+      { pmid: '111', title: 'Seed A', source: 'initial', is_valid: 'true', user_decision: 'include' },
+    ]);
+    const efetchXml = [
+      '<?xml version="1.0"?>',
+      '<PubmedArticleSet><PubmedArticle><MedlineCitation>',
+      '<PMID>111</PMID>',
+      '<Article><ArticleTitle>Seed A</ArticleTitle>',
+      '<Abstract><AbstractText>Wheezing is a hallmark of asthma.</AbstractText></Abstract>',
+      '</Article>',
+      '<MeshHeadingList>',
+      '<MeshHeading><DescriptorName>Asthma</DescriptorName></MeshHeading>',
+      '<MeshHeading><DescriptorName>Humans</DescriptorName></MeshHeading>',
+      '</MeshHeadingList>',
+      '</MedlineCitation></PubmedArticle></PubmedArticleSet>',
+    ].join('');
+    const efetchFetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => efetchXml,
+    } as unknown as Response);
+    const ctx = await getBlockImprovementContext('1', {
+      store,
+      google,
+      eutils: { fetch: efetchFetch as unknown as typeof fetch, sleep: async () => undefined, maxRetries: 0 },
+    });
+    expect(ctx!.seedPapers).toEqual([
+      {
+        pmid: '111',
+        title: 'Seed A',
+        decision: 'include',
+        source: 'initial',
+        // Humans はチェックタグなので除外される
+        meshHeadings: ['Asthma'],
+        abstract: 'Wheezing is a hallmark of asthma.',
+      },
+    ]);
+  });
+
+  test('efetch が失敗しても seed の基本情報だけで続行する', async () => {
+    const store = createStore(makeState({ currentFormulaMarkdown: VALID_MD }));
+    const google = seedsGoogle([
+      { pmid: '111', title: 'Seed A', source: 'initial', is_valid: 'true', user_decision: 'include' },
+    ]);
+    const efetchFetch = jest.fn().mockRejectedValue(new Error('efetch down'));
+    const ctx = await getBlockImprovementContext('1', {
+      store,
+      google,
+      eutils: { fetch: efetchFetch as unknown as typeof fetch, sleep: async () => undefined, maxRetries: 0 },
+    });
+    expect(ctx!.seedPapers).toEqual([
+      {
+        pmid: '111',
+        title: 'Seed A',
+        decision: 'include',
+        source: 'initial',
+        meshHeadings: [],
+        abstract: null,
+      },
+    ]);
   });
 
   test('countHits 注入時は概念ブロックの式を計測して currentHits に入れる', async () => {

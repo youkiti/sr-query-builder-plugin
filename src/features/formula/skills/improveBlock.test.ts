@@ -100,7 +100,13 @@ describe('improveBlockExpression', () => {
         researchQuestion: 'RQ',
         userInstruction: '同義語をもっと増やして',
         seedPapers: [
-          { pmid: '111', title: 'Seed A', decision: 'include' },
+          {
+            pmid: '111',
+            title: 'Seed A',
+            decision: 'include',
+            meshHeadings: ['Asthma', 'Respiratory Sounds'],
+            abstract: 'Wheezing is a hallmark of asthma.',
+          },
           { pmid: '222', title: 'Seed B', decision: '(未判定)' },
         ],
         validation: {
@@ -115,6 +121,9 @@ describe('improveBlockExpression', () => {
     expect(userMsg).toContain('同義語をもっと増やして');
     expect(userMsg).toContain('PMID 111 [include]: Seed A');
     expect(userMsg).toContain('PMID 222 [(未判定)]: Seed B');
+    // MeSH・抄録のある seed では同じ項目内に添えられる
+    expect(userMsg).toContain('MeSH: Asthma; Respiratory Sounds');
+    expect(userMsg).toContain('抄録: Wheezing is a hallmark of asthma.');
     expect(userMsg).toContain('捕捉率: 50%');
     expect(userMsg).toContain('取りこぼし PMID: 222');
   });

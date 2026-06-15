@@ -1830,6 +1830,17 @@ a.draft__term--mesh:focus-visible {
   overflow-wrap: anywhere;
 }
 
+.edit__block-ai-context-seeds li + li {
+  margin-top: var(--space-2);
+}
+
+.edit__block-ai-context-seed-mesh,
+.edit__block-ai-context-seed-abstract {
+  margin: var(--space-1) 0 0;
+  font-size: 0.85em;
+  color: var(--color-text-muted);
+}
+
 .edit__block-ai-context-empty,
 .edit__block-ai-context-loading,
 .edit__block-ai-context-validation {

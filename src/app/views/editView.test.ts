@@ -1127,8 +1127,22 @@ describe('createEditView - AI に渡す内容を見る（文脈開示）', () =>
     ],
     freewordDedupTotal: 5800,
     seedPapers: [
-      { pmid: '111', title: 'Seed A', decision: 'include', source: 'initial' },
-      { pmid: '222', title: 'Seed B', decision: 'include', source: 'interactive' },
+      {
+        pmid: '111',
+        title: 'Seed A',
+        decision: 'include',
+        source: 'initial',
+        meshHeadings: ['Asthma', 'Respiratory Sounds'],
+        abstract: 'Wheezing is a common symptom of asthma.',
+      },
+      {
+        pmid: '222',
+        title: 'Seed B',
+        decision: 'include',
+        source: 'interactive',
+        meshHeadings: [],
+        abstract: null,
+      },
     ],
     validation: { captureRate: 0.5, capturedPmids: ['111'], missedPmids: ['222'] },
   };
@@ -1194,6 +1208,16 @@ describe('createEditView - AI に渡す内容を見る（文脈開示）', () =>
     const seeds = row.querySelector('.edit__block-ai-context-seeds')!;
     expect(seeds.textContent).toContain('PMID 111（初期・include）: Seed A');
     expect(seeds.textContent).toContain('PMID 222（対話拡張・include）: Seed B');
+    // MeSH・抄録のある seed では開示にも出る
+    expect(seeds.querySelector('.edit__block-ai-context-seed-mesh')?.textContent).toContain(
+      'MeSH: Asthma; Respiratory Sounds'
+    );
+    expect(seeds.querySelector('.edit__block-ai-context-seed-abstract')?.textContent).toContain(
+      '抄録: Wheezing is a common symptom of asthma.'
+    );
+    // MeSH・抄録の無い seed には行が出ない（2 件中 1 件のみ表示）
+    expect(seeds.querySelectorAll('.edit__block-ai-context-seed-mesh')).toHaveLength(1);
+    expect(seeds.querySelectorAll('.edit__block-ai-context-seed-abstract')).toHaveLength(1);
     expect(row.querySelector('.edit__block-ai-context-validation')?.textContent).toContain(
       '捕捉率 50%'
     );

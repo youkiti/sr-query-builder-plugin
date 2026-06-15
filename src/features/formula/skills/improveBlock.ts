@@ -65,6 +65,16 @@ export interface SeedPaperContext {
   title: string;
   /** include / maybe / initial 等のユーザー判定 */
   decision: string;
+  /**
+   * この論文に PubMed が付与した MeSH 記述子（チェックタグは除外済みの想定）。
+   * どの索引語を式へ補えば seed に当たるかの判断材料。未取得なら空配列。
+   */
+  meshHeadings?: string[];
+  /**
+   * アブストラクト抜粋（呼び出し側で冒頭を切り詰め済み）。本文に出る同義語・表記ゆれの根拠。
+   * 未取得・抄録なしなら null。
+   */
+  abstract?: string | null;
 }
 
 /** 直近の検証捕捉情報。 */
@@ -102,6 +112,10 @@ export const IMPROVE_BLOCK_SYSTEM_PROMPT = `
   ことを重視する。特に「取りこぼし PMID」がある場合は、その論文が引っかかるよう
   同義語・表記ゆれ・MeSH を補って感度を上げる（ただし無関係な語の追加で特異度を
   大きく下げない）。
+- シード論文に MeSH 記述子やアブストラクト抜粋が添えられている場合は、それを根拠に
+  式を補強する。具体的には、複数の seed に共通して付く MeSH をブロックに足す候補にし、
+  アブストラクト本文に現れる表記（同義語・略語・複数形）を tiab 語として補う。
+  推測ではなく seed に実在する語を優先する。
 - 現在のヒット数が与えられた場合は、それを感度・特異度の判断材料にする。極端に少ない
   （取りこぼしの懸念）なら同義語・表記ゆれ・MeSH で感度を上げ、極端に多い（ノイズ過多）
   なら過度に広い語を絞る。rationale では狙いを件数に触れて説明してよい。
@@ -228,13 +242,26 @@ function formatKeywordHits(
   return lines.join('\n');
 }
 
-/** シード論文リストを箇条書きへ整形する。空なら「(なし)」。 */
+/**
+ * シード論文リストを箇条書きへ整形する。空なら「(なし)」。
+ * MeSH 記述子・アブストラクト抜粋があれば、AI が同義語/索引語を拾えるよう同じ項目内に添える。
+ */
 function formatSeeds(seeds: SeedPaperContext[] | undefined): string {
   if (!seeds || seeds.length === 0) {
     return '(なし)';
   }
   return seeds
-    .map((s) => `- PMID ${s.pmid} [${s.decision}]: ${s.title}`)
+    .map((s) => {
+      const lines = [`- PMID ${s.pmid} [${s.decision}]: ${s.title}`];
+      if (s.meshHeadings && s.meshHeadings.length > 0) {
+        lines.push(`    MeSH: ${s.meshHeadings.join('; ')}`);
+      }
+      const abstract = s.abstract?.trim();
+      if (abstract) {
+        lines.push(`    抄録: ${abstract}`);
+      }
+      return lines.join('\n');
+    })
     .join('\n');
 }
 

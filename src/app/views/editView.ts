@@ -1301,7 +1301,23 @@ function buildContextBody(
     for (const seed of seeds) {
       const item = doc.createElement('li');
       const tag = seed.source === 'interactive' ? '対話拡張' : '初期';
-      item.textContent = `PMID ${seed.pmid}（${tag}・${seed.decision}）: ${seed.title}`;
+      const head = doc.createElement('span');
+      head.textContent = `PMID ${seed.pmid}（${tag}・${seed.decision}）: ${seed.title}`;
+      item.appendChild(head);
+      // seed の MeSH 記述子（チェックタグ除外済み）。AI に渡る索引語の開示。
+      if (seed.meshHeadings.length > 0) {
+        const mesh = doc.createElement('p');
+        mesh.className = 'edit__block-ai-context-seed-mesh';
+        mesh.textContent = `MeSH: ${seed.meshHeadings.join('; ')}`;
+        item.appendChild(mesh);
+      }
+      // アブストラクト抜粋（冒頭を切り詰め済み）。AI に渡る本文の開示。
+      if (seed.abstract) {
+        const abs = doc.createElement('p');
+        abs.className = 'edit__block-ai-context-seed-abstract';
+        abs.textContent = `抄録: ${seed.abstract}`;
+        item.appendChild(abs);
+      }
       seedList.appendChild(item);
     }
     wrapper.appendChild(seedList);
