@@ -1622,6 +1622,131 @@ a.draft__term--mesh:focus-visible {
   margin: var(--space-1) 0 0;
 }
 
+/* ---- チップ編集（ブロック式そのものを編集面にする） ---------------------- */
+
+/* チップ列。演算子・括弧は地のテキストで残り、語はチップになる */
+.edit__block-chips {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-sm);
+  line-height: 2;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  background: var(--color-surface, #fff);
+  overflow-wrap: break-word;
+}
+
+/* 1 operand のチップ（語 + ✕）。draft__term の色分けを土台に枠を付ける */
+.edit__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 0 1px 0 3px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.edit__chip:hover,
+.edit__chip:focus-within {
+  border-color: var(--color-border);
+}
+
+/* チップ内の語。フリーワードはボタン（クリックで編集）、MeSH はリンク */
+.edit__chip-term {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.edit__chip-term--editable {
+  text-decoration: underline;
+  text-decoration-style: dotted;
+}
+
+.edit__chip-term--editable:hover,
+.edit__chip-term--editable:focus-visible {
+  text-decoration-style: solid;
+}
+
+.edit__chip-term--static {
+  cursor: default;
+}
+
+/* ✕ 削除ボタン。平常は控えめ、hover/focus で目立たせる */
+.edit__chip-remove {
+  font: inherit;
+  line-height: 1;
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  padding: 0 2px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.edit__chip-remove:hover,
+.edit__chip-remove:focus-visible {
+  color: var(--color-danger);
+  background: rgba(214, 69, 69, 0.12);
+}
+
+/* 語のその場編集 input（タグは保持するので語だけ） */
+.edit__chip-input {
+  font: inherit;
+  padding: 0 2px;
+  border: 1px solid var(--color-primary, #2a63d6);
+  border-radius: 3px;
+  min-width: 6ch;
+}
+
+/* 「＋ 語を追加」 */
+.edit__chip-add {
+  margin-left: var(--space-1);
+}
+
+.edit__chip-add-btn {
+  font: inherit;
+  font-size: var(--font-size-sm);
+  color: var(--color-primary, #2a63d6);
+  background: none;
+  border: 1px dashed var(--color-border);
+  border-radius: 4px;
+  padding: 0 var(--space-1);
+  cursor: pointer;
+}
+
+.edit__chip-add-btn:hover,
+.edit__chip-add-btn:focus-visible {
+  background: rgba(42, 99, 214, 0.08);
+}
+
+.edit__chip-add-input {
+  font: inherit;
+  padding: 0 2px;
+  border: 1px solid var(--color-primary, #2a63d6);
+  border-radius: 3px;
+  min-width: 8ch;
+}
+
+/* 生テキスト編集（折りたたみ「詳細編集」） */
+.edit__block-raw {
+  margin: var(--space-2) 0;
+}
+
+.edit__block-raw-summary {
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.edit__block-panel-actions {
+  margin-top: var(--space-1);
+}
+
 /* AI 改善: プロンプト入力フォーム */
 .edit__block-ai-form {
   margin-top: var(--space-2);
@@ -2849,6 +2974,52 @@ a.draft__term--mesh:focus-visible {
 
 .bins__delta-term {
   font-family: var(--font-family-mono);
+}
+
+/* Δ 表: 語クリック編集 / × 削除（onApplyExpression 注入時のみ出る） */
+.bins__delta-term-btn {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+}
+
+.bins__delta-term-btn:hover,
+.bins__delta-term-btn:focus-visible {
+  text-decoration-style: solid;
+}
+
+.bins__delta-input {
+  font-family: var(--font-family-mono);
+  padding: 0 2px;
+  border: 1px solid var(--color-primary);
+  border-radius: 3px;
+  min-width: 8ch;
+}
+
+.bins__delta-actions {
+  text-align: right;
+}
+
+.bins__delta-remove {
+  font: inherit;
+  line-height: 1;
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  padding: 0 2px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.bins__delta-remove:hover,
+.bins__delta-remove:focus-visible {
+  color: var(--color-danger);
+  background: rgba(214, 69, 69, 0.12);
 }
 
 .bins__delta-individual,

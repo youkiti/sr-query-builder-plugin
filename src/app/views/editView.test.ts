@@ -227,6 +227,89 @@ describe('createEditView - ブロック名・MeSH リンク・ヒット数', () 
   });
 });
 
+describe('createEditView - チップ編集（フリーワード）', () => {
+  const FREEWORD_MD = [
+    '## PubMed/MEDLINE',
+    '',
+    '```',
+    '#1 asthma[tiab] OR wheez[tiab]',
+    '#2 children[tiab]',
+    '#3 #1 AND #2',
+    '```',
+    '',
+  ].join('\n');
+  const stateFreeword: AppState = { ...stateReady, currentFormulaMarkdown: FREEWORD_MD };
+
+  function openPanel(container: HTMLElement, id: string): HTMLElement {
+    blockRow(container, id)
+      .querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!
+      .click();
+    return blockRow(container, id);
+  }
+
+  test('概念ブロックを開くとチップ編集面が出て、生テキストは折りたたみに退避する', () => {
+    const view = createEditView({ onAutoSave: jest.fn() });
+    const container = buildContainer();
+    view(container, { state: stateFreeword, navigate: jest.fn() });
+    const row = openPanel(container, '1');
+    expect(row.querySelector('.edit__block-chips')).toBeTruthy();
+    expect(row.querySelectorAll('.edit__chip--freeword')).toHaveLength(2);
+    const details = row.querySelector<HTMLDetailsElement>('details.edit__block-raw')!;
+    expect(details).toBeTruthy();
+    expect(details.open).toBe(false);
+    expect(details.querySelector('.edit__block-edit-input')).toBeTruthy();
+  });
+
+  test('フリーワードの ✕ で語が消え onAutoSave に反映される', () => {
+    const onAutoSave = jest.fn();
+    const view = createEditView({ onAutoSave });
+    const container = buildContainer();
+    view(container, { state: stateFreeword, navigate: jest.fn() });
+    const row = openPanel(container, '1');
+    // 2 つ目（wheez）の ✕ を押す
+    row.querySelectorAll<HTMLButtonElement>('.edit__chip-remove')[1]!.click();
+    expect(onAutoSave).toHaveBeenCalledTimes(1);
+    expect(onAutoSave.mock.calls[0]![0]).toContain('#1 asthma[tiab]');
+    expect(onAutoSave.mock.calls[0]![0]).not.toContain('wheez');
+  });
+
+  test('フリーワードのクリック編集で語だけ差し替わる（タグ保持）', () => {
+    const onAutoSave = jest.fn();
+    const view = createEditView({ onAutoSave });
+    const container = buildContainer();
+    view(container, { state: stateFreeword, navigate: jest.fn() });
+    const row = openPanel(container, '1');
+    row.querySelector<HTMLButtonElement>('.edit__chip-term--editable')!.click();
+    const input = row.querySelector<HTMLInputElement>('.edit__chip-input')!;
+    input.value = 'asthma*';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(onAutoSave.mock.calls[0]![0]).toContain('#1 asthma*[tiab] OR wheez[tiab]');
+  });
+
+  test('「＋ 語を追加」で末尾に tiab 句が足される', () => {
+    const onAutoSave = jest.fn();
+    const view = createEditView({ onAutoSave });
+    const container = buildContainer();
+    view(container, { state: stateFreeword, navigate: jest.fn() });
+    const row = openPanel(container, '1');
+    row.querySelector<HTMLButtonElement>('.edit__chip-add-btn')!.click();
+    const input = row.querySelector<HTMLInputElement>('.edit__chip-add-input')!;
+    input.value = 'cough';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(onAutoSave.mock.calls[0]![0]).toContain('cough[tiab]');
+  });
+
+  test('結合行はチップ編集を出さず、生テキスト編集を開いた状態で出す', () => {
+    const view = createEditView({ onAutoSave: jest.fn() });
+    const container = buildContainer();
+    view(container, { state: stateFreeword, navigate: jest.fn() });
+    const row = openPanel(container, '3');
+    expect(row.querySelector('.edit__block-chips')).toBeNull();
+    const details = row.querySelector<HTMLDetailsElement>('details.edit__block-raw')!;
+    expect(details.open).toBe(true);
+  });
+});
+
 describe('createEditView - 動的保存（上書き）', () => {
   test('インライン編集の反映で onAutoSave が最新 md 付きで呼ばれる', () => {
     const onAutoSave = jest.fn();

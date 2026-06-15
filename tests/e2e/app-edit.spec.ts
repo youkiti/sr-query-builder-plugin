@@ -28,16 +28,37 @@ test.describe('app-edit (#/edit)', () => {
     await expect(page.locator('.edit__actions button')).toHaveText(/履歴に残す/);
   });
 
-  test('鉛筆で手編集と AI 改善フォームが同時に開く', async ({ page }) => {
+  test('鉛筆でチップ編集面と AI 改善フォームが同時に開く', async ({ page }) => {
     await injectAppStub(page, fullStateScenario());
     await page.goto(APP_URL);
     const firstRow = page.locator('.edit__block-row').first();
     await firstRow.locator('.edit__block-edit-toggle').click();
-    // 手編集フォーム
+    // 主編集面は式そのものをチップ化したもの（語の削除 ✕ と「＋ 語を追加」）
+    await expect(firstRow.locator('.edit__block-chips')).toBeVisible();
+    await expect(firstRow.locator('.edit__chip-remove').first()).toBeVisible();
+    await expect(firstRow.locator('.edit__chip-add-btn')).toBeVisible();
+    // 生テキスト編集は折りたたみ「詳細編集」に退避（既定は閉じている）
+    const details = firstRow.locator('details.edit__block-raw');
+    await expect(details).toBeVisible();
+    await expect(firstRow.locator('.edit__block-edit-input')).toBeHidden();
+    await details.locator('summary').click();
     await expect(firstRow.locator('.edit__block-edit-input')).toBeVisible();
     // AI 改善フォーム
     await expect(firstRow.locator('.edit__block-ai-instruction')).toBeVisible();
     await expect(firstRow.locator('.edit__block-ai-submit')).toBeVisible();
+  });
+
+  test('フリーワードチップの ✕ で語が消える', async ({ page }) => {
+    await injectAppStub(page, fullStateScenario());
+    await page.goto(APP_URL);
+    const firstRow = page.locator('.edit__block-row').first();
+    await firstRow.locator('.edit__block-edit-toggle').click();
+    const freewordChips = firstRow.locator('.edit__chip--freeword');
+    const before = await freewordChips.count();
+    test.skip(before === 0, 'このブロックにフリーワードが無いシナリオ');
+    await freewordChips.first().locator('.edit__chip-remove').click();
+    // 再描画後、フリーワードチップが 1 つ減る
+    await expect(firstRow.locator('.edit__chip--freeword')).toHaveCount(before - 1);
   });
 
   test('a11y: axe violation zero', async ({ page }) => {

@@ -189,6 +189,89 @@ describe('buildBlockInspector', () => {
     expect(flags.some((f) => f?.includes('ヒット0'))).toBe(true);
   });
 
+  test('onApplyExpression 注入時、Δ 行に語編集ボタンと × 削除を出す', async () => {
+    const doc = buildDoc();
+    const onCountHits = jest.fn((q: string) => {
+      if (q === 'surgeon*[tiab]') return Promise.resolve(300);
+      if (q === 'neurosurgeon*[tiab]') return Promise.resolve(15);
+      return Promise.resolve(310);
+    });
+    const el = buildBlockInspector(
+      doc,
+      baseParams({
+        expression: 'surgeon*[tiab] OR neurosurgeon*[tiab]',
+        onCountHits,
+        onApplyExpression: jest.fn(),
+      })
+    )!;
+    await flushAsync();
+    const rows = el.querySelectorAll('.bins__delta-row');
+    expect(rows[0]!.querySelector('.bins__delta-term-btn')).toBeTruthy();
+    expect(rows[0]!.querySelector('.bins__delta-remove')).toBeTruthy();
+  });
+
+  test('onApplyExpression 未注入なら Δ 行は静的表示（編集ボタンを出さない）', async () => {
+    const doc = buildDoc();
+    const onCountHits = jest.fn((q: string) => Promise.resolve(q.includes('OR') ? 10 : 5));
+    const el = buildBlockInspector(
+      doc,
+      baseParams({ expression: 'a[tiab] OR b[tiab]', onCountHits })
+    )!;
+    await flushAsync();
+    expect(el.querySelector('.bins__delta-term-btn')).toBeNull();
+    expect(el.querySelector('.bins__delta-remove')).toBeNull();
+  });
+
+  test('Δ 行の × でその語を式から外して onApplyExpression に渡す', async () => {
+    const doc = buildDoc();
+    const onCountHits = jest.fn((q: string) => {
+      if (q === 'surgeon*[tiab]') return Promise.resolve(300);
+      if (q === 'neurosurgeon*[tiab]') return Promise.resolve(15);
+      return Promise.resolve(310);
+    });
+    const onApplyExpression = jest.fn();
+    const el = buildBlockInspector(
+      doc,
+      baseParams({
+        expression: 'surgeon*[tiab] OR neurosurgeon*[tiab]',
+        onCountHits,
+        onApplyExpression,
+      })
+    )!;
+    await flushAsync();
+    // 2 行目（neurosurgeon*）の × を押す
+    const rows = el.querySelectorAll('.bins__delta-row');
+    rows[1]!.querySelector<HTMLButtonElement>('.bins__delta-remove')!.click();
+    expect(onApplyExpression).toHaveBeenCalledWith('surgeon*[tiab]');
+  });
+
+  test('Δ 行の語クリック→編集で語だけ差し替える（タグ保持）', async () => {
+    const doc = buildDoc();
+    const onCountHits = jest.fn((q: string) => {
+      if (q === 'surgeon*[tiab]') return Promise.resolve(300);
+      if (q === 'neurosurgeon*[tiab]') return Promise.resolve(15);
+      return Promise.resolve(310);
+    });
+    const onApplyExpression = jest.fn();
+    const el = buildBlockInspector(
+      doc,
+      baseParams({
+        expression: 'surgeon*[tiab] OR neurosurgeon*[tiab]',
+        onCountHits,
+        onApplyExpression,
+      })
+    )!;
+    await flushAsync();
+    const rows = el.querySelectorAll('.bins__delta-row');
+    // 1 行目（surgeon*）の語を編集
+    rows[0]!.querySelector<HTMLButtonElement>('.bins__delta-term-btn')!.click();
+    const input = rows[0]!.querySelector<HTMLInputElement>('.bins__delta-input')!;
+    expect(input.value).toBe('surgeon*'); // タグを除いた語
+    input.value = 'surgeons*';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(onApplyExpression).toHaveBeenCalledWith('surgeons*[tiab] OR neurosurgeon*[tiab]');
+  });
+
   test('他ブロックと共有する語を重複行で示す', () => {
     const doc = buildDoc();
     const el = buildBlockInspector(

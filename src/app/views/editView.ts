@@ -20,6 +20,8 @@ import {
   renderExpressionInto,
 } from './formulaDisplay';
 import { dedupeOperands, sortOperandsMeshFirst } from './meshExpressionEdit';
+import { renderEditableBlockInto } from './editableBlock';
+import { appendFreeword, removeOperandAt, setOperandTerm } from './operandEdit';
 import type { RenderView } from './types';
 
 /**
@@ -27,8 +29,12 @@ import type { RenderView } from './types';
  *
  * ブロック（`#1`〜）ごとのカードを並べ、各ブロックに対して 2 つの編集手段を提供する:
  *
- * 1. **インライン手編集**: カードにホバー / フォーカスすると鉛筆ボタンが現れ、
- *    クリックでその行を直接書き換えられる。保存すると内部の formula_md を更新する。
+ * 1. **チップ編集（インライン）**: カードにホバー / フォーカスすると鉛筆ボタンが現れ、
+ *    クリックで式そのものを operand 単位のチップに展開する。フリーワードは ✕ で削除・
+ *    クリックで語をその場編集（タグ保持）、MeSH は ✕ で削除（語の付け替えはインスペクタの
+ *    MeSH ツリー）、末尾に「＋ 語を追加」。各操作は内部の formula_md を即時更新する。
+ *    生テキストでの一括編集は折りたたみ「詳細編集（生テキスト）」に退避する（結合行は
+ *    語の概念が無いのでチップを出さず、生テキスト編集を開いた状態で出す）。
  * 2. **ブロック単位 AI 改善（requirements.md §4.7）**: 「AI に改善させる」を押すと
  *    任意の指示文を入力する欄が開き（空でも可）、improve-block skill を実行する。
  *    提案 expression と rationale を diff 表示し、「置き換える」で内部 md に反映する。
@@ -452,6 +458,18 @@ function buildBlockRow(
   renderCtx: BlockRenderContext,
   allBlocks: ReadonlyArray<{ id: string; expression: string; isCombination: boolean }>
 ): HTMLElement {
+  // このブロックの式を書き換えて自動保存へ流す共通アプライ。MeSH ブラウザ（インスペクタ）と
+  // チップ編集（フリーワードの削除・語編集・追加）で同じ正規化を通す。
+  // 適用時に重複句を掃除し（dedupe）、MeSH 句を先・フリーワードを後に並べ替える（sort）。
+  const applyExpression = (next: string): void => {
+    try {
+      const normalized = sortOperandsMeshFirst(dedupeOperands(next));
+      editor.setMd(applyBlockImprovement(editor.getMd(), blockId, normalized));
+    } catch {
+      // 不正な式（空など）は適用しない。
+    }
+  };
+
   // 概念ブロックの編集／AI 改善パネルを開いたときに展開するインスペクタの生成器。
   // 結合行には付けない。callback 未注入時は buildBlockInspector が null を返す。
   const makeInspector = (): HTMLElement | null => {
@@ -467,15 +485,7 @@ function buildBlockRow(
       onFetchMeshChildren: callbacks.onFetchMeshChildren,
       onFetchMeshLabels: callbacks.onFetchMeshLabels,
       // MeSH ブラウザからの追加・削除はこのブロックの式を書き換えて自動保存へ流す。
-      // 適用時に重複句を掃除し（dedupe）、MeSH 句を先・フリーワードを後に並べ替える（sort）。
-      onApplyExpression: (next: string): void => {
-        try {
-          const normalized = sortOperandsMeshFirst(dedupeOperands(next));
-          editor.setMd(applyBlockImprovement(editor.getMd(), blockId, normalized));
-        } catch {
-          // 不正な式（空など）は適用しない。UI 側で空は弾いている。
-        }
-      },
+      onApplyExpression: applyExpression,
       hitsCache: renderCtx.hitsCache,
       meshTreeCache: renderCtx.meshTreeCache,
       meshChildrenCache: renderCtx.meshChildrenCache,
@@ -568,6 +578,8 @@ function buildBlockRow(
       expression,
       editor,
       makeInspector,
+      applyExpression,
+      isCombination,
       focus,
       closeCombinedPanel
     );
@@ -752,7 +764,13 @@ function buildHitsBadge(
 }
 
 /**
- * 鉛筆で開く統合編集パネルの「手編集」部分（テキストエリア + 保存 + インスペクタ）を構築する。
+ * 鉛筆で開く統合編集パネルの「手編集」部分を構築する。
+ *
+ * 主編集面は **ブロック式そのものをチップ化**したもの（フリーワードは ✕ 削除 / クリックで語編集、
+ * MeSH は ✕ 削除、末尾に「＋ 語を追加」）。生テキストでの一括編集は折りたたみ「詳細編集」に
+ * 退避し、ネスト式・貼り付け置換の逃げ道として残す。結合行（`#1 AND #2`）は語の概念が無いので
+ * チップ編集は出さず、生テキスト編集だけを開いた状態で出す。
+ *
  * 「閉じる」は統合パネル全体を畳む onClose に委譲する（手編集と AI 改善を一体で開閉するため）。
  * focus=true のときだけ入力欄へフォーカスする（再描画での復元時は false でフォーカスを奪わない）。
  */
@@ -765,6 +783,8 @@ function openInlineEdit(
   expression: string,
   editor: FormulaEditor,
   makeInspector: () => HTMLElement | null,
+  applyExpression: (next: string) => void,
+  isCombination: boolean,
   focus: boolean,
   onClose: () => void
 ): void {
@@ -772,12 +792,37 @@ function openInlineEdit(
   currentPre.style.display = 'none';
   editToggle.setAttribute('aria-expanded', 'true');
 
+  // 概念ブロックは式をチップ化した主編集面を出す（結合行は語編集の概念が無いので出さない）。
+  if (!isCombination) {
+    const chipForm = doc.createElement('div');
+    chipForm.className = 'edit__block-chip-form';
+    const chipHeading = doc.createElement('p');
+    chipHeading.className = 'edit__block-edit-heading';
+    chipHeading.textContent = '語をクリックで編集・× で削除';
+    chipForm.appendChild(chipHeading);
+    const chips = doc.createElement('div');
+    renderEditableBlockInto(chips, expression, {
+      onRemove: (index) => applyExpression(removeOperandAt(expression, index)),
+      onEditTerm: (index, term) => applyExpression(setOperandTerm(expression, index, term)),
+      onAddFreeword: (term) => applyExpression(appendFreeword(expression, term)),
+    });
+    chipForm.appendChild(chips);
+    slot.appendChild(chipForm);
+  }
+
+  // 生テキストでの一括編集。概念ブロックは折りたたみ（詳細編集）、結合行は開いた状態で出す。
+  const details = doc.createElement('details');
+  details.className = 'edit__block-raw';
+  if (isCombination) {
+    details.open = true;
+  }
+  const summary = doc.createElement('summary');
+  summary.className = 'edit__block-raw-summary';
+  summary.textContent = isCombination ? '手で編集' : '詳細編集（生テキスト）';
+  details.appendChild(summary);
+
   const form = doc.createElement('div');
   form.className = 'edit__block-edit-form';
-  const heading = doc.createElement('p');
-  heading.className = 'edit__block-edit-heading';
-  heading.textContent = '手で編集';
-  form.appendChild(heading);
   const input = doc.createElement('textarea');
   input.className = 'edit__block-edit-input';
   input.rows = 3;
@@ -791,12 +836,7 @@ function openInlineEdit(
   saveBtn.type = 'button';
   saveBtn.className = 'edit__block-edit-save';
   saveBtn.textContent = '保存';
-  const cancelBtn = doc.createElement('button');
-  cancelBtn.type = 'button';
-  cancelBtn.className = 'edit__block-edit-cancel';
-  cancelBtn.textContent = '閉じる';
   editActions.appendChild(saveBtn);
-  editActions.appendChild(cancelBtn);
   form.appendChild(editActions);
 
   const editError = doc.createElement('p');
@@ -804,14 +844,29 @@ function openInlineEdit(
   editError.setAttribute('aria-live', 'polite');
   form.appendChild(editError);
 
-  slot.appendChild(form);
+  details.appendChild(form);
+  slot.appendChild(details);
+
+  // パネル全体を閉じるボタン（チップ編集・生テキスト編集の外側に置き、常に届くようにする）。
+  const panelActions = doc.createElement('div');
+  panelActions.className = 'edit__block-edit-actions edit__block-panel-actions';
+  const cancelBtn = doc.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'edit__block-edit-cancel';
+  cancelBtn.textContent = '閉じる';
+  panelActions.appendChild(cancelBtn);
+  slot.appendChild(panelActions);
+
   // 編集に入った瞬間にインスペクタを展開する（当該ブロックの MeSH ツリー / フリーワード Δ）。
   const inspector = makeInspector();
   if (inspector) {
     slot.appendChild(inspector);
   }
   if (focus) {
-    input.focus();
+    // 結合行は生テキスト編集へ、概念ブロックは詳細を開かずチップ編集に任せる（フォーカスは奪わない）。
+    if (isCombination) {
+      input.focus();
+    }
   }
 
   saveBtn.addEventListener('click', () => {

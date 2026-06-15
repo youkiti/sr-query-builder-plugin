@@ -37,6 +37,7 @@ import {
   removeMeshDescriptor,
   replaceMeshDescriptor,
 } from './meshExpressionEdit';
+import { findOperandByText, removeOperandAt, setOperandTerm } from './operandEdit';
 
 /** インスペクタが必要とする計測 callback とキャッシュ。 */
 export interface BlockInspectorDeps {
@@ -690,7 +691,9 @@ function buildFreewordSection(
   wrap.className = 'bins__section bins__freeword';
   const title = doc.createElement('p');
   title.className = 'bins__section-title';
-  title.textContent = 'フリーワード（個別ヒット数の多い順 / Δ=累積に足したときの純増）';
+  title.textContent = params.onApplyExpression
+    ? 'フリーワード（個別ヒット数の多い順 / Δ=純増。語クリックで編集・× で削除）'
+    : 'フリーワード（個別ヒット数の多い順 / Δ=累積に足したときの純増）';
   wrap.appendChild(title);
 
   if (freewordTerms.length === 0) {
@@ -714,7 +717,7 @@ function buildFreewordSection(
       const table = doc.createElement('table');
       table.className = 'bins__delta-table';
       for (const row of res.rows) {
-        table.appendChild(buildDeltaRow(doc, row, maxDelta));
+        table.appendChild(buildDeltaRow(doc, row, maxDelta, params));
       }
       body.appendChild(table);
 
@@ -731,14 +734,41 @@ function buildFreewordSection(
   return wrap;
 }
 
-/** Δ 表の 1 行。語 / 個別 / Δ / 増分バー / ステータスバッジ。 */
-function buildDeltaRow(doc: Document, row: FreewordDeltaRow, maxDelta: number): HTMLElement {
+/**
+ * Δ 表の 1 行。語 / 個別 / Δ / 増分バー / ステータスバッジ / 操作（× 削除）。
+ * onApplyExpression が注入されているときだけ、語クリックでのその場編集（タグ保持）と
+ * × 削除を出す。チップ編集面と同じ純粋関数（setOperandTerm / removeOperandAt）を通すので、
+ * 編集面とインスペクタのどちらから触っても同じ結果になる。
+ */
+function buildDeltaRow(
+  doc: Document,
+  row: FreewordDeltaRow,
+  maxDelta: number,
+  params: BlockInspectorParams
+): HTMLElement {
   const tr = doc.createElement('tr');
   tr.className = `bins__delta-row bins__delta-row--${row.status}`;
 
+  // 編集可能なときは row.query（タグ込み）から式上の operand を引き当てる。
+  const operand = params.onApplyExpression ? findOperandByText(params.expression, row.query) : null;
+
   const termCell = doc.createElement('td');
   termCell.className = 'bins__delta-term draft__term draft__term--freeword';
-  termCell.textContent = row.display;
+  if (params.onApplyExpression && operand) {
+    const termBtn = doc.createElement('button');
+    termBtn.type = 'button';
+    termBtn.className = 'bins__delta-term-btn';
+    termBtn.textContent = row.display;
+    termBtn.title = 'クリックで語を編集（タグは保持）';
+    termBtn.addEventListener('click', () =>
+      beginDeltaEdit(doc, termCell, termBtn, operand.term, (next) =>
+        params.onApplyExpression!(setOperandTerm(params.expression, operand.index, next))
+      )
+    );
+    termCell.appendChild(termBtn);
+  } else {
+    termCell.textContent = row.display;
+  }
   tr.appendChild(termCell);
 
   const indCell = doc.createElement('td');
@@ -771,7 +801,74 @@ function buildDeltaRow(doc: Document, row: FreewordDeltaRow, maxDelta: number): 
   }
   tr.appendChild(flagCell);
 
+  // 操作（× 削除）。編集可能で operand を引き当てられたときだけ。
+  const actionCell = doc.createElement('td');
+  actionCell.className = 'bins__delta-actions';
+  if (params.onApplyExpression && operand) {
+    const removeBtn = doc.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'bins__delta-remove';
+    removeBtn.textContent = '×';
+    removeBtn.title = 'この語を削除';
+    removeBtn.setAttribute('aria-label', `「${row.display}」を削除`);
+    removeBtn.addEventListener('click', () =>
+      params.onApplyExpression!(removeOperandAt(params.expression, operand.index))
+    );
+    actionCell.appendChild(removeBtn);
+  }
+  tr.appendChild(actionCell);
+
   return tr;
+}
+
+/** Δ 表の語セルを、語だけ編集する <input> に差し替える（Enter/blur 確定、Esc 取消）。 */
+function beginDeltaEdit(
+  doc: Document,
+  cell: HTMLElement,
+  termBtn: HTMLButtonElement,
+  initialTerm: string,
+  onCommit: (next: string) => void
+): void {
+  const input = doc.createElement('input');
+  input.type = 'text';
+  input.className = 'bins__delta-input';
+  input.value = initialTerm;
+  input.setAttribute('aria-label', `「${initialTerm}」を編集`);
+
+  let done = false;
+  const commit = (): void => {
+    if (done) {
+      return;
+    }
+    done = true;
+    const next = input.value.trim();
+    if (next === initialTerm.trim()) {
+      input.replaceWith(termBtn);
+      return;
+    }
+    onCommit(next);
+  };
+  const cancel = (): void => {
+    if (done) {
+      return;
+    }
+    done = true;
+    input.replaceWith(termBtn);
+  };
+  input.addEventListener('keydown', (ev: KeyboardEvent) => {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      commit();
+    } else if (ev.key === 'Escape') {
+      ev.preventDefault();
+      cancel();
+    }
+  });
+  input.addEventListener('blur', () => commit());
+
+  cell.replaceChildren(input);
+  input.focus();
+  input.select();
 }
 
 // ---- 他ブロックとの重複セクション ------------------------------------------
