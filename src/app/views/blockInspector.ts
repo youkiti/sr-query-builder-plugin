@@ -27,12 +27,11 @@ import {
   type BlockMeshTermMeta,
   type FreewordDeltaRow,
   type FreewordTermInput,
-  type MeshHierarchyNode,
   type MeshTreeEntry,
 } from '@/features/validation';
 import type { MeshTreeNode } from '@/lib/ncbi';
 import { extractMeshTerm, tokenizeExpression } from './formulaDisplay';
-import { addMeshDescriptor, hasMeshDescriptor, removeMeshDescriptor } from './meshExpressionEdit';
+import { addMeshDescriptor, hasMeshDescriptor, replaceMeshDescriptor } from './meshExpressionEdit';
 
 /** インスペクタが必要とする計測 callback とキャッシュ。 */
 export interface BlockInspectorDeps {
@@ -45,8 +44,8 @@ export interface BlockInspectorDeps {
   /** tree number 群 → ノード（descriptor + 名前）のバッチ逆引き（MeSH RDF）。祖先の名前表示に使う */
   onFetchMeshLabels?: (treeNumbers: string[]) => Promise<Map<string, MeshTreeNode>>;
   /**
-   * MeSH ブラウザからの追加・削除でブロック式を差し替える。注入された場合のみ
-   * ナビに「＋ブロックに追加」「−削除」ボタンを出す。引数は当該ブロックの新しい式全文。
+   * MeSH ブラウザからの置換 / OR追加でブロック式を差し替える。注入された場合のみ
+   * ノード名クリック（置換）・「OR追加」ボタンを出す。引数は当該ブロックの新しい式全文。
    */
   onApplyExpression?: (nextExpression: string) => void;
   /** 式→件数キャッシュ（edit view インスタンスと共有） */
@@ -57,6 +56,11 @@ export interface BlockInspectorDeps {
   meshChildrenCache: Map<string, Promise<MeshTreeNode[]>>;
   /** tree number 群→ラベル Map キャッシュ（edit view インスタンスと共有） */
   meshLabelCache: Map<string, Promise<Map<string, MeshTreeNode>>>;
+  /**
+   * blockId → 展開済み tree number 集合。MeSH ブラウザの ▸ 展開状態を、
+   * 置換/追加による setMd 再描画をまたいで保持するために共有する。
+   */
+  meshExpandedState: Map<string, Set<string>>;
 }
 
 /** 他ブロックとの重複判定に使う兄弟ブロック。 */
@@ -179,7 +183,17 @@ function cachedCount(
   return pending;
 }
 
-// ---- MeSH ツリーセクション ------------------------------------------------
+// ---- MeSH ブラウザ（PubMed 風インデントツリー）-----------------------------
+//
+// 1 ブロック内の各 MeSH 用語について、ルート〜その語までの「枝（spine）」を PubMed の
+// MeSH ツリーページのようにインデント表示し、起点語の配下を展開して辿れるブラウザを作る。
+//
+// 操作:
+// - ノード名クリック = 置換（起点語をそのノードへ差し替え。上位＝広げる / 下位＝絞る）
+// - 行の「OR追加」 = そのノードを別 OR 項として足す
+// - ▸/▾ = 子をその場に遅延展開（PubMed 風）
+// 行アクションは hover / focus 時に出して平常時はごみごみさせない。件数は explode で常時表示。
+// 展開状態は再描画をまたいで保持し、置換直後も同じツリーのまま隣の語を OR追加できる。
 
 function buildMeshSection(
   doc: Document,
@@ -190,7 +204,7 @@ function buildMeshSection(
   wrap.className = 'bins__section bins__mesh';
   const title = doc.createElement('p');
   title.className = 'bins__section-title';
-  title.textContent = 'MeSH（この枝にどう乗っているか）';
+  title.textContent = 'MeSH（クリックで置換 / OR追加。▸ で下位を展開）';
   wrap.appendChild(title);
 
   if (meshTerms.length === 0) {
@@ -210,31 +224,31 @@ function buildMeshSection(
   fetchMeshTreesCached(params, descriptors)
     .then((entries) => {
       const treeByDescriptor = new Map(entries.map((e) => [e.descriptor, e.treeNumbers]));
+      // 冗長（ブロック内で別 explode 語に内包）/ 分散カテゴリ / 未解決 の解析は従来どおり再利用。
       const inputs: BlockMeshTermInput[] = meshTerms.map((t) => ({
         descriptor: t.descriptor,
         explode: t.explode,
         treeNumbers: treeByDescriptor.get(t.descriptor) ?? [],
       }));
-      const result = buildBlockMeshTree(inputs);
+      const analysis = buildBlockMeshTree(inputs);
+
       body.innerHTML = '';
-      // 祖先（構造）ノードの名前を後から埋めるための treeId→<span> 受け皿。
-      const ancestorNameSpans = new Map<string, HTMLElement>();
-      body.appendChild(buildMeshTreeDom(doc, result.nodes, result.termMeta, params, ancestorNameSpans));
-      body.appendChild(buildDivergenceLine(doc, result.categories));
-      // ① 祖先ノードの名前を MeSH RDF からバッチ逆引きして埋める（PubMed 風の名前表示）。
-      fillAncestorNames(params, ancestorNameSpans);
-      // ②③ 各 MeSH 用語に「下位語ブラウザ（ナビ + 追加/削除）」を付ける。
-      if (params.onFetchMeshChildren) {
-        for (const term of meshTerms) {
-          const treeNumbers = treeByDescriptor.get(term.descriptor) ?? [];
-          for (const treeNumber of treeNumbers) {
-            body.appendChild(buildMeshNavigator(doc, term.descriptor, treeNumber, params));
-          }
+      // 各 MeSH 用語 × tree number ごとに 1 本のブラウザ枝を出す。
+      for (const term of meshTerms) {
+        const treeNumbers = treeByDescriptor.get(term.descriptor) ?? [];
+        for (const treeNumber of treeNumbers) {
+          body.appendChild(buildMeshBranch(doc, term.descriptor, treeNumber, params));
         }
       }
-      if (result.unresolved.length > 0) {
+      // 補助情報（1〜数行）。
+      body.appendChild(buildDivergenceLine(doc, analysis.categories));
+      const redundancy = buildRedundancyLine(doc, analysis.termMeta);
+      if (redundancy) {
+        body.appendChild(redundancy);
+      }
+      if (analysis.unresolved.length > 0) {
         body.appendChild(
-          muted(doc, `ツリー未解決（MeSH 解決不可）: ${result.unresolved.join(', ')}`)
+          muted(doc, `ツリー未解決（MeSH 解決不可）: ${analysis.unresolved.join(', ')}`)
         );
       }
     })
@@ -244,29 +258,6 @@ function buildMeshSection(
     });
 
   return wrap;
-}
-
-/** 構造ノード（名前未取得の祖先）の tree number 群を MeSH RDF で解決し、span を埋める。 */
-function fillAncestorNames(
-  params: BlockInspectorParams,
-  nameSpans: Map<string, HTMLElement>
-): void {
-  if (!params.onFetchMeshLabels || nameSpans.size === 0) {
-    return;
-  }
-  const treeNumbers = Array.from(nameSpans.keys());
-  fetchMeshLabelsCached(params, treeNumbers)
-    .then((labelByTree) => {
-      for (const [treeId, span] of nameSpans) {
-        const node = labelByTree.get(treeId);
-        if (node) {
-          span.textContent = node.label;
-        }
-      }
-    })
-    .catch(() => {
-      // 名前が取れなくても tree id は残るので致命ではない。何もしない。
-    });
 }
 
 /** descriptor 群→tree entries のキャッシュ越し取得（キーは descriptor の昇順連結）。 */
@@ -319,99 +310,282 @@ function fetchMeshLabelsCached(
   return pending;
 }
 
-/** 階層ノード（flat + parentId）をネストした <ul> に組み立てる。 */
-function buildMeshTreeDom(
-  doc: Document,
-  nodes: readonly MeshHierarchyNode[],
-  termMeta: ReadonlyMap<string, BlockMeshTermMeta>,
-  params: BlockInspectorParams,
-  ancestorNameSpans: Map<string, HTMLElement>
-): HTMLElement {
-  const childrenByParent = new Map<string | null, MeshHierarchyNode[]>();
-  for (const node of nodes) {
-    const list = childrenByParent.get(node.parentId);
-    if (list) {
-      list.push(node);
-    } else {
-      childrenByParent.set(node.parentId, [node]);
-    }
+/** このブロックの「展開済み tree number 集合」を取り出す（再描画をまたいで保持）。 */
+function expandedSetFor(params: BlockInspectorParams): Set<string> {
+  let set = params.meshExpandedState.get(params.blockId);
+  if (!set) {
+    set = new Set<string>();
+    params.meshExpandedState.set(params.blockId, set);
   }
-
-  const renderLevel = (parentId: string | null): HTMLElement | null => {
-    const children = childrenByParent.get(parentId);
-    if (!children || children.length === 0) {
-      return null;
-    }
-    const ul = doc.createElement('ul');
-    ul.className = 'bins__tree';
-    for (const node of children) {
-      const li = doc.createElement('li');
-      li.className = 'bins__tree-node';
-      li.appendChild(buildTreeNodeLine(doc, node, termMeta, parentId === null, params, ancestorNameSpans));
-      const sub = renderLevel(node.treeId);
-      if (sub) {
-        li.appendChild(sub);
-      }
-      ul.appendChild(li);
-    }
-    return ul;
-  };
-
-  return renderLevel(null) ?? doc.createElement('ul');
+  return set;
 }
 
-/** ツリー 1 ノードの行（tree id + 名前 + descriptor + バッジ + 件数）。 */
-function buildTreeNodeLine(
-  doc: Document,
-  node: MeshHierarchyNode,
-  termMeta: ReadonlyMap<string, BlockMeshTermMeta>,
-  isRoot: boolean,
-  params: BlockInspectorParams,
-  ancestorNameSpans: Map<string, HTMLElement>
-): HTMLElement {
-  const line = doc.createElement('div');
-  line.className = 'bins__tree-line';
-
-  const idSpan = doc.createElement('span');
-  idSpan.className = 'bins__tree-id';
-  idSpan.textContent = isRoot ? `${node.treeId} ${meshCategoryName(node.treeId)}` : node.treeId;
-  line.appendChild(idSpan);
-
-  if (node.labels.length === 0) {
-    // 構造ノード（祖先）。tree id の隣に名前用の span を置き、後で MeSH RDF で埋める。
-    line.classList.add('bins__tree-line--structural');
-    if (params.onFetchMeshLabels && !isRoot) {
-      const nameSpan = doc.createElement('span');
-      nameSpan.className = 'bins__tree-name';
-      line.appendChild(nameSpan);
-      ancestorNameSpans.set(node.treeId, nameSpan);
-    }
-    return line;
+/**
+ * tree number を「カテゴリ文字 → 各階層 → 自分」の順に並べる。
+ * 例: `M01.526.485` → `['M', 'M01', 'M01.526', 'M01.526.485']`。
+ * 先頭のカテゴリ文字（`M`）は buildMeshHierarchy と同様に独立ノードとして足す。
+ */
+function spineTreeNumbers(treeNumber: string): string[] {
+  const parts = treeNumber.split('.');
+  const head = parts[0] ?? '';
+  const category = head.charAt(0);
+  const out: string[] = category !== '' ? [category] : [];
+  let acc = '';
+  for (let i = 0; i < parts.length; i += 1) {
+    acc = i === 0 ? parts[i]! : `${acc}.${parts[i]!}`;
+    out.push(acc);
   }
+  return out;
+}
 
-  for (const descriptor of node.labels) {
-    const meta = termMeta.get(descriptor);
-    const termSpan = doc.createElement('span');
-    termSpan.className = 'bins__tree-term';
-    termSpan.textContent = descriptor;
-    line.appendChild(termSpan);
+/**
+ * 1 つの MeSH 用語（起点）について、ルート〜起点の枝を描き、起点配下を展開表示する。
+ * 起点ラベルは既知。祖先ラベルは MeSH RDF でバッチ逆引きする。
+ */
+function buildMeshBranch(
+  doc: Document,
+  originDescriptor: string,
+  originTreeNumber: string,
+  params: BlockInspectorParams
+): HTMLElement {
+  const branch = doc.createElement('div');
+  branch.className = 'bins__branch';
 
-    if (meta?.explode) {
-      line.appendChild(badge(doc, 'explode', 'bins__badge--explode'));
-    }
-    if (meta && meta.subsumedBy.length > 0) {
-      line.appendChild(
-        badge(doc, `⚠ 重複（${meta.subsumedBy.join(', ')}配下）`, 'bins__badge--redundant')
+  const spine = spineTreeNumbers(originTreeNumber); // 例: M, M01, M01.526, ... , origin
+  // 祖先の名前を一括逆引きしてから描く（ルート文字 M はカテゴリ名で出すので除外、起点は既知）。
+  // 第1階層（M01=Persons）も名前を出したいので slice(1, -1) で root letter と origin だけ落とす。
+  const ancestorTns = spine.slice(1, -1);
+  const renderAll = (labelByTree: Map<string, MeshTreeNode>): void => {
+    branch.innerHTML = '';
+    for (let depth = 0; depth < spine.length; depth += 1) {
+      const tn = spine[depth]!;
+      const isOrigin = tn === originTreeNumber;
+      const label = isOrigin ? originDescriptor : labelByTree.get(tn)?.label ?? null;
+      branch.appendChild(
+        buildBranchRow(doc, {
+          treeId: tn,
+          label,
+          depth,
+          isOrigin,
+          originDescriptor,
+          params,
+          // 枝（spine）の中間ノードは展開トグルを出さない（起点までの一本道）。
+          expandable: false,
+        })
       );
     }
-    // 個別ヒット数（onCountHits があれば）
-    if (params.onCountHits) {
-      const query = meta?.explode === false ? `"${descriptor}"[Mesh:NoExp]` : `"${descriptor}"[Mesh]`;
-      line.appendChild(buildCountBadge(doc, query, params));
+    // 起点配下の子をぶら下げる（自動展開）。
+    const childHost = doc.createElement('div');
+    childHost.className = 'bins__branch-children';
+    branch.appendChild(childHost);
+    if (params.onFetchMeshChildren) {
+      renderChildren(doc, childHost, originTreeNumber, spine.length, originDescriptor, params);
     }
+  };
+
+  if (params.onFetchMeshLabels && ancestorTns.length > 0) {
+    const loading = doc.createElement('p');
+    loading.className = 'bins__loading';
+    loading.textContent = '枝の名前を取得中…';
+    branch.appendChild(loading);
+    fetchMeshLabelsCached(params, ancestorTns)
+      .then((labelByTree) => renderAll(labelByTree))
+      .catch(() => renderAll(new Map()));
+  } else {
+    renderAll(new Map());
+  }
+  return branch;
+}
+
+/** 起点配下（または任意ノード配下）の子を遅延取得して描く。展開済みの孫は再帰展開する。 */
+function renderChildren(
+  doc: Document,
+  host: HTMLElement,
+  treeNumber: string,
+  depth: number,
+  originDescriptor: string,
+  params: BlockInspectorParams
+): void {
+  host.innerHTML = '';
+  const loading = doc.createElement('p');
+  loading.className = 'bins__loading';
+  loading.style.paddingLeft = `${depth * 16}px`;
+  loading.textContent = '下位語を取得中…';
+  host.appendChild(loading);
+
+  fetchMeshChildrenCached(params, treeNumber)
+    .then((children) => {
+      host.innerHTML = '';
+      if (children.length === 0) {
+        const none = muted(doc, '（最下層）');
+        none.style.paddingLeft = `${depth * 16}px`;
+        host.appendChild(none);
+        return;
+      }
+      const expanded = expandedSetFor(params);
+      for (const child of children) {
+        const row = buildBranchRow(doc, {
+          treeId: child.treeNumber,
+          label: child.label,
+          depth,
+          isOrigin: false,
+          originDescriptor,
+          params,
+          expandable: child.hasChildren === true,
+        });
+        host.appendChild(row);
+        // この子の孫を入れる受け皿。
+        const sub = doc.createElement('div');
+        sub.className = 'bins__branch-children';
+        host.appendChild(sub);
+        if (child.hasChildren === true && expanded.has(child.treeNumber)) {
+          row.setAttribute('data-expanded', 'true');
+          renderChildren(doc, sub, child.treeNumber, depth + 1, originDescriptor, params);
+        }
+      }
+    })
+    .catch((err: unknown) => {
+      host.innerHTML = '';
+      host.appendChild(muted(doc, `下位語の取得に失敗しました: ${formatError(err)}`));
+    });
+}
+
+interface BranchRowOptions {
+  treeId: string;
+  /** 表示名。null は未解決（名前が取れなかった祖先）。 */
+  label: string | null;
+  depth: number;
+  isOrigin: boolean;
+  originDescriptor: string;
+  params: BlockInspectorParams;
+  /** ▸ 展開トグルを出すか（子を持つ下位ノード）。 */
+  expandable: boolean;
+}
+
+/**
+ * ブラウザ 1 行。表示の簡素化ルール:
+ * - ルート文字（ドット無しかつ単一文字）: `M 人々の集団`
+ * - 第1階層（ドット無し、例 M01）: `M01 名前`
+ * - 第2階層以降（ドット有り）: 名前のみ（ID は title 属性へ退避）
+ */
+function buildBranchRow(doc: Document, opts: BranchRowOptions): HTMLElement {
+  const { treeId, label, depth, isOrigin, originDescriptor, params } = opts;
+  const row = doc.createElement('div');
+  row.className = 'bins__row';
+  if (isOrigin) {
+    row.classList.add('bins__row--origin');
+  }
+  row.style.paddingLeft = `${depth * 16}px`;
+  row.setAttribute('data-tree-id', treeId);
+
+  const isCategoryRoot = !treeId.includes('.') && /^[A-Z]$/.test(treeId);
+  const isFirstLevel = !treeId.includes('.') && !isCategoryRoot; // 例: M01
+
+  // 展開トグル（▸/▾）。展開可能ノードのみ。
+  const toggle = doc.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'bins__row-toggle';
+  if (opts.expandable) {
+    toggle.textContent = '▸';
+    toggle.setAttribute('aria-label', '下位語を展開');
+    toggle.addEventListener('click', () => toggleRow(doc, row, treeId, depth, originDescriptor, params, toggle));
+  } else {
+    // インデント揃えのためのプレースホルダ（カテゴリ root と第1階層・葉）。
+    toggle.classList.add('bins__row-toggle--leaf');
+    toggle.textContent = '';
+    toggle.disabled = true;
+  }
+  row.appendChild(toggle);
+
+  // ラベル（クリック＝置換）。カテゴリ root は MeSH 語ではないので非クリック。
+  if (isCategoryRoot) {
+    const cat = doc.createElement('span');
+    cat.className = 'bins__row-cat';
+    cat.textContent = `${treeId} ${meshCategoryName(treeId)}`;
+    row.appendChild(cat);
+    return row;
   }
 
-  return line;
+  // 第1階層は ID を前置（`M01 名前`）。第2階層以降は ID を title に退避。
+  if (isFirstLevel) {
+    const idSpan = doc.createElement('span');
+    idSpan.className = 'bins__row-id';
+    idSpan.textContent = treeId;
+    row.appendChild(idSpan);
+  }
+
+  const text = label ?? treeId; // 名前未解決時は ID で代替
+  if (params.onApplyExpression && label !== null) {
+    const link = doc.createElement('button');
+    link.type = 'button';
+    link.className = 'bins__row-name';
+    link.textContent = text;
+    link.title = `${treeId} ／ クリックでこの語に置換`;
+    link.addEventListener('click', () => {
+      params.onApplyExpression!(replaceMeshDescriptor(params.expression, originDescriptor, text));
+    });
+    row.appendChild(link);
+  } else {
+    const name = doc.createElement('span');
+    name.className = 'bins__row-name bins__row-name--static';
+    name.textContent = text;
+    name.title = treeId;
+    row.appendChild(name);
+  }
+
+  // 起点語には「起点」バッジ。
+  if (isOrigin) {
+    row.appendChild(badge(doc, '起点', 'bins__badge--origin'));
+  }
+
+  // 件数（explode）。
+  if (params.onCountHits && label !== null) {
+    row.appendChild(buildCountBadge(doc, `"${text}"[Mesh]`, params));
+  }
+
+  // OR追加（hover/focus で出す。起点語自身は既に式にあるので出さない）。
+  if (params.onApplyExpression && label !== null && !hasMeshDescriptor(params.expression, text)) {
+    const orBtn = doc.createElement('button');
+    orBtn.type = 'button';
+    orBtn.className = 'bins__row-or';
+    orBtn.textContent = 'OR追加';
+    orBtn.title = 'この語を別 OR 項としてブロックに足す';
+    orBtn.addEventListener('click', () => {
+      params.onApplyExpression!(addMeshDescriptor(params.expression, text));
+    });
+    row.appendChild(orBtn);
+  }
+
+  return row;
+}
+
+/** ▸/▾ トグル。展開状態を保持しつつ、直後の子受け皿（兄弟 div）を描く。 */
+function toggleRow(
+  doc: Document,
+  row: HTMLElement,
+  treeNumber: string,
+  depth: number,
+  originDescriptor: string,
+  params: BlockInspectorParams,
+  toggle: HTMLButtonElement
+): void {
+  const sub = row.nextElementSibling;
+  if (!(sub instanceof HTMLElement) || !sub.classList.contains('bins__branch-children')) {
+    return;
+  }
+  const expanded = expandedSetFor(params);
+  if (expanded.has(treeNumber)) {
+    // 折りたたむ。
+    expanded.delete(treeNumber);
+    sub.innerHTML = '';
+    toggle.textContent = '▸';
+    row.removeAttribute('data-expanded');
+  } else {
+    expanded.add(treeNumber);
+    toggle.textContent = '▾';
+    row.setAttribute('data-expanded', 'true');
+    renderChildren(doc, sub, treeNumber, depth + 1, originDescriptor, params);
+  }
 }
 
 /** 「同じ枝にまとまっている / N カテゴリに分散」の要約行。 */
@@ -428,230 +602,24 @@ function buildDivergenceLine(doc: Document, categories: readonly string[]): HTML
   return p;
 }
 
-// ---- MeSH ブラウザ（下位語ナビ + 追加/削除）-------------------------------
-
-/** ナビの「現在地」。tree number と表示ラベルを持つ。 */
-interface NavLocation {
-  treeNumber: string;
-  label: string;
-}
-
-/**
- * 1 つの MeSH 用語を起点に、ツリーを上下に辿れるミニブラウザを作る（②）。
- * 「現在地」を上に出し、その子（1 段下）を名前＋件数で並べる。子の「↓ 下りる」で
- * 現在地を 1 段下げ、件数がどう変わるかをライブ表示する。onApplyExpression があれば
- * 「＋ブロックに追加」「−削除」も出す（③）。
- */
-function buildMeshNavigator(
+/** ブロック内 MeSH の冗長（祖先 explode 語に内包される語）を 1 行で示す。無ければ null。 */
+function buildRedundancyLine(
   doc: Document,
-  descriptor: string,
-  startTreeNumber: string,
-  params: BlockInspectorParams
-): HTMLElement {
-  const wrap = doc.createElement('details');
-  wrap.className = 'bins__nav';
-  const summary = doc.createElement('summary');
-  summary.className = 'bins__nav-summary';
-  summary.textContent = `▸ 「${descriptor}」の下位語をブラウズ（${startTreeNumber}）`;
-  wrap.appendChild(summary);
-
-  const body = doc.createElement('div');
-  body.className = 'bins__nav-body';
-  wrap.appendChild(body);
-
-  const start: NavLocation = { treeNumber: startTreeNumber, label: descriptor };
-  // 初回展開時にだけ描画する（無駄な fetch を避ける）。
-  let rendered = false;
-  wrap.addEventListener('toggle', () => {
-    if (wrap.open && !rendered) {
-      rendered = true;
-      renderNavBody(doc, body, start, start, params);
+  termMeta: ReadonlyMap<string, BlockMeshTermMeta>
+): HTMLElement | null {
+  const lines: string[] = [];
+  for (const meta of termMeta.values()) {
+    if (meta.subsumedBy.length > 0) {
+      lines.push(`${meta.descriptor}（${meta.subsumedBy.join(', ')}配下）`);
     }
-  });
-  return wrap;
-}
-
-/**
- * ナビ本体を「現在地 + 子リスト」で描き直す。current が起点(start)でなければ
- * 「↑ 親へ」も出す。すべて body 内のローカル再描画（全体再描画は起こさない）。
- */
-function renderNavBody(
-  doc: Document,
-  body: HTMLElement,
-  current: NavLocation,
-  start: NavLocation,
-  params: BlockInspectorParams
-): void {
-  body.innerHTML = '';
-
-  // 現在地
-  const currentRow = doc.createElement('div');
-  currentRow.className = 'bins__nav-current';
-  const here = doc.createElement('span');
-  here.className = 'bins__nav-here';
-  here.textContent = `現在地: ${current.label}`;
-  currentRow.appendChild(here);
-  const tn = doc.createElement('span');
-  tn.className = 'bins__nav-tn';
-  tn.textContent = current.treeNumber;
-  currentRow.appendChild(tn);
-  if (params.onCountHits) {
-    currentRow.appendChild(buildCountBadge(doc, `"${current.label}"[Mesh]`, params));
   }
-  appendApplyButtons(doc, currentRow, current.label, params);
-  body.appendChild(currentRow);
-
-  // ナビ操作行（親へ戻る）
-  const nav = doc.createElement('div');
-  nav.className = 'bins__nav-controls';
-  const parentTn = parentTreeNumber(current.treeNumber);
-  if (parentTn && current.treeNumber !== start.treeNumber) {
-    const upBtn = doc.createElement('button');
-    upBtn.type = 'button';
-    upBtn.className = 'bins__nav-up';
-    upBtn.textContent = '↑ 親へ戻る';
-    upBtn.addEventListener('click', () => {
-      navigateTo(doc, body, parentTn, start, params);
-    });
-    nav.appendChild(upBtn);
+  if (lines.length === 0) {
+    return null;
   }
-  body.appendChild(nav);
-
-  // 子リスト
-  const childWrap = doc.createElement('div');
-  childWrap.className = 'bins__nav-children';
-  const loading = doc.createElement('p');
-  loading.className = 'bins__loading';
-  loading.textContent = '下位語を取得中…';
-  childWrap.appendChild(loading);
-  body.appendChild(childWrap);
-
-  fetchMeshChildrenCached(params, current.treeNumber)
-    .then((children) => {
-      childWrap.innerHTML = '';
-      if (children.length === 0) {
-        childWrap.appendChild(muted(doc, 'これより下位の MeSH 用語はありません（最下層）。'));
-        return;
-      }
-      const heading = doc.createElement('p');
-      heading.className = 'bins__nav-children-title';
-      heading.textContent = `下位語（${children.length}）`;
-      childWrap.appendChild(heading);
-      for (const child of children) {
-        childWrap.appendChild(buildNavChildRow(doc, body, child, start, params));
-      }
-    })
-    .catch((err: unknown) => {
-      childWrap.innerHTML = '';
-      childWrap.appendChild(muted(doc, `下位語の取得に失敗しました: ${formatError(err)}`));
-    });
-}
-
-/** 子ノード 1 行（名前 + 件数 + ↓下りる + ＋追加）。 */
-function buildNavChildRow(
-  doc: Document,
-  body: HTMLElement,
-  child: MeshTreeNode,
-  start: NavLocation,
-  params: BlockInspectorParams
-): HTMLElement {
-  const row = doc.createElement('div');
-  row.className = 'bins__nav-child';
-
-  const label = doc.createElement('span');
-  label.className = 'bins__nav-child-label';
-  label.textContent = child.label;
-  row.appendChild(label);
-
-  if (params.onCountHits) {
-    row.appendChild(buildCountBadge(doc, `"${child.label}"[Mesh]`, params));
-  }
-
-  const downBtn = doc.createElement('button');
-  downBtn.type = 'button';
-  downBtn.className = 'bins__nav-down';
-  downBtn.textContent = '↓ 下りる';
-  downBtn.title = `${child.label} を現在地にして、さらに下位語を見る`;
-  downBtn.addEventListener('click', () => {
-    navigateTo(doc, body, child.treeNumber, start, params, child.label);
-  });
-  row.appendChild(downBtn);
-
-  appendApplyButtons(doc, row, child.label, params);
-  return row;
-}
-
-/** 「＋ブロックに追加」/「−削除」ボタンを行へ足す（onApplyExpression 注入時のみ）。 */
-function appendApplyButtons(
-  doc: Document,
-  row: HTMLElement,
-  label: string,
-  params: BlockInspectorParams
-): void {
-  const onApply = params.onApplyExpression;
-  if (!onApply) {
-    return;
-  }
-  if (hasMeshDescriptor(params.expression, label)) {
-    const removeBtn = doc.createElement('button');
-    removeBtn.type = 'button';
-    removeBtn.className = 'bins__nav-remove';
-    removeBtn.textContent = '− ブロックから削除';
-    removeBtn.addEventListener('click', () => {
-      const next = removeMeshDescriptor(params.expression, label);
-      if (next.trim() === '') {
-        // 唯一の語を消すと式が空になるので拒否（ブロックは空にできない）。
-        removeBtn.disabled = true;
-        removeBtn.textContent = '− 削除不可（最後の語）';
-        return;
-      }
-      onApply(next);
-    });
-    row.appendChild(removeBtn);
-  } else {
-    const addBtn = doc.createElement('button');
-    addBtn.type = 'button';
-    addBtn.className = 'bins__nav-add';
-    addBtn.textContent = '＋ ブロックに追加';
-    addBtn.addEventListener('click', () => {
-      onApply(addMeshDescriptor(params.expression, label));
-    });
-    row.appendChild(addBtn);
-  }
-}
-
-/** 指定 tree number へ現在地を移す。label 未指定なら MeSH RDF で名前を引いてから描く。 */
-function navigateTo(
-  doc: Document,
-  body: HTMLElement,
-  treeNumber: string,
-  start: NavLocation,
-  params: BlockInspectorParams,
-  label?: string
-): void {
-  if (label !== undefined) {
-    renderNavBody(doc, body, { treeNumber, label }, start, params);
-    return;
-  }
-  // 親へ戻るときは名前が手元に無いので逆引きしてから描く。
-  if (params.onFetchMeshLabels) {
-    fetchMeshLabelsCached(params, [treeNumber])
-      .then((labelByTree) => {
-        const node = labelByTree.get(treeNumber);
-        renderNavBody(doc, body, { treeNumber, label: node?.label ?? treeNumber }, start, params);
-      })
-      .catch(() => {
-        renderNavBody(doc, body, { treeNumber, label: treeNumber }, start, params);
-      });
-  } else {
-    renderNavBody(doc, body, { treeNumber, label: treeNumber }, start, params);
-  }
-}
-
-/** tree number の親（末尾 `.NNN` を 1 つ落とす）。カテゴリ直下や不正なら null。 */
-function parentTreeNumber(treeNumber: string): string | null {
-  const idx = treeNumber.lastIndexOf('.');
-  return idx > 0 ? treeNumber.slice(0, idx) : null;
+  const p = doc.createElement('p');
+  p.className = 'bins__divergence bins__divergence--spread';
+  p.textContent = `⚠ 冗長（内包）: ${lines.join(' / ')}`;
+  return p;
 }
 
 // ---- フリーワード Δ セクション --------------------------------------------

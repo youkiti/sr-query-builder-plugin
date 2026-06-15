@@ -20,6 +20,7 @@ function baseParams(over: Partial<BlockInspectorParams> = {}): BlockInspectorPar
     meshTreeCache: new Map(),
     meshChildrenCache: new Map(),
     meshLabelCache: new Map(),
+    meshExpandedState: new Map(),
     ...over,
   };
 }
@@ -52,7 +53,7 @@ describe('buildBlockInspector', () => {
     expect(el).toBeNull();
   });
 
-  test('MeSH ツリーを描画し、explode バッジと個別件数を出す', async () => {
+  test('MeSH ブラウザの枝（ルート〜起点）を描き、起点に件数を出す', async () => {
     const doc = buildDoc();
     const onFetchMeshTrees = jest
       .fn<Promise<MeshTreeEntry[]>, [string[]]>()
@@ -65,17 +66,17 @@ describe('buildBlockInspector', () => {
     expect(el.querySelector('.bins__loading')).toBeTruthy();
     await flushAsync();
     expect(onFetchMeshTrees).toHaveBeenCalledWith(['Asthma']);
-    // ルート C 疾患 〜 葉 C08.127.108 まで展開される
-    const text = el.querySelector('.bins__mesh-body')!.textContent ?? '';
-    expect(text).toContain('C 疾患');
-    expect(text).toContain('Asthma');
-    expect(el.querySelector('.bins__badge--explode')?.textContent).toBe('explode');
-    // 個別件数バッジ（"Asthma"[Mesh] で count）
+    // ルートはカテゴリ名、起点は descriptor 名 + 起点バッジ
+    expect(el.querySelector('.bins__row-cat')?.textContent).toContain('C 疾患');
+    const origin = el.querySelector('.bins__row--origin')!;
+    expect(origin.querySelector('.bins__row-name')?.textContent).toBe('Asthma');
+    expect(origin.querySelector('.bins__badge--origin')?.textContent).toBe('起点');
+    // 件数バッジ（"Asthma"[Mesh] で explode count）
     expect(onCountHits).toHaveBeenCalledWith('"Asthma"[Mesh]');
     expect(el.querySelector('.bins__count--done')?.textContent).toBe('12,300 件');
   });
 
-  test('祖先 explode 用語の子孫に ⚠ 重複バッジを出す', async () => {
+  test('ブロック内 MeSH の冗長（内包）を 1 行で示す', async () => {
     const doc = buildDoc();
     const onFetchMeshTrees = jest.fn().mockResolvedValue([
       { descriptor: 'Lung Diseases', treeNumbers: ['C08.381'] },
@@ -89,8 +90,10 @@ describe('buildBlockInspector', () => {
       })
     )!;
     await flushAsync();
-    const redundant = el.querySelector('.bins__badge--redundant');
-    expect(redundant?.textContent).toContain('Lung Diseases配下');
+    const body = el.querySelector('.bins__mesh-body')!.textContent ?? '';
+    expect(body).toContain('冗長');
+    expect(body).toContain('Pneumonia');
+    expect(body).toContain('Lung Diseases配下');
   });
 
   test('別カテゴリに分散していると分散サマリを出す', async () => {
@@ -177,15 +180,17 @@ describe('buildBlockInspector', () => {
     expect(el.querySelector('.bins__overlap')?.textContent).toContain('重複する語はありません');
   });
 
-  test('祖先ノードに MeSH RDF 逆引きの名前を埋める', async () => {
+  test('枝の祖先ノードを MeSH RDF 名で表示し、第1階層は ID+名前・以降は名前のみ', async () => {
     const doc = buildDoc();
     const onFetchMeshTrees = jest
       .fn()
       .mockResolvedValue([{ descriptor: 'Surgeons', treeNumbers: ['M01.526.485.810.910'] }]);
     const onFetchMeshLabels = jest.fn().mockResolvedValue(
       new Map([
-        ['M01.526.485.810', { treeNumber: 'M01.526.485.810', descriptorUi: 'D010820', label: 'Physicians' }],
+        ['M01', { treeNumber: 'M01', descriptorUi: 'D009272', label: 'Persons' }],
+        ['M01.526', { treeNumber: 'M01.526', descriptorUi: 'D009274', label: 'Occupational Groups' }],
         ['M01.526.485', { treeNumber: 'M01.526.485', descriptorUi: 'D006282', label: 'Health Personnel' }],
+        ['M01.526.485.810', { treeNumber: 'M01.526.485.810', descriptorUi: 'D010820', label: 'Physicians' }],
       ])
     );
     const el = buildBlockInspector(
@@ -193,22 +198,24 @@ describe('buildBlockInspector', () => {
       baseParams({ expression: '"Surgeons"[Mesh]', onFetchMeshTrees, onFetchMeshLabels })
     )!;
     await flushAsync();
-    // 祖先 tree number 群でバッチ逆引きが呼ばれる
-    expect(onFetchMeshLabels).toHaveBeenCalledTimes(1);
+    // ルート文字と起点を除く全祖先でバッチ逆引き（M01 も含む）
     const requested = onFetchMeshLabels.mock.calls[0]![0] as string[];
-    expect(requested).toContain('M01.526.485.810');
-    // 名前が span に埋まる
-    const names = Array.from(el.querySelectorAll('.bins__tree-name')).map((n) => n.textContent);
-    expect(names).toContain('Physicians');
+    expect(requested).toEqual(['M01', 'M01.526', 'M01.526.485', 'M01.526.485.810']);
+    // 名前が出る
+    const names = Array.from(el.querySelectorAll('.bins__row-name')).map((n) => n.textContent);
+    expect(names).toContain('Occupational Groups');
     expect(names).toContain('Health Personnel');
+    // 第1階層 M01 は ID を前置（`M01` の row-id がある）
+    const ids = Array.from(el.querySelectorAll('.bins__row-id')).map((n) => n.textContent);
+    expect(ids).toContain('M01');
+    // 第2階層以降は row-id を出さない（Occupational Groups の行に ID span が無い）
+    const occRow = Array.from(el.querySelectorAll('.bins__row')).find(
+      (r) => r.querySelector('.bins__row-name')?.textContent === 'Occupational Groups'
+    )!;
+    expect(occRow.querySelector('.bins__row-id')).toBeNull();
   });
 
-  function openDetails(el: Element): void {
-    (el as HTMLDetailsElement).open = true;
-    el.dispatchEvent(new Event('toggle'));
-  }
-
-  test('下位語ナビ: 開くと子を名前+件数で出し、↓下りるで現在地が変わる', async () => {
+  test('起点配下の子を自動展開し、名前クリックで置換、OR追加で OR される', async () => {
     const doc = buildDoc();
     const onFetchMeshTrees = jest
       .fn()
@@ -216,89 +223,111 @@ describe('buildBlockInspector', () => {
     const onFetchMeshChildren = jest.fn((tn: string) => {
       if (tn === 'M01.526.485.810.910') {
         return Promise.resolve([
-          { treeNumber: 'M01.526.485.810.910.750', descriptorUi: 'D000069471', label: 'Neurosurgeons' },
+          { treeNumber: 'M01.526.485.810.910.750', descriptorUi: 'D000069471', label: 'Neurosurgeons', hasChildren: false },
+          { treeNumber: 'M01.526.485.810.910.875', descriptorUi: 'D000072161', label: 'Orthopedic Surgeons', hasChildren: false },
         ]);
       }
       return Promise.resolve([]);
     });
-    const onCountHits = jest.fn((q: string) =>
-      Promise.resolve(q === '"Surgeons"[Mesh]' ? 21296 : q === '"Neurosurgeons"[Mesh]' ? 5000 : 0)
-    );
+    const onCountHits = jest.fn().mockResolvedValue(5000);
+    const onApplyExpression = jest.fn();
     const el = buildBlockInspector(
       doc,
-      baseParams({ expression: '"Surgeons"[Mesh]', onFetchMeshTrees, onFetchMeshChildren, onCountHits })
+      baseParams({
+        expression: '("Surgeons"[Mesh] OR surgeon*[tiab])',
+        onFetchMeshTrees,
+        onFetchMeshChildren,
+        onCountHits,
+        onApplyExpression,
+      })
     )!;
     await flushAsync();
-    const nav = el.querySelector('.bins__nav')!;
-    expect(nav.querySelector('.bins__nav-summary')?.textContent).toContain('Surgeons');
-    openDetails(nav);
-    await flushAsync();
+    // 起点 Surgeons の子が自動で出る
     expect(onFetchMeshChildren).toHaveBeenCalledWith('M01.526.485.810.910');
-    // 現在地と子の件数が出る
-    expect(nav.querySelector('.bins__nav-here')?.textContent).toContain('Surgeons');
-    const child = nav.querySelector('.bins__nav-child')!;
-    expect(child.querySelector('.bins__nav-child-label')?.textContent).toBe('Neurosurgeons');
-    // ↓下りる → 現在地が Neurosurgeons になり、その子を取りに行く
-    child.querySelector<HTMLButtonElement>('.bins__nav-down')!.click();
-    await flushAsync();
-    expect(onFetchMeshChildren).toHaveBeenCalledWith('M01.526.485.810.910.750');
-    expect(nav.querySelector('.bins__nav-here')?.textContent).toContain('Neurosurgeons');
+    const rows = Array.from(el.querySelectorAll('.bins__row'));
+    const neuroRow = rows.find((r) => r.querySelector('.bins__row-name')?.textContent === 'Neurosurgeons')!;
+    const orthoRow = rows.find((r) => r.querySelector('.bins__row-name')?.textContent === 'Orthopedic Surgeons')!;
+    // 名前クリック = 置換（Surgeons → Neurosurgeons、フリーワード保持）
+    neuroRow.querySelector<HTMLButtonElement>('.bins__row-name')!.click();
+    expect(onApplyExpression).toHaveBeenLastCalledWith('("Neurosurgeons"[Mesh] OR surgeon*[tiab])');
+    // OR追加 = 別 OR 項
+    orthoRow.querySelector<HTMLButtonElement>('.bins__row-or')!.click();
+    expect(onApplyExpression).toHaveBeenLastCalledWith(
+      '("Surgeons"[Mesh] OR surgeon*[tiab] OR "Orthopedic Surgeons"[Mesh])'
+    );
   });
 
-  test('＋追加 で onApplyExpression が新しい式で呼ばれる', async () => {
+  test('上位ノードの名前クリックで広げる置換になる', async () => {
     const doc = buildDoc();
     const onFetchMeshTrees = jest
       .fn()
       .mockResolvedValue([{ descriptor: 'Surgeons', treeNumbers: ['M01.526.485.810.910'] }]);
-    const onFetchMeshChildren = jest
-      .fn()
-      .mockResolvedValue([
-        { treeNumber: 'M01.526.485.810.910.750', descriptorUi: 'D000069471', label: 'Neurosurgeons' },
-      ]);
+    const onFetchMeshLabels = jest.fn().mockResolvedValue(
+      new Map([
+        ['M01.526.485.810', { treeNumber: 'M01.526.485.810', descriptorUi: 'D010820', label: 'Physicians' }],
+      ])
+    );
     const onApplyExpression = jest.fn();
     const el = buildBlockInspector(
       doc,
       baseParams({
-        expression: '"Surgeons"[Mesh]',
+        expression: '("Surgeons"[Mesh] OR surgeon*[tiab])',
         onFetchMeshTrees,
-        onFetchMeshChildren,
+        onFetchMeshLabels,
         onCountHits: jest.fn().mockResolvedValue(1),
         onApplyExpression,
       })
     )!;
     await flushAsync();
-    const nav = el.querySelector('.bins__nav')!;
-    openDetails(nav);
-    await flushAsync();
-    const child = nav.querySelector('.bins__nav-child')!;
-    child.querySelector<HTMLButtonElement>('.bins__nav-add')!.click();
-    expect(onApplyExpression).toHaveBeenCalledWith('"Surgeons"[Mesh] OR "Neurosurgeons"[Mesh]');
+    const physRow = Array.from(el.querySelectorAll('.bins__row')).find(
+      (r) => r.querySelector('.bins__row-name')?.textContent === 'Physicians'
+    )!;
+    physRow.querySelector<HTMLButtonElement>('.bins__row-name')!.click();
+    expect(onApplyExpression).toHaveBeenCalledWith('("Physicians"[Mesh] OR surgeon*[tiab])');
   });
 
-  test('現在地が既存語なら −削除 で onApplyExpression が呼ばれる', async () => {
+  test('▸ で子を遅延展開し、展開状態を共有 state に保持する', async () => {
     const doc = buildDoc();
     const onFetchMeshTrees = jest
       .fn()
-      .mockResolvedValue([{ descriptor: 'Surgeons', treeNumbers: ['M01.526.485.810.910'] }]);
-    const onFetchMeshChildren = jest.fn().mockResolvedValue([]);
-    const onApplyExpression = jest.fn();
+      .mockResolvedValue([{ descriptor: 'Health Personnel', treeNumbers: ['M01.526.485'] }]);
+    const onFetchMeshChildren = jest.fn((tn: string) => {
+      if (tn === 'M01.526.485') {
+        return Promise.resolve([
+          { treeNumber: 'M01.526.485.810', descriptorUi: 'D010820', label: 'Physicians', hasChildren: true },
+        ]);
+      }
+      if (tn === 'M01.526.485.810') {
+        return Promise.resolve([
+          { treeNumber: 'M01.526.485.810.910', descriptorUi: 'D066231', label: 'Surgeons', hasChildren: false },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+    const meshExpandedState = new Map<string, Set<string>>();
     const el = buildBlockInspector(
       doc,
       baseParams({
-        expression: '"Surgeons"[Mesh] OR surgeon*[tiab]',
+        expression: '"Health Personnel"[Mesh]',
         onFetchMeshTrees,
         onFetchMeshChildren,
         onCountHits: jest.fn().mockResolvedValue(1),
-        onApplyExpression,
+        meshExpandedState,
       })
     )!;
     await flushAsync();
-    const nav = el.querySelector('.bins__nav')!;
-    openDetails(nav);
+    // 起点 Health Personnel の子 Physicians（hasChildren=true）に ▸ が出る
+    const physRow = Array.from(el.querySelectorAll('.bins__row')).find(
+      (r) => r.querySelector('.bins__row-name')?.textContent === 'Physicians'
+    )!;
+    const toggle = physRow.querySelector<HTMLButtonElement>('.bins__row-toggle')!;
+    expect(toggle.textContent).toBe('▸');
+    toggle.click();
     await flushAsync();
-    const removeBtn = nav.querySelector<HTMLButtonElement>('.bins__nav-current .bins__nav-remove')!;
-    expect(removeBtn.textContent).toContain('削除');
-    removeBtn.click();
-    expect(onApplyExpression).toHaveBeenCalledWith('surgeon*[tiab]');
+    expect(onFetchMeshChildren).toHaveBeenCalledWith('M01.526.485.810');
+    expect(meshExpandedState.get('1')?.has('M01.526.485.810')).toBe(true);
+    // 孫 Surgeons が出る
+    const names = Array.from(el.querySelectorAll('.bins__row-name')).map((n) => n.textContent);
+    expect(names).toContain('Surgeons');
   });
 });

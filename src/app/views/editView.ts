@@ -95,6 +95,8 @@ interface BlockRenderContext {
   meshChildrenCache: Map<string, Promise<MeshTreeNode[]>>;
   /** MeSH ブラウザの tree number 群→ラベル Map キャッシュ */
   meshLabelCache: Map<string, Promise<Map<string, MeshTreeNode>>>;
+  /** MeSH ブラウザの展開状態（blockId→展開済み tree number 集合）。再描画をまたいで保持 */
+  meshExpandedState: Map<string, Set<string>>;
   /**
    * ブロックごとの AI 改善パネル状態（pending / proposal / error）。
    * 全ビュー再描画（store.setState）をまたいで提案を失わないよう view インスタンスで持ち越し、
@@ -174,6 +176,8 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
   // MeSH ブラウザの子ノード / ラベル逆引きも view インスタンスで持ち越す。
   const meshChildrenCache = new Map<string, Promise<MeshTreeNode[]>>();
   const meshLabelCache = new Map<string, Promise<Map<string, MeshTreeNode>>>();
+  // MeSH ブラウザの展開状態も view インスタンスで持ち越す（置換/追加の再描画をまたぐ）。
+  const meshExpandedState = new Map<string, Set<string>>();
   // store.setState による全ビュー再描画をまたいで保持する「作業中の md」。
   // store.currentFormulaMarkdown とは別に作業コピーを closure で持つことで、自動保存中（saving）の
   // stale な setState 再描画や、LLM コスト集計の setState 再描画でも、確定前の編集を失わない。
@@ -321,6 +325,7 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
       meshTreeCache,
       meshChildrenCache,
       meshLabelCache,
+      meshExpandedState,
       aiPanels,
       openEditPanels,
       refreshPanel,
@@ -472,6 +477,7 @@ function buildBlockRow(
       meshTreeCache: renderCtx.meshTreeCache,
       meshChildrenCache: renderCtx.meshChildrenCache,
       meshLabelCache: renderCtx.meshLabelCache,
+      meshExpandedState: renderCtx.meshExpandedState,
     });
   };
   const li = doc.createElement('li');
@@ -570,14 +576,37 @@ function buildBlockRow(
     openCombinedPanel(false);
   }
 
-  editToggle.addEventListener('click', () => {
+  const toggleCombinedPanel = (): void => {
     if (renderCtx.openEditPanels.has(blockId)) {
       closeCombinedPanel();
     } else {
       renderCtx.openEditPanels.add(blockId);
       openCombinedPanel(true);
     }
-  });
+  };
+
+  editToggle.addEventListener('click', toggleCombinedPanel);
+
+  // 鉛筆だけでなく、ブロック行（ヘッダ・式の行）クリックでも編集パネルを開閉する。
+  // リンク（MeSH）・ボタン（鉛筆等）・入力欄・展開済みパネル内のクリックは対象外にし、
+  // テキスト選択中（ドラッグ）も無視する。
+  const rowToggleHandler = (ev: Event): void => {
+    const target = ev.target as Element | null;
+    if (
+      target?.closest(
+        'a, button, input, textarea, select, .edit__block-edit, .edit__block-ai, .edit__combo-check'
+      )
+    ) {
+      return;
+    }
+    const selection = doc.getSelection?.();
+    if (selection && selection.type === 'Range' && selection.toString() !== '') {
+      return;
+    }
+    toggleCombinedPanel();
+  };
+  header.addEventListener('click', rowToggleHandler);
+  currentPre.addEventListener('click', rowToggleHandler);
 
   // 結合行には最終検索式の実検索 + シード捕捉確認を付ける（表示時・編集後に自動実行）。
   if (isCombination && callbacks.onCheckCombination) {

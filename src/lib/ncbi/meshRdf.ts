@@ -36,6 +36,11 @@ export interface MeshTreeNode {
   descriptorUi: string;
   /** descriptor 名（PubMed の `"<label>"[Mesh]` に使える表示名。例: `Neurosurgeons`） */
   label: string;
+  /**
+   * このノードがさらに下位（子）を持つか。children クエリでのみ EXISTS で取得し、
+   * UI の「▸ 展開できるか」判定に使う。labels クエリでは undefined。
+   */
+  hasChildren?: boolean;
 }
 
 /** SPARQL JSON 結果のうち、本モジュールが参照する最小形。 */
@@ -84,13 +89,13 @@ export async function fetchMeshChildren(
     return [];
   }
   const query = `${PREFIXES}
-SELECT ?childTN ?desc ?label WHERE {
+SELECT ?childTN ?desc ?label (EXISTS { ?gc meshv:parentTreeNumber ?childTN } AS ?hasKids) WHERE {
   ?childTN meshv:parentTreeNumber mesh:${treeNumber} .
   ?desc meshv:treeNumber ?childTN .
   ?desc rdfs:label ?label .
 }`;
   const json = await runSparql(query, deps);
-  return parseTreeNodes(json).sort((a, b) => a.label.localeCompare(b.label));
+  return parseTreeNodes(json, 'childTN', true).sort((a, b) => a.label.localeCompare(b.label));
 }
 
 /**
@@ -127,7 +132,11 @@ SELECT ?tn ?desc ?label WHERE {
  * SPARQL bindings を MeshTreeNode[] にする。
  * tree number 変数名は children クエリでは `childTN`、labels クエリでは `tn`。
  */
-function parseTreeNodes(json: SparqlJson, tnVar: 'childTN' | 'tn' = 'childTN'): MeshTreeNode[] {
+function parseTreeNodes(
+  json: SparqlJson,
+  tnVar: 'childTN' | 'tn' = 'childTN',
+  withHasChildren = false
+): MeshTreeNode[] {
   const out: MeshTreeNode[] = [];
   for (const b of json.results?.bindings ?? []) {
     const tnIri = b[tnVar]?.value;
@@ -136,11 +145,17 @@ function parseTreeNodes(json: SparqlJson, tnVar: 'childTN' | 'tn' = 'childTN'): 
     if (!tnIri || !descIri || !label) {
       continue;
     }
-    out.push({
+    const node: MeshTreeNode = {
       treeNumber: localName(tnIri),
       descriptorUi: localName(descIri),
       label,
-    });
+    };
+    if (withHasChildren) {
+      // Virtuoso は boolean を "1"/"0" で返す（"true"/"false" も許容）。
+      const v = b.hasKids?.value;
+      node.hasChildren = v === '1' || v === 'true';
+    }
+    out.push(node);
   }
   return out;
 }

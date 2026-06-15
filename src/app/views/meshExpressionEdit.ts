@@ -67,6 +67,48 @@ export function addMeshDescriptor(expression: string, label: string): string {
 }
 
 /**
+ * ブロック式の MeSH 句 origin を newLabel の MeSH 句（explode）へ「その場で」差し替える。
+ * MeSH ブラウザの「置換」（上位＝広げる / 下位＝絞る）に使う。
+ *
+ * - newLabel が空、または origin == newLabel なら原文のまま。
+ * - newLabel が式中に既にあれば、二重化を避けて origin を取り除くだけにする。
+ * - origin が式に無ければ（保険）OR で追加する。
+ */
+export function replaceMeshDescriptor(
+  expression: string,
+  origin: string,
+  newLabel: string
+): string {
+  const next = newLabel.trim();
+  if (next === '') {
+    return expression;
+  }
+  const originKey = descriptorKey(origin);
+  if (originKey === descriptorKey(next)) {
+    return expression;
+  }
+  if (!hasMeshDescriptor(expression, origin)) {
+    return addMeshDescriptor(expression, next);
+  }
+  // 差し替え先が既にあるなら、置換は origin の除去に帰着する（重複させない）。
+  if (hasMeshDescriptor(expression, next)) {
+    return removeMeshDescriptor(expression, origin);
+  }
+  const tokens = tokenizeOperands(expression);
+  for (const token of tokens) {
+    if (!token.isOperand) {
+      continue;
+    }
+    const d = operandMeshDescriptor(token.text);
+    if (d !== null && descriptorKey(d) === originKey) {
+      token.text = `"${next}"[Mesh]`;
+      break;
+    }
+  }
+  return joinTokens(tokens);
+}
+
+/**
  * descriptor の MeSH 句をブロック式から取り除く。隣接する演算子 glue も 1 つ落として
  * `A OR  OR B` のような壊れを防ぐ。該当が無ければ原文のまま返す。
  */

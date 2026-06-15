@@ -3,6 +3,7 @@ import {
   hasMeshDescriptor,
   operandMeshDescriptor,
   removeMeshDescriptor,
+  replaceMeshDescriptor,
 } from './meshExpressionEdit';
 
 describe('operandMeshDescriptor', () => {
@@ -91,5 +92,45 @@ describe('removeMeshDescriptor', () => {
   test('大小違いでも取り除く', () => {
     const expr = '("Surgeons"[Mesh] OR surgeon*[tiab])';
     expect(removeMeshDescriptor(expr, 'surgeons')).toBe('(surgeon*[tiab])');
+  });
+});
+
+describe('replaceMeshDescriptor', () => {
+  test('下位への置換（絞り込み）: 起点語を同じ位置で差し替え、他は保持', () => {
+    const expr = '("Surgeons"[Mesh] OR surgeon*[tiab])';
+    expect(replaceMeshDescriptor(expr, 'Surgeons', 'Neurosurgeons')).toBe(
+      '("Neurosurgeons"[Mesh] OR surgeon*[tiab])'
+    );
+  });
+
+  test('上位への置換（広げる）も同じ仕組み', () => {
+    const expr = '("Surgeons"[Mesh] OR surgeon*[tiab])';
+    expect(replaceMeshDescriptor(expr, 'Surgeons', 'Physicians')).toBe(
+      '("Physicians"[Mesh] OR surgeon*[tiab])'
+    );
+  });
+
+  test('差し替え先が既にあれば二重化せず起点だけ消す', () => {
+    const expr = '("Surgeons"[Mesh] OR "Neurosurgeons"[Mesh] OR surgeon*[tiab])';
+    expect(replaceMeshDescriptor(expr, 'Surgeons', 'Neurosurgeons')).toBe(
+      '("Neurosurgeons"[Mesh] OR surgeon*[tiab])'
+    );
+  });
+
+  test('起点が式に無ければ OR 追加にフォールバック', () => {
+    const expr = '(surgeon*[tiab])';
+    expect(replaceMeshDescriptor(expr, 'Surgeons', 'Neurosurgeons')).toBe(
+      '(surgeon*[tiab] OR "Neurosurgeons"[Mesh])'
+    );
+  });
+
+  test('起点と差し替え先が同じなら原文のまま', () => {
+    const expr = '("Surgeons"[Mesh])';
+    expect(replaceMeshDescriptor(expr, 'Surgeons', 'surgeons')).toBe(expr);
+  });
+
+  test('空ラベルは無視', () => {
+    const expr = '("Surgeons"[Mesh])';
+    expect(replaceMeshDescriptor(expr, 'Surgeons', '  ')).toBe(expr);
   });
 });

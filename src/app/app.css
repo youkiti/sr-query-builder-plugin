@@ -1431,6 +1431,8 @@ a.draft__term--mesh:focus-visible {
   justify-content: space-between;
   align-items: center;
   margin-bottom: var(--space-2);
+  /* ヘッダ全体をクリックで編集パネルを開閉できる（鉛筆と同等） */
+  cursor: pointer;
 }
 
 .edit__block-idgroup {
@@ -1735,6 +1737,8 @@ a.draft__term--mesh:focus-visible {
   font-size: var(--font-size-sm);
   white-space: pre-wrap;
   overflow-x: auto;
+  /* 式の行クリックでも編集パネルを開ける（MeSH リンクはリンクとして機能） */
+  cursor: pointer;
 }
 
 .edit__block-proposal:empty {
@@ -2917,96 +2921,113 @@ a.draft__term--mesh:focus-visible {
   color: var(--color-warning);
 }
 
-/* ---- MeSH ブラウザ（下位語ナビ + 追加/削除）---- */
-.bins__nav {
+/* ---- MeSH ブラウザ（PubMed 風インデントツリー）---- */
+.bins__branch {
   margin: var(--space-2) 0 0;
   border: 1px solid var(--color-border);
   border-radius: 4px;
-  padding: var(--space-1) var(--space-2);
+  padding: var(--space-1) 0;
   background: var(--color-surface, #fff);
 }
 
-.bins__nav-summary {
-  cursor: pointer;
-  font-weight: 600;
-  color: var(--color-text);
+.bins__branch-children:not([hidden]) {
+  display: block;
 }
 
-.bins__nav-body {
-  margin-top: var(--space-2);
-}
-
-.bins__nav-current:not([hidden]) {
+/* 1 行（インデントは padding-left を JS で付与） */
+.bins__row:not([hidden]) {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-1) var(--space-2);
-  background: rgba(42, 99, 214, 0.08);
+  gap: var(--space-1);
+  min-height: 22px;
+  padding-right: var(--space-2);
+}
+
+.bins__row:hover {
+  background: rgba(0, 0, 0, 0.035);
+}
+
+.bins__row--origin {
+  background: rgba(42, 99, 214, 0.1);
   border-radius: 3px;
 }
 
-.bins__nav-here {
+/* 展開トグル ▸/▾ */
+.bins__row-toggle {
+  flex: 0 0 auto;
+  width: 18px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  line-height: 1;
+  padding: 0;
+}
+
+.bins__row-toggle--leaf {
+  cursor: default;
+  visibility: hidden;
+}
+
+/* カテゴリ root（M 人々の集団）。MeSH 語ではないので地のテキスト */
+.bins__row-cat {
+  color: var(--color-text-muted);
   font-weight: 600;
 }
 
-.bins__nav-tn {
+/* 第1階層の tree id（M01 など） */
+.bins__row-id {
   font-family: var(--font-family-mono);
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
 }
 
-.bins__nav-controls {
-  margin: var(--space-1) 0;
+/* ノード名（クリック＝置換）。リンク風ボタン */
+.bins__row-name {
+  border: none;
+  background: transparent;
+  color: var(--color-primary-hover);
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+  text-align: left;
 }
 
-.bins__nav-children-title {
-  margin: var(--space-2) 0 var(--space-1);
-  color: var(--color-text-muted);
+.bins__row-name:hover {
+  text-decoration: underline;
+}
+
+.bins__row-name--static {
+  color: var(--color-text);
+  cursor: default;
+}
+
+.bins__row-name--static:hover {
+  text-decoration: none;
+}
+
+.bins__badge--origin {
+  background: rgba(42, 99, 214, 0.12);
+  color: var(--color-primary-hover);
+}
+
+/* OR追加（平常時は控えめ、hover/focus で前面に） */
+.bins__row-or {
   font-size: var(--font-size-sm);
-}
-
-.bins__nav-child:not([hidden]) {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 2px var(--space-2);
-}
-
-.bins__nav-child:nth-child(even) {
-  background: rgba(0, 0, 0, 0.03);
-}
-
-.bins__nav-child-label {
-  flex: 1 1 auto;
-}
-
-.bins__nav-up,
-.bins__nav-down,
-.bins__nav-add,
-.bins__nav-remove {
-  font-size: var(--font-size-sm);
-  border: 1px solid var(--color-border);
+  border: 1px solid rgba(42, 99, 214, 0.4);
   border-radius: 3px;
   padding: 0 6px;
   background: var(--color-surface, #fff);
+  color: var(--color-primary-hover);
   cursor: pointer;
   white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.1s ease;
 }
 
-.bins__nav-add {
-  color: var(--color-primary-hover);
-  border-color: rgba(42, 99, 214, 0.4);
-}
-
-.bins__nav-remove {
-  color: var(--color-danger);
-  border-color: rgba(201, 54, 47, 0.4);
-}
-
-.bins__nav-add:disabled,
-.bins__nav-remove:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.bins__row:hover .bins__row-or,
+.bins__row:focus-within .bins__row-or,
+.bins__row-or:focus {
+  opacity: 1;
 }

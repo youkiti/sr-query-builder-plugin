@@ -20,16 +20,22 @@ function errorResponse(status: number): Response {
 
 /** 実 SPARQL JSON（application/sparql-results+json）の形を模す。 */
 function sparql(
-  rows: Array<{ tn: string; desc: string; label: string }>,
+  rows: Array<{ tn: string; desc: string; label: string; hasKids?: string }>,
   tnVar: 'childTN' | 'tn' = 'childTN'
 ): SparqlJson {
   return {
     results: {
-      bindings: rows.map((r) => ({
-        [tnVar]: { type: 'uri', value: `http://id.nlm.nih.gov/mesh/${r.tn}` },
-        desc: { type: 'uri', value: `http://id.nlm.nih.gov/mesh/${r.desc}` },
-        label: { type: 'literal', value: r.label },
-      })),
+      bindings: rows.map((r) => {
+        const binding: Record<string, { type: string; value: string }> = {
+          [tnVar]: { type: 'uri', value: `http://id.nlm.nih.gov/mesh/${r.tn}` },
+          desc: { type: 'uri', value: `http://id.nlm.nih.gov/mesh/${r.desc}` },
+          label: { type: 'literal', value: r.label },
+        };
+        if (r.hasKids !== undefined) {
+          binding.hasKids = { type: 'literal', value: r.hasKids };
+        }
+        return binding;
+      }),
     },
   };
 }
@@ -41,11 +47,13 @@ describe('fetchMeshChildren', () => {
       expect(url).toContain('format=JSON');
       // クエリに親 tree number が IRI として含まれる
       expect(decodeURIComponent(url)).toContain('mesh:M01.526.485.810.910');
+      // クエリに hasChildren 判定の EXISTS が含まれる
+      expect(decodeURIComponent(url)).toContain('EXISTS');
       return jsonResponse(
         sparql([
-          { tn: 'M01.526.485.810.910.750', desc: 'D000069471', label: 'Neurosurgeons' },
-          { tn: 'M01.526.485.810.910.813', desc: 'D000066794', label: 'Oral and Maxillofacial Surgeons' },
-          { tn: 'M01.526.485.810.910.500', desc: 'D019024', label: 'Barber Surgeons' },
+          { tn: 'M01.526.485.810.910.750', desc: 'D000069471', label: 'Neurosurgeons', hasKids: '0' },
+          { tn: 'M01.526.485.810.910.813', desc: 'D000066794', label: 'Oral and Maxillofacial Surgeons', hasKids: '1' },
+          { tn: 'M01.526.485.810.910.500', desc: 'D019024', label: 'Barber Surgeons', hasKids: '0' },
         ])
       );
     });
@@ -62,7 +70,10 @@ describe('fetchMeshChildren', () => {
       treeNumber: 'M01.526.485.810.910.750',
       descriptorUi: 'D000069471',
       label: 'Neurosurgeons',
+      hasChildren: false,
     });
+    // hasKids="1" は hasChildren:true
+    expect(result.find((n) => n.label === 'Oral and Maxillofacial Surgeons')?.hasChildren).toBe(true);
   });
 
   test('不正な tree number は fetch せず空配列', async () => {
@@ -100,7 +111,9 @@ describe('fetchMeshChildren', () => {
     const result = await fetchMeshChildren('C08', {
       fetch: fetch as unknown as typeof globalThis.fetch,
     });
-    expect(result).toEqual([{ treeNumber: 'C08.2', descriptorUi: 'D1', label: 'Valid' }]);
+    expect(result).toEqual([
+      { treeNumber: 'C08.2', descriptorUi: 'D1', label: 'Valid', hasChildren: false },
+    ]);
   });
 
   test('HTTP エラーは EutilsError', async () => {

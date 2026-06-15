@@ -873,7 +873,8 @@ describe('createEditView - ブロック・インスペクタ', () => {
     expect(row.querySelector('.bins')).toBeTruthy();
     await flushAsync();
     expect(onFetchMeshTrees).toHaveBeenCalledWith(['Asthma']);
-    expect(row.querySelector('.bins__tree-term')?.textContent).toBe('Asthma');
+    // 起点ノード（Asthma）が MeSH ブラウザの枝に出る
+    expect(row.querySelector('.bins__row--origin .bins__row-name')?.textContent).toBe('Asthma');
   });
 
   test('AI 改善パネルを開くとインスペクタが展開される', () => {
@@ -886,6 +887,38 @@ describe('createEditView - ブロック・インスペクタ', () => {
     row.querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!.click();
     expect(row.querySelector('.bins')).toBeTruthy();
     expect(row.querySelector('.bins__freeword')).toBeTruthy();
+  });
+
+  test('ブロックのヘッダ行クリックでも編集パネルを開閉できる', () => {
+    const onCountHits = jest.fn().mockResolvedValue(1);
+    const view = createEditView({ onCountHits });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    const row = blockRow(container, '1');
+    const header = row.querySelector<HTMLElement>('.edit__block-header')!;
+    // 閉→開
+    header.click();
+    expect(row.querySelector('.bins')).toBeTruthy();
+    // 開→閉（同じ行クリックで畳む）
+    header.click();
+    expect(row.querySelector('.bins')).toBeNull();
+  });
+
+  test('式の行クリックでも開くが、MeSH リンククリックでは開かない', () => {
+    const onCountHits = jest.fn().mockResolvedValue(1);
+    const view = createEditView({ onCountHits });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    const row = blockRow(container, '1');
+    // MeSH リンク（<a>）クリックはトグル対象外
+    const meshLink = row.querySelector<HTMLAnchorElement>('.edit__block-current a');
+    if (meshLink) {
+      meshLink.click();
+      expect(row.querySelector('.bins')).toBeNull();
+    }
+    // 式行の地のテキスト部分クリックで開く
+    row.querySelector<HTMLElement>('.edit__block-current')!.click();
+    expect(row.querySelector('.bins')).toBeTruthy();
   });
 
   test('結合行にはインスペクタを出さない', () => {
