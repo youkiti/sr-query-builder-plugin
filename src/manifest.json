@@ -10,6 +10,7 @@
     "https://sheets.googleapis.com/*",
     "https://www.googleapis.com/*",
     "https://eutils.ncbi.nlm.nih.gov/*",
+    "https://id.nlm.nih.gov/*",
     "https://generativelanguage.googleapis.com/*"
   ],
   "oauth2": {

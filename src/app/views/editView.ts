@@ -9,6 +9,7 @@ import {
 } from '@/app/services';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
 import type { MeshTreeEntry } from '@/features/validation';
+import type { MeshTreeNode } from '@/lib/ncbi';
 import { ROUTE_LABELS } from '../router';
 import type { BlocksDraft } from '../store';
 import { buildBlockInspector, type SiblingBlock } from './blockInspector';
@@ -61,6 +62,16 @@ export interface EditViewCallbacks {
    */
   onFetchMeshTrees?: (descriptors: string[]) => Promise<MeshTreeEntry[]>;
   /**
+   * tree number → 子ノード（1 段下・名前付き）を取得する（MeSH RDF）。注入された場合のみ、
+   * インスペクタの MeSH ブラウザで下位語ナビ（クリックで下りる・件数のライブ表示）を出す。
+   */
+  onFetchMeshChildren?: (treeNumber: string) => Promise<MeshTreeNode[]>;
+  /**
+   * tree number 群 → ノード（descriptor + 名前）をバッチ逆引きする（MeSH RDF）。注入された場合のみ、
+   * MeSH ツリーの祖先ノードに ID だけでなく名前を表示する。
+   */
+  onFetchMeshLabels?: (treeNumbers: string[]) => Promise<Map<string, MeshTreeNode>>;
+  /**
    * 結合行（最終検索式）を実際に検索し、同時に有効シード論文の捕捉状況を確認する。
    * 注入された場合のみ、結合行に「検索してシード捕捉を確認」ボタンを出す。
    * 引数は編集中の md 全文（保存前でも確認できるよう view が保持している現在値）。
@@ -80,6 +91,10 @@ interface BlockRenderContext {
   comboCache: Map<string, Promise<CombinationCheckResult>>;
   /** インスペクタ MeSH ツリーの descriptor 群→tree entries キャッシュ */
   meshTreeCache: Map<string, Promise<MeshTreeEntry[]>>;
+  /** MeSH ブラウザの tree number→子ノード キャッシュ */
+  meshChildrenCache: Map<string, Promise<MeshTreeNode[]>>;
+  /** MeSH ブラウザの tree number 群→ラベル Map キャッシュ */
+  meshLabelCache: Map<string, Promise<Map<string, MeshTreeNode>>>;
   /**
    * ブロックごとの AI 改善パネル状態（pending / proposal / error）。
    * 全ビュー再描画（store.setState）をまたいで提案を失わないよう view インスタンスで持ち越し、
@@ -156,6 +171,9 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
   const comboCache = new Map<string, Promise<CombinationCheckResult>>();
   // インスペクタの MeSH ツリー取得結果も view インスタンスで持ち越す。
   const meshTreeCache = new Map<string, Promise<MeshTreeEntry[]>>();
+  // MeSH ブラウザの子ノード / ラベル逆引きも view インスタンスで持ち越す。
+  const meshChildrenCache = new Map<string, Promise<MeshTreeNode[]>>();
+  const meshLabelCache = new Map<string, Promise<Map<string, MeshTreeNode>>>();
   // store.setState による全ビュー再描画をまたいで保持する「作業中の md」。
   // store.currentFormulaMarkdown とは別に作業コピーを closure で持つことで、自動保存中（saving）の
   // stale な setState 再描画や、LLM コスト集計の setState 再描画でも、確定前の編集を失わない。
@@ -301,6 +319,8 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
       hitsCache,
       comboCache,
       meshTreeCache,
+      meshChildrenCache,
+      meshLabelCache,
       aiPanels,
       openEditPanels,
       refreshPanel,
@@ -438,8 +458,20 @@ function buildBlockRow(
       siblings: buildSiblings(blockId, allBlocks, renderCtx.blocksDraft),
       onCountHits: callbacks.onCountHits,
       onFetchMeshTrees: callbacks.onFetchMeshTrees,
+      onFetchMeshChildren: callbacks.onFetchMeshChildren,
+      onFetchMeshLabels: callbacks.onFetchMeshLabels,
+      // MeSH ブラウザからの追加・削除はこのブロックの式を書き換えて自動保存へ流す。
+      onApplyExpression: (next: string): void => {
+        try {
+          editor.setMd(applyBlockImprovement(editor.getMd(), blockId, next));
+        } catch {
+          // 不正な式（空など）は適用しない。UI 側で空は弾いている。
+        }
+      },
       hitsCache: renderCtx.hitsCache,
       meshTreeCache: renderCtx.meshTreeCache,
+      meshChildrenCache: renderCtx.meshChildrenCache,
+      meshLabelCache: renderCtx.meshLabelCache,
     });
   };
   const li = doc.createElement('li');

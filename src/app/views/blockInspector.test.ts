@@ -18,6 +18,8 @@ function baseParams(over: Partial<BlockInspectorParams> = {}): BlockInspectorPar
     siblings: [],
     hitsCache: new Map(),
     meshTreeCache: new Map(),
+    meshChildrenCache: new Map(),
+    meshLabelCache: new Map(),
     ...over,
   };
 }
@@ -173,5 +175,130 @@ describe('buildBlockInspector', () => {
       })
     )!;
     expect(el.querySelector('.bins__overlap')?.textContent).toContain('重複する語はありません');
+  });
+
+  test('祖先ノードに MeSH RDF 逆引きの名前を埋める', async () => {
+    const doc = buildDoc();
+    const onFetchMeshTrees = jest
+      .fn()
+      .mockResolvedValue([{ descriptor: 'Surgeons', treeNumbers: ['M01.526.485.810.910'] }]);
+    const onFetchMeshLabels = jest.fn().mockResolvedValue(
+      new Map([
+        ['M01.526.485.810', { treeNumber: 'M01.526.485.810', descriptorUi: 'D010820', label: 'Physicians' }],
+        ['M01.526.485', { treeNumber: 'M01.526.485', descriptorUi: 'D006282', label: 'Health Personnel' }],
+      ])
+    );
+    const el = buildBlockInspector(
+      doc,
+      baseParams({ expression: '"Surgeons"[Mesh]', onFetchMeshTrees, onFetchMeshLabels })
+    )!;
+    await flushAsync();
+    // 祖先 tree number 群でバッチ逆引きが呼ばれる
+    expect(onFetchMeshLabels).toHaveBeenCalledTimes(1);
+    const requested = onFetchMeshLabels.mock.calls[0]![0] as string[];
+    expect(requested).toContain('M01.526.485.810');
+    // 名前が span に埋まる
+    const names = Array.from(el.querySelectorAll('.bins__tree-name')).map((n) => n.textContent);
+    expect(names).toContain('Physicians');
+    expect(names).toContain('Health Personnel');
+  });
+
+  function openDetails(el: Element): void {
+    (el as HTMLDetailsElement).open = true;
+    el.dispatchEvent(new Event('toggle'));
+  }
+
+  test('下位語ナビ: 開くと子を名前+件数で出し、↓下りるで現在地が変わる', async () => {
+    const doc = buildDoc();
+    const onFetchMeshTrees = jest
+      .fn()
+      .mockResolvedValue([{ descriptor: 'Surgeons', treeNumbers: ['M01.526.485.810.910'] }]);
+    const onFetchMeshChildren = jest.fn((tn: string) => {
+      if (tn === 'M01.526.485.810.910') {
+        return Promise.resolve([
+          { treeNumber: 'M01.526.485.810.910.750', descriptorUi: 'D000069471', label: 'Neurosurgeons' },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+    const onCountHits = jest.fn((q: string) =>
+      Promise.resolve(q === '"Surgeons"[Mesh]' ? 21296 : q === '"Neurosurgeons"[Mesh]' ? 5000 : 0)
+    );
+    const el = buildBlockInspector(
+      doc,
+      baseParams({ expression: '"Surgeons"[Mesh]', onFetchMeshTrees, onFetchMeshChildren, onCountHits })
+    )!;
+    await flushAsync();
+    const nav = el.querySelector('.bins__nav')!;
+    expect(nav.querySelector('.bins__nav-summary')?.textContent).toContain('Surgeons');
+    openDetails(nav);
+    await flushAsync();
+    expect(onFetchMeshChildren).toHaveBeenCalledWith('M01.526.485.810.910');
+    // 現在地と子の件数が出る
+    expect(nav.querySelector('.bins__nav-here')?.textContent).toContain('Surgeons');
+    const child = nav.querySelector('.bins__nav-child')!;
+    expect(child.querySelector('.bins__nav-child-label')?.textContent).toBe('Neurosurgeons');
+    // ↓下りる → 現在地が Neurosurgeons になり、その子を取りに行く
+    child.querySelector<HTMLButtonElement>('.bins__nav-down')!.click();
+    await flushAsync();
+    expect(onFetchMeshChildren).toHaveBeenCalledWith('M01.526.485.810.910.750');
+    expect(nav.querySelector('.bins__nav-here')?.textContent).toContain('Neurosurgeons');
+  });
+
+  test('＋追加 で onApplyExpression が新しい式で呼ばれる', async () => {
+    const doc = buildDoc();
+    const onFetchMeshTrees = jest
+      .fn()
+      .mockResolvedValue([{ descriptor: 'Surgeons', treeNumbers: ['M01.526.485.810.910'] }]);
+    const onFetchMeshChildren = jest
+      .fn()
+      .mockResolvedValue([
+        { treeNumber: 'M01.526.485.810.910.750', descriptorUi: 'D000069471', label: 'Neurosurgeons' },
+      ]);
+    const onApplyExpression = jest.fn();
+    const el = buildBlockInspector(
+      doc,
+      baseParams({
+        expression: '"Surgeons"[Mesh]',
+        onFetchMeshTrees,
+        onFetchMeshChildren,
+        onCountHits: jest.fn().mockResolvedValue(1),
+        onApplyExpression,
+      })
+    )!;
+    await flushAsync();
+    const nav = el.querySelector('.bins__nav')!;
+    openDetails(nav);
+    await flushAsync();
+    const child = nav.querySelector('.bins__nav-child')!;
+    child.querySelector<HTMLButtonElement>('.bins__nav-add')!.click();
+    expect(onApplyExpression).toHaveBeenCalledWith('"Surgeons"[Mesh] OR "Neurosurgeons"[Mesh]');
+  });
+
+  test('現在地が既存語なら −削除 で onApplyExpression が呼ばれる', async () => {
+    const doc = buildDoc();
+    const onFetchMeshTrees = jest
+      .fn()
+      .mockResolvedValue([{ descriptor: 'Surgeons', treeNumbers: ['M01.526.485.810.910'] }]);
+    const onFetchMeshChildren = jest.fn().mockResolvedValue([]);
+    const onApplyExpression = jest.fn();
+    const el = buildBlockInspector(
+      doc,
+      baseParams({
+        expression: '"Surgeons"[Mesh] OR surgeon*[tiab]',
+        onFetchMeshTrees,
+        onFetchMeshChildren,
+        onCountHits: jest.fn().mockResolvedValue(1),
+        onApplyExpression,
+      })
+    )!;
+    await flushAsync();
+    const nav = el.querySelector('.bins__nav')!;
+    openDetails(nav);
+    await flushAsync();
+    const removeBtn = nav.querySelector<HTMLButtonElement>('.bins__nav-current .bins__nav-remove')!;
+    expect(removeBtn.textContent).toContain('削除');
+    removeBtn.click();
+    expect(onApplyExpression).toHaveBeenCalledWith('surgeon*[tiab]');
   });
 });

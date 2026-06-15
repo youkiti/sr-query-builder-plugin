@@ -57,7 +57,15 @@ import {
   type ValidationSummary,
 } from './services';
 import type { SeedPaper } from '@/domain/seedPaper';
-import { efetchArticles, esearch, fetchMeshTreeNumbers, type EfetchArticle } from '@/lib/ncbi';
+import {
+  efetchArticles,
+  esearch,
+  fetchMeshChildren,
+  fetchMeshLabels,
+  fetchMeshTreeNumbers,
+  type EfetchArticle,
+  type MeshTreeNode,
+} from '@/lib/ncbi';
 import type { MeshTreeEntry } from '@/features/validation';
 import { getLatestFormulaVersion, listFormulaVersions } from '@/features/formula';
 import type { FormulaVersion } from '@/domain/formulaVersion';
@@ -436,6 +444,14 @@ function buildDefaultViewOptions(
           descriptor,
           treeNumbers,
         }));
+      },
+      onFetchMeshChildren: async (treeNumber: string): Promise<MeshTreeNode[]> => {
+        const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
+        return fetchMeshChildren(treeNumber, eutils);
+      },
+      onFetchMeshLabels: async (treeNumbers: string[]): Promise<Map<string, MeshTreeNode>> => {
+        const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
+        return fetchMeshLabels(treeNumbers, eutils);
       },
       onCheckCombination: async (formulaMd: string): Promise<CombinationCheckResult> => {
         const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
