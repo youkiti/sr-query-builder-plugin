@@ -83,6 +83,9 @@ function buildChip(
   const chip = doc.createElement('span');
   chip.className = `edit__chip edit__chip--${info.kind} draft__term draft__term--${info.kind === 'other' ? 'plain' : info.kind}`;
   chip.setAttribute('data-operand-index', String(info.index));
+  // 語編集の確定後に「同じ語のチップ」へフォーカスを戻すための目印（index は dedupe/sort で
+  // 変わりうるため、bare term で引き当てる）。editView 側の focus 復元が参照する。
+  chip.setAttribute('data-operand-term', info.term);
 
   if (info.kind === 'mesh') {
     // MeSH は語を MeSH ブラウザへのリンクのまま（自由入力はさせない）。

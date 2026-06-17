@@ -298,6 +298,52 @@ describe('startApp', () => {
     }));
     expect(content.querySelector('.edit__block-row[data-block-id="1"]')).not.toBe(rowBefore);
   });
+
+  test('#/edit の自動保存（onAutoSave→md 書き戻し）では全描画せず、ブロックリストを保持する', () => {
+    const doc = buildDocument();
+    const md0 = [
+      '## PubMed/MEDLINE',
+      '',
+      '```',
+      '#1 asthma[tiab] OR wheez[tiab]',
+      '#2 children[tiab]',
+      '#3 #1 AND #2',
+      '```',
+      '',
+    ].join('\n');
+    const store = createStore({
+      ...INITIAL_STATE,
+      route: 'edit',
+      project: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'd', title: 'T' },
+      currentFormulaVersionId: 'v1',
+      currentFormulaMarkdown: md0,
+    });
+    // overwriteCurrentFormula 相当: 自動保存は currentFormulaMarkdown を新 md に書き戻す。
+    const onAutoSave = (md: string): void => {
+      store.setState((s) => ({ ...s, currentFormulaMarkdown: md }));
+    };
+    startApp(doc, { ...noopHashOptions('#/edit'), store, viewOptions: { edit: { onAutoSave } } });
+    const content = doc.getElementById('app-content')!;
+    const listBefore = content.querySelector('.edit__block-list')!;
+    expect(listBefore).toBeTruthy();
+
+    // #1 を開いてフリーワード（wheez）を削除 → onAutoSave 経由で md が書き戻される。
+    content
+      .querySelector<HTMLButtonElement>(
+        '.edit__block-row[data-block-id="1"] .edit__block-edit-toggle'
+      )!
+      .click();
+    content
+      .querySelectorAll<HTMLButtonElement>(
+        '.edit__block-row[data-block-id="1"] .edit__chip-remove'
+      )[1]!
+      .click();
+
+    // md は書き戻されているが、書き戻しの setState では全描画されない
+    // （innerHTML='' でブロックリスト自体が作り直されない＝スクロール/フォーカスが飛ばない）。
+    expect(store.getState().currentFormulaMarkdown).not.toContain('wheez');
+    expect(content.querySelector('.edit__block-list')).toBe(listBefore);
+  });
 });
 
 describe('startApp - wiring 層', () => {

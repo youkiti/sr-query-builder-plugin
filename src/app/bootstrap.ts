@@ -149,7 +149,26 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
     }
     opts.setHash(buildHash(route));
   };
-  const viewOptions = opts.viewOptions ?? buildDefaultViewOptions(store, runtime, navigate);
+  const baseViewOptions = opts.viewOptions ?? buildDefaultViewOptions(store, runtime, navigate);
+  // edit ビューの自動保存（onAutoSave）が書き戻す currentFormulaMarkdown は、編集ビューが
+  // setMd 時点で既にブロック差分描画済みの値。その書き戻しの setState で edit ビュー全体を
+  // 描き直す（innerHTML='' → スクロール位置リセット・入力フォーカス喪失）と、下のほうの
+  // ブロックを手編集している最中に表示外へ飛ぶ。これを防ぐため、直近に自動保存へ流した md を
+  // 覚えておき、canSkipEditFullRender で「自分の書き戻しなら全描画しない」判定に使う。
+  let lastEditAutoSaveMd: string | null = null;
+  const innerEditAutoSave = baseViewOptions.edit?.onAutoSave;
+  const viewOptions = innerEditAutoSave
+    ? {
+        ...baseViewOptions,
+        edit: {
+          ...baseViewOptions.edit,
+          onAutoSave: (md: string): void => {
+            lastEditAutoSaveMd = md;
+            innerEditAutoSave(md);
+          },
+        },
+      }
+    : baseViewOptions;
   const views = buildViews(store, viewOptions);
 
   // ヘッダーのアプリタイトル: クリックで #/home へ戻す（docs/ui-flow.md §4）
@@ -190,7 +209,7 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
         route === 'edit' &&
         lastRendered !== null &&
         lastRendered.route === 'edit' &&
-        canSkipEditFullRender(lastRendered, snapshot)
+        canSkipEditFullRender(lastRendered, snapshot, lastEditAutoSaveMd)
       ) {
         // edit ビューの構造的入力（プロジェクト・検索式 md・バージョン・ブロック）が不変。
         // 自動保存ステータスや LLM コスト集計の setState で全体を描き直すと、進行中の MeSH ツリー
@@ -232,10 +251,21 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
  * version_id・ブロックドラフト）がすべて前回描画時と同一なら、変わったのは自動保存ステータスや
  * LLM コスト集計など edit の DOM 構造に影響しない state だけなので、全体再描画を省ける。
  */
-function canSkipEditFullRender(prev: AppState, next: AppState): boolean {
+function canSkipEditFullRender(
+  prev: AppState,
+  next: AppState,
+  lastAutoSavedMd: string | null
+): boolean {
+  // currentFormulaMarkdown が変わっても、その新値が「edit ビュー自身が直近に自動保存へ流した md」
+  // と一致するなら、編集ビューは既にその式を描画済み（setMd でブロック差分描画した）なので全描画は
+  // 冗長かつ有害（スクロール・フォーカスを失う）。履歴復元・新規生成は lastAutoSavedMd と異なる値に
+  // なるため、従来どおり全描画される。
+  const formulaUnchanged =
+    prev.currentFormulaMarkdown === next.currentFormulaMarkdown ||
+    next.currentFormulaMarkdown === lastAutoSavedMd;
   return (
     (prev.project?.projectId ?? null) === (next.project?.projectId ?? null) &&
-    prev.currentFormulaMarkdown === next.currentFormulaMarkdown &&
+    formulaUnchanged &&
     prev.currentFormulaVersionId === next.currentFormulaVersionId &&
     prev.blocksDraft === next.blocksDraft
   );

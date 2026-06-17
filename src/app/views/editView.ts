@@ -172,7 +172,19 @@ interface BlockRenderContext {
    * 行要素は維持され、進行中の手編集なども巻き込まない。
    */
   refreshPanel: (blockId: string) => void;
+  /**
+   * 編集確定後に復元したい入力フォーカスの指定（holder で持つ）。語編集・語追加・生テキスト保存は
+   * setMd → renderBlockList でブロック行を作り直すためフォーカスが外れる。確定時にここへ意図を
+   * 置き、行の再構築時（openInlineEdit 末尾）に消費してフォーカスを戻す。
+   */
+  pendingFocus: { value: PendingFocus | null };
 }
+
+/** 編集確定で行が作り直された後に復元する入力フォーカスの指定。 */
+type PendingFocus =
+  | { blockId: string; kind: 'term'; term: string } // 語編集後: 同じ語のチップへ戻す
+  | { blockId: string; kind: 'add' } // 語追加後: 追加入力を開き直して連続入力できるようにする
+  | { blockId: string; kind: 'raw' }; // 生テキスト保存後: テキストエリアへ戻す
 
 /** 結合行チェックの debounce / stale 表示の状態。 */
 interface ComboCheckState {
@@ -268,6 +280,8 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
   // 「最新の」ライブ DOM へ反映できるようにする（全体再描画はしない）。
   let latestRefreshPanel: (blockId: string) => void = () => {};
   const refreshPanel = (blockId: string): void => latestRefreshPanel(blockId);
+  // 編集確定後のフォーカス復元の意図を持ち越す holder（全描画をまたいでも維持されるよう closure に置く）。
+  const pendingFocus: { value: PendingFocus | null } = { value: null };
   return (container, ctx) => {
     container.innerHTML = '';
     const doc = container.ownerDocument;
@@ -403,6 +417,7 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
       openEditPanels,
       closePanelFns,
       refreshPanel,
+      pendingFocus,
     };
 
     function rerenderBlocks(): void {
@@ -512,7 +527,10 @@ function renderBlockList(
   if (!sameStructure) {
     ul.innerHTML = '';
     for (const block of formula.blocks) {
-      ul.appendChild(build(block));
+      const row = build(block);
+      ul.appendChild(row);
+      // 行を DOM へ繋いだ後にフォーカス復元する（detached なまま focus しても効かないため）。
+      restoreFocusInRow(row, renderCtx);
     }
     return;
   }
@@ -522,9 +540,49 @@ function renderBlockList(
     const el = existing[i]!;
     const changed = block.isCombination || el.dataset.expression !== block.expression;
     if (changed) {
-      el.replaceWith(build(block));
+      const row = build(block);
+      el.replaceWith(row);
+      // replaceWith で DOM へ繋がった後に、編集確定で外れたフォーカスを復元する。
+      restoreFocusInRow(row, renderCtx);
     }
   });
+}
+
+/**
+ * 編集確定（語編集・語追加・生テキスト保存）でブロック行が作り直された後、DOM へ繋がったその行の上で
+ * 目的の入力へフォーカスを戻す。意図は renderCtx.pendingFocus に置かれ、当該ブロックのものだけを
+ * 1 度だけ消費する。対象が見つからなければ静かに諦める（パネルは開いたままなので操作は続けられる）。
+ *
+ * 注意: 行が DOM に attach された後に呼ぶこと。detached な要素への focus() は効かない。
+ */
+function restoreFocusInRow(row: HTMLElement, renderCtx: BlockRenderContext): void {
+  const pf = renderCtx.pendingFocus.value;
+  if (!pf || pf.blockId !== row.getAttribute('data-block-id')) {
+    return;
+  }
+  renderCtx.pendingFocus.value = null;
+  if (pf.kind === 'add') {
+    // 「＋ 語を追加」ボタンを押下扱いにして入力欄を開き直す（クリックハンドラが focus まで行う）。
+    row.querySelector<HTMLElement>('.edit__chip-add-btn')?.click();
+    return;
+  }
+  if (pf.kind === 'term') {
+    // dedupe/sort で index が変わるため、bare term 一致のチップの語ボタンへ戻す。
+    for (const chip of Array.from(row.querySelectorAll<HTMLElement>('.edit__chip'))) {
+      if (chip.dataset.operandTerm === pf.term) {
+        chip.querySelector<HTMLElement>('.edit__chip-term--editable')?.focus();
+        return;
+      }
+    }
+    return;
+  }
+  // raw: 生テキストのテキストエリアへ戻し、キャレットを末尾へ置く。
+  const raw = row.querySelector<HTMLTextAreaElement>('.edit__block-edit-input');
+  if (raw) {
+    raw.focus();
+    const end = raw.value.length;
+    raw.setSelectionRange(end, end);
+  }
 }
 
 /**
@@ -690,7 +748,8 @@ function buildBlockRow(
       applyExpression,
       isCombination,
       focus,
-      closeCombinedPanel
+      closeCombinedPanel,
+      renderCtx
     );
     renderAiArea(doc, aiSlot, blockId, expression, editor, callbacks, renderCtx, focus);
   };
@@ -957,7 +1016,8 @@ function openInlineEdit(
   applyExpression: (next: string) => void,
   isCombination: boolean,
   focus: boolean,
-  onClose: () => void
+  onClose: () => void,
+  renderCtx: BlockRenderContext
 ): void {
   slot.innerHTML = '';
   currentPre.style.display = 'none';
@@ -974,8 +1034,16 @@ function openInlineEdit(
     const chips = doc.createElement('div');
     renderEditableBlockInto(chips, expression, {
       onRemove: (index) => applyExpression(removeOperandAt(expression, index)),
-      onEditTerm: (index, term) => applyExpression(setOperandTerm(expression, index, term)),
-      onAddFreeword: (term) => applyExpression(appendFreeword(expression, term)),
+      onEditTerm: (index, term) => {
+        // 確定後、行が作り直されても同じ語のチップへフォーカスを戻す（bare term で引き当てる）。
+        renderCtx.pendingFocus.value = { blockId, kind: 'term', term: term.trim() };
+        applyExpression(setOperandTerm(expression, index, term));
+      },
+      onAddFreeword: (term) => {
+        // 追加後は追加入力を開き直し、連続して語を足せるようにする。
+        renderCtx.pendingFocus.value = { blockId, kind: 'add' };
+        applyExpression(appendFreeword(expression, term));
+      },
     });
     chipForm.appendChild(chips);
     slot.appendChild(chipForm);
@@ -1040,6 +1108,9 @@ function openInlineEdit(
     }
   }
 
+  // フォーカス復元（pendingFocus の消費）は、行が DOM へ attach された後に renderBlockList が
+  // restoreFocusInRow で行う（ここで focus すると detached な要素になり効かない）。
+
   saveBtn.addEventListener('click', () => {
     const next = input.value.trim();
     if (next === '') {
@@ -1048,6 +1119,11 @@ function openInlineEdit(
     }
     try {
       const updated = applyBlockImprovement(editor.getMd(), blockId, next);
+      // 結合行は生テキスト編集が常時開いているので、保存後はテキストエリアへフォーカスを戻す。
+      // 概念ブロックの生テキストは折りたたみ（保存で畳まれる）なので focus 復元はしない。
+      if (isCombination) {
+        renderCtx.pendingFocus.value = { blockId, kind: 'raw' };
+      }
       // setMd がブロック一覧を丸ごと再描画する。openEditPanels は保持されるのでパネルは開いたまま、
       // 新しい式で再生成される。
       editor.setMd(updated);

@@ -308,6 +308,55 @@ describe('createEditView - チップ編集（フリーワード）', () => {
     const details = row.querySelector<HTMLDetailsElement>('details.edit__block-raw')!;
     expect(details.open).toBe(true);
   });
+
+  // NOTE: テスト用 document は document.implementation.createHTMLDocument 由来で browsing context を
+  // 持たないため jsdom の focus() が activeElement を更新しない。フォーカス復元は
+  // HTMLElement.prototype.focus のスパイで「どの要素に focus したか」を検証する。
+  test('語編集の確定後、行が作り直されても同じ語のチップへフォーカスが戻る', () => {
+    const view = createEditView({ onAutoSave: jest.fn() });
+    const container = buildContainer();
+    view(container, { state: stateFreeword, navigate: jest.fn() });
+    const row = openPanel(container, '1');
+    row.querySelector<HTMLButtonElement>('.edit__chip-term--editable')!.click();
+    const input = row.querySelector<HTMLInputElement>('.edit__chip-input')!;
+    input.value = 'asthma*';
+    const focusSpy = jest.spyOn(HTMLElement.prototype, 'focus');
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    const { instances } = focusSpy.mock;
+    const focused = instances[instances.length - 1] as unknown as HTMLElement;
+    focusSpy.mockRestore();
+    expect(focused.classList.contains('edit__chip-term--editable')).toBe(true);
+    expect(focused.closest<HTMLElement>('.edit__chip')!.dataset.operandTerm).toBe('asthma*');
+  });
+
+  test('語追加の確定後、追加入力が開き直して連続入力できる', () => {
+    const view = createEditView({ onAutoSave: jest.fn() });
+    const container = buildContainer();
+    view(container, { state: stateFreeword, navigate: jest.fn() });
+    const row = openPanel(container, '1');
+    row.querySelector<HTMLButtonElement>('.edit__chip-add-btn')!.click();
+    const input = row.querySelector<HTMLInputElement>('.edit__chip-add-input')!;
+    input.value = 'cough';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    // 作り直された行で追加入力が開き直されている（＝続けて語を足せる）。
+    const newRow = blockRow(container, '1');
+    expect(newRow.querySelector('.edit__chip-add-input')).toBeTruthy();
+  });
+
+  test('結合行の生テキスト保存後、テキストエリアへフォーカスが戻る', () => {
+    const view = createEditView({ onAutoSave: jest.fn() });
+    const container = buildContainer();
+    view(container, { state: stateFreeword, navigate: jest.fn() });
+    const row = openPanel(container, '3');
+    const input = row.querySelector<HTMLTextAreaElement>('.edit__block-edit-input')!;
+    input.value = '#2 AND #1';
+    const focusSpy = jest.spyOn(HTMLElement.prototype, 'focus');
+    row.querySelector<HTMLButtonElement>('.edit__block-edit-save')!.click();
+    const { instances } = focusSpy.mock;
+    const focused = instances[instances.length - 1] as unknown as HTMLElement;
+    focusSpy.mockRestore();
+    expect(focused.classList.contains('edit__block-edit-input')).toBe(true);
+  });
 });
 
 describe('createEditView - 動的保存（上書き）', () => {
