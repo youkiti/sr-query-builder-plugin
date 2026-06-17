@@ -154,8 +154,17 @@ interface BlockRenderContext {
   /**
    * 統合編集パネル（手編集 + AI 改善）が開いているブロック ID の集合。鉛筆トグルで開閉し、
    * 全ビュー再描画をまたいで開閉状態を保持して、再描画後も buildBlockRow がパネルを復元する。
+   *
+   * アコーディオン動作（同時に開くのは 1 ブロックだけ）にしているため実質的に 0〜1 件だが、
+   * 開閉判定・再描画後の復元ロジックを変えずに済むよう Set のまま扱う。
    */
   openEditPanels: Set<string>;
+  /**
+   * 各ブロック行の「パネルを閉じる」関数を blockId で引けるレジストリ。別ブロックを開くときに、
+   * 既に開いているパネルをその場の DOM 上で閉じる（アコーディオン）ために使う。行が作り直される
+   * たびに buildBlockRow が最新の closure を上書き登録する。
+   */
+  closePanelFns: Map<string, () => void>;
   /**
    * 指定ブロックの AI 提案サブ領域だけを、最新の DOM 上で aiPanels の状態から作り直す。
    * AI 改善の非同期コールバック（LLM の then 等）は、自分が作られた時点ではなく「最新の」
@@ -253,6 +262,8 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
   const aiPanels = new Map<string, AiPanelState>();
   // 鉛筆で開いている統合編集パネル（手編集 + AI）のブロック ID。再描画をまたいで開閉を保持する。
   const openEditPanels = new Set<string>();
+  // 各ブロック行の「パネルを閉じる」関数のレジストリ（アコーディオンで別パネルを閉じるのに使う）。
+  const closePanelFns = new Map<string, () => void>();
   // 最新の「指定ブロックの AI 提案サブ領域の再構築」への間接参照。AI 改善の非同期 then 等が
   // 「最新の」ライブ DOM へ反映できるようにする（全体再描画はしない）。
   let latestRefreshPanel: (blockId: string) => void = () => {};
@@ -390,6 +401,7 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
       meshExpandedState,
       aiPanels,
       openEditPanels,
+      closePanelFns,
       refreshPanel,
     };
 
@@ -659,6 +671,9 @@ function buildBlockRow(
     closeInlineEdit(editSlot, currentPre, editToggle);
     aiSlot.innerHTML = '';
   }
+  // アコーディオンで別ブロックから閉じられるよう、この行の閉じる関数を登録する（行が作り直される
+  // たびに最新の closure で上書きする）。
+  renderCtx.closePanelFns.set(blockId, closeCombinedPanel);
 
   // 統合編集パネルを開く。手編集フォーム（+ インスペクタ）と AI 改善フォーム（+ 提案）を同時に出す。
   // focus=true はユーザー操作で開いたとき（入力欄へフォーカス）、false は再描画での復元時。
@@ -689,6 +704,13 @@ function buildBlockRow(
     if (renderCtx.openEditPanels.has(blockId)) {
       closeCombinedPanel();
     } else {
+      // アコーディオン: 同時に開くのは 1 ブロックだけにする。先に開いている他のパネルを閉じてから
+      // 開くことで、複数ブロックを開いたまま表示が縦に広がりすぎるのを防ぐ。
+      for (const otherId of Array.from(renderCtx.openEditPanels)) {
+        if (otherId !== blockId) {
+          renderCtx.closePanelFns.get(otherId)?.();
+        }
+      }
       renderCtx.openEditPanels.add(blockId);
       openCombinedPanel(true);
     }

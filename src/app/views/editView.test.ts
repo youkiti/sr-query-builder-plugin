@@ -681,6 +681,27 @@ describe('createEditView - 鉛筆インライン編集', () => {
     toggle.click();
     expect(row.querySelector('.edit__block-edit-input')).toBeNull();
   });
+
+  test('別のブロックを開くと先に開いていたブロックは閉じる（アコーディオン）', () => {
+    const view = createEditView();
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    // #1 を開く。
+    blockRow(container, '1')
+      .querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!
+      .click();
+    expect(blockRow(container, '1').querySelector('.edit__block-edit-input')).toBeTruthy();
+    // #2 を開くと #1 は自動的に閉じる。
+    blockRow(container, '2')
+      .querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!
+      .click();
+    expect(blockRow(container, '2').querySelector('.edit__block-edit-input')).toBeTruthy();
+    expect(blockRow(container, '1').querySelector('.edit__block-edit-input')).toBeNull();
+    // #1 の式表示が元に戻っている（display:none が解除されている）。
+    expect(
+      blockRow(container, '1').querySelector<HTMLElement>('.edit__block-current')!.style.display
+    ).toBe('');
+  });
 });
 
 describe('createEditView - ブロック単位 AI 改善', () => {
