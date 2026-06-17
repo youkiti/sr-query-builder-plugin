@@ -88,6 +88,38 @@ describe('renderEditableBlockInto', () => {
     expect(calls.add).toEqual(['cough']);
   });
 
+  test('語編集の input には保持タグ [tiab] が静的接尾辞として添えられる', () => {
+    const { container } = render('asthma*[tiab]');
+    container.querySelector<HTMLButtonElement>('.edit__chip-term--editable')!.click();
+    const suffix = container.querySelector('.edit__chip-edit .edit__chip-tag-suffix');
+    expect(suffix?.textContent).toBe('[tiab]');
+  });
+
+  test('語追加の input には [tiab] の静的接尾辞が添えられる', () => {
+    const { container } = render('a[tiab]');
+    container.querySelector<HTMLButtonElement>('.edit__chip-add-btn')!.click();
+    const suffix = container.querySelector('.edit__chip-edit .edit__chip-tag-suffix');
+    expect(suffix?.textContent).toBe('[tiab]');
+  });
+
+  test('語編集でうっかり [tiab] を打っても末尾タグを 1 つ剥がして渡す', () => {
+    const { container, calls } = render('a[tiab]');
+    container.querySelector<HTMLButtonElement>('.edit__chip-term--editable')!.click();
+    const input = container.querySelector<HTMLInputElement>('.edit__chip-input')!;
+    input.value = 'asthma*[tiab]';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(calls.edit).toEqual([[0, 'asthma*']]);
+  });
+
+  test('語追加でうっかり [tiab] を打っても末尾タグを 1 つ剥がして渡す', () => {
+    const { container, calls } = render('a[tiab]');
+    container.querySelector<HTMLButtonElement>('.edit__chip-add-btn')!.click();
+    const input = container.querySelector<HTMLInputElement>('.edit__chip-add-input')!;
+    input.value = 'cough[tiab]';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(calls.add).toEqual(['cough']);
+  });
+
   test('複合句（ネスト群）は削除のみ、自由入力ボタンを出さない', () => {
     const { container } = render('(a[tiab] OR b[tiab]) AND c[tiab]');
     const otherChip = container.querySelector('.edit__chip--other')!;

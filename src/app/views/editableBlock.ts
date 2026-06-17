@@ -13,6 +13,24 @@
 import { MESH_BROWSER_BASE, tokenizeOperands } from './formulaDisplay';
 import { listOperands, type OperandInfo } from './operandEdit';
 
+/**
+ * 入力欄ではフィールドタグ（`[tiab]` 等）を打たせない方針なので、ユーザーがうっかり
+ * 末尾に付けた `[...]` を 1 つだけ剥がす。`asthma*[tiab]` → `asthma*`（二重タグ防止）。
+ */
+function stripTrailingTag(value: string): string {
+  return value.replace(/\[[^\]]*\]\s*$/, '').trim();
+}
+
+/** 入力欄の右に添える、編集不可のタグ接尾辞（`[tiab]` は自動付与される旨を可視化）。 */
+function buildTagSuffix(doc: Document, tag: string): HTMLElement {
+  const suffix = doc.createElement('span');
+  suffix.className = 'edit__chip-tag-suffix';
+  suffix.textContent = `[${tag}]`;
+  suffix.setAttribute('aria-hidden', 'true');
+  suffix.title = `タグ [${tag}] は自動で付きます（入力不要）`;
+  return suffix;
+}
+
 export interface EditableBlockHandlers {
   /** index 位置の句を削除する */
   onRemove: (index: number) => void;
@@ -118,7 +136,19 @@ function beginInlineEdit(
   input.type = 'text';
   input.className = 'edit__chip-input';
   input.value = info.term;
-  input.setAttribute('aria-label', `「${info.term}」を編集`);
+  // タグは setOperandTerm が保持するので、語だけ編集すればよい旨を伝える。
+  input.setAttribute(
+    'aria-label',
+    info.tag === null ? `「${info.term}」を編集` : `「${info.term}」を編集（タグ [${info.tag}] は保持）`
+  );
+
+  // input + 静的タグ接尾辞をひとまとめにし、確定/取消ではラッパーごと差し替える。
+  const wrapper = doc.createElement('span');
+  wrapper.className = 'edit__chip-edit';
+  wrapper.appendChild(input);
+  if (info.tag !== null) {
+    wrapper.appendChild(buildTagSuffix(doc, info.tag));
+  }
 
   let done = false;
   const commit = (): void => {
@@ -126,10 +156,10 @@ function beginInlineEdit(
       return;
     }
     done = true;
-    const next = input.value.trim();
+    const next = stripTrailingTag(input.value);
     // 変化が無ければ何もしない（再描画も走らせない）。
     if (next === info.term.trim()) {
-      input.replaceWith(termBtn);
+      wrapper.replaceWith(termBtn);
       return;
     }
     handlers.onEditTerm(info.index, next);
@@ -139,7 +169,7 @@ function beginInlineEdit(
       return;
     }
     done = true;
-    input.replaceWith(termBtn);
+    wrapper.replaceWith(termBtn);
   };
 
   input.addEventListener('keydown', (ev: KeyboardEvent) => {
@@ -153,7 +183,7 @@ function beginInlineEdit(
   });
   input.addEventListener('blur', () => commit());
 
-  termBtn.replaceWith(input);
+  termBtn.replaceWith(wrapper);
   input.focus();
   input.select();
 }
@@ -175,7 +205,14 @@ function buildAddControl(doc: Document, handlers: EditableBlockHandlers): HTMLEl
     input.type = 'text';
     input.className = 'edit__chip-add-input';
     input.placeholder = '例: asthma*';
-    input.setAttribute('aria-label', 'フリーワードを追加');
+    // タグ [tiab] は appendFreeword が自動で付ける。語だけ入力すればよい旨を伝える。
+    input.setAttribute('aria-label', 'フリーワードを追加（タグ [tiab] は自動付与）');
+
+    // input + 静的 [tiab] 接尾辞をひとまとめにし、確定/取消ではラッパーごと差し替える。
+    const wrapper = doc.createElement('span');
+    wrapper.className = 'edit__chip-edit';
+    wrapper.appendChild(input);
+    wrapper.appendChild(buildTagSuffix(doc, 'tiab'));
 
     let done = false;
     const commit = (): void => {
@@ -183,9 +220,9 @@ function buildAddControl(doc: Document, handlers: EditableBlockHandlers): HTMLEl
         return;
       }
       done = true;
-      const term = input.value.trim();
+      const term = stripTrailingTag(input.value);
       if (term === '') {
-        input.replaceWith(btn);
+        wrapper.replaceWith(btn);
         return;
       }
       handlers.onAddFreeword(term);
@@ -195,7 +232,7 @@ function buildAddControl(doc: Document, handlers: EditableBlockHandlers): HTMLEl
         return;
       }
       done = true;
-      input.replaceWith(btn);
+      wrapper.replaceWith(btn);
     };
     input.addEventListener('keydown', (ev: KeyboardEvent) => {
       if (ev.key === 'Enter') {
@@ -208,7 +245,7 @@ function buildAddControl(doc: Document, handlers: EditableBlockHandlers): HTMLEl
     });
     input.addEventListener('blur', () => commit());
 
-    btn.replaceWith(input);
+    btn.replaceWith(wrapper);
     input.focus();
   });
 

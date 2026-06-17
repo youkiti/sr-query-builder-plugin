@@ -1742,6 +1742,23 @@ a.draft__term--mesh:focus-visible {
   min-width: 8ch;
 }
 
+/* input + 静的タグ接尾辞のラッパー（語編集・語追加で共通）。 */
+.edit__chip-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+
+/* 「[tiab] は自動で付く（打たなくてよい）」を可視化する編集不可の接尾辞。 */
+.edit__chip-tag-suffix {
+  font: inherit;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted, #6b7280);
+  user-select: none;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
 /* 生テキスト編集（折りたたみ「詳細編集」） */
 .edit__block-raw {
   margin: var(--space-2) 0;
