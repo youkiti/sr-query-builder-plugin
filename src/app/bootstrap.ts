@@ -70,7 +70,12 @@ import type { MeshTreeEntry } from '@/features/validation';
 import { getLatestFormulaVersion, listFormulaVersions } from '@/features/formula';
 import type { FormulaVersion } from '@/domain/formulaVersion';
 import { getCurrentProject } from '@/features/project';
-import { getLatestProtocol, getProtocolBlocksByVersion, listProtocols } from '@/features/protocol';
+import {
+  getLatestProtocol,
+  getProtocolBlocksByVersion,
+  listProtocols,
+  fflateDocxExtractor,
+} from '@/features/protocol';
 import type { Protocol, ProtocolBlock } from '@/domain/protocol';
 import type { BlocksDraft, ProtocolDraft } from './store';
 import { getCurrentUserEmail } from '@/lib/google';
@@ -867,7 +872,13 @@ async function runProtocolSubmit(
     spreadsheetId: project.spreadsheetId,
   });
   const provider = factory.forPurpose('extract_protocol');
-  await submitProtocol(input, { store, provider });
+  // docx 入力時のみ、本文抽出アダプタ（fflate ベース）をここで注入する。
+  // view 層に抽出ライブラリを持ち込まず、実行時に差し込むことでバンドルを軽く保つ。
+  const wired: ProtocolSubmissionInput =
+    input.sourceType === 'docx' && !input.docxExtractor
+      ? { ...input, docxExtractor: fflateDocxExtractor }
+      : input;
+  await submitProtocol(wired, { store, provider });
 }
 
 async function runApprove(store: AppStore, runtime: ChromeRuntimeDeps): Promise<void> {

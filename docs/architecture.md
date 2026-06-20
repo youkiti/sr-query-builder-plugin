@@ -94,7 +94,8 @@ src/
 │   │   ├── selectProject.ts
 │   │   └── projectStore.ts
 │   ├── protocol/
-│   │   ├── parseDocx.ts           # mammoth.js ラッパ
+│   │   ├── parseDocx.ts           # docx パース（DocxExtractor 注入口）
+│   │   ├── docxText.ts            # fflate ベースの本文抽出（DocxExtractor 実装）
 │   │   ├── parseMarkdown.ts
 │   │   └── extractBlocks.ts       # extract-protocol skill 呼び出し
 │   ├── seeds/
@@ -315,7 +316,7 @@ coveragePathIgnorePatterns: [
 
 | 用途 | ライブラリ | ライセンス |
 |---|---|---|
-| docx パース | mammoth | BSD-2-Clause |
+| docx パース（unzip + 本文抽出） | fflate | MIT |
 | マークダウンエディタ | @codemirror/* | MIT |
 | Mermaid 描画 | mermaid | MIT |
 | ランタイムバリデータ | zod | MIT |

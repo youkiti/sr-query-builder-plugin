@@ -76,7 +76,6 @@ src/
 
 ## 未実装・既知のギャップ
 
-- **`.docx` パース未配線**: UI と型（`DocxExtractor`）はあるが、mammoth.js が未導入で extractor が注入されていない。現状 .docx をアップロードすると「パーサが注入されていません」エラーになる
 - **P1 ロジック未移植**: `check_block_overlap` / `check_mesh` / `check_mesh_overlap`（ブロック重複・MeSH 分析）
 - **LLM は Gemini のみ**（`LLMProvider` 抽象はあり。OpenAI / Claude / OpenRouter は後続）
 - **CI/CD なし**（`.github/workflows/` 未配置。検証はローカルで `typecheck → test → test:e2e → lint → dev` を回す）

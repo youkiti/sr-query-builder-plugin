@@ -1,8 +1,9 @@
 import { buildPreview, type ParsedProtocolFile } from './types';
 
 /**
- * `.docx` ファイルから `mammoth.js` 等でプレーンテキストに変換する関数の型。
- * 実装は app 側で `mammoth.extractRawText` をラップしたアダプタを注入する。
+ * `.docx` ファイルをプレーンテキストに変換する関数の型。
+ * 具体実装は [docxText.ts](./docxText.ts) の `fflateDocxExtractor`（fflate ベース）で、
+ * app 側の配線（bootstrap）が docx 入力時に注入する。
  */
 export type DocxExtractor = (buffer: ArrayBuffer) => Promise<string>;
 

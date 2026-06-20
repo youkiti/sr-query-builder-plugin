@@ -7,6 +7,7 @@
 | ライブラリ | ライセンス | 用途 |
 |---|---|---|
 | [uuid](https://github.com/uuidjs/uuid) | MIT | UUID v4 発番（`project_id` 等） |
+| [fflate](https://github.com/101arrowz/fflate) | MIT | `.docx`（zip）の展開と本文プレーンテキスト化 |
 
 ## 開発依存
 
@@ -31,7 +32,6 @@
 
 | ライブラリ | ライセンス | 用途 |
 |---|---|---|
-| [mammoth](https://github.com/mwilliamson/mammoth.js) | BSD-2-Clause | `.docx` のプレーンテキスト化 |
 | [zod](https://github.com/colinhacks/zod) | MIT | ランタイムバリデータ |
 | [mermaid](https://github.com/mermaid-js/mermaid) | MIT | MeSH 階層ダイアグラム描画 |
 | [@codemirror/\*](https://github.com/codemirror/dev) | MIT | マークダウンエディタ |
