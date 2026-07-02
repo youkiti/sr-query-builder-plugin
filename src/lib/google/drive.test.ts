@@ -1,4 +1,11 @@
-import { createFolder, ensureChildFolder, ensureRootFolder, getFileText, uploadTextFile } from './drive';
+import {
+  createFolder,
+  ensureChildFolder,
+  ensureRootFolder,
+  getFileText,
+  updateFolder,
+  uploadTextFile,
+} from './drive';
 
 function okJson(body: unknown): Response {
   return {
@@ -40,6 +47,44 @@ describe('createFolder', () => {
     await createFolder('root', null, deps);
     const body = JSON.parse((fetch.mock.calls[0][1] as RequestInit).body as string);
     expect(body.parents).toBeUndefined();
+  });
+
+  test('colorRgb 指定で folderColorRgb が body に入る', async () => {
+    const fetch = jest.fn().mockResolvedValue(okJson({ id: 'F1', webViewLink: '' }));
+    const deps = { fetch, getAccessToken: jest.fn().mockResolvedValue('t') };
+    await createFolder('colored', null, deps, { colorRgb: '#45afd7' });
+    const body = JSON.parse((fetch.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.folderColorRgb).toBe('#45afd7');
+  });
+
+  test('colorRgb 未指定なら folderColorRgb を送らない', async () => {
+    const fetch = jest.fn().mockResolvedValue(okJson({ id: 'F1', webViewLink: '' }));
+    const deps = { fetch, getAccessToken: jest.fn().mockResolvedValue('t') };
+    await createFolder('plain', null, deps);
+    const body = (fetch.mock.calls[0][1] as RequestInit).body as string;
+    expect(body).not.toContain('folderColorRgb');
+  });
+});
+
+describe('updateFolder', () => {
+  test('PATCH で名前と色を更新する', async () => {
+    const fetch = jest
+      .fn()
+      .mockResolvedValue(okJson({ id: 'F1', webViewLink: 'https://drive/f1' }));
+    const deps = { fetch, getAccessToken: jest.fn().mockResolvedValue('t') };
+    const result = await updateFolder(
+      'F1',
+      { name: 'SR Query Builder', folderColorRgb: '#45afd7' },
+      deps
+    );
+    expect(result).toEqual({ id: 'F1', webViewLink: 'https://drive/f1' });
+    const [url, init] = fetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/drive/v3/files/F1?fields=id,webViewLink');
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(init.body as string)).toEqual({
+      name: 'SR Query Builder',
+      folderColorRgb: '#45afd7',
+    });
   });
 });
 
@@ -108,13 +153,13 @@ describe('ensureRootFolder', () => {
       .fn()
       .mockResolvedValueOnce(okJson({ files: [{ id: 'ROOT1', webViewLink: 'https://drive/root' }] }));
     const deps = { fetch, getAccessToken: jest.fn().mockResolvedValue('t') };
-    const result = await ensureRootFolder('sr-query-builder', deps);
+    const result = await ensureRootFolder('SR Query Builder', deps);
     expect(result).toEqual({ id: 'ROOT1', webViewLink: 'https://drive/root' });
     expect(fetch).toHaveBeenCalledTimes(1);
     const [url] = fetch.mock.calls[0] as [string, RequestInit];
     const decoded = decodeURIComponent(url);
     expect(decoded).toContain("'root' in parents");
-    expect(decoded).toContain("name='sr-query-builder'");
+    expect(decoded).toContain("name='SR Query Builder'");
   });
 
   test('既存フォルダが無ければ新規作成する（親 undefined でマイドライブ直下）', async () => {
@@ -123,12 +168,69 @@ describe('ensureRootFolder', () => {
       .mockResolvedValueOnce(okJson({ files: [] }))
       .mockResolvedValueOnce(okJson({ id: 'ROOT2', webViewLink: 'https://drive/new-root' }));
     const deps = { fetch, getAccessToken: jest.fn().mockResolvedValue('t') };
-    const result = await ensureRootFolder('sr-query-builder', deps);
+    const result = await ensureRootFolder('SR Query Builder', deps);
     expect(result).toEqual({ id: 'ROOT2', webViewLink: 'https://drive/new-root' });
     expect(fetch).toHaveBeenCalledTimes(2);
     const createBody = JSON.parse((fetch.mock.calls[1] as [string, RequestInit])[1].body as string);
-    expect(createBody.name).toBe('sr-query-builder');
+    expect(createBody.name).toBe('SR Query Builder');
     expect(createBody.parents).toBeUndefined();
+  });
+
+  test('colorRgb 指定時は新規作成に folderColorRgb が付く', async () => {
+    const fetch = jest
+      .fn()
+      .mockResolvedValueOnce(okJson({ files: [] }))
+      .mockResolvedValueOnce(okJson({ id: 'ROOT3', webViewLink: '' }));
+    const deps = { fetch, getAccessToken: jest.fn().mockResolvedValue('t') };
+    await ensureRootFolder('SR Query Builder', deps, { colorRgb: '#45afd7' });
+    const createBody = JSON.parse((fetch.mock.calls[1] as [string, RequestInit])[1].body as string);
+    expect(createBody.folderColorRgb).toBe('#45afd7');
+  });
+
+  test('新名称が無く旧名称フォルダがあれば PATCH で改名＋色変更して再利用する', async () => {
+    const fetch = jest
+      .fn()
+      // 1 回目: 新名称の検索 → なし
+      .mockResolvedValueOnce(okJson({ files: [] }))
+      // 2 回目: 旧名称の検索 → あり
+      .mockResolvedValueOnce(okJson({ files: [{ id: 'LEGACY1', webViewLink: 'https://drive/legacy' }] }))
+      // 3 回目: PATCH
+      .mockResolvedValueOnce(okJson({ id: 'LEGACY1', webViewLink: 'https://drive/legacy' }));
+    const deps = { fetch, getAccessToken: jest.fn().mockResolvedValue('t') };
+    const result = await ensureRootFolder('SR Query Builder', deps, {
+      colorRgb: '#45afd7',
+      legacyName: 'sr-query-builder',
+    });
+    expect(result).toEqual({ id: 'LEGACY1', webViewLink: 'https://drive/legacy' });
+    expect(fetch).toHaveBeenCalledTimes(3);
+    const legacyQuery = decodeURIComponent(fetch.mock.calls[1][0] as string);
+    expect(legacyQuery).toContain("name='sr-query-builder'");
+    const [patchUrl, patchInit] = fetch.mock.calls[2] as [string, RequestInit];
+    expect(patchUrl).toContain('/drive/v3/files/LEGACY1');
+    expect(patchInit.method).toBe('PATCH');
+    expect(JSON.parse(patchInit.body as string)).toEqual({
+      name: 'SR Query Builder',
+      folderColorRgb: '#45afd7',
+    });
+  });
+
+  test('新名称・旧名称ともに無ければ新規作成する', async () => {
+    const fetch = jest
+      .fn()
+      .mockResolvedValueOnce(okJson({ files: [] }))
+      .mockResolvedValueOnce(okJson({ files: [] }))
+      .mockResolvedValueOnce(okJson({ id: 'ROOT4', webViewLink: '' }));
+    const deps = { fetch, getAccessToken: jest.fn().mockResolvedValue('t') };
+    const result = await ensureRootFolder('SR Query Builder', deps, {
+      colorRgb: '#45afd7',
+      legacyName: 'sr-query-builder',
+    });
+    expect(result).toEqual({ id: 'ROOT4', webViewLink: '' });
+    const [, createInit] = fetch.mock.calls[2] as [string, RequestInit];
+    expect(createInit.method).toBe('POST');
+    const createBody = JSON.parse(createInit.body as string);
+    expect(createBody.name).toBe('SR Query Builder');
+    expect(createBody.folderColorRgb).toBe('#45afd7');
   });
 });
 

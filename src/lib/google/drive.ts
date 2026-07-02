@@ -17,18 +17,28 @@ interface DriveListResponse {
   files?: DriveFileRef[];
 }
 
+export interface CreateFolderOptions {
+  /**
+   * フォルダ色（RGB hex）。Drive のパレットに無い色を指定した場合は
+   * Drive 側が最も近いパレット色へ自動で丸める。
+   */
+  colorRgb?: string;
+}
+
 /**
  * Drive にフォルダを作成する。`parentId` を指定すると配下に、null で「マイドライブ直下」。
  */
 export async function createFolder(
   name: string,
   parentId: string | null,
-  deps: GoogleApiDeps
+  deps: GoogleApiDeps,
+  options: CreateFolderOptions = {}
 ): Promise<DriveFileRef> {
   const body = {
     name,
     mimeType: 'application/vnd.google-apps.folder',
     parents: parentId ? [parentId] : undefined,
+    folderColorRgb: options.colorRgb,
   };
   const url = `${METADATA_API}?fields=id,webViewLink`;
   const res = await googleFetch(
@@ -108,13 +118,31 @@ export async function uploadTextFile(
 }
 
 /**
- * My Drive ルート直下で指定名のフォルダを探し、なければ新規作成して返す。
- * 複数回プロジェクト作成しても sr-query-builder フォルダが増殖しない。
+ * フォルダのメタデータ（名前・色）を更新する。
  */
-export async function ensureRootFolder(
-  name: string,
+export async function updateFolder(
+  fileId: string,
+  patch: { name?: string; folderColorRgb?: string },
   deps: GoogleApiDeps
 ): Promise<DriveFileRef> {
+  const url = `${METADATA_API}/${encodeURIComponent(fileId)}?fields=id,webViewLink`;
+  const res = await googleFetch(
+    url,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    },
+    deps
+  );
+  return (await res.json()) as DriveFileRef;
+}
+
+/** My Drive ルート直下で指定名のフォルダを検索する（無ければ null）。 */
+async function findRootFolder(
+  name: string,
+  deps: GoogleApiDeps
+): Promise<DriveFileRef | null> {
   const escapedName = name.replace(/'/g, "\\'");
   const query = [
     `name='${escapedName}'`,
@@ -127,11 +155,43 @@ export async function ensureRootFolder(
     `&pageSize=1&q=${encodeURIComponent(query)}`;
   const res = await googleFetch(url, { method: 'GET' }, deps);
   const body = (await res.json()) as DriveListResponse;
-  const existing = body.files?.[0];
+  return body.files?.[0] ?? null;
+}
+
+export interface EnsureRootFolderOptions {
+  /** 新規作成・旧名称からの移行時に適用するフォルダ色 */
+  colorRgb?: string;
+  /**
+   * 旧名称。指定名のフォルダが無く旧名称のフォルダがあれば、
+   * 新規作成せずそのフォルダを改名（＋色変更）して再利用する。
+   */
+  legacyName?: string;
+}
+
+/**
+ * My Drive ルート直下で指定名のフォルダを探し、なければ新規作成して返す。
+ * 複数回プロジェクト作成してもルートフォルダが増殖しない。
+ */
+export async function ensureRootFolder(
+  name: string,
+  deps: GoogleApiDeps,
+  options: EnsureRootFolderOptions = {}
+): Promise<DriveFileRef> {
+  const existing = await findRootFolder(name, deps);
   if (existing) {
     return existing;
   }
-  return createFolder(name, null, deps);
+  if (options.legacyName) {
+    const legacy = await findRootFolder(options.legacyName, deps);
+    if (legacy) {
+      return updateFolder(
+        legacy.id,
+        { name, folderColorRgb: options.colorRgb },
+        deps
+      );
+    }
+  }
+  return createFolder(name, null, deps, { colorRgb: options.colorRgb });
 }
 
 /**

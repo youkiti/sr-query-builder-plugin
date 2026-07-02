@@ -106,8 +106,8 @@ describe('createProject', () => {
     const { fetch, calls } = makeFetch();
     const deps = { fetch, getAccessToken: jest.fn().mockResolvedValue('t') };
     await createProject({ projectTitle: 'Y', createdBy: 'u@y' }, deps);
-    // モックが GET に空オブジェクトを返す → 既存フォルダなし → POST で作成する
-    // ルートフォルダ（sr-query-builder）+ top + raw_protocols + logs + llm + validation = 6
+    // モックが GET に空オブジェクトを返す → 既存・旧名称フォルダなし → POST で作成する
+    // ルートフォルダ（SR Query Builder）+ top + raw_protocols + logs + llm + validation = 6
     const folderCreates = calls.filter(
       (c) =>
         c.url.startsWith('https://www.googleapis.com/drive/v3/files?fields=id,webViewLink') &&
@@ -115,8 +115,11 @@ describe('createProject', () => {
     );
     expect(folderCreates.length).toBeGreaterThanOrEqual(5);
     const rootCall = folderCreates.find(
-      (c) => JSON.parse(c.init.body as string).name === 'sr-query-builder'
+      (c) => JSON.parse(c.init.body as string).name === 'SR Query Builder'
     );
     expect(rootCall).toBeTruthy();
+    // ルートフォルダにはアイコン色（#45afd7）を設定する
+    const rootBody = JSON.parse(rootCall!.init.body as string);
+    expect(rootBody.folderColorRgb).toBe('#45afd7');
   });
 });

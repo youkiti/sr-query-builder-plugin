@@ -22,7 +22,10 @@ export {
   createFolder,
   ensureChildFolder,
   ensureRootFolder,
+  updateFolder,
   uploadTextFile,
   getFileText,
+  type CreateFolderOptions,
   type DriveFileRef,
+  type EnsureRootFolderOptions,
 } from './drive';
