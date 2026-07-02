@@ -66,6 +66,31 @@ describe('checkSearchLines', () => {
     expect(result[0]?.error).toBe('string error');
   });
 
+  test('NCBI の in-band 構文エラーは「0 件」ではなくブロックのエラーになる', async () => {
+    // 不正な語を含む式は HTTP 200 + errorlist で返る（fix-plan 1-1）
+    const fetch = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        esearchresult: {
+          count: '0',
+          idlist: [],
+          errorlist: { phrasesnotfound: ['xyzzy123'], fieldsnotfound: [] },
+        },
+      }),
+      text: async () => '',
+    }) as Response);
+    const result = await checkSearchLines(formula([['1', 'xyzzy123[tiab]']]), {
+      fetch,
+      maxRetries: 3,
+      sleep: async () => undefined,
+    });
+    expect(result[0]?.error).toContain('構文エラー');
+    expect(result[0]?.error).toContain('xyzzy123');
+    // 恒久エラーなのでリトライされない
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   test('空ブロック配列なら [] を返す', async () => {
     const result = await checkSearchLines(formula([]), { fetch: jest.fn() });
     expect(result).toEqual([]);

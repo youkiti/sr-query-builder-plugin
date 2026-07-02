@@ -34,6 +34,12 @@ export {
   type BlocksServiceDeps,
 } from './blocksService';
 export {
+  saveBlocksDraftBackup,
+  getBlocksDraftBackup,
+  clearBlocksDraftBackup,
+  type BlocksDraftBackup,
+} from './blocksDraftBackupService';
+export {
   generateDraft,
   type DraftProgress,
   type DraftBlockHit,

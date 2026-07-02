@@ -41,6 +41,52 @@ test.describe('app-blocks (#/blocks)', () => {
     await expect(page.locator('.blocks__add-row button')).toBeEnabled();
   });
 
+  test('「下書きとして保存」で chrome.storage に保存され未承認バナーが出る', async ({ page }) => {
+    await injectAppStub(page, fullStateScenario());
+    await page.goto(APP_URL);
+
+    // ブロック名を編集してから保存
+    const labelInput = page.locator('.blocks__item').first().locator('input').first();
+    await labelInput.fill('P (編集済み)');
+    await page.getByRole('button', { name: '下書きとして保存' }).click();
+
+    await expect(page.locator('.blocks__draft-notice')).toContainText('未承認の下書きがあります');
+    const backup = await page.evaluate(
+      () =>
+        (window as unknown as { __appStubData: Record<string, unknown> }).__appStubData[
+          'blocksDraftBackup'
+        ] as { projectId: string; draft: { blocks: Array<{ blockLabel: string }> } } | undefined
+    );
+    expect(backup?.projectId).toBe('pid-fixture-1');
+    expect(backup?.draft.blocks[0]?.blockLabel).toBe('P (編集済み)');
+  });
+
+  test('保存済み下書きはリロード相当の起動（hydrate）で復元される', async ({ page }) => {
+    // 「保存後にリロード」を、バックアップ入り chrome.storage での新規起動として再現する。
+    // preloadedState の blocksDraft（2 ブロック）より hydrate のバックアップ（1 ブロック）が優先される
+    await injectAppStub(page, fullStateScenario({
+      extraStorage: {
+        blocksDraftBackup: {
+          projectId: 'pid-fixture-1',
+          savedAt: '2026-07-01T00:00:00Z',
+          draft: {
+            blocks: [
+              { blockLabel: 'P (編集済み)', description: 'ARDS', aiGenerated: false, note: '' },
+            ],
+            combinationExpression: '#1',
+          },
+        },
+      },
+    }));
+    await page.goto(APP_URL);
+
+    await expect(page.locator('.blocks__draft-notice')).toContainText('未承認の下書きがあります');
+    await expect(page.locator('.blocks__item')).toHaveCount(1);
+    await expect(page.locator('.blocks__item').first().locator('input').first()).toHaveValue(
+      'P (編集済み)'
+    );
+  });
+
   test('a11y: axe violation zero', async ({ page }) => {
     await injectAppStub(page, fullStateScenario());
     await page.goto(APP_URL);

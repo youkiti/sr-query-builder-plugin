@@ -63,6 +63,8 @@ describe('startApp', () => {
       validationResult: null,
       missedAnalysis: null,
       editAutoSave: null,
+      blocksDraftSavedAt: null,
+      hydrateError: null,
     });
     startApp(doc, { ...noopHashOptions('#/home'), store });
     expect(doc.getElementById('app-status')?.textContent).toContain('My SR');
@@ -105,6 +107,8 @@ describe('startApp', () => {
       validationResult: null,
       missedAnalysis: null,
       editAutoSave: null,
+      blocksDraftSavedAt: null,
+      hydrateError: null,
     });
     startApp(doc, { ...noopHashOptions('#/home'), setHash, store });
     const protocolBtn = Array.from(
@@ -472,6 +476,146 @@ describe('startApp - wiring 層', () => {
     const handle = startApp(doc, { ...noopHashOptions('#/home'), runtime });
     await flush();
     expect(handle.store.getState().project).toBeNull();
+  });
+
+  test('hydrate: 下書きバックアップがあれば承認済みブロックより優先して復元する', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'D', title: 'T' },
+      blocksDraftBackup: {
+        projectId: 'p',
+        savedAt: '2026-07-01T00:00:00Z',
+        draft: {
+          blocks: [{ blockLabel: '下書きP', description: 'd', aiGenerated: false, note: '' }],
+          combinationExpression: '#1',
+        },
+      },
+    });
+    fetchMock.mockImplementation(sheetsFetchHandler());
+    const handle = startApp(doc, { ...noopHashOptions('#/home'), runtime });
+    await flush();
+    const state = handle.store.getState();
+    // Sheets の承認済みブロック（P-orig）ではなく、バックアップの編集内容が勝つ
+    expect(state.blocksDraft?.blocks[0]?.blockLabel).toBe('下書きP');
+    expect(state.blocksDraftSavedAt).toBe('2026-07-01T00:00:00Z');
+    expect(state.hydrateError).toBeNull();
+  });
+
+  test('hydrate: 別プロジェクトの下書きバックアップは復元しない', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'D', title: 'T' },
+      blocksDraftBackup: {
+        projectId: 'other-project',
+        savedAt: '2026-07-01T00:00:00Z',
+        draft: {
+          blocks: [{ blockLabel: '他人の下書き', description: 'd', aiGenerated: false, note: '' }],
+          combinationExpression: '#1',
+        },
+      },
+    });
+    fetchMock.mockImplementation(sheetsFetchHandler());
+    const handle = startApp(doc, { ...noopHashOptions('#/home'), runtime });
+    await flush();
+    const state = handle.store.getState();
+    expect(state.blocksDraft?.blocks[0]?.blockLabel).toBe('P-orig');
+    expect(state.blocksDraftSavedAt).toBeNull();
+  });
+
+  test('hydrate: Sheets 読み込み失敗で hydrateError がセットされ home にバナーが出る', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'D', title: 'T' },
+    });
+    fetchMock.mockRejectedValue(new Error('Sheets API down'));
+    const handle = startApp(doc, { ...noopHashOptions('#/home'), runtime });
+    await flush();
+    expect(handle.store.getState().hydrateError).toContain('Sheets API down');
+    handle.store.setState((s) => ({ ...s })); // 再レンダして view に反映
+    const banner = doc.querySelector('.view__hydrate-error');
+    expect(banner).not.toBeNull();
+    expect(banner?.textContent).toContain('読み込みに失敗しました');
+  });
+
+  test('hydrate 失敗バナーの「再試行」で復元をやり直し、成功したらバナーが消える', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'D', title: 'T' },
+    });
+    fetchMock.mockRejectedValue(new Error('temporary outage'));
+    const handle = startApp(doc, { ...noopHashOptions('#/home'), runtime });
+    await flush();
+    handle.store.setState((s) => ({ ...s }));
+    // 2 回目は成功させる
+    fetchMock.mockImplementation(sheetsFetchHandler());
+    doc.querySelector<HTMLButtonElement>('.view__hydrate-error-retry')!.click();
+    await flush();
+    const state = handle.store.getState();
+    expect(state.hydrateError).toBeNull();
+    expect(state.currentProtocolVersion).toBe(3);
+    handle.store.setState((s) => ({ ...s }));
+    expect(doc.querySelector('.view__hydrate-error')).toBeNull();
+  });
+
+  test('blocks 既定 onSaveDraft: 下書きを chrome.storage へ保存し未承認バナーを出す', async () => {
+    const doc = buildDocument();
+    const { runtime, data, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'D', title: 'T' },
+    });
+    fetchMock.mockImplementation(sheetsFetchHandler());
+    const handle = startApp(doc, {
+      getHash: () => '#/blocks',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush(); // hydrate
+    handle.store.setState((s) => ({ ...s })); // 再レンダして view に反映
+    const saveBtn = Array.from(doc.querySelectorAll<HTMLButtonElement>('button')).find(
+      (b) => b.textContent === '下書きとして保存'
+    )!;
+    saveBtn.click();
+    await flush();
+    const backup = data['blocksDraftBackup'] as { projectId: string; draft: unknown } | undefined;
+    expect(backup?.projectId).toBe('p');
+    expect(handle.store.getState().blocksDraftSavedAt).not.toBeNull();
+    // setState 由来の再レンダで未承認バナーが表示される
+    const notice = doc.querySelector('.blocks__draft-notice');
+    expect(notice).not.toBeNull();
+    expect(notice?.textContent).toContain('未承認の下書きがあります');
+  });
+
+  test('blocks 既定 onApprove: 承認で下書きバックアップを破棄する', async () => {
+    const doc = buildDocument();
+    const { runtime, data, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'D', title: 'T' },
+      blocksDraftBackup: {
+        projectId: 'p',
+        savedAt: '2026-07-01T00:00:00Z',
+        draft: {
+          blocks: [{ blockLabel: '下書きP', description: 'd', aiGenerated: false, note: '' }],
+          combinationExpression: '#1',
+        },
+      },
+    });
+    fetchMock.mockImplementation(sheetsFetchHandler());
+    const handle = startApp(doc, {
+      getHash: () => '#/blocks',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush(); // hydrate（バックアップ復元）
+    expect(handle.store.getState().blocksDraftSavedAt).not.toBeNull();
+    handle.store.setState((s) => ({ ...s }));
+    const approveBtn = Array.from(doc.querySelectorAll<HTMLButtonElement>('button')).find(
+      (b) => b.textContent?.includes('承認してシード論文へ')
+    )!;
+    approveBtn.click();
+    await flush();
+    await flush();
+    expect(data['blocksDraftBackup']).toBeNull();
+    expect(handle.store.getState().blocksDraftSavedAt).toBeNull();
   });
 
   test('protocol view 既定 onSubmit が submitProtocol を呼び blocksDraft を埋める', async () => {

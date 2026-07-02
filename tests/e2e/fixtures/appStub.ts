@@ -176,6 +176,18 @@ export async function injectAppStub(page: Page, scenario: AppScenario = {}): Pro
     }
   );
 
+  // hydrateCurrentProject が currentProject 設定時に Sheets を読む経路のデフォルトモック
+  // （空プロジェクト相当の `{ values: [] }` を返す）。実ネットワークへ出さず、
+  // hydrateError（fix-plan 1-3）を誤発火させないため。Playwright の route は後勝ちなので、
+  // scenario.routes / spec 内の page.route で個別に上書きできる。
+  await page.route('**/sheets.googleapis.com/**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ values: [] }),
+    });
+  });
+
   // route モックは init script のあとに設定（page 単位で有効）
   for (const r of scenario.routes ?? []) {
     await page.route(r.url, async (route) => {

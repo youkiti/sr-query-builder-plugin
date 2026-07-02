@@ -22,6 +22,8 @@ describe('createStore', () => {
       validationResult: null,
       missedAnalysis: null,
       editAutoSave: null,
+      blocksDraftSavedAt: null,
+      hydrateError: null,
     });
     expect(store.getState().route).toBe('protocol');
   });

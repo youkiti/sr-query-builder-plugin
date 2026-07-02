@@ -98,6 +98,82 @@ describe('esearch', () => {
     expect(result.pmids).toEqual(['9']);
     expect(fetch).toHaveBeenCalledTimes(2);
   });
+
+  test('errorlist.phrasesnotfound は permanent な EutilsError（リトライしない）', async () => {
+    // NCBI は不正な語を含む式でも HTTP 200 + count 付きで返す（in-band エラー）
+    const fetch = jest.fn().mockResolvedValue(
+      makeJsonResponse({
+        esearchresult: {
+          count: '0',
+          idlist: [],
+          errorlist: { phrasesnotfound: ['nonexistentterm123'], fieldsnotfound: [] },
+        },
+      })
+    );
+    const sleep = jest.fn().mockResolvedValue(undefined);
+    const promise = esearch('x', { fetch, sleep, maxRetries: 3 });
+    await expect(promise).rejects.toBeInstanceOf(EutilsError);
+    await expect(promise).rejects.toMatchObject({
+      permanent: true,
+      message: expect.stringContaining('"nonexistentterm123"'),
+    });
+    // 恒久エラーはリトライ対象外（fetch 1 回で打ち切り）
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  test('errorlist.fieldsnotfound は不明なタグとしてエラーになる', async () => {
+    const fetch = jest.fn().mockResolvedValue(
+      makeJsonResponse({
+        esearchresult: {
+          count: '123',
+          idlist: [],
+          errorlist: { phrasesnotfound: [], fieldsnotfound: ['tiabb'] },
+        },
+      })
+    );
+    await expect(esearch('x', { fetch, maxRetries: 0 })).rejects.toMatchObject({
+      permanent: true,
+      message: expect.stringContaining('[tiabb]'),
+    });
+  });
+
+  test('esearchresult.ERROR は permanent な EutilsError になる', async () => {
+    const fetch = jest.fn().mockResolvedValue(
+      makeJsonResponse({ esearchresult: { ERROR: 'Empty term and query_key - nothing todo' } })
+    );
+    const sleep = jest.fn().mockResolvedValue(undefined);
+    await expect(esearch('', { fetch, sleep, maxRetries: 3 })).rejects.toMatchObject({
+      permanent: true,
+      message: expect.stringContaining('Empty term'),
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test('トップレベル error（rate limit 等）は一時エラーとしてリトライされる', async () => {
+    const fetch = jest
+      .fn()
+      .mockResolvedValueOnce(makeJsonResponse({ error: 'API rate limit exceeded' }))
+      .mockResolvedValueOnce(makeJsonResponse({ esearchresult: { count: '1', idlist: ['9'] } }));
+    const sleep = jest.fn().mockResolvedValue(undefined);
+    const result = await esearch('x', { fetch, sleep, maxRetries: 3 });
+    expect(result.count).toBe(1);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  test('warninglist（stopword 無視等）はエラーにしない', async () => {
+    const fetch = jest.fn().mockResolvedValue(
+      makeJsonResponse({
+        esearchresult: {
+          count: '5',
+          idlist: ['1'],
+          warninglist: { phrasesignored: ['the'], quotedphrasesnotfound: [], outputmessages: [] },
+        },
+      })
+    );
+    const result = await esearch('x', { fetch });
+    expect(result.count).toBe(5);
+  });
 });
 
 describe('parsePubmedXml / efetchArticles', () => {

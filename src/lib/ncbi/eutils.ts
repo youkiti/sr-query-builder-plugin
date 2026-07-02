@@ -36,10 +36,66 @@ function appendCommonParams(params: URLSearchParams, deps: EutilsDeps): void {
 
 export class EutilsError extends Error {
   readonly status: number;
-  constructor(message: string, status: number) {
+  /**
+   * リトライしても解消しない恒久エラー（構文エラー・不明タグ等の in-band エラー）なら true。
+   * retryWithBackoff の shouldRetry でリトライ対象外にするための判定に使う。
+   */
+  readonly permanent: boolean;
+  constructor(message: string, status: number, permanent = false) {
     super(message);
     this.name = 'EutilsError';
     this.status = status;
+    this.permanent = permanent;
+  }
+}
+
+/** 恒久エラー（permanent な EutilsError）だけリトライしない共通判定。 */
+function shouldRetryEutils(err: unknown): boolean {
+  return !(err instanceof EutilsError && err.permanent);
+}
+
+/**
+ * esearch の JSON レスポンス。HTTP 200 でもクエリの構文エラー等は
+ * `ERROR` / `errorlist`（in-band エラー）として返るため、count だけでなくこれらも見る。
+ */
+interface EsearchResponseJson {
+  esearchresult?: {
+    count?: string;
+    idlist?: string[];
+    ERROR?: string;
+    errorlist?: {
+      phrasesnotfound?: string[];
+      fieldsnotfound?: string[];
+    };
+    warninglist?: {
+      phrasesignored?: string[];
+      quotedphrasesnotfound?: string[];
+      outputmessages?: string[];
+    };
+  };
+  /** トップレベルの error（rate limit 超過時の "API rate limit exceeded" 等） */
+  error?: string;
+}
+
+/**
+ * esearch レスポンスの in-band エラーを検査し、エラーなら permanent な EutilsError を throw する。
+ * 「0 件」と「構文エラー」を区別するための検出（fix-plan 1-1）。
+ * warninglist（stopword 無視等）は正常系の揺らぎなのでエラーにしない。
+ */
+function assertNoInbandError(json: EsearchResponseJson): void {
+  const result = json.esearchresult;
+  const phrasesNotFound = result?.errorlist?.phrasesnotfound ?? [];
+  const fieldsNotFound = result?.errorlist?.fieldsnotfound ?? [];
+  if (fieldsNotFound.length > 0) {
+    const fields = fieldsNotFound.map((f) => `[${f}]`).join(', ');
+    throw new EutilsError(`構文エラー: 不明なフィールドタグ ${fields}`, 200, true);
+  }
+  if (phrasesNotFound.length > 0) {
+    const phrases = phrasesNotFound.map((p) => `"${p}"`).join(', ');
+    throw new EutilsError(`構文エラー: phrase not found ${phrases}`, 200, true);
+  }
+  if (result?.ERROR) {
+    throw new EutilsError(`esearch エラー: ${result.ERROR}`, 200, true);
   }
 }
 
@@ -81,9 +137,15 @@ export async function esearch(
       if (!res.ok) {
         throw new EutilsError(`esearch failed: HTTP ${res.status}`, res.status);
       }
-      return (await res.json()) as { esearchresult?: { count?: string; idlist?: string[] } };
+      const body = (await res.json()) as EsearchResponseJson;
+      if (body.error) {
+        // HTTP 200 で返る rate limit 等の一時エラー。permanent ではないのでリトライ対象
+        throw new EutilsError(`esearch エラー: ${body.error}`, res.status);
+      }
+      assertNoInbandError(body);
+      return body;
     },
-    { sleep: deps.sleep, maxRetries: deps.maxRetries ?? 5 }
+    { sleep: deps.sleep, maxRetries: deps.maxRetries ?? 5, shouldRetry: shouldRetryEutils }
   );
 
   const result = json.esearchresult;

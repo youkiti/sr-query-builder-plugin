@@ -2,6 +2,7 @@ import type { ProtocolSubmissionInput } from '@/app/services';
 import type { Protocol } from '@/domain/protocol';
 import type { ProtocolDraft } from '../store';
 import { ROUTE_LABELS } from '../router';
+import { buildHydrateErrorBanner } from './hydrateErrorBanner';
 import type { RenderView } from './types';
 
 /**
@@ -25,6 +26,8 @@ import type { RenderView } from './types';
 export interface ProtocolViewCallbacks {
   /** 解析（extract-protocol）してブロック承認画面へ。初回入力と「ブロックを作り直す」改訂の両方が使う */
   onSubmit?: (input: ProtocolSubmissionInput) => void | Promise<void>;
+  /** 起動時 hydrate（Sheets 読み込み）失敗バナーの「再試行」 */
+  onRetryHydrate?: () => void;
   /**
    * 既存ブロックを維持したまま改訂を保存する。
    * 新しい Protocol.version を即時追記し、既存ブロックを同 version へコピーする（§4.2）。
@@ -79,6 +82,12 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
     const heading = doc.createElement('h2');
     heading.textContent = ROUTE_LABELS.protocol;
     container.appendChild(heading);
+
+    if (ctx.state.hydrateError !== null) {
+      container.appendChild(
+        buildHydrateErrorBanner(doc, ctx.state.hydrateError, callbacks.onRetryHydrate)
+      );
+    }
 
     const lead = doc.createElement('p');
     lead.className = 'protocol__lead';

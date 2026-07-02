@@ -13,7 +13,10 @@ import {
   buildEutilsDeps,
   buildLlmProviderFactory,
   checkEditedCombination,
+  clearBlocksDraftBackup,
   createChromeRuntimeDeps,
+  getBlocksDraftBackup,
+  saveBlocksDraftBackup,
   exportToAllDatabases,
   fetchBoundaryCandidates,
   fillPmidForRisRow,
@@ -280,7 +283,10 @@ function canSkipEditFullRender(
  * chrome.storage の currentProject をストアに反映し、
  * 既存プロジェクトがあれば Sheets から Protocol / ProtocolBlocks / FormulaVersions の
  * 最新行を読んで in-memory state を復元する。
- * Sheets API エラーはアプリ起動を妨げない（エラー時は null のまま起動する）。
+ * Sheets API エラーはアプリ起動を妨げないが、握りつぶさず hydrateError に残して
+ * home / protocol にエラーバナー（再試行付き）を出す（fix-plan 1-3）。
+ * Sheets の後に、「下書きとして保存」のバックアップ（chrome.storage）があれば
+ * 承認済みブロックより優先して blocksDraft へ復元する（fix-plan 1-2）。
  */
 async function hydrateCurrentProject(store: AppStore, runtime: ChromeRuntimeDeps): Promise<void> {
   const current = await getCurrentProject(runtime.store);
@@ -318,8 +324,28 @@ async function hydrateCurrentProject(store: AppStore, runtime: ChromeRuntimeDeps
         currentFormulaMarkdown: latestFormula.formulaMd,
       }));
     }
+    // 再試行で成功したときにバナーを消す
+    store.setState((s) => (s.hydrateError === null ? s : { ...s, hydrateError: null }));
+  } catch (err) {
+    store.setState((s) => ({
+      ...s,
+      hydrateError: err instanceof Error ? err.message : String(err),
+    }));
+  }
+
+  // 下書きバックアップの復元は Sheets 障害と独立に行う（chrome.storage のみ参照）。
+  // 承認済みブロック（Sheets 由来）の後に上書きすることで、未承認の編集を優先させる。
+  try {
+    const backup = await getBlocksDraftBackup(current.projectId, runtime.store);
+    if (backup) {
+      store.setState((s) => ({
+        ...s,
+        blocksDraft: backup.draft,
+        blocksDraftSavedAt: backup.savedAt,
+      }));
+    }
   } catch {
-    // Sheets API エラーは無視してアプリを起動させる
+    // バックアップ読み込み失敗は起動を妨げない（下書きが無い扱いにする）
   }
 }
 
@@ -354,7 +380,7 @@ function toBlocksDraft(blocks: ProtocolBlock[], combinationExpression: string): 
  * runtime が利用可能なときの既定 view options。
  * - protocol.onSubmit → submitProtocol（LLM 呼び出し）→ blocksDraft 更新 → /blocks ナビ
  * - blocks.onApprove → approveBlocks（Sheets 書き込み）→ /seeds ナビ（シード論文収集を先行させる）
- * - blocks.onSaveDraft → 何もしない（store にのみ残す）
+ * - blocks.onSaveDraft → 下書きバックアップを chrome.storage へ保存（リロード後 hydrate で復元）
  */
 function buildDefaultViewOptions(
   store: AppStore,
@@ -404,11 +430,22 @@ function buildDefaultViewOptions(
         // 拡張コンテキストでは chrome.tabs/chrome.runtime が存在する前提。
         chrome.tabs.create({ url: chrome.runtime.getURL('popup/popup.html') });
       },
+      onRetryHydrate: () => {
+        void hydrateCurrentProject(store, runtime);
+      },
     },
     protocol: {
       onSubmit: async (input: ProtocolSubmissionInput) => {
         await runProtocolSubmit(store, runtime, llmFactoryDepsBase(), llmFactoryPromise, input);
+        // 再解析でブロックが作り直されたので、旧ブロックの下書きバックアップは破棄する
+        await clearBlocksDraftBackup(runtime.store);
+        store.setState((s) =>
+          s.blocksDraftSavedAt === null ? s : { ...s, blocksDraftSavedAt: null }
+        );
         navigate('blocks');
+      },
+      onRetryHydrate: () => {
+        void hydrateCurrentProject(store, runtime);
       },
       // 改訂保存（既存ブロック維持）: extract-protocol で RQ 等を再抽出しつつ、
       // ブロックは改訂前の承認済み定義へ戻してから即時 approve する。
@@ -431,6 +468,15 @@ function buildDefaultViewOptions(
       },
     },
     blocks: {
+      // 承認前の編集を chrome.storage へ退避する（リロードで消える blocksDraft の保険。fix-plan 1-2）
+      onSaveDraft: async (draft) => {
+        const project = store.getState().project;
+        if (!project) {
+          throw new Error('プロジェクトが選択されていません');
+        }
+        const backup = await saveBlocksDraftBackup(project.projectId, draft, runtime.store);
+        store.setState((s) => ({ ...s, blocksDraftSavedAt: backup.savedAt }));
+      },
       onApprove: async () => {
         await runApprove(store, runtime);
         navigate('seeds');
@@ -883,6 +929,9 @@ async function runProtocolSubmit(
 
 async function runApprove(store: AppStore, runtime: ChromeRuntimeDeps): Promise<void> {
   await approveBlocks({ google: runtime.google, profile: runtime.profile, store });
+  // 承認済みになったので下書きバックアップ（未承認フラグ）は破棄する
+  await clearBlocksDraftBackup(runtime.store);
+  store.setState((s) => (s.blocksDraftSavedAt === null ? s : { ...s, blocksDraftSavedAt: null }));
 }
 
 /**

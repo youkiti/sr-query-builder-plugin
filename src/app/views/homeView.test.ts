@@ -104,4 +104,30 @@ describe('renderHomeView', () => {
     const btn = container.querySelector<HTMLButtonElement>('.home__switch-project')!;
     expect(() => btn.click()).not.toThrow();
   });
+
+  test('hydrateError があればエラーバナー + 再試行ボタンを出す', () => {
+    const container = buildContainer();
+    const onRetryHydrate = jest.fn();
+    const view = createHomeView({ onRetryHydrate });
+    view(container, {
+      state: { ...INITIAL_STATE, hydrateError: 'HTTP 500' },
+      navigate: jest.fn(),
+    });
+    const banner = container.querySelector('.view__hydrate-error');
+    expect(banner).not.toBeNull();
+    expect(banner?.getAttribute('role')).toBe('alert');
+    expect(banner?.textContent).toContain('読み込みに失敗しました');
+    expect(banner?.textContent).toContain('HTTP 500');
+    const retry = container.querySelector<HTMLButtonElement>('.view__hydrate-error-retry')!;
+    retry.click();
+    expect(onRetryHydrate).toHaveBeenCalledTimes(1);
+    // 連打防止で押下後は無効化される
+    expect(retry.disabled).toBe(true);
+  });
+
+  test('hydrateError が null ならバナーは出さない', () => {
+    const container = buildContainer();
+    renderHomeView(container, { state: INITIAL_STATE, navigate: jest.fn() });
+    expect(container.querySelector('.view__hydrate-error')).toBeNull();
+  });
 });

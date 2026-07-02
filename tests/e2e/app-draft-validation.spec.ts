@@ -138,6 +138,38 @@ test.describe('app-draft 検証結果（#/draft）', () => {
     await expect(page.locator('.validate__analysis-terms li')).toContainText('acute lung injury');
   });
 
+  test('行の in-band 構文エラーは「0 件」ではなくエラー表示になる（fix-plan 1-1）', async ({ page }) => {
+    const withLineError: NonNullable<AppState['validationResult']> = {
+      formulaVersionId: VALIDATION_RESULT.formulaVersionId,
+      summary: {
+        ...VALIDATION_RESULT.summary,
+        lineHits: [
+          ...VALIDATION_RESULT.summary.lineHits.slice(0, 2),
+          {
+            blockId: '3',
+            expression: 'xyzzy[tiabb]',
+            expandedQuery: '',
+            hitCount: 0,
+            error: '構文エラー: 不明なフィールドタグ [tiabb]',
+          },
+        ],
+      },
+    };
+    await injectAppStub(
+      page,
+      fullStateScenario({
+        preloadedState: { ...FULL_APP_STATE, validationResult: withLineError },
+      })
+    );
+    await page.goto(APP_URL);
+
+    const errorLine = page.locator('.validate__line-error');
+    await expect(errorLine).toContainText('#3: エラー — 構文エラー');
+    await expect(errorLine).toContainText('[tiabb]');
+    // 「0 件」とは表示されない
+    await expect(errorLine).not.toContainText('0 件');
+  });
+
   test('a11y: axe violation zero（検証結果表示時）', async ({ page }) => {
     await injectAppStub(
       page,

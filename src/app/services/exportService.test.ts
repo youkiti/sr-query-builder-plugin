@@ -38,6 +38,8 @@ function stateWithFormula(): AppState {
     validationResult: null,
     missedAnalysis: null,
     editAutoSave: null,
+    blocksDraftSavedAt: null,
+    hydrateError: null,
   };
 }
 

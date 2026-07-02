@@ -6,6 +6,7 @@
  *
  * historyView は `onList` で Sheets API（values:get）を呼ぶ → 結果を render。
  * 本スペックは `page.route` で Sheets の `FormulaVersions` タブ取得を mock する。
+ * 起動時 hydrate も同じ mock を読むため、最新の fv-B が作業バージョンになる。
  *
  * docs/ui-deep-test-plan.md §Phase D J2。
  */
@@ -51,16 +52,11 @@ const FORMULA_VERSIONS_ROWS = [
 ];
 
 test.describe('journey-history-switch (J2)', () => {
-  test('2 バージョン一覧 → バージョン B を復元 → context の Formula が新しい作業版に切り替わる', async ({
+  test('2 バージョン一覧 → 過去バージョン A を復元 → context の Formula が新しい作業版に切り替わる', async ({
     page,
   }) => {
     await injectAppStub(page, {
-      ...fullStateScenario({
-        preloadedState: {
-          ...(await import('./fixtures/scenarios/fullState')).FULL_APP_STATE,
-          currentFormulaVersionId: 'fv-A',
-        },
-      }),
+      ...fullStateScenario(),
       routes: [
         {
           url: /sheets\.googleapis\.com\/v4\/spreadsheets\/[^/]+\/values\/FormulaVersions/,
@@ -78,12 +74,19 @@ test.describe('journey-history-switch (J2)', () => {
     const items = page.locator('.history__item');
     await expect(items).toHaveCount(2);
 
-    // 現状 active = fv-A。fv-B（非 active）の復元ボタンをクリック → 新しい作業版へフォーク
+    // hydrate が Sheets の最新（fv-B）を作業版にするため、fv-B の復元ボタンは無効
     const itemB = page.locator('.history__item[data-version-id="fv-B"]');
-    await expect(itemB).toBeVisible();
-    await itemB.locator('button.history__load').click();
+    await expect(itemB.locator('button.history__load')).toBeDisabled();
 
-    // context ラベル（#app-context, aria-live=polite）に、フォークされた新しい作業版の Formula id が載る
-    await expect(page.locator('#app-context')).toContainText('Formula');
+    // 過去バージョン fv-A（非 active）の復元ボタンをクリック → 新しい作業版へフォーク
+    const itemA = page.locator('.history__item[data-version-id="fv-A"]');
+    await expect(itemA).toBeVisible();
+    await itemA.locator('button.history__load').click();
+
+    // context ラベル（#app-context, aria-live=polite）が、フォークされた新しい作業版の
+    // Formula id（fv-A / fv-B のどちらでもない採番済み id）に切り替わる
+    const context = page.locator('#app-context');
+    await expect(context).toContainText('Formula');
+    await expect(context).not.toContainText('fv-B');
   });
 });

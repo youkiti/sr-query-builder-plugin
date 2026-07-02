@@ -73,6 +73,28 @@ describe('createBlocksView', () => {
     expect(container.querySelector('ol.blocks__list')?.children).toHaveLength(1);
   });
 
+  test('blocksDraftSavedAt があれば未承認の下書きバナーを出す', () => {
+    const store = createStore({
+      ...withProject(),
+      blocksDraft: draftOf(1),
+      blocksDraftSavedAt: '2026-07-01T12:34:56Z',
+    });
+    const view = createBlocksView(store);
+    const container = buildContainer();
+    view(container, { state: store.getState(), navigate: jest.fn() });
+    const notice = container.querySelector('.blocks__draft-notice');
+    expect(notice).not.toBeNull();
+    expect(notice?.textContent).toContain('未承認の下書きがあります');
+  });
+
+  test('blocksDraftSavedAt が null ならバナーは出さない', () => {
+    const store = createStore({ ...withProject(), blocksDraft: draftOf(1) });
+    const view = createBlocksView(store);
+    const container = buildContainer();
+    view(container, { state: store.getState(), navigate: jest.fn() });
+    expect(container.querySelector('.blocks__draft-notice')).toBeNull();
+  });
+
   test('既存 blocksDraft をレンダして label 入力で更新する', () => {
     const store = createStore({ ...withProject(), blocksDraft: draftOf(2, '#1 AND #2') });
     const view = createBlocksView(store);
