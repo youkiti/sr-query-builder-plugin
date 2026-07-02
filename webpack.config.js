@@ -85,6 +85,7 @@ module.exports = (env, argv) => {
           { from: 'src/options/options.html', to: 'options/options.html' },
           { from: 'src/options/options.css', to: 'options/options.css' },
           { from: 'src/styles', to: 'styles' },
+          { from: 'src/icons', to: 'icons' },
           {
             from: 'src/_locales',
             to: '_locales',
