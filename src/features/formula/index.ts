@@ -7,6 +7,11 @@ export {
   type BlockOutputs,
 } from './assembleFormulaMd';
 export {
+  appendExcessFilterBlocks,
+  AppendExcessFiltersError,
+  type ApprovedExcessFilter,
+} from './appendExcessFilters';
+export {
   appendFormulaVersion,
   getLatestFormulaVersion,
   listFormulaVersions,

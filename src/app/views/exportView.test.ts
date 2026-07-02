@@ -1,6 +1,6 @@
-import type { ExportResult } from '@/app/services';
+import type { ExportResult, ValidationSummary } from '@/app/services';
 import { INITIAL_STATE, type AppState } from '../store';
-import { createExportView } from './exportView';
+import { buildValidationWarning, createExportView } from './exportView';
 
 function buildContainer(): HTMLElement {
   const doc = document.implementation.createHTMLDocument('test');
@@ -40,6 +40,35 @@ function sampleResult(): ExportResult {
 
 async function flushAsync(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** finalQuery 部分だけ差し替え可能な検証 summary を作る */
+function summaryWith(
+  finalQuery: Partial<ValidationSummary['finalQuery']>,
+  extra: Partial<ValidationSummary> = {}
+): ValidationSummary {
+  return {
+    lineHits: [],
+    finalQuery: {
+      finalQuery: 'q',
+      totalHits: 100,
+      captureRate: 1,
+      capturedPmids: [],
+      missedPmids: [],
+      ...finalQuery,
+    },
+    finalQueryError: null,
+    mesh: [],
+    meshFrequency: [],
+    meshError: null,
+    meshHierarchy: [],
+    meshMermaid: 'flowchart TD',
+    meshHierarchyError: null,
+    eligibleSeedCount: 1,
+    totalSeedCount: 1,
+    loggedValidationIds: [],
+    ...extra,
+  };
 }
 
 describe('createExportView', () => {
@@ -155,6 +184,50 @@ describe('createExportView', () => {
     expect(() => container.querySelector('button')!.click()).not.toThrow();
   });
 
+  test('未検証の式では警告バナーを表示する（fix-plan 2-3）', () => {
+    const view = createExportView();
+    const container = buildContainer();
+    view(container, { state: stateWithDraft(), navigate: jest.fn() });
+    const banner = container.querySelector('.export__validation-warning');
+    expect(banner).not.toBeNull();
+    expect(banner?.textContent).toContain('まだ検証されていません');
+    // 警告のみでエクスポートボタンはそのまま使える（ハードブロックしない）
+    const btn = container.querySelector('button') as HTMLButtonElement;
+    expect(btn.disabled).toBe(false);
+  });
+
+  test('現在バージョンの検証済み（捕捉率 100%）なら警告バナーを出さない', () => {
+    const view = createExportView();
+    const container = buildContainer();
+    view(container, {
+      state: stateWithDraft({
+        validationResult: {
+          formulaVersionId: 'v-1',
+          summary: summaryWith({ captureRate: 1, capturedPmids: ['1'], missedPmids: [] }),
+        },
+      }),
+      navigate: jest.fn(),
+    });
+    expect(container.querySelector('.export__validation-warning')).toBeNull();
+  });
+
+  test('捕捉率 < 100% なら捕捉率入りの警告バナーを出す', () => {
+    const view = createExportView();
+    const container = buildContainer();
+    view(container, {
+      state: stateWithDraft({
+        validationResult: {
+          formulaVersionId: 'v-1',
+          summary: summaryWith({ captureRate: 0.5, capturedPmids: ['1'], missedPmids: ['2'] }),
+        },
+      }),
+      navigate: jest.fn(),
+    });
+    const banner = container.querySelector('.export__validation-warning');
+    expect(banner?.textContent).toContain('50.0%');
+    expect(banner?.textContent).toContain('1/2 件');
+  });
+
   test('4 DB 全ての label が出ることを確認', async () => {
     const onExport = jest.fn(
       async (): Promise<ExportResult> => ({
@@ -182,5 +255,64 @@ describe('createExportView', () => {
       'ClinicalTrials.gov',
       'ICTRP',
     ]);
+  });
+});
+
+describe('buildValidationWarning（fix-plan 2-3）', () => {
+  test('validationResult が無ければ「未検証」警告', () => {
+    expect(buildValidationWarning(stateWithDraft())).toContain('まだ検証されていません');
+  });
+
+  test('別バージョンの検証結果は stale として「未検証」警告', () => {
+    const state = stateWithDraft({
+      validationResult: { formulaVersionId: 'v-old', summary: summaryWith({}) },
+    });
+    expect(buildValidationWarning(state)).toContain('まだ検証されていません');
+  });
+
+  test('final_query が失敗している場合は捕捉率未確認の警告', () => {
+    const state = stateWithDraft({
+      validationResult: {
+        formulaVersionId: 'v-1',
+        summary: summaryWith({}, { finalQueryError: 'NCBI 503' }),
+      },
+    });
+    expect(buildValidationWarning(state)).toContain('捕捉率を確認できていません');
+  });
+
+  test('捕捉率 < 100% は割合と件数を含む警告', () => {
+    const state = stateWithDraft({
+      validationResult: {
+        formulaVersionId: 'v-1',
+        summary: summaryWith({
+          captureRate: 2 / 3,
+          capturedPmids: ['1', '2'],
+          missedPmids: ['3'],
+        }),
+      },
+    });
+    const warning = buildValidationWarning(state);
+    expect(warning).toContain('66.7%');
+    expect(warning).toContain('2/3 件');
+  });
+
+  test('有効 seed 0 件（分母なし）は捕捉率警告を出さない', () => {
+    const state = stateWithDraft({
+      validationResult: {
+        formulaVersionId: 'v-1',
+        summary: summaryWith({ captureRate: 0, capturedPmids: [], missedPmids: [] }),
+      },
+    });
+    expect(buildValidationWarning(state)).toBeNull();
+  });
+
+  test('検証済み・捕捉率 100% は警告なし', () => {
+    const state = stateWithDraft({
+      validationResult: {
+        formulaVersionId: 'v-1',
+        summary: summaryWith({ captureRate: 1, capturedPmids: ['1'], missedPmids: [] }),
+      },
+    });
+    expect(buildValidationWarning(state)).toBeNull();
   });
 });

@@ -5,6 +5,7 @@ import { expandFormula } from '@/features/validation';
 import { buildPubmedSearchUrl } from '@/lib/ncbi';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
 import { ROUTE_LABELS } from '../router';
+import type { AppState } from '../store';
 import type { RenderView } from './types';
 
 /**
@@ -43,6 +44,17 @@ export function createExportView(callbacks: ExportViewCallbacks = {}): RenderVie
       warn.textContent = '先に /draft で検索式を生成してください。';
       container.appendChild(warn);
       return;
+    }
+
+    // 未検証 / 捕捉率不足の警告（fix-plan 2-3）。guards.ts の近似方針どおりハードブロックは
+    // せず、エクスポート自体は許可したまま注意だけ促す。
+    const warning = buildValidationWarning(ctx.state);
+    if (warning !== null) {
+      const banner = doc.createElement('p');
+      banner.className = 'export__validation-warning';
+      banner.setAttribute('role', 'note');
+      banner.textContent = warning;
+      container.appendChild(banner);
     }
 
     const actions = doc.createElement('div');
@@ -95,6 +107,34 @@ export function createExportView(callbacks: ExportViewCallbacks = {}): RenderVie
         });
     });
   };
+}
+
+/**
+ * 未検証 / 捕捉率不足の警告文を組み立てる（fix-plan 2-3）。警告不要なら null。
+ *
+ * - validationResult が無い、または現在のバージョンと不一致 → 「未検証」警告
+ * - 検証済みでも final_query が失敗している → 捕捉率未確認の警告
+ * - 検証済みで有効 seed があり捕捉率 < 100% → 捕捉率 N% の警告
+ * - 検証済みで問題なし → null（バナー非表示）
+ *
+ * テストから直接検証できるよう純関数として export する。
+ */
+export function buildValidationWarning(state: AppState): string | null {
+  const entry = state.validationResult;
+  if (entry === null || entry.formulaVersionId !== state.currentFormulaVersionId) {
+    return '⚠ この検索式はまだ検証されていません。#/draft の「生成して検証する」でシード捕捉率を確認してからのエクスポートを推奨します。';
+  }
+  const summary = entry.summary;
+  if (summary.finalQueryError !== null) {
+    return '⚠ 検証でシード捕捉率を確認できていません（final_query の実行に失敗）。#/draft で再検証してからのエクスポートを推奨します。';
+  }
+  const captured = summary.finalQuery.capturedPmids.length;
+  const seedTotal = captured + summary.finalQuery.missedPmids.length;
+  if (seedTotal > 0 && summary.finalQuery.captureRate < 1) {
+    const percent = (summary.finalQuery.captureRate * 100).toFixed(1);
+    return `⚠ シード捕捉率が ${percent}%（${captured}/${seedTotal} 件）です。未捕捉シードの原因を #/draft で確認してからのエクスポートを推奨します。`;
+  }
+  return null;
 }
 
 function renderResults(doc: Document, container: HTMLElement, result: ExportResult): void {

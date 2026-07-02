@@ -70,7 +70,16 @@ import {
   type MeshTreeNode,
 } from '@/lib/ncbi';
 import type { MeshTreeEntry } from '@/features/validation';
-import { getLatestFormulaVersion, listFormulaVersions } from '@/features/formula';
+import {
+  appendExcessFilterBlocks,
+  getLatestFormulaVersion,
+  listFormulaVersions,
+} from '@/features/formula';
+import {
+  HIT_THRESHOLD,
+  proposeExcessFilters,
+  type ExcessFilterCandidate,
+} from '@/features/formula/skills';
 import type { FormulaVersion } from '@/domain/formulaVersion';
 import { getCurrentProject } from '@/features/project';
 import {
@@ -487,6 +496,14 @@ function buildDefaultViewOptions(
       // 進捗・エラー・ブロックごとのヒット数は store.draftRun で管理する（LLM コスト集計の
       // setState による全ビュー再描画でローカル DOM の進捗表示が消えるため）。view は描画専任。
       onGenerate: async () => runGenerateAndValidate(store, runtime, llmFactoryDepsBase()),
+      // 「検証のみ再実行」（fix-plan 2-2）: 生成済みの式を LLM を呼ばずに再検証する。
+      onRevalidate: async () => runRevalidateOnly(store, runtime, llmFactoryDepsBase()),
+      // 過大ヒット時の絞り込みフィルタ承認（fix-plan 2-1）。承認された候補だけ式へ追記する。
+      onApplyExcessFilters: async (approved: ExcessFilterCandidate[]) =>
+        runApplyExcessFilters(store, runtime, llmFactoryDepsBase(), approved),
+      onDismissExcessFilters: () => {
+        store.setState((s) => ({ ...s, excessFilterProposal: null }));
+      },
       // 結果は store に保存する。再描画後も draft view が state から復元できるようにするため。
       onAnalyzeMissed: async (
         missedPmids: string[]
@@ -1016,6 +1033,24 @@ async function runGenerateAndValidate(
       precomputed.set(hit.blockId, hit.hitCount);
     }
   }
+  const summary = await runValidationPhase(store, runtime, precomputed);
+  if (summary !== null) {
+    await maybeProposeExcessFilters(store, baseDeps, summary);
+  }
+}
+
+/**
+ * 検証フェーズ（runValidation + 進捗反映 + 完了時の validationResult 保存）。
+ * 「生成して検証する」の後半と「検証のみ再実行」（fix-plan 2-2）で共用する。
+ * 呼び出し時点で draftRun は status='running' / phase='validating' になっている前提。
+ * 成功時は summary を返して draftRun を終了（null）し、失敗時は draftRun をエラー化して
+ * null を返す（生成済みの blockHits は保持される）。
+ */
+async function runValidationPhase(
+  store: AppStore,
+  runtime: ChromeRuntimeDeps,
+  precomputedBlockHits?: ReadonlyMap<string, number>
+): Promise<ValidationSummary | null> {
   try {
     const summary = await runValidate(
       store,
@@ -1034,7 +1069,7 @@ async function runGenerateAndValidate(
               }
         );
       },
-      precomputed
+      precomputedBlockHits
     );
     store.setState((s) => ({
       ...s,
@@ -1046,9 +1081,164 @@ async function runGenerateAndValidate(
       missedAnalysis: null,
       draftRun: null,
     }));
+    return summary;
   } catch (err) {
     setDraftRunError(store, 'validating', err);
+    return null;
   }
+}
+
+/**
+ * 「検証のみ再実行」（fix-plan 2-2）。生成済みの currentFormulaMarkdown を対象に、
+ * LLM を一切呼ばず検証フェーズだけをやり直す。生成成功・検証失敗のときに
+ * 「再生成して再検証」しか手がなく LLM コストを二重払いする問題の解消。
+ * 直前の実行（検証フェーズまで到達したもの）で計測済みの blockHits は
+ * precomputed として再利用し、概念ブロックの再 esearch も省く。
+ */
+async function runRevalidateOnly(
+  store: AppStore,
+  runtime: ChromeRuntimeDeps,
+  baseDeps: Omit<LlmFactoryDeps, 'llmLogFolderId' | 'spreadsheetId'>
+): Promise<void> {
+  const initial = store.getState();
+  if (initial.draftRun?.status === 'running') {
+    return;
+  }
+  /* istanbul ignore if -- 再実行ボタンは formula 保存済みでしか表示されない */
+  if (initial.currentFormulaVersionId === null || initial.currentFormulaMarkdown === null) {
+    return;
+  }
+  // 生成フェーズで失敗した run の blockHits は保存済み式と一致しない可能性があるため、
+  // 検証フェーズまで到達した run のものだけ引き継ぐ。
+  const prevBlockHits =
+    initial.draftRun?.phase === 'validating' ? initial.draftRun.blockHits : [];
+  store.setState((s) => ({
+    ...s,
+    draftRun: {
+      status: 'running',
+      phase: 'validating',
+      progressLabel: '検証を開始します…',
+      progress: { phase: 'validating', step: 'line_hits' },
+      startedAtMs: Date.now(),
+      error: null,
+      blockHits: prevBlockHits,
+    },
+  }));
+  const precomputed = new Map<string, number>();
+  for (const hit of prevBlockHits) {
+    if (hit.error === null && hit.hitCount !== null) {
+      precomputed.set(hit.blockId, hit.hitCount);
+    }
+  }
+  const summary = await runValidationPhase(store, runtime, precomputed);
+  if (summary !== null) {
+    await maybeProposeExcessFilters(store, baseDeps, summary);
+  }
+}
+
+/**
+ * 検証完了後、総ヒット数が HIT_THRESHOLD（10,000 件）を超えていたら LLM に絞り込み
+ * フィルタ候補を尋ね、承認待ちとして store.excessFilterProposal へ保存する（fix-plan 2-1 /
+ * requirements.md §4.4）。候補はあくまで承認待ちで、式への追記はユーザー承認
+ * （onApplyExcessFilters）でのみ行う。LLM 失敗は検証結果を壊さず proposal.error に留める。
+ */
+async function maybeProposeExcessFilters(
+  store: AppStore,
+  baseDeps: Omit<LlmFactoryDeps, 'llmLogFolderId' | 'spreadsheetId'>,
+  summary: ValidationSummary
+): Promise<void> {
+  const state = store.getState();
+  const project = state.project;
+  const versionId = state.currentFormulaVersionId;
+  /* istanbul ignore if -- 検証が成功した直後なので project / version は必ずある */
+  if (!project || versionId === null) {
+    return;
+  }
+  if (summary.finalQueryError !== null) {
+    return;
+  }
+  const totalHits = summary.finalQuery.totalHits;
+  if (totalHits <= HIT_THRESHOLD) {
+    // 閾値以下に収まったら残っている旧提案を片づける
+    store.setState((s) =>
+      s.excessFilterProposal === null ? s : { ...s, excessFilterProposal: null }
+    );
+    return;
+  }
+  if (state.excessFilterProposal?.formulaVersionId === versionId) {
+    // 同じバージョンに提案済み。再検証のたびに LLM を呼び直さない
+    return;
+  }
+  try {
+    const factory = await buildLlmProviderFactory({
+      ...baseDeps,
+      llmLogFolderId: project.driveFolderId,
+      spreadsheetId: project.spreadsheetId,
+    });
+    const candidates = await proposeExcessFilters(
+      {
+        studyDesign: state.protocolDraft?.studyDesign ?? 'any',
+        hitCount: totalHits,
+      },
+      factory.forPurpose('design_filter')
+    );
+    store.setState((s) =>
+      s.currentFormulaVersionId !== versionId
+        ? s
+        : {
+            ...s,
+            excessFilterProposal: { formulaVersionId: versionId, totalHits, candidates, error: null },
+          }
+    );
+  } catch (err) {
+    // 候補取得の失敗は検証結果に影響させない（過大ヒットの事実だけは表示する）
+    store.setState((s) =>
+      s.currentFormulaVersionId !== versionId
+        ? s
+        : {
+            ...s,
+            excessFilterProposal: {
+              formulaVersionId: versionId,
+              totalHits,
+              candidates: [],
+              error: err instanceof Error ? err.message : String(err),
+            },
+          }
+    );
+  }
+}
+
+/**
+ * ユーザーが承認した絞り込みフィルタを式へ追記し、新しい FormulaVersion として保存して
+ * 検証のみ再実行する（fix-plan 2-1）。承認なしでは絶対に呼ばれない（UI 側の承認ゲート）。
+ */
+async function runApplyExcessFilters(
+  store: AppStore,
+  runtime: ChromeRuntimeDeps,
+  baseDeps: Omit<LlmFactoryDeps, 'llmLogFolderId' | 'spreadsheetId'>,
+  approved: ExcessFilterCandidate[]
+): Promise<void> {
+  if (approved.length === 0) {
+    return;
+  }
+  const state = store.getState();
+  if (state.draftRun?.status === 'running') {
+    return;
+  }
+  if (state.currentFormulaMarkdown === null) {
+    throw new Error('検索式が未生成です。先に「生成して検証する」を実行してください');
+  }
+  const newMd = appendExcessFilterBlocks(state.currentFormulaMarkdown, approved);
+  await saveEditedFormula(
+    {
+      formulaMd: newMd,
+      note: `過大ヒット絞り込みフィルタを承認して追加: ${approved.map((c) => c.label).join(', ')}`,
+    },
+    { google: runtime.google, store }
+  );
+  // 新バージョンへ移ったので旧提案は破棄し、更新後の式を検証し直す
+  store.setState((s) => ({ ...s, excessFilterProposal: null }));
+  await runRevalidateOnly(store, runtime, baseDeps);
 }
 
 /** draftRun を指定フェーズのエラー状態にする（生成済み blockHits は保持する） */

@@ -1,7 +1,7 @@
 # 修正計画（2026-07 レビュー起点）
 
 - **作成日**: 2026-07-02
-- **ステータス**: フェーズ 1 完了（2026-07-02）。フェーズ 2〜4 未着手
+- **ステータス**: フェーズ 1・2 完了（2026-07-02）。フェーズ 3〜4 未着手
 - **起点**: 「SR 検索式作成アプリとして効率的に役立つか」の全体レビュー（フロー/UX・検証/変換ロジックの Python 版忠実性・LLM/要件充足度の 3 観点）
 - **関連**: [requirements.md](requirements.md) / [architecture.md](architecture.md)
 
@@ -47,25 +47,28 @@
 - **受入条件**: Sheets API を落とした E2E stub で「読み込みに失敗しました」が出る
 - **実装メモ**: `AppState.hydrateError` + `buildHydrateErrorBanner`（home / protocol 共用、再試行 = `hydrateCurrentProject` 再実行）。あわせて E2E の `appStub` に Sheets のデフォルトモック（`{ values: [] }`）を追加し、hydrate が実ネットワークへ出ないようにした（`journey-history-switch` は hydrate 成功前提に更新）
 
-## フェーズ 2: 安全装置の配線（規模: 中）
+## フェーズ 2: 安全装置の配線（規模: 中） ✅ 完了（2026-07-02, ブランチ `feat/excess-filter-and-revalidate`）
 
-### 2-1. 過大ヒット → フィルタ承認フローの接続（dead code の解消）
+### 2-1. 過大ヒット → フィルタ承認フローの接続（dead code の解消） ✅
 
 - 現状: [src/features/formula/skills/filterDesigner.ts](../src/features/formula/skills/filterDesigner.ts) の `proposeExcessFilters` / `HIT_THRESHOLD`（10,000 件）は実装・テスト済みだが呼び出し元がなく、要件 §4.4 の承認ゲートが機能していない
 - 対応: draft パイプライン（bootstrap.ts 894 行付近の `runDraftPipeline`）の最終検証後、総ヒット数 > `HIT_THRESHOLD` なら `proposeExcessFilters` を呼び、候補フィルタを draftView に承認 UI として表示。承認されたら式に追記 → 検証のみ再実行（2-2 と共用）。**承認なしでは絶対に追加しない**（要件の厳格ルール維持）
 - `LLMApiLog` は既存の `purpose=design_filter` で記録
 - **受入条件**: E2E で 10,001 件 stub → 候補提示 → 承認で式更新、拒否で式不変
+- **実装メモ**: 検証フェーズ共通の後処理 `maybeProposeExcessFilters`（bootstrap）が final_query の総ヒット > `HIT_THRESHOLD` で `proposeExcessFilters` を呼び、`AppState.excessFilterProposal`（formulaVersionId で stale 判定）へ保存。draftView がチェックボックス式の承認 UI（`.draft__excess`）を表示し、承認は `appendExcessFilterBlocks`（[src/features/formula/appendExcessFilters.ts](../src/features/formula/appendExcessFilters.ts)。`#FilterN` ブロック挿入 + 結合行へ ` AND #FilterN`）→ `saveEditedFormula`（新バージョン、note に承認記録）→ 検証のみ再実行（2-2 共用）。同一バージョンへの再提案はスキップ（LLM 二重呼び防止）。LLM 失敗は `proposal.error` に留めて検証結果は壊さない
 
-### 2-2. 「検証のみ再実行」パス（生成やり直しの LLM コスト二重払い解消）
+### 2-2. 「検証のみ再実行」パス（生成やり直しの LLM コスト二重払い解消） ✅
 
 - 現状: 生成成功・検証失敗のとき `currentFormulaMarkdown` は保持されているのに、再クリックすると生成からやり直しになる
 - 対応: `runDraftPipeline` の検証フェーズだけを切り出した関数を bootstrap に用意し、draftView のエラー表示に「検証のみ再実行」ボタンを追加（2-1 の再検証と共用）
 - **受入条件**: 検証フェーズで fetch を落とす E2E → 再実行ボタンで LLM を呼ばずに検証が回る
+- **実装メモ**: `runGenerateAndValidate` の検証フェーズを `runValidationPhase` として切り出し、`runRevalidateOnly`（bootstrap）が draftRun を `phase='validating'` で起動して共用。draftView は検証フェーズのエラー時のみ「検証のみ再実行」ボタン（`.draft__revalidate`）を表示（生成フェーズ失敗は式が無い/古いので出さない）。直前の run が検証フェーズまで到達していれば blockHits を precomputed として引き継ぎ、概念ブロックの再 esearch も省く
 
-### 2-3. export ガードの警告化
+### 2-3. export ガードの警告化 ✅
 
 - ハードブロックはしない（[src/app/guards.ts](../src/app/guards.ts) 冒頭コメントの近似方針は維持）。exportView 上部に「この式は未検証です / 捕捉率 N% です」の警告バナーを出すだけに留める。`validationResult` とバージョン ID の突合で判定
 - **受入条件**: 未検証式で export を開くと警告表示、検証済みなら非表示
+- **実装メモ**: 純関数 `buildValidationWarning`（[src/app/views/exportView.ts](../src/app/views/exportView.ts)）で判定し `.export__validation-warning` バナーを表示。未検証（結果なし / stale）→「まだ検証されていません」、final_query 失敗 →「捕捉率を確認できていません」、有効 seed ありで捕捉率 < 100% →「捕捉率 N%（M/K 件）」、検証済み 100%（または seed 0 件で分母なし）→ 非表示
 
 ## フェーズ 3: DB 変換の底上げ（規模: 中〜大 / 出力物の品質）
 

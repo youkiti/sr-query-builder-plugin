@@ -74,6 +74,7 @@ function makeState(overrides: Partial<AppState> = {}): AppState {
     expandRun: null,
     validationResult: null,
     missedAnalysis: null,
+    excessFilterProposal: null,
     editAutoSave: null,
     blocksDraftSavedAt: null,
     hydrateError: null,

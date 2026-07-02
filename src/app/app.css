@@ -1310,6 +1310,89 @@
   display: none;
 }
 
+/* 検証フェーズ失敗時の「検証のみ再実行」ボタン（fix-plan 2-2）。 */
+.draft__revalidate {
+  margin-top: var(--space-2);
+}
+
+/* 過大ヒット時の絞り込みフィルタ承認セクション（fix-plan 2-1）。 */
+.draft__excess {
+  margin-top: var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid var(--color-warning, #b8860b);
+  border-left: 4px solid var(--color-warning, #b8860b);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-bg, #fff8e1);
+}
+
+.draft__excess h3 {
+  margin-top: 0;
+  color: var(--color-warning-text, #6d4c00);
+}
+
+.draft__excess-note {
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+}
+
+.draft__excess-list {
+  list-style: none;
+  margin: var(--space-2) 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.draft__excess-item {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+}
+
+.draft__excess-expr {
+  display: block;
+  margin: var(--space-1, 4px) 0;
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.draft__excess-rationale {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.draft__excess-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.draft__excess-status:empty,
+.draft__excess-error:empty {
+  display: none;
+}
+
+.draft__excess-error {
+  color: var(--color-danger);
+}
+
+/* エクスポート画面の未検証・捕捉率不足の警告バナー（fix-plan 2-3）。 */
+.export__validation-warning {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-warning, #b8860b);
+  border-left: 4px solid var(--color-warning, #b8860b);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-bg, #fff8e1);
+  color: var(--color-warning-text, #6d4c00);
+  font-size: var(--font-size-sm);
+}
+
 /* 検索式ドラフト表示（ブロック単位 + 折り返し + 語の色分け） */
 .draft__formula {
   margin: var(--space-3) 0 0;

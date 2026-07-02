@@ -1,7 +1,13 @@
 import type { DraftBlockHit, DraftProgress } from '@/app/services';
+import { HIT_THRESHOLD, type ExcessFilterCandidate } from '@/features/formula/skills';
 import { parsePubmedFormulaMd, type PubmedFormula } from '@/lib/search-formula-md';
 import { ROUTE_LABELS } from '../router';
-import type { AppState, DraftRunProgressDetail, DraftRunState } from '../store';
+import type {
+  AppState,
+  DraftRunProgressDetail,
+  DraftRunState,
+  ExcessFilterProposalEntry,
+} from '../store';
 import { buildLegend, renderExpressionInto } from './formulaDisplay';
 import type { RenderView } from './types';
 import {
@@ -34,6 +40,15 @@ import {
 export interface DraftViewCallbacks extends ValidationResultsCallbacks {
   /** 「生成して検証する」ボタンが押されたとき。進捗・エラーは store.draftRun 経由で反映される */
   onGenerate?: () => Promise<void>;
+  /**
+   * 「検証のみ再実行」ボタン（fix-plan 2-2）。生成済みの式を LLM を呼ばずに再検証する。
+   * 検証フェーズの失敗時に、生成からやり直す LLM コスト二重払いを避けるための導線。
+   */
+  onRevalidate?: () => Promise<void>;
+  /** 過大ヒット時のフィルタ候補をユーザーが承認したとき（fix-plan 2-1）。承認済み候補のみ渡す */
+  onApplyExcessFilters?: (approved: ExcessFilterCandidate[]) => Promise<void>;
+  /** フィルタ候補を見送ったとき（式は変更しない） */
+  onDismissExcessFilters?: () => void;
 }
 
 export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView {
@@ -108,7 +123,31 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
       } else {
         const phaseLabel = run.phase === 'validating' ? '検証' : '生成';
         errorBox.textContent = `${phaseLabel}に失敗しました: ${run.error ?? '不明なエラー'}`;
+        // 検証フェーズの失敗は生成済みの式が残っているので、LLM を呼ばない再検証を促す
+        // （fix-plan 2-2）。生成フェーズの失敗は式が無い/古いので再生成しかない。
+        if (run.phase === 'validating' && existing) {
+          const revalidateBtn = doc.createElement('button');
+          revalidateBtn.type = 'button';
+          revalidateBtn.className = 'draft__revalidate';
+          revalidateBtn.textContent = '検証のみ再実行（生成はやり直しません）';
+          revalidateBtn.addEventListener('click', () => {
+            if (!callbacks.onRevalidate || revalidateBtn.disabled) {
+              return;
+            }
+            revalidateBtn.disabled = true;
+            void callbacks.onRevalidate();
+          });
+          container.appendChild(revalidateBtn);
+        }
       }
+    }
+
+    // 過大ヒット時の絞り込みフィルタ承認 UI（fix-plan 2-1）。検証完了後、総ヒット数が
+    // 閾値を超えたときだけ store.excessFilterProposal に候補が入る。承認された候補のみ
+    // 式へ追記され、見送れば式は変更されない（requirements.md §4.4 の承認ゲート）。
+    const proposal = readStoredProposal(ctx.state);
+    if (proposal && !running) {
+      container.appendChild(renderExcessFilterProposal(doc, proposal, callbacks));
     }
 
     // ブロックごとのライブヒット数。実行中（生成フェーズ）に「出来上がったブロックから順に
@@ -142,6 +181,147 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
       void callbacks.onGenerate();
     });
   };
+}
+
+/** state.excessFilterProposal が現在の formula バージョンの提案なら返す（stale は null） */
+export function readStoredProposal(state: AppState): ExcessFilterProposalEntry | null {
+  if (
+    state.excessFilterProposal === null ||
+    state.currentFormulaVersionId === null ||
+    state.excessFilterProposal.formulaVersionId !== state.currentFormulaVersionId
+  ) {
+    return null;
+  }
+  return state.excessFilterProposal;
+}
+
+/**
+ * 過大ヒット時の絞り込みフィルタ候補（承認待ち）セクション。
+ * チェックボックスで候補を選び、「式に追加して再検証」を押したものだけが式へ追記される。
+ * 「見送る」は候補を破棄して式を変更しない。
+ */
+function renderExcessFilterProposal(
+  doc: Document,
+  proposal: ExcessFilterProposalEntry,
+  callbacks: DraftViewCallbacks
+): HTMLElement {
+  const section = doc.createElement('section');
+  section.className = 'draft__excess';
+
+  const h3 = doc.createElement('h3');
+  h3.textContent = `⚠ ヒット数が多すぎます（${proposal.totalHits.toLocaleString()} 件 > ${HIT_THRESHOLD.toLocaleString()} 件）`;
+  section.appendChild(h3);
+
+  const note = doc.createElement('p');
+  note.className = 'draft__excess-note';
+  note.textContent =
+    '検索式を絞り込む候補フィルタです。承認した候補だけが式へ追加されます（承認しない限り式は変更されません）。言語・年代などの制限は感度を下げるリスクがあるため、根拠を確認してから承認してください。';
+  section.appendChild(note);
+
+  const statusBox = doc.createElement('p');
+  statusBox.className = 'draft__excess-status';
+  statusBox.setAttribute('aria-live', 'polite');
+
+  const errorBox = doc.createElement('p');
+  errorBox.className = 'draft__excess-error';
+  errorBox.setAttribute('role', 'alert');
+
+  if (proposal.error !== null) {
+    errorBox.textContent = `候補の取得に失敗しました: ${proposal.error}`;
+  } else if (proposal.candidates.length === 0) {
+    const empty = doc.createElement('p');
+    empty.className = 'draft__excess-empty';
+    empty.textContent = '候補が得られませんでした。#/edit から手動で絞り込んでください。';
+    section.appendChild(empty);
+  }
+
+  const checkboxes: Array<{ input: HTMLInputElement; candidate: ExcessFilterCandidate }> = [];
+  if (proposal.candidates.length > 0) {
+    const list = doc.createElement('ul');
+    list.className = 'draft__excess-list';
+    proposal.candidates.forEach((candidate, index) => {
+      const li = doc.createElement('li');
+      li.className = 'draft__excess-item';
+
+      const label = doc.createElement('label');
+      const input = doc.createElement('input');
+      input.type = 'checkbox';
+      input.className = 'draft__excess-check';
+      input.dataset['index'] = String(index);
+      label.appendChild(input);
+      const name = doc.createElement('strong');
+      name.textContent = ` ${candidate.label}`;
+      label.appendChild(name);
+      li.appendChild(label);
+
+      const expr = doc.createElement('code');
+      expr.className = 'draft__excess-expr';
+      expr.textContent = candidate.expression;
+      li.appendChild(expr);
+
+      const rationale = doc.createElement('p');
+      rationale.className = 'draft__excess-rationale';
+      rationale.textContent = candidate.rationale;
+      li.appendChild(rationale);
+
+      checkboxes.push({ input, candidate });
+      list.appendChild(li);
+    });
+    section.appendChild(list);
+  }
+
+  const actions = doc.createElement('div');
+  actions.className = 'draft__excess-actions';
+
+  const applyBtn = doc.createElement('button');
+  applyBtn.type = 'button';
+  applyBtn.className = 'draft__excess-apply';
+  applyBtn.textContent = '承認した候補を式に追加して再検証';
+  applyBtn.disabled = true;
+
+  const dismissBtn = doc.createElement('button');
+  dismissBtn.type = 'button';
+  dismissBtn.className = 'draft__excess-dismiss';
+  dismissBtn.textContent = '見送る（式を変更しない）';
+
+  if (proposal.candidates.length > 0) {
+    actions.appendChild(applyBtn);
+  }
+  actions.appendChild(dismissBtn);
+  section.appendChild(actions);
+  section.appendChild(statusBox);
+  section.appendChild(errorBox);
+
+  const syncApplyDisabled = (): void => {
+    applyBtn.disabled = !checkboxes.some((entry) => entry.input.checked);
+  };
+  for (const entry of checkboxes) {
+    entry.input.addEventListener('change', syncApplyDisabled);
+  }
+
+  applyBtn.addEventListener('click', () => {
+    const approved = checkboxes
+      .filter((entry) => entry.input.checked)
+      .map((entry) => entry.candidate);
+    if (!callbacks.onApplyExcessFilters || approved.length === 0 || applyBtn.disabled) {
+      return;
+    }
+    applyBtn.disabled = true;
+    dismissBtn.disabled = true;
+    statusBox.textContent = '式を更新して再検証しています…';
+    callbacks.onApplyExcessFilters(approved).catch((err: unknown) => {
+      statusBox.textContent = '';
+      errorBox.textContent = `式の更新に失敗しました: ${err instanceof Error ? err.message : String(err)}`;
+      applyBtn.disabled = false;
+      dismissBtn.disabled = false;
+    });
+  });
+
+  dismissBtn.addEventListener('click', () => {
+    callbacks.onDismissExcessFilters?.();
+  });
+
+  return section;
 }
 
 /**

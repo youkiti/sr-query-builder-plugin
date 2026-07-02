@@ -62,6 +62,7 @@ describe('startApp', () => {
       expandRun: null,
       validationResult: null,
       missedAnalysis: null,
+      excessFilterProposal: null,
       editAutoSave: null,
       blocksDraftSavedAt: null,
       hydrateError: null,
@@ -106,6 +107,7 @@ describe('startApp', () => {
       expandRun: null,
       validationResult: null,
       missedAnalysis: null,
+      excessFilterProposal: null,
       editAutoSave: null,
       blocksDraftSavedAt: null,
       hydrateError: null,
@@ -1582,6 +1584,210 @@ describe('startApp - wiring 層', () => {
       .filter((u) => u.includes('eutils.ncbi.nlm.nih.gov'));
     expect(eutilsCalls.length).toBeGreaterThan(0);
     expect(eutilsCalls.every((u) => u.includes('api_key=NCBI-KEY'))).toBe(true);
+  });
+
+  const REVALIDATE_MD = '## PubMed/MEDLINE\n\n```\n#1 "asthma"[tiab]\n#2 "children"[tiab]\n#3 #1 AND #2\n```\n';
+
+  /** 検証フェーズ失敗直後（生成済み式あり）の状態を store に流し込む */
+  function seedValidatingError(handle: ReturnType<typeof startApp>): void {
+    seedDraftPrereqs(handle);
+    handle.store.setState((s) => ({
+      ...s,
+      currentFormulaVersionId: 'fv-1',
+      currentFormulaMarkdown: REVALIDATE_MD,
+      draftRun: {
+        status: 'error',
+        phase: 'validating',
+        progressLabel: '',
+        startedAtMs: Date.now(),
+        error: 'NCBI 503',
+        blockHits: [],
+      },
+    }));
+  }
+
+  /** 検証だけ回すのに必要な NCBI / Sheets / Drive のモック（esearch は count を返す） */
+  function mockValidationFetch(fetchMock: jest.Mock, esearchCount: string): void {
+    fetchMock.mockImplementation(async (url: string) => {
+      const u = typeof url === 'string' ? url : String(url);
+      if (u.includes('generativelanguage.googleapis.com')) {
+        return jsonResponse({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      candidates: [
+                        {
+                          label: '英語論文に限定',
+                          expression: 'english[la]',
+                          rationale: '非英語論文を除外するリスクあり',
+                        },
+                      ],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+          usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
+        });
+      }
+      if (u.includes('/upload/drive/v3/files')) {
+        return jsonResponse({ id: 'f', webViewLink: '' });
+      }
+      if (u.includes('/values/SeedPapers')) {
+        return jsonResponse({ values: [SHEET_HEADERS.SeedPapers] });
+      }
+      if (u.includes('eutils.ncbi.nlm.nih.gov')) {
+        if (u.includes('efetch')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({}),
+            text: async () => `<?xml version="1.0"?><PubmedArticleSet></PubmedArticleSet>`,
+          } as Response;
+        }
+        return jsonResponse({ esearchresult: { count: esearchCount, idlist: [] } });
+      }
+      return jsonResponse({});
+    });
+  }
+
+  test('「検証のみ再実行」は LLM を呼ばずに検証を回す（fix-plan 2-2）', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+      // apiKeys.gemini は意図的に置かない: LLM が呼ばれたら factory 生成で失敗して気付ける
+    });
+    mockValidationFetch(fetchMock, '5');
+    const handle = startApp(doc, {
+      getHash: () => '#/draft',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    seedValidatingError(handle);
+    const btn = doc.querySelector<HTMLButtonElement>('.draft__revalidate');
+    expect(btn).not.toBeNull();
+    btn!.click();
+    for (let i = 0; i < 30; i += 1) {
+      await flush();
+    }
+    const llmCalls = fetchMock.mock.calls.filter((c) =>
+      (c[0] as string).includes('generativelanguage.googleapis.com')
+    );
+    expect(llmCalls).toHaveLength(0);
+    const state = handle.store.getState();
+    expect(state.draftRun).toBeNull();
+    expect(state.validationResult?.formulaVersionId).toBe('fv-1');
+    expect(state.validationResult?.summary.lineHits.length).toBeGreaterThan(0);
+  });
+
+  test('検証完了時に総ヒット > 10,000 なら design_filter を呼び提案を保存する（fix-plan 2-1）', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+      'apiKeys.gemini': 'KEY',
+    });
+    mockValidationFetch(fetchMock, '10001');
+    const handle = startApp(doc, {
+      getHash: () => '#/draft',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    seedValidatingError(handle);
+    doc.querySelector<HTMLButtonElement>('.draft__revalidate')!.click();
+    for (let i = 0; i < 30; i += 1) {
+      await flush();
+    }
+    const state = handle.store.getState();
+    expect(state.excessFilterProposal?.formulaVersionId).toBe('fv-1');
+    expect(state.excessFilterProposal?.totalHits).toBe(10001);
+    expect(state.excessFilterProposal?.candidates).toEqual([
+      expect.objectContaining({ label: '英語論文に限定', expression: 'english[la]' }),
+    ]);
+    // view にも承認 UI が出る
+    expect(doc.querySelector('.draft__excess')).not.toBeNull();
+    // 式はまだ変更されていない（承認ゲート）
+    expect(state.currentFormulaMarkdown).toBe(REVALIDATE_MD);
+  });
+
+  test('フィルタ承認で式が更新され新バージョン追記 + 再検証、拒否（見送り）では式不変（fix-plan 2-1）', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+      'apiKeys.gemini': 'KEY',
+    });
+    mockValidationFetch(fetchMock, '10001');
+    const handle = startApp(doc, {
+      getHash: () => '#/draft',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    seedDraftPrereqs(handle);
+    handle.store.setState((s) => ({
+      ...s,
+      currentFormulaVersionId: 'fv-1',
+      currentFormulaMarkdown: REVALIDATE_MD,
+      excessFilterProposal: {
+        formulaVersionId: 'fv-1',
+        totalHits: 10001,
+        candidates: [
+          { label: '英語論文に限定', expression: 'english[la]', rationale: 'リスクあり' },
+        ],
+        error: null,
+      },
+    }));
+
+    // --- 見送り: 式は変更されず提案だけ破棄される ---
+    doc.querySelector<HTMLButtonElement>('.draft__excess-dismiss')!.click();
+    expect(handle.store.getState().excessFilterProposal).toBeNull();
+    expect(handle.store.getState().currentFormulaMarkdown).toBe(REVALIDATE_MD);
+    expect(
+      fetchMock.mock.calls.filter(
+        (c) =>
+          (c[0] as string).includes('FormulaVersions') && (c[0] as string).includes(':append')
+      )
+    ).toHaveLength(0);
+
+    // --- 承認: 式へ追記 → FormulaVersions 追記 → 再検証 ---
+    handle.store.setState((s) => ({
+      ...s,
+      excessFilterProposal: {
+        formulaVersionId: 'fv-1',
+        totalHits: 10001,
+        candidates: [
+          { label: '英語論文に限定', expression: 'english[la]', rationale: 'リスクあり' },
+        ],
+        error: null,
+      },
+    }));
+    const check = doc.querySelector<HTMLInputElement>('.draft__excess-check')!;
+    check.checked = true;
+    check.dispatchEvent(new Event('change'));
+    doc.querySelector<HTMLButtonElement>('.draft__excess-apply')!.click();
+    for (let i = 0; i < 40; i += 1) {
+      await flush();
+    }
+    const state = handle.store.getState();
+    expect(state.currentFormulaMarkdown).toContain('#Filter1 english[la]');
+    expect(state.currentFormulaMarkdown).toContain('#3 #1 AND #2 AND #Filter1');
+    expect(state.currentFormulaVersionId).not.toBe('fv-1');
+    // 新バージョンの追記（FormulaVersions :append）が走っている
+    const appendCalls = fetchMock.mock.calls.filter(
+      (c) =>
+        (c[0] as string).includes('FormulaVersions') && (c[0] as string).includes(':append')
+    );
+    expect(appendCalls.length).toBeGreaterThan(0);
+    // 承認後は検証のみ再実行され、新バージョンの検証結果が保存される
+    expect(state.validationResult?.formulaVersionId).toBe(state.currentFormulaVersionId);
   });
 });
 

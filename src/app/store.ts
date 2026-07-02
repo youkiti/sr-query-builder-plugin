@@ -1,4 +1,5 @@
 import type { CurrentProjectEntry } from '@/features/project';
+import type { ExcessFilterCandidate } from '@/features/formula/skills';
 import type {
   AnalyzeMissedSeedsResult,
   ValidationProgress,
@@ -72,6 +73,23 @@ export interface ValidationResultEntry {
 export interface MissedAnalysisEntry {
   formulaVersionId: string;
   result: AnalyzeMissedSeedsResult;
+}
+
+/**
+ * 過大ヒット（> HIT_THRESHOLD 件）時の絞り込みフィルタ候補（requirements.md §4.4 / fix-plan 2-1）。
+ * 検証完了時に総ヒット数が閾値を超えていたら proposeExcessFilters（LLM）で候補を取得し、
+ * ここへ保存する。draft view はユーザー承認 UI として表示し、承認された候補だけ式へ追記する
+ * （承認なしでは絶対に追加しない）。stale 判定は ValidationResultEntry と同じで、
+ * formulaVersionId が currentFormulaVersionId と一致するときだけ有効。
+ */
+export interface ExcessFilterProposalEntry {
+  formulaVersionId: string;
+  /** 提案時点の最終検索式の総ヒット数 */
+  totalHits: number;
+  /** LLM が提案した候補フィルタ。error 時は空配列 */
+  candidates: ExcessFilterCandidate[];
+  /** 候補取得（LLM）に失敗したときのメッセージ。成功時は null */
+  error: string | null;
 }
 
 /**
@@ -180,6 +198,8 @@ export interface AppState {
   validationResult: ValidationResultEntry | null;
   /** 未捕捉 PMID の AI 原因分析結果。未実行なら null */
   missedAnalysis: MissedAnalysisEntry | null;
+  /** 過大ヒット時の絞り込みフィルタ候補（承認待ち）。未提案・承認/見送り済みなら null */
+  excessFilterProposal: ExcessFilterProposalEntry | null;
   /** #/edit の動的保存（上書き）状態。未保存・別画面なら null */
   editAutoSave: EditAutoSaveState | null;
   /**
@@ -210,6 +230,7 @@ export const INITIAL_STATE: AppState = {
   expandRun: null,
   validationResult: null,
   missedAnalysis: null,
+  excessFilterProposal: null,
   editAutoSave: null,
   blocksDraftSavedAt: null,
   hydrateError: null,
