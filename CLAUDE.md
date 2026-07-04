@@ -24,9 +24,12 @@ npm run test:e2e:ui  # Playwright UI モード
 npm run typecheck    # tsc --noEmit
 npm run lint         # eslint（src + tests）
 npm run lint:css     # stylelint
+npm run manual:check # Selenium 実機確認（本物の Chrome + Google/Gemini/NCBI。手動確認用・CI 非対象）
 ```
 
 単一テストの実行: `npx jest src/app/views/blocksView.test.ts`、E2E 単体: `npx playwright test tests/e2e/app-blocks.spec.ts`。
+
+**実機確認（Selenium 半自動ハーネス）**: jest / Playwright（すべて stub）ではカバーできない「本物の Chrome 拡張ランタイム + 本物の Google / Gemini / NCBI API」の結合部は [tools/selenium/manualCheck.mjs](tools/selenium/manualCheck.mjs) で通し確認する。操作・検証を自動化し、ログイン / OAuth 同意 / API キー入力だけコンソールで一時停止する。初回は `npm run manual:check -- prepare` で専用プロファイル（`.selenium-profile/`）に dist/ を手動読込。詳細と手順書は [docs/manual-testing.md](docs/manual-testing.md)。
 
 ## アルファ配布（Chrome Web Store 申請前のテスター配布）
 
