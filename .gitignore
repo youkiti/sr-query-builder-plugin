@@ -36,3 +36,8 @@ key.pem
 playwright-report/
 test-results/
 playwright/.cache/
+
+# Selenium 実機確認の専用 Chrome プロファイル（tools/selenium/manualCheck.mjs）。
+# ログイン済みセッションと拡張の読み込み状態を再利用するため永続化するが、
+# 認証情報を含むためコミットしない
+.selenium-profile/
