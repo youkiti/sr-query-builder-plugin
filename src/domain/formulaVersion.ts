@@ -14,4 +14,9 @@ export interface FormulaVersion {
   createdBy: FormulaCreatedBy;
   createdAt: string;
   note: string | null;
+  /**
+   * この版の作成を支援した LLM モデル ID（例: 'gemini-3.5-flash'）。
+   * user_edit では元ドラフトのモデルを引き継ぐ。model 列導入前の行では null
+   */
+  model: string | null;
 }

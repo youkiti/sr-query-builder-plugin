@@ -40,6 +40,7 @@ function makeState(): AppState {
     currentProtocolVersion: null,
     currentFormulaVersionId: null,
     currentFormulaMarkdown: null,
+    currentFormulaModel: null,
     draftRun: null,
     expandRun: null,
     validationResult: null,

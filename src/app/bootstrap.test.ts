@@ -58,6 +58,7 @@ describe('startApp', () => {
       currentProtocolVersion: null,
       currentFormulaVersionId: null,
       currentFormulaMarkdown: null,
+      currentFormulaModel: null,
       draftRun: null,
       expandRun: null,
       validationResult: null,
@@ -99,6 +100,7 @@ describe('startApp', () => {
       currentProtocolVersion: null,
       currentFormulaVersionId: null,
       currentFormulaMarkdown: null,
+      currentFormulaModel: null,
       draftRun: null,
       expandRun: null,
       validationResult: null,
@@ -533,6 +535,39 @@ describe('startApp - wiring 層', () => {
     expect(doc.querySelector('.protocol__version-label')?.textContent).toContain('v3');
   });
 
+  test('hydrate: 最新 FormulaVersion の model も store に復元する', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'D', title: 'T' },
+    });
+    const header = [...SHEET_HEADERS.FormulaVersions];
+    const formulaRow = header.map((k) => {
+      if (k === 'version_id') return 'fv-1';
+      if (k === 'protocol_version') return '3';
+      if (k === 'formula_md') return '## PubMed/MEDLINE\n\n```\n#1 asthma[tiab]\n```\n';
+      if (k === 'created_by') return 'ai_draft';
+      if (k === 'model') return 'gemini-3.5-flash';
+      return '';
+    });
+    fetchMock.mockImplementation(
+      sheetsFetchHandler((url) =>
+        url.includes('/values/FormulaVersions')
+          ? jsonResponse({ values: [header, formulaRow] })
+          : null
+      )
+    );
+    const handle = startApp(doc, {
+      getHash: () => '#/home',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    const state = handle.store.getState();
+    expect(state.currentFormulaVersionId).toBe('fv-1');
+    expect(state.currentFormulaModel).toBe('gemini-3.5-flash');
+  });
+
   test('protocol view 既定 onListVersions が Protocol タブの全バージョンを読む', async () => {
     const doc = buildDocument();
     const { runtime, fetchMock } = makeRuntime({
@@ -845,6 +880,7 @@ describe('startApp - wiring 層', () => {
             if (k === 'formula_md') return `## PubMed/MEDLINE\n\n\`\`\`\n#1 md-${versionId}\n\`\`\`\n`;
             if (k === 'created_by') return 'ai_draft';
             if (k === 'created_at') return '2026';
+            if (k === 'model') return versionId === 'v2' ? 'gemini-3.5-flash' : '';
             return '';
           });
         return jsonResponse({ values: [header, row('v1'), row('v2')] });
@@ -870,6 +906,7 @@ describe('startApp - wiring 層', () => {
     expect(handle.store.getState().currentProtocolVersion).toBe(7);
     expect(handle.store.getState().currentFormulaVersionId).toBe('v2');
     expect(handle.store.getState().currentFormulaMarkdown).toContain('md-v2');
+    expect(handle.store.getState().currentFormulaModel).toBe('gemini-3.5-flash');
   });
 
   test('edit view 既定 onSave が FormulaVersions に user_edit 行を追加する', async () => {

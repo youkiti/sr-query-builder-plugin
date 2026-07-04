@@ -231,6 +231,8 @@ export async function generateDraft(deps: DraftServiceDeps): Promise<DraftResult
   notifyProgress({ step: 'save', blockCount });
   const versionId = (deps.newUuid ?? newUuid)();
   const createdAt = (deps.now ?? nowIso)();
+  // 生成に実際に使ったモデル ID を版に記録する（export 画面の Methods 文案用）
+  const model = deps.llmFactory.model;
   await appendFormulaVersion(
     project.spreadsheetId,
     {
@@ -242,6 +244,7 @@ export async function generateDraft(deps: DraftServiceDeps): Promise<DraftResult
       createdBy: 'ai_draft',
       createdAt,
       note: null,
+      model,
     },
     deps.google
   );
@@ -250,6 +253,7 @@ export async function generateDraft(deps: DraftServiceDeps): Promise<DraftResult
     ...s,
     currentFormulaVersionId: versionId,
     currentFormulaMarkdown: assembled.markdown,
+    currentFormulaModel: model,
   }));
 
   notifyProgress({ step: 'done', blockCount });

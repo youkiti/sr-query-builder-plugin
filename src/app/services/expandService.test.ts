@@ -70,6 +70,7 @@ function makeState(overrides: Partial<AppState> = {}): AppState {
     currentFormulaVersionId: 'v1',
     currentFormulaMarkdown:
       '## PubMed/MEDLINE\n\n```\n#1 asthma[tiab]\n#2 children[tiab]\n#3 #1 AND #2\n```\n',
+    currentFormulaModel: null,
     draftRun: null,
     expandRun: null,
     validationResult: null,
@@ -153,7 +154,7 @@ function emptyDeps(
       maxRetries: 0,
     },
     store,
-    llmFactory: { forPurpose: () => provider },
+    llmFactory: { forPurpose: () => provider, model: 'gemini-test' },
   };
 }
 
@@ -273,7 +274,7 @@ describe('fetchBoundaryCandidates', () => {
         maxRetries: 0,
       },
       store,
-      llmFactory: { forPurpose },
+      llmFactory: { forPurpose, model: 'gemini-test' },
     });
     // 現式ヒット数（original count）と外側ヒット数（margin count）はモックの count を反映する
     expect(result.originalHits).toBe(1000);
@@ -327,7 +328,7 @@ describe('fetchBoundaryCandidates', () => {
         maxRetries: 0,
       },
       store,
-      llmFactory: { forPurpose },
+      llmFactory: { forPurpose, model: 'gemini-test' },
     });
     // margin が既存 seed のみ（111）→ 新規候補 0。pick_boundary は呼ばれない
     expect(result.candidates).toEqual([]);
@@ -369,6 +370,7 @@ describe('fetchBoundaryCandidates', () => {
       store,
       llmFactory: {
         forPurpose: () => branchingProvider({ picks: [{ pmid: '666', reason: 'ok' }] }),
+        model: 'gemini-test',
       },
     });
     expect(result.candidates).toEqual([
@@ -428,7 +430,7 @@ describe('fetchBoundaryCandidates', () => {
         maxRetries: 0,
       },
       store,
-      llmFactory: { forPurpose: () => branchingProvider({ picks: [] }) },
+      llmFactory: { forPurpose: () => branchingProvider({ picks: [] }), model: 'gemini-test' },
       retmax: 5,
       skillCandidateLimit: 2,
     });
@@ -499,7 +501,7 @@ describe('fetchBoundaryCandidates', () => {
         maxRetries: 0,
       },
       store,
-      llmFactory: { forPurpose: () => provider },
+      llmFactory: { forPurpose: () => provider, model: 'gemini-test' },
     });
     expect(result.candidates).toEqual([
       {
@@ -585,7 +587,7 @@ describe('fetchBoundaryCandidates', () => {
         maxRetries: 0,
       },
       store,
-      llmFactory: { forPurpose: () => provider },
+      llmFactory: { forPurpose: () => provider, model: 'gemini-test' },
     });
     expect(provider.chat).toHaveBeenCalled();
   });
@@ -628,7 +630,7 @@ describe('fetchBoundaryCandidates', () => {
           maxRetries: 0,
         },
         store,
-        llmFactory: { forPurpose: () => mockProvider('{}') },
+        llmFactory: { forPurpose: () => mockProvider('{}'), model: 'gemini-test' },
       })
     ).rejects.toThrow('Protocol version 42');
   });
@@ -661,7 +663,7 @@ describe('recordDecision', () => {
           maxRetries: 0,
         },
         store,
-        llmFactory: { forPurpose: () => mockProvider('{}') },
+        llmFactory: { forPurpose: () => mockProvider('{}'), model: 'gemini-test' },
         now: () => '2026-04-19T00:00:00.000Z',
       }
     );
@@ -704,7 +706,7 @@ describe('recordDecision', () => {
           maxRetries: 0,
         },
         store,
-        llmFactory: { forPurpose: () => mockProvider('{}') },
+        llmFactory: { forPurpose: () => mockProvider('{}'), model: 'gemini-test' },
       }
     );
     expect(result.seed.isValid).toBe(true);
@@ -729,7 +731,7 @@ describe('recordDecision', () => {
           maxRetries: 0,
         },
         store,
-        llmFactory: { forPurpose: () => mockProvider('{}') },
+        llmFactory: { forPurpose: () => mockProvider('{}'), model: 'gemini-test' },
       }
     );
     expect(result.seed.isValid).toBe(true);
@@ -755,7 +757,7 @@ describe('recordDecision', () => {
         },
         store,
         userEmail: 'reviewer@example.com',
-        llmFactory: { forPurpose: () => mockProvider('{}') },
+        llmFactory: { forPurpose: () => mockProvider('{}'), model: 'gemini-test' },
       }
     );
     expect(result.seed.decidedBy).toBe('reviewer@example.com');
@@ -783,7 +785,7 @@ describe('recordDecision', () => {
           maxRetries: 0,
         },
         store,
-        llmFactory: { forPurpose: () => mockProvider('{}') },
+        llmFactory: { forPurpose: () => mockProvider('{}'), model: 'gemini-test' },
       }
     );
     expect(result.seed.decidedBy).toBeNull();
@@ -805,7 +807,7 @@ describe('recordDecision', () => {
           maxRetries: 0,
         },
         store,
-        llmFactory: { forPurpose: () => mockProvider('{}') },
+        llmFactory: { forPurpose: () => mockProvider('{}'), model: 'gemini-test' },
       }
     );
     expect(typeof result.seed.decidedAt).toBe('string');

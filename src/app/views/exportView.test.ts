@@ -155,6 +155,98 @@ describe('createExportView', () => {
     expect(() => container.querySelector('button')!.click()).not.toThrow();
   });
 
+  describe('論文 Methods 用文案', () => {
+    afterEach(() => {
+      delete (globalThis as { chrome?: unknown }).chrome;
+      // defineProperty で差し込んだ clipboard スタブを次のテストに持ち越さない
+      delete (globalThis.navigator as { clipboard?: unknown }).clipboard;
+    });
+
+    test('英語版・日本語版の文案とコピーボタンが表示される', () => {
+      const view = createExportView();
+      const container = buildContainer();
+      view(container, {
+        state: stateWithDraft({ currentFormulaModel: 'gemini-3.5-flash' }),
+        navigate: jest.fn(),
+      });
+      const texts = container.querySelectorAll<HTMLElement>('.export__methods-text');
+      expect(texts).toHaveLength(2);
+      expect(texts[0]?.lang).toBe('en');
+      expect(texts[0]?.textContent).toContain('gemini-3.5-flash');
+      expect(texts[0]?.textContent).toContain('sr-query-builder-plugin');
+      expect(texts[1]?.lang).toBe('ja');
+      expect(texts[1]?.textContent).toContain('gemini-3.5-flash');
+      expect(container.querySelectorAll('.export__methods-copy')).toHaveLength(2);
+    });
+
+    test('モデル情報が無い旧バージョンではプレースホルダと置換案内を出す', () => {
+      const view = createExportView();
+      const container = buildContainer();
+      view(container, { state: stateWithDraft(), navigate: jest.fn() });
+      const texts = container.querySelectorAll<HTMLElement>('.export__methods-text');
+      expect(texts[0]?.textContent).toContain('{AI model}');
+      expect(texts[1]?.textContent).toContain('{AI モデル名}');
+      expect(container.querySelector('.export__methods-note')?.textContent).toContain(
+        '置き換えてください'
+      );
+    });
+
+    test('chrome manifest があれば拡張バージョンが埋まる', () => {
+      (globalThis as { chrome?: unknown }).chrome = {
+        runtime: { getManifest: () => ({ version: '9.9.9' }) },
+      };
+      const view = createExportView();
+      const container = buildContainer();
+      view(container, {
+        state: stateWithDraft({ currentFormulaModel: 'gemini-3.5-flash' }),
+        navigate: jest.fn(),
+      });
+      const en = container.querySelector('.export__methods-text');
+      expect(en?.textContent).toContain('version 9.9.9');
+    });
+
+    test('コピーボタンで clipboard に書き込み、ステータスを出す', async () => {
+      const writeText = jest.fn().mockResolvedValue(undefined);
+      Object.defineProperty(globalThis.navigator, 'clipboard', {
+        value: { writeText },
+        configurable: true,
+      });
+      const view = createExportView();
+      const container = buildContainer();
+      view(container, {
+        state: stateWithDraft({ currentFormulaModel: 'gemini-3.5-flash' }),
+        navigate: jest.fn(),
+      });
+      const buttons = container.querySelectorAll<HTMLButtonElement>('.export__methods-copy');
+      buttons[0]!.click();
+      await flushAsync();
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining('gemini-3.5-flash'));
+      expect(container.querySelector('.export__methods-status')?.textContent).toContain(
+        '英語版の文案をコピーしました'
+      );
+      buttons[1]!.click();
+      await flushAsync();
+      expect(container.querySelector('.export__methods-status')?.textContent).toContain(
+        '日本語版の文案をコピーしました'
+      );
+      expect(writeText).toHaveBeenCalledTimes(2);
+    });
+
+    test('clipboard API が無い環境ではコピー失敗メッセージを出す', async () => {
+      const view = createExportView();
+      const container = buildContainer();
+      view(container, {
+        state: stateWithDraft({ currentFormulaModel: 'gemini-3.5-flash' }),
+        navigate: jest.fn(),
+      });
+      container.querySelector<HTMLButtonElement>('.export__methods-copy')!.click();
+      await flushAsync();
+      expect(container.querySelector('.export__methods-status')?.textContent).toContain(
+        'コピーに失敗しました'
+      );
+    });
+  });
+
   test('4 DB 全ての label が出ることを確認', async () => {
     const onExport = jest.fn(
       async (): Promise<ExportResult> => ({
