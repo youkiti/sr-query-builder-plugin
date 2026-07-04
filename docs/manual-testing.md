@@ -22,14 +22,42 @@ npm run manual:check -- prepare   # 専用プロファイルの Chrome が開く
 
 1. `chrome://extensions` の「デベロッパーモード」を ON
 2. 「パッケージ化されていない拡張機能を読み込む」で `dist/` を選択
-3. 別タブで <https://accounts.google.com> を開き、確認用 Google アカウントにログイン
-   （OAuth 同意画面が Testing の場合はテストユーザー登録済みのアカウント）
 
 - Chrome 137+ は `--load-extension` が使えないため、専用プロファイル（`.selenium-profile/`。gitignore 済み）に
   **一度だけ手動で dist/ を読み込む**。以後の実行はこのプロファイルを再利用するので再読込は不要
   （`npm run dev` し直しても同じフォルダを指すため、`chrome://extensions` の「更新」だけでよい）。
 - 拡張 ID は manifest.json の `key` から決定的に導出され **`bckokafmjighegpjiocopkagghppnjld`**。
   ハーネスが起動時に表示するので、GCP の OAuth クライアント設定との一致確認に使う。
+
+### 0-1b. Google ログインは「通常の Chrome」で済ませる（重要）
+
+本拡張の認証は `chrome.identity.getAuthToken`（ブラウザにサインイン済みのアカウントを使う方式）。
+Selenium 制御下の Chrome で対話ログインを踏むと Google が
+**「このブラウザまたはアプリは安全でない可能性があります」**で弾く（自動化検知）。
+
+回避策: **通常の（Selenium ではない）Chrome を同じプロファイルで 1 回起動してログイン**しておく。
+`getAuthToken` の認可はプロファイルにキャッシュされるため、以後 Selenium 実行は
+`interactive:false` で無音にトークンを取得でき、Web ログイン画面を踏まない。
+
+```powershell
+# 1) このプロファイルを使う Chrome をすべて閉じてから、通常の Chrome を同プロファイルで起動
+& "C:\Program Files\Google\Chrome\Application\chrome.exe" `
+  --user-data-dir="C:\Users\youki\codes\sr-query-builder-plugin\.selenium-profile" `
+  --profile-directory=Default --no-first-run
+```
+
+起動した通常 Chrome で:
+
+1. `chrome://extensions` → デベロッパーモード ON → `dist/` を読み込む（未読込なら）
+2. ツールバーの拡張アイコン → Popup の「ログイン」→ OAuth 同意を完了（通常 Chrome なので弾かれない）。
+   確認用アカウントが同意画面（Testing）のテストユーザーに登録済みであること
+3. ついでに拡張の Options を開き Gemini / NCBI API キーを保存しておくと `options` シーンが無停止で通る
+4. **この Chrome を完全に終了**（プロファイルの排他ロックを解放するため）
+5. 以後は `npm run manual:check` を実行 → `login` シーンは「ログイン済み」を検知してスキップされる
+
+> `getAuthToken` はブラウザレベルのサインインを要求するため、`accounts.google.com` への Web ログインだけでは
+> 足りない場合がある。その際は通常 Chrome の右上プロフィール → アカウント追加でプロファイルにサインインしてから
+> 2. の Popup ログインを行う。
 
 ### 0-2. Gemini API キー / NCBI API キー
 
@@ -87,6 +115,7 @@ npm run manual:check -- draft export --keep        # 失敗しなくても終了
 
 | 症状 | 見るところ |
 |---|---|
+| 「このブラウザまたはアプリは安全でない可能性があります」でログイン不可 | Google の自動化検知。**§0-1b の通常 Chrome で先にログイン**して認可をプロファイルにキャッシュする（最も確実）。ハーネス側も `--disable-blink-features=AutomationControlled` + `excludeSwitches('enable-automation')` を付与済みだが、Web ログイン自体を踏まないのが根本回避 |
 | ログインが `bad client id` 系で失敗 | 拡張 ID（0-1）と GCP の OAuth クライアント設定の一致。同意画面のテストユーザー登録 |
 | `dist/manifest.json の client_id が未設定` で即終了 | `.env` の `OAUTH_CLIENT_ID` を設定して `npm run dev` し直す |
 | ガード状態のプレースホルダで止まる | 前段シーンが未実行（例: `export` の前に `draft`）。順に実行するか既定通しで回す |
