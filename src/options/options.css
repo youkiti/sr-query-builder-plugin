@@ -7,6 +7,17 @@
   gap: var(--space-4);
 }
 
+.options__brand {
+  margin: 0;
+  font-weight: 600;
+}
+
+.options__build-date {
+  margin-top: calc(-1 * var(--space-3));
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
 .options__title {
   margin: 0;
 }

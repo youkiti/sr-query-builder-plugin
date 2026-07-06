@@ -19,6 +19,11 @@
   font-size: var(--font-size-xl);
 }
 
+.app__build-date {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
 .app__title-link {
   background: transparent;
   border: none;
