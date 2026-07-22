@@ -72,6 +72,8 @@ export async function saveEditedFormula(
       createdBy: 'user_edit',
       createdAt,
       note: input.note.trim() === '' ? null : input.note.trim(),
+      // 手編集では AI を使わないので、元ドラフトを支援したモデルをそのまま引き継ぐ
+      model: state.currentFormulaModel,
     },
     deps.google
   );

@@ -86,6 +86,7 @@ function makeState(overrides: Partial<AppState> = {}): AppState {
     currentProtocolVersion: 3,
     currentFormulaVersionId: 'parent-v',
     currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 old\n```\n',
+    currentFormulaModel: null,
     draftRun: null,
     expandRun: null,
     validationResult: null,
@@ -170,6 +171,22 @@ describe('saveEditedFormula', () => {
     expect(map['created_at']).toBe('2026-04-19T00:00:00.000Z');
     expect(store.getState().currentFormulaVersionId).toBe('new-id');
     expect(store.getState().currentFormulaMarkdown).toBe(VALID_MD);
+  });
+
+  test('store の currentFormulaModel を model 列に引き継ぐ（手編集は AI 不使用のため）', async () => {
+    const store = createStore(makeState({ currentFormulaModel: 'gemini-3.5-flash' }));
+    const fetchMock = jest.fn().mockResolvedValue(jsonResponse({}));
+    const google = { fetch: fetchMock, getAccessToken: jest.fn().mockResolvedValue('t') };
+    await saveEditedFormula(
+      { formulaMd: VALID_MD, note: '' },
+      { google, store, newUuid: () => 'n', now: () => 'now' }
+    );
+    const body = getAppendBody(fetchMock);
+    const row = body.values[0]!;
+    const modelIdx = SHEET_HEADERS.FormulaVersions.indexOf('model');
+    expect(row[modelIdx]).toBe('gemini-3.5-flash');
+    // store の値は保存後も変わらない
+    expect(store.getState().currentFormulaModel).toBe('gemini-3.5-flash');
   });
 
   test('note 空白は null として保存される', async () => {
@@ -303,6 +320,7 @@ function fakeLlmFactory(
   return {
     captured,
     factory: {
+      model: 'gemini-test',
       forPurpose: (purpose) => {
         captured.purpose = purpose;
         return provider;
@@ -381,7 +399,7 @@ describe('requestBlockImprovement', () => {
         };
       },
     };
-    const factory: LlmProviderFactory = { forPurpose: () => provider };
+    const factory: LlmProviderFactory = { forPurpose: () => provider, model: 'gemini-test' };
     await requestBlockImprovement({ blockId: '1' }, { store, google: emptySeedsGoogle(), llmFactory: factory });
     // label と description が空なので description は「(不明)」で埋められる
     expect(calls[0]).toContain('(不明)');
@@ -438,7 +456,7 @@ describe('requestBlockImprovement', () => {
     };
     await requestBlockImprovement(
       { blockId: '2' },
-      { store, google: emptySeedsGoogle(), llmFactory: { forPurpose: () => provider } }
+      { store, google: emptySeedsGoogle(), llmFactory: { forPurpose: () => provider, model: 'gemini-test' } }
     );
     expect(calls[0]).toContain('(不明)');
   });
@@ -466,7 +484,7 @@ describe('requestBlockImprovement', () => {
     };
     await requestBlockImprovement(
       { blockId: '1' },
-      { store, google: emptySeedsGoogle(), llmFactory: { forPurpose: () => provider } }
+      { store, google: emptySeedsGoogle(), llmFactory: { forPurpose: () => provider, model: 'gemini-test' } }
     );
     // RQ: の直後に空行がくる（`RQ: \n` パターン）
     expect(calls[0]).toMatch(/RQ:\s*\n/);
@@ -489,7 +507,7 @@ describe('requestBlockImprovement - シード / 検証文脈', () => {
         };
       },
     };
-    return { calls, factory: { forPurpose: () => provider } };
+    return { calls, factory: { forPurpose: () => provider, model: 'gemini-test' } };
   }
 
   test('SeedPapers の include / 初期シードがプロンプトに載り、exclude は除外される', async () => {

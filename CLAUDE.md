@@ -112,7 +112,7 @@ MIT ライセンスの OSS Chrome 拡張 **sr-query-builder-plugin**。ユーザ
 | `Protocol` | RQ / フレームワーク種別（pico/peco/pcc/spider/custom）/ 組入除外基準 / `combination_expression` / 元テキストへの Drive URL（versioning あり） |
 | `ProtocolBlocks` | 1〜5 個の検索式ブロック定義。`search_formula.md` の `#1`〜`#5` と 1:1 対応。PICO 固定ではなく汎用ブロックモデル。LLM が抽出 → ユーザーが承認/編集 |
 | `SeedPapers` | PMID / title / source（`initial` or `interactive`）／ユーザー判定（include / exclude / maybe） |
-| `FormulaVersions` | version_id / formula_md / created_at / created_by / parent_version_id |
+| `FormulaVersions` | version_id / formula_md / created_at / created_by / parent_version_id / model（下書きを支援した LLM モデル ID。#/export の Methods 文案に使用） |
 | `ValidationLog` | version_id / total_hits / capture_rate / captured_pmids / missed_pmids |
 | `Conversions` | version_id / target_db / converted_formula / exported_at |
 | `LLMApiLog` | timestamp / provider / model / purpose / prompt_ref / response_ref / tokens_in / tokens_out / latency_ms / error。フル payload は Drive の `{drive_folder_id}/logs/llm/{log_id}.json`、Sheet には URL と要約のみ |
