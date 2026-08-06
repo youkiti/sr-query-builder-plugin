@@ -20,6 +20,7 @@ npm run release:alpha # アルファ配布: dev ビルド → zip 化 → Drive 
 npm test             # jest（jsdom）unit テスト
 npm run test:e2e     # Playwright E2E（実 Chromium + axe a11y。API はすべて stub）
 npm run test:e2e:ui  # Playwright UI モード
+npm run shots        # ストア掲載用スクリーンショット 5 枚を無人撮影（tests/shots/・stub 環境。hosted/screenshots/ へ出力）
 npm run typecheck    # tsc --noEmit
 npm run lint         # eslint（src + tests）
 npm run lint:css     # stylelint
@@ -79,7 +80,7 @@ Chrome ウェブストア審査・利用者向けに公開する静的ページ 
 - **プライバシーポリシーの公開 URL は Chrome ウェブストア審査の必須要件**。想定 URL は `https://youkiti.github.io/sr-query-builder-plugin/privacy-policy.html`
 - **プライバシーポリシーの正典は [docs/store/privacy-policy.md](docs/store/privacy-policy.md)**。`hosted/privacy-policy.html` はその転記＋英訳なので、**内容を変えるときは両方を直す**（乖離するとストア審査で参照される URL の内容とリポジトリの原稿がずれる）
 - ja / en は**併記ではなく切替**（`lang.js` が `html[data-lang]` で表示側を絞る）。文言を足すときは両言語分を書くこと
-- ストア掲載用スクリーンショットは `npm run manual:check -- --shots` で `hosted/screenshots/` へ出力する（1280×800 の 5 枚）
+- ストア掲載用スクリーンショットは `npm run shots`（Playwright + stub 環境。無人実行）で `hosted/screenshots/` へ出力する（1280×800 の 5 枚）。実 API を叩いた本物の画面で撮り直したいときは `npm run manual:check -- --shots` を使う
 - デプロイは手動（`gh-pages` ブランチへ push）。手順は [hosted/README.md](hosted/README.md)。**`gh-pages` ブランチはまだ存在せず、デプロイも未実施**（現時点では公開 URL はまだ有効になっていない）
 - 提出物一式の全体像・進捗は [docs/store/README.md](docs/store/README.md) を参照
 

@@ -93,6 +93,12 @@ npm run manual:check -- draft export --keep        # 失敗しなくても終了
 
 ### ストア掲載用スクリーンショット（`--shots`）
 
+> **通常は `npm run shots`（`tests/shots/`・Playwright・stub 環境・無人実行）を使う。**
+> 本節で説明する `manual:check -- --shots` は、実際に Google/Gemini/NCBI API を叩いた
+> 本物の画面を撮り直したいとき専用の代替手段（実 Chrome 拡張ランタイムでの結合確認を兼ねる分、
+> ログイン・OAuth 同意・API キー入力の手動待ちが必要になる）。詳しくは
+> [hosted/README.md](../hosted/README.md) の「デプロイ手順（初回）」を参照。
+
 Chrome ウェブストアの掲載ページに使うスクリーンショットを、このハーネスで撮る機能。
 
 - **目的**: ストア掲載用の 5 枚（研究プロトコル入力 / ブロック承認 / 検索式ドラフト生成 / 検証結果 / エクスポート）を、

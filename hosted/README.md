@@ -39,7 +39,7 @@
 > 今の作業ツリーの中身を消すコマンドは事故になる。`git worktree` で `gh-pages` 専用の別ディレクトリを作り、
 > そちらでコミット・push する。
 
-1. **先にスクリーンショットを撮る**: `npm run manual:check -- --shots` でアプリの実画面から `screenshots/` の 5 枚（`s1-protocol.png` 〜 `s5-export.png`）を取得する。撮影せずにデプロイすると `index.html` のスクリーンショットセクションの画像リンクが切れる
+1. **先にスクリーンショットを撮る**: `npm run shots`（Playwright + stub 環境。実 API を叩かず無人実行できる）で `screenshots/` の 5 枚（`s1-protocol.png` 〜 `s5-export.png`）を取得する。撮影せずにデプロイすると `index.html` のスクリーンショットセクションの画像リンクが切れる。実際にアプリを動かした本物の画面で撮り直したいとき（stub のデモデータではなく実 Google/Gemini/NCBI API の応答を見せたいとき）は、代わりに `npm run manual:check -- --shots` を使う（詳細は [docs/manual-testing.md](../docs/manual-testing.md)）
 2. `gh-pages` 用の孤立 worktree を、今の作業ツリーの外（兄弟ディレクトリ）に作る:
    ```bash
    git worktree add --orphan -b gh-pages ../sr-query-builder-plugin-gh-pages
