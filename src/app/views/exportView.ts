@@ -5,6 +5,7 @@ import { expandFormula } from '@/features/validation';
 import { buildPubmedSearchUrl } from '@/lib/ncbi';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
 import { ROUTE_LABELS } from '../router';
+import { buildMethodsTexts, getExtensionVersion } from './methodsText';
 import type { RenderView } from './types';
 
 /**
@@ -14,6 +15,7 @@ import type { RenderView } from './types';
  * - 各 DB の変換結果を `<details>` で開閉でき、ダウンロードリンクと
  *   PubMed 検索 URL を表示
  * - warnings は箇条書きで併記
+ * - 論文 Methods 用の定型文（生成 AI 支援の開示。英/日）をコピーできる
  *
  * 実ロジック（onExport）は bootstrap で exportService をラップして渡す。
  */
@@ -71,6 +73,8 @@ export function createExportView(callbacks: ExportViewCallbacks = {}): RenderVie
     const results = doc.createElement('div');
     results.className = 'export__results';
     container.appendChild(results);
+
+    container.appendChild(buildMethodsSection(doc, ctx.state.currentFormulaModel));
 
     exportBtn.addEventListener('click', () => {
       if (!callbacks.onExport) {
@@ -131,6 +135,78 @@ function renderResults(doc: Document, container: HTMLElement, result: ExportResu
 
     container.appendChild(details);
   }
+}
+
+/**
+ * 論文 Methods 用の定型文セクション。
+ * 「AI 支援で下書き → 著者がレビューして確定」の開示文を英/日で表示し、
+ * ボタン 1 つでクリップボードへコピーできるようにする。
+ */
+function buildMethodsSection(doc: Document, model: string | null): HTMLElement {
+  const texts = buildMethodsTexts({ model, version: getExtensionVersion() });
+  const section = doc.createElement('section');
+  section.className = 'export__methods';
+
+  const heading = doc.createElement('h3');
+  heading.textContent = '論文 Methods 用の文案';
+  section.appendChild(heading);
+
+  const note = doc.createElement('p');
+  note.className = 'export__methods-note';
+  note.textContent =
+    model === null
+      ? '検索式の下書きに生成 AI を使ったことを論文の方法（Methods）に記載するための定型文です。この検索式にはモデル情報が記録されていないため、{ } の部分は使用したモデル名に置き換えてください。'
+      : '検索式の下書きに生成 AI を使ったことを論文の方法（Methods）に記載するための定型文です。必要に応じて調整して使ってください。';
+  section.appendChild(note);
+
+  const status = doc.createElement('p');
+  status.className = 'export__methods-status';
+  status.setAttribute('aria-live', 'polite');
+
+  const variants: Array<{ lang: string; label: string; text: string }> = [
+    { lang: 'en', label: '英語版', text: texts.en },
+    { lang: 'ja', label: '日本語版', text: texts.ja },
+  ];
+  for (const variant of variants) {
+    const item = doc.createElement('div');
+    item.className = 'export__methods-item';
+
+    const text = doc.createElement('p');
+    text.className = 'export__methods-text';
+    text.lang = variant.lang;
+    text.textContent = variant.text;
+    item.appendChild(text);
+
+    const copyBtn = doc.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'export__methods-copy';
+    copyBtn.textContent = `${variant.label}をコピー`;
+    copyBtn.addEventListener('click', () => {
+      copyToClipboard(variant.text).then(
+        () => {
+          status.textContent = `${variant.label}の文案をコピーしました。`;
+        },
+        () => {
+          status.textContent =
+            'コピーに失敗しました。テキストを選択して手動でコピーしてください。';
+        }
+      );
+    });
+    item.appendChild(copyBtn);
+
+    section.appendChild(item);
+  }
+
+  section.appendChild(status);
+  return section;
+}
+
+function copyToClipboard(text: string): Promise<void> {
+  const clipboard = globalThis.navigator?.clipboard;
+  if (!clipboard) {
+    return Promise.reject(new Error('クリップボード API が利用できません'));
+  }
+  return clipboard.writeText(text);
 }
 
 function buildPubmedLink(doc: Document, markdown: string): HTMLElement | null {

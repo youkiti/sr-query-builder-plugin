@@ -58,6 +58,8 @@ export interface LlmFactoryDeps {
 export interface LlmProviderFactory {
   /** 指定 purpose 用のロガー付きプロバイダを返す */
   forPurpose: (purpose: LlmPurpose) => LLMProvider;
+  /** このファクトリが解決したモデル ID（FormulaVersions.model への記録用） */
+  model: string;
 }
 
 /**
@@ -106,6 +108,7 @@ export async function buildLlmProviderFactory(deps: LlmFactoryDeps): Promise<Llm
   // withLogging を内側にして「再試行 1 回ごとに LLMApiLog へ 1 行」残す
   // （503 等の失敗試行も監査ログに見える状態を保つ）。
   return {
+    model: selectedModel,
     forPurpose: (purpose) =>
       withRetry(
         withLogging(baseProvider, purpose, {

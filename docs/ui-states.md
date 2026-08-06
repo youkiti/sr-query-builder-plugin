@@ -138,7 +138,7 @@
 | `#/validate` | 行ごとヒット数 / 捕捉率 / missed PMIDs | 結果待ちはスピナ、失敗時はリトライボタン |
 | `#/expand` | 境界事例論文の対話判定 UI（**実験的機能・dev** バナー `.expand__dev` を冒頭に表示）。現式を 2 軸（MeSH 一段上 / フリーワード）で広げた拡張式の外側（margin = 拡張式 NOT 現式）から候補を拾う。取得（fetchBoundaryCandidates）の進捗・取得結果は `store.expandRun` で管理し（最後の AI 選定 LLM の setState による全ビュー再描画で表示が消えないように。draft と同じ思想）、取得中は `.expand__tracker`（プロトコル取得→拡張語の提案→外側を検索→重複除去→候補論文の取得→AI 選定 の **6 段階**を `draft__step` チップ ✓/⟳/○ で表示）+ `.expand__status` の現在段階ラベル + 経過時間（1 秒ごと更新）を出す。取得完了後の候補一覧・判定・ラウンド再検証・更新提案（`.expand__proposals`）はビュー側ローカル DOM（recordDecision / 再検証は LLM を呼ばず再描画されないため） | 0 件のときは理由別の案内（拡張語が出ない / margin 0 / 既存 seed と重複）。取得失敗時は `.expand__error` にメッセージ |
 | `#/edit` | ブロックカード一覧 + 鉛筆インライン編集 + 「AI に改善させる」プロンプト欄（文脈開示の details）+ diff 表示 | 鉛筆ボタンはホバー / フォーカス時に可視化（常時は控えめ）。AI プロンプト欄を開いた直後は文脈が「読み込み中…」、取得後にシード論文・捕捉率を表示。diff ペインが空でも縦スクロールが出ない |
-| `#/export` | 各 DB 変換結果（CENTRAL / Embase(Dialog) / ClinicalTrials.gov / ICTRP）+ コピー / DL ボタン | 1 つも変換結果が無い時は完了ボタンを出さない |
+| `#/export` | 各 DB 変換結果（CENTRAL / Embase(Dialog) / ClinicalTrials.gov / ICTRP）+ コピー / DL ボタン。末尾に「論文 Methods 用の文案」セクション（`.export__methods`）: 生成 AI 支援の開示定型文を英/日で表示し、各文の「コピー」ボタンでクリップボードへ。文中のモデル ID は `store.currentFormulaModel`（FormulaVersions.model 由来）、拡張バージョンは manifest から埋める | 1 つも変換結果が無い時は完了ボタンを出さない。モデル情報の無い旧バージョンでは `{AI model}` プレースホルダを残し、note で置換を案内 |
 | `#/done` | PubMed nbib DL 案内 + 次ステップ（tiab-review-plugin への引き継ぎ） | 「もう一度エクスポート」リンクで `#/export` に戻る |
 | `#/history` | FormulaVersions の一覧 | 0 件のとき「まだバージョンがありません」を出す |
 

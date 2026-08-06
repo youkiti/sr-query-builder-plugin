@@ -49,6 +49,7 @@ function makeState(): AppState {
     currentProtocolVersion: 3,
     currentFormulaVersionId: 'v-1',
     currentFormulaMarkdown: formulaMd,
+    currentFormulaModel: null,
     draftRun: null,
     expandRun: null,
     validationResult: null,
@@ -475,6 +476,7 @@ describe('analyzeMissedSeeds', () => {
       calls,
       purposes,
       factory: {
+        model: 'gemini-test',
         forPurpose: (purpose) => {
           purposes.push(purpose);
           return provider;

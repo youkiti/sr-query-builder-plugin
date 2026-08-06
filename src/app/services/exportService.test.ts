@@ -33,6 +33,7 @@ function stateWithFormula(): AppState {
     currentProtocolVersion: 3,
     currentFormulaVersionId: 'v-42',
     currentFormulaMarkdown: formulaMd,
+    currentFormulaModel: null,
     draftRun: null,
     expandRun: null,
     validationResult: null,

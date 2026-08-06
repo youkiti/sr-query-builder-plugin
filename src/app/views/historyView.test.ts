@@ -24,6 +24,7 @@ function buildVersion(overrides: Partial<FormulaVersion> = {}): FormulaVersion {
     createdBy: 'ai_draft',
     createdAt: '2026-04-19T00:00:00.000Z',
     note: null,
+    model: null,
     ...overrides,
   };
 }

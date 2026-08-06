@@ -111,6 +111,7 @@ export async function injectAppStub(page: Page, scenario: AppScenario = {}): Pro
       const chromeStub = {
         runtime: {
           getURL: (p: string) => `chrome-extension://test/${p}`,
+          getManifest: () => ({ version: '0.1.0-e2e' }),
           openOptionsPage: () => undefined,
           sendMessage: (msg: unknown, cb?: (resp: unknown) => void) => {
             sentMessages.push({ message: msg, timestamp: Date.now() });

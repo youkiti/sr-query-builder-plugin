@@ -56,6 +56,7 @@ export const FULL_APP_STATE: Partial<AppState> = {
   currentProtocolVersion: 1,
   currentFormulaVersionId: 'fv-20260420-01',
   currentFormulaMarkdown: FULL_FORMULA_MARKDOWN,
+  currentFormulaModel: 'gemini-3.5-flash',
 };
 
 /** 全ルート遷移可能なシナリオ */

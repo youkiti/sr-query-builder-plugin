@@ -73,6 +73,8 @@ export const SHEET_HEADERS: Record<SheetTabName, readonly string[]> = {
     'created_by',
     'created_at',
     'note',
+    // model は後付け列。既存シートの行データと位置互換を保つため必ず末尾に置く
+    'model',
   ],
   ValidationLog: [
     'validation_id',

@@ -97,6 +97,7 @@ function toRow(v: FormulaVersionRow): (string | number | boolean | null)[] {
     created_by: v.createdBy,
     created_at: v.createdAt,
     note: v.note,
+    model: v.model,
   };
   return HEADER.map((key) => map[key] ?? null);
 }
@@ -123,5 +124,7 @@ function fromRow(row: readonly string[]): FormulaVersion {
     createdBy,
     createdAt: cell('created_at'),
     note: cell('note') === '' ? null : cell('note'),
+    // model 列導入前に書かれた行は列自体が無い（'' になる）ので null 扱い
+    model: cell('model') === '' ? null : cell('model'),
   };
 }

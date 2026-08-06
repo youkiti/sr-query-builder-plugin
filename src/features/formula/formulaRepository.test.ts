@@ -32,6 +32,7 @@ const fixture: FormulaVersion = {
   createdBy: 'ai_draft',
   createdAt: '2026-04-19T00:00:00.000Z',
   note: null,
+  model: null,
 };
 
 describe('appendFormulaVersion', () => {
@@ -77,6 +78,20 @@ describe('appendFormulaVersion', () => {
     expect(map['note']).toBe('memo');
     expect(map['created_by']).toBe('user_edit');
   });
+
+  test('model ありは末尾の model 列に反映される', async () => {
+    const d = deps();
+    await appendFormulaVersion('sid', { ...fixture, model: 'gemini-3.5-flash' }, d);
+    const body = JSON.parse((d.fetch.mock.calls[0][1] as RequestInit).body as string) as {
+      values: (string | number | boolean | null)[][];
+    };
+    const row = body.values[0]!;
+    const map: Record<string, string | number | boolean | null> = {};
+    SHEET_HEADERS.FormulaVersions.forEach((key, i) => {
+      map[key] = row[i] as string | number | boolean | null;
+    });
+    expect(map['model']).toBe('gemini-3.5-flash');
+  });
 });
 
 describe('getLatestFormulaVersion', () => {
@@ -116,6 +131,7 @@ describe('getLatestFormulaVersion', () => {
           protocol_version: '2',
           note: 'latest',
           created_by: 'user_edit',
+          model: 'gemini-3.5-flash',
         }),
       ],
     });
@@ -125,6 +141,13 @@ describe('getLatestFormulaVersion', () => {
     expect(result?.protocolVersion).toBe(2);
     expect(result?.note).toBe('latest');
     expect(result?.createdBy).toBe('user_edit');
+    expect(result?.model).toBe('gemini-3.5-flash');
+  });
+
+  test('model 列導入前の行（列なし）は model が null になる', async () => {
+    const d = deps({ values: [header, row()] });
+    const result = await getLatestFormulaVersion('sid', d);
+    expect(result?.model).toBeNull();
   });
 
   test('created_by が想定外なら ai_draft にフォールバック', async () => {

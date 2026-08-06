@@ -236,6 +236,7 @@ async function hydrateCurrentProject(store: AppStore, runtime: ChromeRuntimeDeps
         ...s,
         currentFormulaVersionId: latestFormula.versionId,
         currentFormulaMarkdown: latestFormula.formulaMd,
+        currentFormulaModel: latestFormula.model,
       }));
     }
   } catch {
@@ -388,6 +389,7 @@ function buildDefaultViewOptions(
           currentProtocolVersion: version.protocolVersion,
           currentFormulaVersionId: version.versionId,
           currentFormulaMarkdown: version.formulaMd,
+          currentFormulaModel: version.model,
         }));
       },
     },
@@ -553,7 +555,7 @@ async function runRecordDecision(
     store,
     userEmail,
     // recordDecision は LLM を呼ばないので forPurpose は呼ばれない（guard）
-    llmFactory: { forPurpose: neverCalledProvider },
+    llmFactory: { forPurpose: neverCalledProvider, model: 'unused' },
   });
 }
 

@@ -40,6 +40,7 @@ function makeState(): AppState {
     currentProtocolVersion: 3,
     currentFormulaVersionId: null,
     currentFormulaMarkdown: null,
+    currentFormulaModel: null,
     draftRun: null,
     expandRun: null,
     validationResult: null,
@@ -99,6 +100,7 @@ function setupDeps(extra: { onProgress?: (p: DraftProgress) => void } = {}): {
       email: 'test@example.com',
     },
     llmFactory: {
+      model: 'gemini-test',
       forPurpose: (purpose) => {
         purposes.push(purpose);
         return skillProviderFor(purpose);
@@ -153,10 +155,13 @@ describe('generateDraft', () => {
     expect(map['version_id']).toBe('new-version-id');
     expect(map['protocol_version']).toBe(3);
     expect(map['created_by']).toBe('ai_draft');
+    // 生成に使ったモデル ID が model 列に記録される
+    expect(map['model']).toBe('gemini-test');
 
-    // store に currentFormulaVersionId / markdown が入る
+    // store に currentFormulaVersionId / markdown / model が入る
     expect(store.getState().currentFormulaVersionId).toBe('new-version-id');
     expect(store.getState().currentFormulaMarkdown).toContain('## PubMed/MEDLINE');
+    expect(store.getState().currentFormulaModel).toBe('gemini-test');
 
     // onProgress の呼び出し順（step 列挙）
     const steps = progress.map((p) => p.step);
@@ -293,6 +298,7 @@ describe('generateDraft', () => {
       store,
       eutils: { fetch: fetchMock as unknown as typeof fetch, tool: 'test' },
       llmFactory: {
+        model: 'gemini-test',
         forPurpose: (purpose) => {
           const base = skillProviderFor(purpose);
           return {
@@ -323,6 +329,7 @@ describe('generateDraft', () => {
     const meshPrompts: string[] = [];
     const { store, deps } = setupDeps();
     deps.llmFactory = {
+      model: 'gemini-test',
       forPurpose: (purpose) => {
         const base = skillProviderFor(purpose);
         if (purpose !== 'suggest_mesh') return base;

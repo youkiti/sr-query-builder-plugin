@@ -162,6 +162,11 @@ export interface AppState {
   currentFormulaVersionId: string | null;
   /** 直近に生成 / 読み込んだ検索式の markdown */
   currentFormulaMarkdown: string | null;
+  /**
+   * 現在の検索式の下書きを支援した LLM モデル ID（FormulaVersions.model 由来）。
+   * export 画面の Methods 文案に埋め込む。model 列導入前の旧バージョンでは null
+   */
+  currentFormulaModel: string | null;
   /** 検索式ドラフト生成の実行状態。未実行（完了済み含む）なら null */
   draftRun: DraftRunState | null;
   /** 境界事例取得（#/expand）の実行状態。未実行なら null */
@@ -182,6 +187,7 @@ export const INITIAL_STATE: AppState = {
   currentProtocolVersion: null,
   currentFormulaVersionId: null,
   currentFormulaMarkdown: null,
+  currentFormulaModel: null,
   draftRun: null,
   expandRun: null,
   validationResult: null,
