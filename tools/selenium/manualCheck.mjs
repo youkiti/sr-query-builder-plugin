@@ -27,7 +27,13 @@ import chrome from 'selenium-webdriver/chrome.js';
 
 const ROOT = path.resolve(new URL('../..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
 const DIST_DIR = path.join(ROOT, 'dist');
-const PROFILE_DIR = path.join(ROOT, '.selenium-profile');
+// プロファイルは環境変数 SR_SELENIUM_PROFILE で差し替え可能。
+// 既に Google 認証済みの別プロファイル（例: sr-data-extraction-plugin/.selenium-profile）を
+// 流用すると、Selenium での対話ログイン（Google の自動化検知で弾かれる箇所）を踏まずに済む。
+// 流用先には本拡張の dist/ を 1 回読み込んでおくこと（拡張 ID: bckokafmjighegpjiocopkagghppnjld）。
+const PROFILE_DIR = process.env.SR_SELENIUM_PROFILE
+  ? path.resolve(process.env.SR_SELENIUM_PROFILE)
+  : path.join(ROOT, '.selenium-profile');
 
 // ---------------------------------------------------------------------------
 // ユーティリティ
@@ -181,6 +187,27 @@ async function textsOf(driver, selector) {
 }
 
 /**
+ * #/draft の生成・検証の完了状態を「1 回の executeScript」で原子的に読む。
+ * 生成中は draft ビューが頻繁に再描画（replaceChildren）されるため、
+ * findVisible→getText の 2 段構えだと stale element になる。DOM 参照と判定を
+ * ブラウザ内の 1 コールに閉じることで stale を回避する。
+ * 返り値: 'error' | 'validated' | 'regen' | ''（まだ生成中）
+ */
+async function draftOutcome(driver) {
+  return driver
+    .executeScript(
+      "const err = document.querySelector('.draft__error');" +
+        "if (err && err.offsetParent !== null && err.textContent.trim() !== '') return 'error';" +
+        "const vs = document.querySelector('.draft__validate-status');" +
+        "if (vs && vs.offsetParent !== null) return 'validated';" +
+        "const btn = document.querySelector('.draft__actions button');" +
+        "if (btn && btn.textContent.indexOf('再生成') >= 0) return 'regen';" +
+        "return '';",
+    )
+    .catch(() => '');
+}
+
+/**
  * 既に開いている app.html のタブへ切り替え、#/home をフル読み込みして
  * bootstrap（Sheets からの hydration 込み）を通してから目的の hash へ遷移する。
  * ガード付きルート（draft / export など）を直接フル読み込みすると、hydration 前の
@@ -211,6 +238,16 @@ async function switchToApp(driver, hash) {
   if (hash !== '#/home') {
     await driver.executeScript('location.hash = arguments[0];', hash);
   }
+}
+
+/**
+ * アプリ内 hash 遷移（フルリロードしない）。protocolDraft / blocksDraft は in-memory のため、
+ * protocol→blocks→draft の間は switchToApp（driver.get でリロード）ではなくこれを使い、
+ * 抽出したブロックや採番前のドラフトを失わないようにする。
+ */
+async function hashGoto(driver, hash) {
+  await driver.executeScript('location.hash = arguments[0];', hash);
+  await new Promise((r) => setTimeout(r, 600));
 }
 
 /**
@@ -321,15 +358,31 @@ async function sceneProject(driver) {
     now.getDate(),
   ).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
   const title = `実機確認 ${stamp}`;
-  const before = await driver.getAllWindowHandles();
   await driver.findElement(By.css('#popup-create-title')).sendKeys(title);
   await driver.findElement(By.css('#popup-create-form button[type=submit]')).click();
   log(`  「${title}」を作成中（Sheets タブ + Drive フォルダ生成。1 分程度かかります）…`);
-  await waitForWindowWithUrl(driver, before, APP_URL, 3 * 60 * 1000, 'メインビュー');
+  // 作成成功時、popup は chrome.tabs.create で app タブを開くが、popup を「通常タブ」として
+  // 開いている Selenium ではそのタブを取りこぼす。代わりに chrome.storage.local の
+  // currentProject が採番されるのを待ち、こちらから直接 app を開く（より確実）。
+  const created = await driver.wait(
+    async () => {
+      const cp = await driver
+        .executeAsyncScript(
+          'const cb = arguments[arguments.length - 1];' +
+            'try { chrome.storage.local.get("currentProject", (o) => cb(o.currentProject || null)); }' +
+            'catch (e) { cb(null); }',
+        )
+        .catch(() => null);
+      return cp && cp.title === title ? cp : false;
+    },
+    3 * 60 * 1000,
+    'プロジェクトが作成されません（currentProject が採番されない）',
+  );
+  ok(`プロジェクト作成: ${created.title}（${String(created.projectId).slice(0, 8)}）`);
   await switchToApp(driver, '#/home');
   const homeText = await textOf(driver, '#app-content');
   if (homeText.includes('現在のプロジェクト:') && !homeText.includes('プロジェクトが選択されていません')) {
-    ok(`プロジェクト作成 → メインビュー表示: ${homeText.split('\n')[0]}`);
+    ok(`メインビュー表示: ${homeText.split('\n')[0]}`);
   } else {
     ng('メインビューにプロジェクト名が出ません');
     throw new Error('project 失敗');
@@ -464,22 +517,9 @@ async function sceneDraft(driver) {
   const generate = await driver.findElement(By.css('.draft__actions button'));
   await generate.click();
   log('  「生成して検証する」実行中（LLM でブロック展開 → NCBI でヒット数 → 捕捉率検証。数分かかります）…');
-  // 生成完了 = 検証ステータスが出る or エラー。生成ボタンが「再生成」に戻ることでも判定
+  // 生成完了 = 検証ステータスが出る or エラー or ボタンが「再生成」に戻る（原子的に判定）
   await driver.wait(
-    async () => {
-      if ((await findVisible(driver, '.draft__error')) !== null) {
-        return true;
-      }
-      if ((await findVisible(driver, '.draft__validate-status')) !== null) {
-        return true;
-      }
-      const btn = await findVisible(driver, '.draft__actions button');
-      if (btn !== null) {
-        const label = (await btn.getText()).trim();
-        return label.includes('再生成');
-      }
-      return false;
-    },
+    async () => (await draftOutcome(driver)) !== '',
     LLM_TIMEOUT,
     '生成・検証が完了しません',
   );
@@ -736,6 +776,135 @@ async function sceneEditModel(driver) {
   }
 }
 
+/**
+ * protocol → blocks → draft → export を「1 ページ文脈」で通す統合シーン。
+ * protocolDraft / blocksDraft は in-memory（承認時にだけ Sheets へ書く）ため、
+ * 各ステップ間は switchToApp（リロード）ではなく hashGoto（アプリ内 hash 遷移）で移動し、
+ * 抽出したブロックや採番前のドラフトを失わないようにする。protocol 送信は成功時に
+ * アプリが #/blocks へ自動遷移する（bootstrap.ts の navigate('blocks')）。
+ */
+async function sceneFull(driver) {
+  log('\n[full] protocol → blocks → draft → export（1 ページ文脈で in-memory 状態を保持）');
+  await switchToApp(driver, '#/protocol');
+  let st = await waitForAnyVisible(
+    driver,
+    ['.protocol__form', '.protocol__readonly', '.protocol__error', '.view__placeholder'],
+    30000,
+    '#/protocol が表示されません',
+  );
+  if (st === '.view__placeholder') {
+    ng(`プロトコル画面がガード状態です: ${await textOf(driver, '.view__placeholder')}`);
+    throw new Error('full 失敗');
+  }
+  if (st === '.protocol__form') {
+    const manualRadio = await findVisible(driver, 'input[name=sourceMode][value=manual]');
+    if (manualRadio !== null && !(await manualRadio.isSelected())) {
+      await manualRadio.click();
+    }
+    await setValue(driver, await driver.findElement(By.css('textarea#inline')), SAMPLE_PROTOCOL);
+    await driver.findElement(By.css('.protocol__submit')).click();
+    log('  プロトコル保存 + ブロック抽出中（extract-protocol の LLM 実弾。成功で #/blocks へ自動遷移）…');
+    await driver.wait(
+      async () =>
+        (await findVisible(driver, '.protocol__error')) !== null ||
+        (await findVisible(driver, '.blocks__item')) !== null,
+      LLM_TIMEOUT,
+      'ブロック抽出が完了しません',
+    );
+    const perr = await textOf(driver, '.protocol__error');
+    if (perr !== '') {
+      ng(`プロトコル保存エラー: ${perr}`);
+      throw new Error('full 失敗');
+    }
+    ok('プロトコル保存 + ブロック抽出 完了（#/blocks へ自動遷移）');
+  } else {
+    ok('プロトコルは保存済み → #/blocks へ');
+    await hashGoto(driver, '#/blocks');
+  }
+
+  // --- blocks 承認 ---
+  await driver.wait(
+    async () => (await findVisible(driver, '.blocks__item')) !== null,
+    30000,
+    'ブロック一覧が表示されません',
+  );
+  const items = await driver.findElements(By.css('.blocks__item'));
+  ok(`抽出ブロック: ${items.length} 個`);
+  const approve = await driver.findElement(By.css('.blocks__btn-primary'));
+  if (!(await approve.isEnabled())) {
+    ng(`承認ボタンが無効です: ${await textOf(driver, '.blocks__approve-reason')}`);
+    throw new Error('full 失敗');
+  }
+  await approve.click();
+  log('  ブロック承認（Protocol / ProtocolBlocks を Sheets に追記）…');
+  await driver.wait(
+    async () =>
+      (await findVisible(driver, '.blocks__error')) !== null ||
+      !(await driver.getCurrentUrl()).includes('#/blocks'),
+    60000,
+    '承認処理が完了しません',
+  );
+  const berr = await textOf(driver, '.blocks__error');
+  if (berr !== '') {
+    ng(`承認エラー: ${berr}`);
+    throw new Error('full 失敗');
+  }
+  ok('ブロック承認完了');
+
+  // --- draft 生成 → 検証 ---
+  await hashGoto(driver, '#/draft');
+  st = await waitForAnyVisible(driver, ['.draft__actions', '.view__placeholder'], 30000, '#/draft が表示されません');
+  if (st === '.view__placeholder') {
+    ng(`検索式画面がガード状態です: ${await textOf(driver, '.view__placeholder')}`);
+    throw new Error('full 失敗');
+  }
+  await driver.findElement(By.css('.draft__actions button')).click();
+  log('  「生成して検証する」実行中（LLM 展開 → NCBI ヒット数 → 捕捉率検証。数分）…');
+  await driver.wait(
+    async () => (await draftOutcome(driver)) !== '',
+    LLM_TIMEOUT,
+    '生成・検証が完了しません',
+  );
+  const derr = await textOf(driver, '.draft__error');
+  if (derr !== '') {
+    ng(`生成・検証エラー: ${derr}`);
+    throw new Error('full 失敗');
+  }
+  for (const hit of await textsOf(driver, '.draft__block-hits li')) {
+    ok(`ヒット数: ${hit.replace(/\s+/g, ' ')}`);
+  }
+  const summary = await textOf(driver, '.draft__validate-status');
+  if (summary !== '') ok(`検証サマリ: ${summary.replace(/\s+/g, ' ')}`);
+  ok('検索式の生成・検証 完了（FormulaVersions を Sheets に保存）');
+
+  // --- export（同一文脈で hash 遷移）---
+  await hashGoto(driver, '#/export');
+  await driver.wait(
+    async () =>
+      (await findVisible(driver, '.export__methods-text')) !== null ||
+      (await findVisible(driver, '.view__placeholder')) !== null,
+    30000,
+    '#/export が表示されません',
+  );
+  if ((await findVisible(driver, '.export__methods-text')) === null) {
+    ng(`エクスポートがガード状態です: ${await textOf(driver, '.view__placeholder')}`);
+    throw new Error('full 失敗');
+  }
+  await assertMethods(driver);
+  const copyBtns = await driver.findElements(By.css('.export__methods-copy'));
+  if (copyBtns.length >= 1) {
+    await copyBtns[0].click();
+    await driver.wait(
+      async () => (await textOf(driver, '.export__methods-status')).includes('コピーしました'),
+      10000,
+      'コピー成功メッセージが出ません',
+    );
+    ok(`コピー成功メッセージ: ${await textOf(driver, '.export__methods-status')}`);
+  }
+  ok('export の Methods 文案 検証 完了（PR #19 手順1・2）');
+  log('  → 手順3-7（reload / modelswitch / editmodel / 目視）は formula が Sheets 保存済みのため別途実行可');
+}
+
 const SCENES = {
   prepare: scenePrepare,
   login: sceneLogin,
@@ -744,6 +913,7 @@ const SCENES = {
   protocol: sceneProtocol,
   blocks: sceneBlocks,
   draft: sceneDraft,
+  full: sceneFull,
   export: sceneExport,
   reload: sceneReload,
   modelswitch: sceneModelSwitch,
@@ -764,7 +934,7 @@ async function main() {
   const names =
     args.length > 0
       ? args
-      : ['login', 'project', 'options', 'protocol', 'blocks', 'draft', 'export'];
+      : ['login', 'project', 'options', 'full'];
   for (const name of names) {
     if (!(name in SCENES)) {
       console.error(`未知のシーン: ${name}（使用可能: ${Object.keys(SCENES).join(' / ')}）`);
@@ -786,13 +956,24 @@ async function main() {
   log(`実行シーン: ${names.join(' → ')}`);
   log('（このプロファイルの Chrome が既に開いている場合は先に閉じてください）');
 
-  const options = new chrome.Options().addArguments(
-    `--user-data-dir=${PROFILE_DIR}`,
-    '--profile-directory=Default',
-    '--no-first-run',
-    '--no-default-browser-check',
-    '--window-size=1400,1000',
-  );
+  // Google の「このブラウザは安全でない可能性があります」による OAuth ブロックは、
+  // chromedriver が既定で付ける自動化フラグ（--enable-automation / navigator.webdriver）を
+  // Google が検知して弾くもの。以下でその痕跡を減らす。それでも Web ログインが弾かれる場合は
+  // docs/manual-testing.md の「Google ログインが弾かれるとき」を参照（同一プロファイルへ通常の
+  // Chrome で 1 回ログインしておくと、以後 Selenium はそのセッションを再利用する）
+  const options = new chrome.Options()
+    .addArguments(
+      `--user-data-dir=${PROFILE_DIR}`,
+      '--profile-directory=Default',
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--window-size=1400,1000',
+      '--disable-blink-features=AutomationControlled',
+      // renderer 切断（Unable to receive message from renderer）対策の定番。
+      // /dev/shm 枯渇によるレンダラークラッシュを避ける
+      '--disable-dev-shm-usage',
+    )
+    .excludeSwitches('enable-automation');
   const driver = await new Builder().forBrowser('chrome').setChromeOptions(options).build();
 
   let failed = false;

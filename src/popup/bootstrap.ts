@@ -25,6 +25,9 @@ import {
   type CurrentProjectEntry,
 } from '@/features/project';
 
+// webpack DefinePlugin が注入するビルド日付（YYYY-MM-DD）
+declare const __BUILD_DATE__: string;
+
 /**
  * API キー未設定時の「後で Options から戻って開く」ための一時フラグ。
  * Options 保存時にフラグが立っていれば、保存直後にメインビューを開いてからフラグを畳む。
@@ -105,6 +108,10 @@ export function createChromePopupDeps(): PopupDeps {
 }
 
 export async function startPopup(doc: Document, deps: PopupDeps): Promise<void> {
+  const buildDateEl = doc.getElementById('popup-build-date');
+  if (buildDateEl) {
+    buildDateEl.textContent = `build: ${__BUILD_DATE__}`;
+  }
   bindLoginButton(doc, deps);
   bindLogoutButton(doc, deps);
   bindOpenOptionsButton(doc, deps);

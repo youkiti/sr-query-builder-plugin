@@ -18,6 +18,9 @@
 
 import { detectGeminiTier, FREE_TIER_MODEL_ID } from '@/lib/llm/geminiTierDetector';
 
+// webpack DefinePlugin が注入するビルド日付（YYYY-MM-DD）
+declare const __BUILD_DATE__: string;
+
 export interface OptionsDeps {
   /** chrome.storage.local から既存値を読み取る */
   readKey: (key: string) => Promise<string | undefined>;
@@ -221,6 +224,10 @@ export function createChromeOptionsDeps(): OptionsDeps {
 }
 
 export async function startOptions(doc: Document, deps: OptionsDeps): Promise<void> {
+  const buildDateEl = doc.getElementById('options-build-date');
+  if (buildDateEl) {
+    buildDateEl.textContent = `build: ${__BUILD_DATE__}`;
+  }
   const status = doc.getElementById('options-status');
   const geminiInput = doc.getElementById('gemini-api-key') as HTMLInputElement | null;
   const openrouterInput = doc.getElementById('openrouter-api-key') as HTMLInputElement | null;
