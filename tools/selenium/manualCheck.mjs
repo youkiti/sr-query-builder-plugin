@@ -17,8 +17,10 @@
 //
 // 個別実行: node tools/selenium/manualCheck.mjs export
 // PR #19（Methods 文案）確認: node tools/selenium/manualCheck.mjs export modelswitch editmodel
+// ストア掲載用スクリーンショット: node tools/selenium/manualCheck.mjs --shots
+//   → hosted/screenshots/ に s1〜s5 の 1280x800 PNG を保存する（詳細は docs/manual-testing.md）
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import readline from 'node:readline';
@@ -81,6 +83,23 @@ const EXTENSION_ID = computeExtensionId();
 const POPUP_URL = `chrome-extension://${EXTENSION_ID}/popup/popup.html`;
 const APP_URL = `chrome-extension://${EXTENSION_ID}/app/app.html`;
 const OPTIONS_URL = `chrome-extension://${EXTENSION_ID}/options/options.html`;
+
+// --- ストア掲載用スクリーンショット（--shots）関連の定数 -----------------------------
+// Chrome ウェブストアのスクリーンショット規格に合わせたビューポートサイズ
+const SHOTS_VIEWPORT_WIDTH = 1280;
+const SHOTS_VIEWPORT_HEIGHT = 800;
+// 出力先はリポジトリ内 1 か所固定。hosted/index.html・hosted/README.md がこのファイル名を参照する
+const SHOTS_DIR = path.join(ROOT, 'hosted', 'screenshots');
+// 撮影対象の 5 枚（ファイル名は変更しないこと。hosted/ 側のドキュメントと対応している）
+const SHOTS_EXPECTED = ['s1-protocol', 's2-blocks', 's3-draft', 's4-validation', 's5-export'];
+// shot() 呼び出しを実際に仕込んであるシーン名。--shots 指定時にこれらが 1 つも
+// 選ばれていなければ（例: full だけを指定）0 枚のまま終わるので、main() で警告に使う
+const SCENES_WITH_SHOTS = ['protocol', 'blocks', 'draft', 'export'];
+// main() で --shots の有無に応じて設定するモジュールスコープのフラグ。
+// シーン関数側は shot() 呼び出し 1 つで済ませたいので、都度引数で渡す代わりにここで持つ
+let shotsEnabled = false;
+// 実際に撮れたファイル名（拡張子抜き）の集合。終了時のサマリ表示に使う
+const shotsTaken = new Set();
 
 // LLM 実弾（ブロック抽出 / 検索式生成）の完了待ち上限
 const LLM_TIMEOUT = 15 * 60 * 1000;
@@ -282,6 +301,125 @@ async function waitForWindowWithUrl(driver, beforeHandles, prefix, timeoutMs, wh
   return found;
 }
 
+// --- ストア掲載用スクリーンショット（--shots）-------------------------------------
+
+/**
+ * --shots のときだけ、起動直後に 1 回だけウィンドウをリサイズしてビューポートを
+ * 1280x800（Chrome ウェブストアのスクリーンショット規格）に合わせる。
+ * takeScreenshot() はビューポートをそのまま撮るため、ウィンドウ全体
+ * （outerWidth/outerHeight）ではなくビューポート（innerWidth/innerHeight）側を
+ * 目標値に合わせる必要があり、その差分（タブバー・アドレスバー等の chrome 分）を
+ * 実測してから window.setRect する。シーンの途中で何度もリサイズすると
+ * 既存の待機・アサーションが不安定になるため、呼び出しはここ 1 箇所のみに限定する。
+ *
+ * window.innerWidth/innerHeight は CSS px だが、takeScreenshot() が返す PNG は
+ * デバイス px（devicePixelRatio 倍）になる。Windows のディスプレイ拡大率が
+ * 125%/150% 等（このハーネスを動かすノート PC では既定でまず 100% ではない）だと
+ * CSS px 基準でリサイズしても実際の PNG は 1280x800 の devicePixelRatio 倍
+ * （例: 150% なら 1920x1200）になってしまう。起動オプション側で
+ * --force-device-scale-factor=1 を付けて devicePixelRatio を 1 に固定しているため、
+ * ここでは CSS px = デバイス px の前提で計算してよい。
+ *
+ * chromedriver 起動直後（about:blank 等、ページ遷移前）は環境によって
+ * executeScript が拒否され例外になることがある。ここで失敗して run 全体が
+ * 落ちるのを避けるため try/catch で包み、失敗時は警告のみ出して続行する
+ * （実際に撮れた PNG のサイズは shot() 側で毎回検証しているので、そこで検知できる）。
+ */
+async function resizeForShots(driver) {
+  try {
+    const [chromeWidth, chromeHeight] = await driver.executeScript(
+      'return [window.outerWidth - window.innerWidth, window.outerHeight - window.innerHeight];',
+    );
+    await driver.manage().window().setRect({
+      width: SHOTS_VIEWPORT_WIDTH + chromeWidth,
+      height: SHOTS_VIEWPORT_HEIGHT + chromeHeight,
+    });
+    log(
+      `  [shots] ビューポートを ${SHOTS_VIEWPORT_WIDTH}x${SHOTS_VIEWPORT_HEIGHT} に合わせてウィンドウをリサイズしました` +
+        `（chrome 余白: ${chromeWidth}x${chromeHeight}）`,
+    );
+  } catch (err) {
+    ng(
+      `[shots] ウィンドウのリサイズに失敗しました（${err instanceof Error ? err.message : String(err)}）。` +
+        '画像サイズが 1280x800 からズレる可能性があります（各撮影後のサイズ検証ログを確認してください）',
+    );
+  }
+}
+
+/**
+ * ストア掲載用スクリーンショットに個人が特定できる情報（署名中の Google アカウントの
+ * メールアドレス等）が写らないよう、撮影直前に DOM 上のメールアドレスらしきテキストを
+ * プレースホルダへ置換する。protocolView.ts の「作成者」欄（.protocol__summary の dd。
+ * Protocol.createdBy が Google アカウントのメールアドレスそのまま入る。src/app/views/
+ * protocolView.ts の buildSummary を参照）は行ごとに専用の class を持たない dl/dt/dd
+ * 構造のため、特定セレクタではなく '@' を含むテキストノードを走査する汎用フォールバックで
+ * マスクする（他の画面に同種の表示が増えても効く）。
+ */
+async function maskEmails(driver) {
+  const maskedCount = await driver.executeScript(
+    "const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);" +
+      'const targets = [];' +
+      'while (walker.nextNode()) {' +
+      '  if (walker.currentNode.nodeValue.indexOf("@") >= 0) targets.push(walker.currentNode);' +
+      '}' +
+      'for (const node of targets) {' +
+      '  node.nodeValue = node.nodeValue.replace(/\\S*@\\S*/g, "[masked-email]");' +
+      '}' +
+      'return targets.length;',
+  );
+  if (maskedCount > 0) {
+    log(`  [shots] メールアドレスらしきテキストを ${maskedCount} 箇所マスクしました`);
+  }
+}
+
+/**
+ * PNG バイナリ（Buffer）の幅・高さを IHDR チャンクから読む（追加依存を増やさないための
+ * 自前パーサ）。PNG シグネチャ 8 バイトの直後が IHDR チャンクで、長さ(4B) + 'IHDR'(4B) に
+ * 続けて幅・高さが各 4B（ビッグエンディアン）で入っている。
+ */
+function pngDimensions(buffer) {
+  return {
+    width: buffer.readUInt32BE(16),
+    height: buffer.readUInt32BE(20),
+  };
+}
+
+/**
+ * --shots のときだけスクリーンショットを撮り、hosted/screenshots/{name}.png に保存する。
+ * フラグ off のときは何もせず即 return するため、既存シーンの流れ・挙動には一切影響しない。
+ * scrollToSelector を渡すとその要素が見える位置へスクロールしてから撮る（省略時は先頭へ戻す）。
+ * 撮影直前にメールアドレスをマスクし、保存後は PNG の実サイズが 1280x800 かを検証して
+ * ずれていれば警告ログを出す（リサイズがブラウザ側で反映しきれていない場合の検知用）。
+ */
+async function shot(driver, name, scrollToSelector = null) {
+  if (!shotsEnabled) {
+    return;
+  }
+  await driver.executeScript(
+    scrollToSelector
+      ? "const el = document.querySelector(arguments[0]); if (el) { el.scrollIntoView({ block: 'start' }); }"
+      : 'window.scrollTo(0, 0);',
+    scrollToSelector,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  await maskEmails(driver);
+  const base64 = await driver.takeScreenshot();
+  const buffer = Buffer.from(base64, 'base64');
+  mkdirSync(SHOTS_DIR, { recursive: true });
+  const dest = path.join(SHOTS_DIR, `${name}.png`);
+  writeFileSync(dest, buffer);
+  const { width, height } = pngDimensions(buffer);
+  if (width === SHOTS_VIEWPORT_WIDTH && height === SHOTS_VIEWPORT_HEIGHT) {
+    ok(`[shots] ${name}.png を保存しました（${width}x${height}）`);
+  } else {
+    ng(
+      `[shots] ${name}.png のサイズが ${width}x${height} です` +
+        `（期待値 ${SHOTS_VIEWPORT_WIDTH}x${SHOTS_VIEWPORT_HEIGHT} とズレています。リサイズ処理を確認してください）`,
+    );
+  }
+  shotsTaken.add(name);
+}
+
 // ---------------------------------------------------------------------------
 // シーン
 // ---------------------------------------------------------------------------
@@ -433,6 +571,7 @@ async function sceneProtocol(driver) {
   }
   if (state === '.protocol__readonly') {
     ok(`既に保存済み: ${(await textOf(driver, '.protocol__summary')).replace(/\s+/g, ' ').slice(0, 80)}`);
+    await shot(driver, 's1-protocol');
     return;
   }
   // 手入力ラジオは既定で checked。textarea#inline に本文を入れて submit
@@ -454,6 +593,7 @@ async function sceneProtocol(driver) {
     throw new Error('protocol 失敗');
   }
   ok(`保存完了（読み取り専用へ遷移）: ${(await textOf(driver, '.protocol__summary')).replace(/\s+/g, ' ').slice(0, 80)}`);
+  await shot(driver, 's1-protocol');
 }
 
 async function sceneBlocks(driver) {
@@ -475,6 +615,8 @@ async function sceneBlocks(driver) {
     ng('ブロックが 0 個です（extract-protocol の結果が空）');
     throw new Error('blocks 失敗');
   }
+  // 承認すると #/seeds へ遷移してしまうため、一覧が見えている今のうちに撮る
+  await shot(driver, 's2-blocks');
   const approve = await driver.wait(
     until.elementLocated(By.css('.blocks__btn-primary')),
     15000,
@@ -532,9 +674,14 @@ async function sceneDraft(driver) {
   for (const hit of hits) {
     ok(`ヒット数: ${hit.replace(/\s+/g, ' ')}`);
   }
+  // s3: ブロックごとのヒット数が見えている状態（先頭〜.draft__block-hits）
+  await shot(driver, 's3-draft');
   const summary = await textOf(driver, '.draft__validate-status');
   if (summary !== '') {
     ok(`検証サマリ: ${summary.replace(/\s+/g, ' ')}`);
+    // s4: 捕捉率・MeSH 検証（.draft__validate-status 以下）。ブロックのヒット数より
+    // 下に描画されるため、その位置までスクロールしてから撮る
+    await shot(driver, 's4-validation', '.draft__validate-status');
   }
   ok('検索式の生成・検証が完了しました');
 }
@@ -626,6 +773,8 @@ async function sceneExport(driver) {
       log('  （クリップボード読み取りは権限により取得不可。UI メッセージで確認済み）');
     }
   }
+  // s5: 各 DB 変換・エクスポート画面（Methods 文案 + 変換ボタン）
+  await shot(driver, 's5-export');
   log('  → FormulaVersions タブ末尾の model 列（手順7）は Sheets 側で目視確認してください');
 }
 
@@ -930,16 +1079,33 @@ async function main() {
   // --auto: stdin を使わない（別プロセスからの起動用）。失敗時は一時停止せず
   // スクリーンショット + DOM を .selenium-profile/ へ保存して終了する
   const auto = rawArgs.includes('--auto');
+  // --shots: ストア掲載用スクリーンショット（hosted/screenshots/ へ s1〜s5 の 1280x800 PNG）を撮る。
+  // 付けない場合はこのフラグに関する処理（リサイズ・マスク・撮影・サマリ）は一切実行されない
+  shotsEnabled = rawArgs.includes('--shots');
   const args = rawArgs.filter((a) => !a.startsWith('--'));
+  // --shots の既定シーンは full ではなく個別シーン（protocol/blocks/draft/export）にする。
+  // full は 1 ページ文脈で通す統合シーンで shot() の呼び出しを仕込んでいないため、
+  // 既定のまま full を使うと --shots を付けても 1 枚も撮れない。
   const names =
     args.length > 0
       ? args
-      : ['login', 'project', 'options', 'full'];
+      : shotsEnabled
+        ? ['login', 'project', 'options', 'protocol', 'blocks', 'draft', 'export']
+        : ['login', 'project', 'options', 'full'];
   for (const name of names) {
     if (!(name in SCENES)) {
       console.error(`未知のシーン: ${name}（使用可能: ${Object.keys(SCENES).join(' / ')}）`);
       process.exit(1);
     }
+  }
+  // --shots を付けたのに撮影対象のシーン（protocol/blocks/draft/export）が 1 つも
+  // 選ばれていない場合（例: `full --shots`）は 0 枚のまま無言で終わるので、先に警告しておく。
+  // 実行は止めない（--shots 以外の目的でそのシーンを回したいケースもあるため）
+  if (shotsEnabled && !names.some((name) => SCENES_WITH_SHOTS.includes(name))) {
+    log(
+      `\n[shots] 警告: 指定されたシーン（${names.join(' / ')}）には撮影処理（${SCENES_WITH_SHOTS.join(' / ')}）が` +
+        '含まれていないため、--shots を付けても 1 枚も撮れません。',
+    );
   }
   if (!existsSync(path.join(DIST_DIR, 'manifest.json'))) {
     console.error('dist/ がありません。先に npm run dev を実行してください');
@@ -961,20 +1127,34 @@ async function main() {
   // Google が検知して弾くもの。以下でその痕跡を減らす。それでも Web ログインが弾かれる場合は
   // docs/manual-testing.md の「Google ログインが弾かれるとき」を参照（同一プロファイルへ通常の
   // Chrome で 1 回ログインしておくと、以後 Selenium はそのセッションを再利用する）
-  const options = new chrome.Options()
-    .addArguments(
-      `--user-data-dir=${PROFILE_DIR}`,
-      '--profile-directory=Default',
-      '--no-first-run',
-      '--no-default-browser-check',
-      '--window-size=1400,1000',
-      '--disable-blink-features=AutomationControlled',
-      // renderer 切断（Unable to receive message from renderer）対策の定番。
-      // /dev/shm 枯渇によるレンダラークラッシュを避ける
-      '--disable-dev-shm-usage',
-    )
-    .excludeSwitches('enable-automation');
+  const chromeArgs = [
+    `--user-data-dir=${PROFILE_DIR}`,
+    '--profile-directory=Default',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--window-size=1400,1000',
+    '--disable-blink-features=AutomationControlled',
+    // renderer 切断（Unable to receive message from renderer）対策の定番。
+    // /dev/shm 枯渇によるレンダラークラッシュを避ける
+    '--disable-dev-shm-usage',
+  ];
+  if (shotsEnabled) {
+    // --shots のときだけ devicePixelRatio を 1 に固定する。resizeForShots() は
+    // window.innerWidth/innerHeight（CSS px）を 1280x800 に合わせて window.setRect するが、
+    // driver.takeScreenshot() が返す PNG はデバイス px（CSS px × devicePixelRatio）。
+    // Windows のディスプレイ拡大率が 100% でない環境（125%/150% 等。このハーネスを動かす
+    // ノート PC では既定でまず 100% ではない）だと、CSS px 基準でリサイズしても
+    // 保存される PNG は 1280x800 の devicePixelRatio 倍（150% なら 1920x1200）になってしまう。
+    // ここで CSS px = デバイス px に揃えておくことで resizeForShots() の計算が成立する。
+    // --shots を付けない通常実行の起動引数はここでは変えない。
+    chromeArgs.push('--force-device-scale-factor=1');
+  }
+  const options = new chrome.Options().addArguments(...chromeArgs).excludeSwitches('enable-automation');
   const driver = await new Builder().forBrowser('chrome').setChromeOptions(options).build();
+
+  if (shotsEnabled) {
+    await resizeForShots(driver);
+  }
 
   let failed = false;
   try {
@@ -1000,6 +1180,16 @@ async function main() {
       }
     }
   } finally {
+    if (shotsEnabled) {
+      log('\n[shots] 撮影サマリ:');
+      for (const name of SHOTS_EXPECTED) {
+        if (shotsTaken.has(name)) {
+          ok(`${name}.png`);
+        } else {
+          ng(`${name}.png は撮れませんでした`);
+        }
+      }
+    }
     if (!auto && (keep || failed)) {
       await pause('ブラウザを開いたままにしています。目視確認が済んだら Enter で終了します');
     }

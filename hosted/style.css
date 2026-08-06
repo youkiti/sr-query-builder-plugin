@@ -1,0 +1,518 @@
+/* SR Query Builder Plugin 公開ページ共通スタイル（index / help / privacy-policy / terms-of-service）。
+   トンマナは拡張本体の src/styles/tokens.css（青基調、--color-primary: #2a63d6）に合わせる。
+   version: 2026-08-07 */
+
+:root {
+  --primary: #2a63d6;
+  --primary-dark: #1f4fb8;
+  --primary-light: #5b93ef;
+  --text: #1a1a1f;
+  --text-secondary: #5b6b74;
+  --bg: #fff;
+  --bg-secondary: #f7f7f9;
+  --border: #d5d5dc;
+  --note-bg: #fff6dd;
+  --note-border: #e2c765;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", "Meiryo",
+    sans-serif;
+  line-height: 1.8;
+  color: var(--text);
+  background: var(--bg);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.container {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.container--wide {
+  max-width: 1040px;
+}
+
+/* 2 言語（ja / en）は本文に両方持ち、選択中の言語だけを表示する。
+   html[data-lang] は lang.js が付ける（JS 無効時は属性が付かず、従来どおり併記になる） */
+.en {
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+:root[data-lang="ja"] .en,
+:root[data-lang="en"] .ja {
+  display: none;
+}
+
+/* 言語切替（lang.js がボタンを組み立てる。ヘッダー / ヒーローの青背景の上に載る） */
+.lang-switch {
+  display: flex;
+  gap: 4px;
+  padding: 2px;
+  border: 1px solid rgb(255 255 255 / 45%);
+  border-radius: 999px;
+}
+
+.lang-switch__button {
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  padding: 3px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgb(255 255 255 / 88%);
+  cursor: pointer;
+}
+
+.lang-switch__button:hover {
+  background: rgb(255 255 255 / 18%);
+  color: #fff;
+}
+
+.lang-switch__button[aria-pressed="true"] {
+  background: #fff;
+  color: var(--primary-dark);
+  font-weight: 700;
+}
+
+.lang-switch__button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* ヒーロー（index）では中央寄せの見出しの上に右寄せで置く */
+.lang-switch--hero {
+  margin: 0 0 24px auto;
+  width: fit-content;
+}
+
+/* ヒーロー内の「最終更新 / 対象バージョン」表示（4 ページ共通の last-updated と役割は同じだが、
+   ヒーローの青背景の上に載るため配色だけ別に持つ） */
+.hero-meta {
+  color: rgb(255 255 255 / 80%);
+  font-size: 0.8rem;
+  margin-bottom: 16px;
+}
+
+/* サイトヘッダー */
+.site-header {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+  padding: 14px 0;
+}
+
+.site-header .container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.logo {
+  color: #fff;
+  text-decoration: none;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.logo:hover {
+  opacity: 0.9;
+}
+
+.site-nav {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.site-nav a {
+  color: rgb(255 255 255 / 88%);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.site-nav a:hover,
+.site-nav a[aria-current="page"] {
+  color: #fff;
+  text-decoration: underline;
+}
+
+/* ヒーロー（index） */
+.hero {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+  color: #fff;
+  padding: 72px 0;
+  text-align: center;
+}
+
+.hero h1 {
+  font-size: 2.25rem;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
+.hero .subtitle {
+  font-size: 1.1rem;
+  margin-bottom: 28px;
+}
+
+.hero-buttons {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.btn {
+  display: inline-block;
+  padding: 13px 28px;
+  border-radius: 8px;
+  text-decoration: none;
+  font-weight: 700;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.btn-primary {
+  background: #fff;
+  color: var(--primary);
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgb(0 0 0 / 20%);
+}
+
+.btn-secondary {
+  background: rgb(255 255 255 / 15%);
+  color: #fff;
+  border: 2px solid rgb(255 255 255 / 50%);
+}
+
+.btn-secondary:hover {
+  background: rgb(255 255 255 / 25%);
+}
+
+/* セクション（index） */
+.section {
+  padding: 56px 0;
+}
+
+.section--alt {
+  background: var(--bg-secondary);
+}
+
+.section h2 {
+  font-size: 1.5rem;
+  margin-bottom: 24px;
+  text-align: center;
+}
+
+.steps {
+  list-style: none;
+  counter-reset: step;
+  display: grid;
+  gap: 16px;
+}
+
+.steps li {
+  counter-increment: step;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 20px 16px 56px;
+  position: relative;
+}
+
+.steps li::before {
+  content: counter(step);
+  position: absolute;
+  left: 16px;
+  top: 16px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 26px;
+  text-align: center;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 20px;
+}
+
+.card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+}
+
+.card h3 {
+  font-size: 1rem;
+  margin-bottom: 8px;
+  color: var(--primary);
+}
+
+.shots {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 24px;
+}
+
+.shot img {
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: block;
+}
+
+.shot figcaption {
+  margin-top: 8px;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+/* 本文ページ（help / privacy-policy / terms-of-service） */
+.document-page,
+.help-page {
+  padding: 44px 0;
+  flex: 1;
+}
+
+.document-page h1,
+.help-page h1 {
+  font-size: 1.9rem;
+  margin-bottom: 8px;
+}
+
+.last-updated {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  margin-bottom: 40px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.document-page section,
+.help-page section {
+  margin-bottom: 40px;
+}
+
+.document-page h2,
+.help-page h2 {
+  font-size: 1.25rem;
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid var(--primary);
+  display: inline-block;
+}
+
+.help-page h3 {
+  font-size: 1rem;
+  margin: 24px 0 8px;
+  color: var(--primary);
+}
+
+.document-page p,
+.help-page p {
+  margin-bottom: 16px;
+}
+
+.document-page ul,
+.document-page ol,
+.help-page ul,
+.help-page ol {
+  margin: 0 0 16px 24px;
+}
+
+.document-page li,
+.help-page li {
+  margin-bottom: 8px;
+}
+
+.document-page a,
+.help-page a {
+  color: var(--primary);
+}
+
+.document-page a:hover,
+.help-page a:hover {
+  text-decoration: none;
+}
+
+.document-page code,
+.help-page code {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.9em;
+}
+
+/* 表（プライバシーポリシーのデータ一覧・ヘルプの一覧） */
+.table-scroll {
+  overflow-x: auto;
+  margin-bottom: 16px;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 480px;
+  font-size: 0.9rem;
+}
+
+th,
+td {
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  background: var(--bg-secondary);
+}
+
+/* 注記ボックス */
+.note {
+  background: var(--note-bg);
+  border: 1px solid var(--note-border);
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+
+.note > :last-child {
+  margin-bottom: 0;
+}
+
+/* ヘルプの目次 */
+.toc {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px 24px;
+  margin-bottom: 40px;
+}
+
+.toc h2 {
+  border: none;
+  font-size: 1.05rem;
+  margin-bottom: 12px;
+  padding-bottom: 0;
+}
+
+.toc ol {
+  margin: 0 0 0 20px;
+}
+
+.toc li {
+  margin-bottom: 4px;
+}
+
+/* FAQ */
+.faq {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  background: var(--bg-secondary);
+}
+
+.faq summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.faq > :last-child {
+  margin-bottom: 0;
+}
+
+.faq p {
+  margin-top: 12px;
+}
+
+/* フッター */
+.footer {
+  background: var(--text);
+  color: #fff;
+  padding: 28px 0;
+  margin-top: auto;
+}
+
+.footer-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+
+.footer-links {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.footer-links a {
+  color: rgb(255 255 255 / 80%);
+  text-decoration: none;
+  font-size: 0.875rem;
+}
+
+.footer-links a:hover {
+  color: #fff;
+  text-decoration: underline;
+}
+
+.copyright {
+  color: rgb(255 255 255 / 60%);
+  font-size: 0.875rem;
+}
+
+@media (width <= 640px) {
+  .hero {
+    padding: 48px 0;
+  }
+
+  .hero h1 {
+    font-size: 1.6rem;
+  }
+
+  .document-page h1,
+  .help-page h1 {
+    font-size: 1.45rem;
+  }
+
+  .document-page h2,
+  .help-page h2 {
+    font-size: 1.1rem;
+  }
+
+  .footer-content {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .footer-links {
+    justify-content: center;
+  }
+}

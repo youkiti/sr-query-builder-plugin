@@ -1,0 +1,440 @@
+<!doctype html>
+<!-- プライバシーポリシー（GitHub Pages 配信）。
+     内容の正典は docs/store/privacy-policy.md。本ファイルはその HTML 転記 + 英訳であり、
+     **更新時は必ず両方を直す**（hosted/README.md「公開ページ」参照）。
+     ja / en は両方を持ち、表示は lang.js + CSS が片方だけに絞る（併記しない）。
+     version: 2026-08-07 -->
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title data-en="Privacy Policy — SR Query Builder Plugin">プライバシーポリシー — SR Query Builder Plugin</title>
+    <meta
+      name="description"
+      content="SR Query Builder Plugin のプライバシーポリシー。開発者サーバーは存在せず、データは利用者の Google アカウントと BYOK の Gemini API / NCBI API の間でのみ流通します。"
+      data-en-content="Privacy policy for SR Query Builder Plugin: there is no developer-operated server; data flows only between the user’s own Google account and the BYOK Gemini API / NCBI API."
+    />
+    <link rel="stylesheet" href="style.css" />
+    <!-- 表示言語（ja / en）の解決と切替。初期描画前に確定させるため head で同期読み込みする -->
+    <script src="lang.js"></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container">
+        <a class="logo" href="index.html">SR Query Builder Plugin</a>
+        <nav
+          class="site-nav"
+          aria-label="サイト内ナビゲーション"
+          data-en-aria-label="Site navigation"
+        >
+          <a href="index.html"
+            ><span class="ja" lang="ja">ホーム</span><span class="en" lang="en">Home</span></a
+          >
+          <a href="help.html"
+            ><span class="ja" lang="ja">使い方</span><span class="en" lang="en">Help</span></a
+          >
+          <a href="privacy-policy.html" aria-current="page"
+            ><span class="ja" lang="ja">プライバシー</span><span class="en" lang="en">Privacy</span></a
+          >
+          <a href="terms-of-service.html"
+            ><span class="ja" lang="ja">利用規約</span><span class="en" lang="en">Terms</span></a
+          >
+          <a href="https://github.com/youkiti/sr-query-builder-plugin">GitHub</a>
+        </nav>
+        <!-- 言語切替ボタンは lang.js が組み立てる（JS 無効時は空のまま = 両言語が並ぶ） -->
+        <div class="lang-switch" data-lang-switch></div>
+      </div>
+    </header>
+
+    <main class="document-page">
+      <div class="container">
+        <!-- 以下、見出し・本文は docs/store/privacy-policy.md の忠実な転記（内容の追加・削除をしない）。
+             正典の「SR Query Builder」表記（Plugin を付けない）はそのまま残す -->
+        <h1>
+          <span class="ja" lang="ja">プライバシーポリシー — SR Query Builder（sr-query-builder-plugin）</span>
+          <span class="en" lang="en">Privacy Policy — SR Query Builder (sr-query-builder-plugin)</span>
+        </h1>
+        <p class="last-updated">
+          <span class="ja" lang="ja"
+            >最終更新: 2026-08-07<br />
+            対象: Chrome 拡張機能「SR Query Builder」（sr-query-builder-plugin）<br />
+            配布元: 本拡張は MIT ライセンス（<a
+              href="https://github.com/youkiti/sr-query-builder-plugin/blob/master/LICENSE"
+              >LICENSE</a
+            >）の OSS です。</span
+          >
+          <span class="en" lang="en"
+            >Last updated: 2026-08-07<br />
+            Applies to: the Chrome extension “SR Query Builder” (sr-query-builder-plugin)<br />
+            Distribution: this extension is open-source software under the
+            <a href="https://github.com/youkiti/sr-query-builder-plugin/blob/master/LICENSE">MIT licence</a>.</span
+          >
+        </p>
+
+        <section>
+          <p>
+            <span class="ja" lang="ja"
+              >このページは、Chrome ウェブストアの審査および利用者への開示のために、本拡張が扱うデータとその流通経路を説明します。</span
+            >
+            <span class="en" lang="en"
+              >This page explains, for Chrome Web Store review and for our users, what data the extension handles and
+              where it flows.</span
+            >
+          </p>
+        </section>
+
+        <section>
+          <h2>
+            <span class="ja" lang="ja">要点</span>
+            <span class="en" lang="en">Summary</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja"
+              ><strong>本拡張の開発者が運用するサーバーは存在しません。</strong>
+              利用者のデータが開発者側に送信・保存・収集されることは一切ありません。データはすべて、利用者自身が契約・所有する以下の
+              3 者の間でのみ流通します。</span
+            >
+            <span class="en" lang="en"
+              ><strong>There is no developer-operated server.</strong> No user data is ever transmitted to, stored by
+              or collected by the developer. All data flows only between the following three parties, all of which
+              the user owns or contracts with directly.</span
+            >
+          </p>
+          <ol>
+            <li>
+              <span class="ja" lang="ja">利用者のブラウザ（本拡張の実行環境。<code>chrome.storage</code> を含む）</span>
+              <span class="en" lang="en">The user’s browser, where the extension runs (including <code>chrome.storage</code>)</span>
+            </li>
+            <li>
+              <span class="ja" lang="ja"
+                >利用者の Google アカウント（Google Sheets = プロジェクト DB、Google Drive = LLM API ログなどの実体保管）</span
+              >
+              <span class="en" lang="en"
+                >The user’s Google account (Google Sheets as the project database; Google Drive for LLM API log
+                files)</span
+              >
+            </li>
+            <li>
+              <span class="ja" lang="ja"
+                >利用者が自分の API キー（BYOK: Bring Your Own Key）で契約する LLM API（Gemini API）および NCBI
+                E-utilities</span
+              >
+              <span class="en" lang="en"
+                >The LLM API the user contracts with using their own key (BYOK: Gemini API), and NCBI
+                E-utilities</span
+              >
+            </li>
+          </ol>
+        </section>
+
+        <section>
+          <h2>
+            <span class="ja" lang="ja">取り扱うデータと送信先</span>
+            <span class="en" lang="en">Data handled and where it goes</span>
+          </h2>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>
+                    <span class="ja" lang="ja">データ</span><span class="en" lang="en">Data</span>
+                  </th>
+                  <th>
+                    <span class="ja" lang="ja">どこへ</span><span class="en" lang="en">Destination</span>
+                  </th>
+                  <th>
+                    <span class="ja" lang="ja">目的</span><span class="en" lang="en">Purpose</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <span class="ja" lang="ja"
+                      >研究プロトコル（RQ・PICO 等）・検索式ブロック定義・シード論文（PMID）・検索式ドラフト・検証結果・LLM
+                      API ログ</span
+                    >
+                    <span class="en" lang="en"
+                      >Research protocol (RQ, PICO, …), search block definitions, seed papers (PMIDs), search draft,
+                      validation results, LLM API log</span
+                    >
+                  </td>
+                  <td>
+                    <span class="ja" lang="ja">利用者の Google Sheets（プロジェクトのスプレッドシート内の各タブ）</span>
+                    <span class="en" lang="en">The user’s Google Sheets (each tab of the project spreadsheet)</span>
+                  </td>
+                  <td>
+                    <span class="ja" lang="ja">プロジェクト DB。監査ログ・バージョニング目的</span>
+                    <span class="en" lang="en">Project database; for the audit log and versioning</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <span class="ja" lang="ja">LLM API ログのフル payload</span>
+                    <span class="en" lang="en">Full payload of the LLM API log</span>
+                  </td>
+                  <td>
+                    <span class="ja" lang="ja"
+                      >利用者の Google Drive（プロジェクトの Drive フォルダ配下 <code>logs/llm/*.json</code>）</span
+                    >
+                    <span class="en" lang="en"
+                      >The user’s Google Drive (<code>logs/llm/*.json</code> under the project’s Drive folder)</span
+                    >
+                  </td>
+                  <td>
+                    <span class="ja" lang="ja">Sheets のセル文字数制限を超える内容の退避</span>
+                    <span class="en" lang="en">Offloading content that exceeds the Sheets cell character limit</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <span class="ja" lang="ja">研究プロトコル本文・検索式ブロック定義・検索式ドラフトなど</span>
+                    <span class="en" lang="en">Full protocol text, search block definitions, search draft, and similar content</span>
+                  </td>
+                  <td>
+                    <span class="ja" lang="ja">利用者が設定した Gemini API（BYOK）</span>
+                    <span class="en" lang="en">The Gemini API configured by the user (BYOK)</span>
+                  </td>
+                  <td>
+                    <span class="ja" lang="ja"
+                      >AI による検索式ドラフト生成・MeSH 提案・シノニム展開等。本文が外部へ送信されるのはこの経路と
+                      NCBI E-utilities のみ</span
+                    >
+                    <span class="en" lang="en"
+                      >AI-drafted search strategy, MeSH suggestions, synonym expansion, etc. This and NCBI
+                      E-utilities are the only routes by which text leaves the browser</span
+                    >
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <span class="ja" lang="ja">検索式・PMID</span>
+                    <span class="en" lang="en">Search strategy and PMIDs</span>
+                  </td>
+                  <td>
+                    <span class="ja" lang="ja">NCBI E-utilities（<code>eutils.ncbi.nlm.nih.gov</code>）</span>
+                    <span class="en" lang="en">NCBI E-utilities (<code>eutils.ncbi.nlm.nih.gov</code>)</span>
+                  </td>
+                  <td>
+                    <span class="ja" lang="ja">ヒット数検証・MeSH 用語の取得・シード論文の捕捉率計算</span>
+                    <span class="en" lang="en">Hit-count validation, retrieving MeSH terms, computing seed-paper capture rate</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <span class="ja" lang="ja">Google OAuth トークン</span>
+                    <span class="en" lang="en">Google OAuth token</span>
+                  </td>
+                  <td>
+                    <span class="ja" lang="ja">利用者のブラウザ内（<code>chrome.storage</code>）</span>
+                    <span class="en" lang="en">Inside the user’s browser (<code>chrome.storage</code>)</span>
+                  </td>
+                  <td>
+                    <span class="ja" lang="ja">Google API 認証。開発者へは送信されません</span>
+                    <span class="en" lang="en">Google API authentication; never sent to the developer</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <span class="ja" lang="ja">Gemini API キー・NCBI API キー</span>
+                    <span class="en" lang="en">Gemini API key and NCBI API key</span>
+                  </td>
+                  <td>
+                    <span class="ja" lang="ja">利用者のブラウザ内（<code>chrome.storage</code>）</span>
+                    <span class="en" lang="en">Inside the user’s browser (<code>chrome.storage</code>)</span>
+                  </td>
+                  <td>
+                    <span class="ja" lang="ja">各 API の認証（BYOK）。開発者へは送信されません</span>
+                    <span class="en" lang="en">Authenticating each API (BYOK); never sent to the developer</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section>
+          <h2>
+            <span class="ja" lang="ja">Google ユーザーデータへのアクセス範囲</span>
+            <span class="en" lang="en">Scope of access to Google user data</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja">本拡張が要求する OAuth スコープは以下の 1 つ <strong>のみ</strong> です。</span>
+            <span class="en" lang="en">The extension requests <strong>only</strong> the following OAuth scope.</span>
+          </p>
+          <ul>
+            <li>
+              <span class="ja" lang="ja"
+                ><code>https://www.googleapis.com/auth/drive.file</code> —
+                <strong>利用者が作成に関与したファイル（本拡張が作成したスプレッドシート・Drive フォルダ・ログファイル）だけ</strong>
+                にアクセスします。Drive 全体を読むスコープ（<code>drive.readonly</code> 等）や、全スプレッドシートへ
+                アクセスできる <code>https://www.googleapis.com/auth/spreadsheets</code> スコープは要求しません。</span
+              >
+              <span class="en" lang="en"
+                ><code>https://www.googleapis.com/auth/drive.file</code> — access limited to
+                <strong>files the user was involved in creating (spreadsheets, Drive folders and log files created by
+                the extension)</strong>. Broader scopes such as <code>drive.readonly</code>, or the
+                <code>https://www.googleapis.com/auth/spreadsheets</code> scope that reaches every spreadsheet, are
+                never requested.</span
+              >
+            </li>
+          </ul>
+          <p>
+            <span class="ja" lang="ja"
+              >サインイン中アカウントのメールアドレスは OAuth スコープではなく、Chrome 拡張 API の
+              <code>chrome.identity.getProfileUserInfo()</code>（<code>identity.email</code> permission）で取得します。これは
+              Chrome プロファイルの同期アカウント情報を読むだけで、OAuth スコープを広げるものではありません。取得したメールアドレスは
+              <code>FormulaVersions</code> 等の記録者列に書き込む目的にのみ使用し、開発者へ送信することはありません。</span
+            >
+            <span class="en" lang="en"
+              >The signed-in account’s email address is not obtained via an OAuth scope; it comes from the Chrome
+              extension API <code>chrome.identity.getProfileUserInfo()</code> (the <code>identity.email</code>
+              permission). This only reads the Chrome profile’s synced account information and does not widen the
+              OAuth scope. The email address obtained is used only to populate recorder columns such as those in
+              <code>FormulaVersions</code>, and is never sent to the developer.</span
+            >
+          </p>
+          <p>
+            <span class="ja" lang="ja"
+              >本拡張は、Google API から取得したユーザーデータを、上記の機能提供以外の目的（広告・分析・第三者への提供・機械学習モデルの学習等）に
+              <strong>一切使用しません</strong>。Google API Services User Data Policy（Limited Use 要件を含む）を遵守します。</span
+            >
+            <span class="en" lang="en"
+              >User data obtained through Google APIs is <strong>never</strong> used for anything beyond the features
+              described above — no advertising, analytics, transfer to third parties, or model training. The
+              extension complies with the Google API Services User Data Policy, including its Limited Use
+              requirements.</span
+            >
+          </p>
+        </section>
+
+        <section>
+          <h2>
+            <span class="ja" lang="ja">LLM API・NCBI API への送信について</span>
+            <span class="en" lang="en">Transmission to the LLM API and NCBI API</span>
+          </h2>
+          <ul>
+            <li>
+              <span class="ja" lang="ja"
+                ><strong>Gemini API</strong>: 検索式のドラフト生成や検証結果の解釈補助を実行すると、研究プロトコルの本文・検索式ブロック定義・検索式ドラフトなどが、利用者が設定した
+                Gemini API キー（BYOK）を用いて Google の Gemini API へ送信されます。送信先によるデータの取り扱いは、Google
+                のプライバシーポリシー・利用規約に従います。本拡張はプロバイダを仲介せず、利用者のブラウザから直接 API
+                を呼び出します。</span
+              >
+              <span class="en" lang="en"
+                ><strong>Gemini API</strong>: running search-strategy drafting or getting help interpreting
+                validation results sends the protocol text, search block definitions and search draft to Google’s
+                Gemini API, using the Gemini API key the user configured (BYOK). How that destination handles the
+                data is governed by Google’s own privacy policy and terms. The extension does not proxy the request:
+                the call is made directly from the user’s browser.</span
+              >
+            </li>
+            <li>
+              <span class="ja" lang="ja"
+                ><strong>NCBI E-utilities</strong>: 検索式の検証（ブロックごとのヒット数、シード論文捕捉率、MeSH
+                用語抽出）のため、検索式や PMID を NCBI の E-utilities（<code>eutils.ncbi.nlm.nih.gov</code>）へ送信します。NCBI
+                API キーは任意で BYOK として設定でき、レート制限緩和のために使用します。</span
+              >
+              <span class="en" lang="en"
+                ><strong>NCBI E-utilities</strong>: to validate the search strategy (per-block hit counts, seed-paper
+                capture rate, MeSH term extraction), the search strategy and PMIDs are sent to NCBI’s E-utilities
+                (<code>eutils.ncbi.nlm.nih.gov</code>). An NCBI API key can optionally be configured as BYOK to ease
+                rate limits.</span
+              >
+            </li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>
+            <span class="ja" lang="ja">データの保存・削除</span>
+            <span class="en" lang="en">Retention and deletion</span>
+          </h2>
+          <ul>
+            <li>
+              <span class="ja" lang="ja"
+                >すべてのデータは利用者自身の Google アカウント（Sheets / Drive）とブラウザローカルストレージに保存されます。削除は、利用者が
+                Google Drive / Sheets 上のファイルを削除し、拡張を削除（またはブラウザのストレージをクリア）することで完結します。</span
+              >
+              <span class="en" lang="en"
+                >All data is stored in the user’s own Google account (Sheets / Drive) and in browser local storage.
+                Deleting the files in Google Drive / Sheets and removing the extension (or clearing browser storage)
+                removes everything.</span
+              >
+            </li>
+            <li>
+              <span class="ja" lang="ja"
+                >本拡張をアンインストールすると、<code>chrome.storage</code> 内の設定（Gemini / NCBI の API
+                キー、認証状態等）は Chrome によって削除されます。Google Drive / Sheets
+                上のプロジェクトデータは利用者の資産としてそのまま残ります。</span
+              >
+              <span class="en" lang="en"
+                >Uninstalling the extension makes Chrome delete its <code>chrome.storage</code> settings (Gemini /
+                NCBI API keys, sign-in state, etc.). Project data in Google Drive / Sheets remains, as it belongs to
+                the user.</span
+              >
+            </li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>
+            <span class="ja" lang="ja">第三者提供・データ販売</span>
+            <span class="en" lang="en">Third parties and data sales</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja"
+              >本拡張は、利用者のデータを第三者へ販売・提供しません。開発者はデータを収集しないため、そもそも提供しうるデータを保持しません。</span
+            >
+            <span class="en" lang="en"
+              >The extension neither sells nor discloses user data to third parties. The developer collects no data
+              and therefore holds nothing that could be disclosed.</span
+            >
+          </p>
+        </section>
+
+        <section>
+          <h2>
+            <span class="ja" lang="ja">お問い合わせ</span>
+            <span class="en" lang="en">Contact</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja"
+              >本ポリシーに関する問い合わせは、GitHub リポジトリの
+              <a href="https://github.com/youkiti/sr-query-builder-plugin/issues">Issues</a> へお願いします。</span
+            >
+            <span class="en" lang="en"
+              >Please contact us through the
+              <a href="https://github.com/youkiti/sr-query-builder-plugin/issues">Issues</a> page of the GitHub
+              repository.</span
+            >
+          </p>
+        </section>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="container">
+        <div class="footer-content">
+          <div class="footer-links">
+            <a href="index.html"
+              ><span class="ja" lang="ja">ホーム</span><span class="en" lang="en">Home</span></a
+            >
+            <a href="help.html"
+              ><span class="ja" lang="ja">使い方</span><span class="en" lang="en">Help</span></a
+            >
+            <a href="privacy-policy.html"
+              ><span class="ja" lang="ja">プライバシーポリシー</span
+              ><span class="en" lang="en">Privacy</span></a
+            >
+            <a href="terms-of-service.html"
+              ><span class="ja" lang="ja">利用規約</span><span class="en" lang="en">Terms</span></a
+            >
+            <a href="https://github.com/youkiti/sr-query-builder-plugin">GitHub</a>
+          </div>
+          <p class="copyright">© 2026 youkiti — MIT License</p>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

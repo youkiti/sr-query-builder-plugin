@@ -1,0 +1,323 @@
+<!doctype html>
+<!-- 利用規約（GitHub Pages 配信）。正典はこのファイル（master の hosted/）。
+     内容は本拡張の実態（MIT OSS・サーバーレス・BYOK・無保証）に即して書き下ろす。
+     ja / en は両方を持ち、表示は lang.js + CSS が片方だけに絞る（併記しない）。
+     version: 2026-08-07 -->
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title data-en="Terms of Service — SR Query Builder Plugin">利用規約 — SR Query Builder Plugin</title>
+    <meta
+      name="description"
+      content="SR Query Builder Plugin の利用規約。MIT ライセンスの OSS・サーバーレス・BYOK・無保証。"
+      data-en-content="Terms of service for SR Query Builder Plugin: MIT-licensed open source, serverless, BYOK, provided as is."
+    />
+    <link rel="stylesheet" href="style.css" />
+    <!-- 表示言語（ja / en）の解決と切替。初期描画前に確定させるため head で同期読み込みする -->
+    <script src="lang.js"></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container">
+        <a class="logo" href="index.html">SR Query Builder Plugin</a>
+        <nav
+          class="site-nav"
+          aria-label="サイト内ナビゲーション"
+          data-en-aria-label="Site navigation"
+        >
+          <a href="index.html"
+            ><span class="ja" lang="ja">ホーム</span><span class="en" lang="en">Home</span></a
+          >
+          <a href="help.html"
+            ><span class="ja" lang="ja">使い方</span><span class="en" lang="en">Help</span></a
+          >
+          <a href="privacy-policy.html"
+            ><span class="ja" lang="ja">プライバシー</span><span class="en" lang="en">Privacy</span></a
+          >
+          <a href="terms-of-service.html" aria-current="page"
+            ><span class="ja" lang="ja">利用規約</span><span class="en" lang="en">Terms</span></a
+          >
+          <a href="https://github.com/youkiti/sr-query-builder-plugin">GitHub</a>
+        </nav>
+        <!-- 言語切替ボタンは lang.js が組み立てる（JS 無効時は空のまま = 両言語が並ぶ） -->
+        <div class="lang-switch" data-lang-switch></div>
+      </div>
+    </header>
+
+    <main class="document-page">
+      <div class="container">
+        <h1>
+          <span class="ja" lang="ja">利用規約</span>
+          <span class="en" lang="en">Terms of Service</span>
+        </h1>
+        <p class="last-updated">
+          <span class="ja" lang="ja"
+            >最終更新: 2026-08-07 / 対象バージョン: v0.2.0<br />
+            対象: Chrome 拡張機能「SR Query Builder Plugin」（sr-query-builder-plugin）</span
+          >
+          <span class="en" lang="en"
+            >Last updated: 2026-08-07 / Covers v0.2.0<br />
+            Applies to the Chrome extension “SR Query Builder Plugin” (sr-query-builder-plugin)</span
+          >
+        </p>
+
+        <section>
+          <h2>
+            <span class="ja" lang="ja">1. 適用</span>
+            <span class="en" lang="en">1. Scope</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja"
+              >本規約は、Chrome 拡張機能「SR Query Builder Plugin」（以下「本拡張」）の利用条件を定めるものです。本拡張をインストールまたは利用した時点で、本規約に同意したものとみなします。同意いただけない場合は本拡張を利用しないでください。</span
+            >
+            <span class="en" lang="en"
+              >These terms govern the use of the Chrome extension “SR Query Builder Plugin” (the “extension”). By
+              installing or using the extension you accept these terms; if you do not accept them, please do not use
+              it.</span
+            >
+          </p>
+        </section>
+
+        <section>
+          <h2>
+            <span class="ja" lang="ja">2. ライセンスと費用</span>
+            <span class="en" lang="en">2. Licence and cost</span>
+          </h2>
+          <ul>
+            <li>
+              <span class="ja" lang="ja"
+                >本拡張は <a href="https://github.com/youkiti/sr-query-builder-plugin/blob/master/LICENSE">MIT
+                ライセンス</a>のオープンソースソフトウェアです。ソースコードの利用・改変・再配布は MIT
+                ライセンスの条件に従います。本規約と MIT ライセンスの内容が矛盾する場合、ソフトウェア自体の利用許諾については
+                MIT ライセンスが優先します。</span
+              >
+              <span class="en" lang="en"
+                >The extension is open-source software released under the
+                <a href="https://github.com/youkiti/sr-query-builder-plugin/blob/master/LICENSE">MIT licence</a>. Use,
+                modification and redistribution of the source code are governed by that licence, which prevails over
+                these terms where the two conflict with respect to the software itself.</span
+              >
+            </li>
+            <li>
+              <span class="ja" lang="ja"
+                >本拡張の利用に対して開発者が課金することはありません。ただし、利用者が接続する Gemini API・NCBI
+                API の利用料金、Google アカウントの利用条件は、利用者と各サービス提供者との契約に基づきます。</span
+              >
+              <span class="en" lang="en"
+                >The developer charges nothing for the extension. Fees for the Gemini API / NCBI API you connect to,
+                and the terms of your Google account, are matters between you and those providers.</span
+              >
+            </li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>
+            <span class="ja" lang="ja">3. サーバーレス構成と BYOK</span>
+            <span class="en" lang="en">3. Serverless design and BYOK</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja"
+              >本拡張には開発者が運用するサーバーが存在しません。データは、利用者自身の Google Sheets / Drive と、利用者が自身の
+              API キーで契約する Gemini API、および NCBI E-utilities の間でのみ流通します（BYOK: Bring Your Own
+              Key）。開発者が利用者のデータを受信・保存・収集することはありません。詳細は<a href="privacy-policy.html"
+                >プライバシーポリシー</a
+              >を参照してください。</span
+            >
+            <span class="en" lang="en"
+              >The extension has no developer-operated server. Data flows only between your own Google Sheets / Drive,
+              the Gemini API you contract with using your own key, and NCBI E-utilities (BYOK: Bring Your Own Key).
+              The developer never receives, stores or collects your data. See the
+              <a href="privacy-policy.html">privacy policy</a> for details.</span
+            >
+          </p>
+          <p>
+            <span class="ja" lang="ja"
+              >そのため、データの保全・バックアップ・アクセス管理は、すべて利用者自身の責任で行っていただく必要があります。</span
+            >
+            <span class="en" lang="en"
+              >Consequently, safeguarding, backing up and controlling access to your data is entirely your
+              responsibility.</span
+            >
+          </p>
+        </section>
+
+        <section>
+          <h2>
+            <span class="ja" lang="ja">4. 利用者の責任</span>
+            <span class="en" lang="en">4. Your responsibilities</span>
+          </h2>
+          <ul>
+            <li>
+              <span class="ja" lang="ja"
+                >研究プロトコル・検索式ブロック定義・シード論文（PMID）等、本拡張に入力するデータの取り扱いは利用者自身の責任です。</span
+              >
+              <span class="en" lang="en"
+                >You are responsible for the handling of any data you enter into the extension — the research
+                protocol, search block definitions, seed papers (PMIDs), and similar content.</span
+              >
+            </li>
+            <li>
+              <span class="ja" lang="ja"
+                >AI が生成する検索式ドラフトは、あくまで下書きです。<strong
+                  >ブロックごとのヒット数・シード論文捕捉率・MeSH 検証などの人間による検証を経ずに、そのまま研究成果として用いないでください。</strong
+                >検索式の網羅性・妥当性の最終的な責任は利用者にあります。</span
+              >
+              <span class="en" lang="en"
+                >The AI-drafted search strategy is only a starting point. <strong>Do not use it as a research result
+                without human verification</strong> — per-block hit counts, seed-paper capture rate, MeSH checks, and
+                so on. You remain responsible for the completeness and validity of the search strategy.</span
+              >
+            </li>
+            <li>
+              <span class="ja" lang="ja"
+                >NCBI E-utilities へ送信する検索式・PMID の内容、および Gemini API・NCBI API の API
+                キーの管理は利用者の責任で行ってください。Gemini API へ送信される内容は、送信先プロバイダの利用規約・プライバシーポリシーに従って扱われます。機密性の高い研究プロトコルを扱う場合は、送信先の条件を事前に確認してください。</span
+              >
+              <span class="en" lang="en"
+                >You are responsible for the content of the search strategies and PMIDs sent to NCBI E-utilities, and
+                for managing your Gemini API and NCBI API keys. Anything sent to the Gemini API is handled under that
+                provider’s own terms and privacy policy; check those terms before processing a sensitive research
+                protocol.</span
+              >
+            </li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>
+            <span class="ja" lang="ja">5. 禁止事項</span>
+            <span class="en" lang="en">5. Prohibited use</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja"
+              >本拡張を、法令に違反する目的、第三者の権利を侵害する目的、または接続先サービス（Google API・Gemini
+              API・NCBI API）の利用規約に違反する態様で利用しないでください。</span
+            >
+            <span class="en" lang="en"
+              >Do not use the extension for unlawful purposes, in ways that infringe the rights of others, or in
+              breach of the terms of the services it connects to (Google APIs, the Gemini API and NCBI APIs).</span
+            >
+          </p>
+        </section>
+
+        <section>
+          <h2>
+            <span class="ja" lang="ja">6. 無保証・免責</span>
+            <span class="en" lang="en">6. No warranty and limitation of liability</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja"
+              >本拡張は MIT ライセンスに基づき<strong>「現状のまま」（AS IS）</strong>提供されます。開発者は、商品性・特定目的への適合性・非侵害を含むいかなる保証も行いません。検索式ドラフトの網羅性・正確性、検証結果（ヒット数・捕捉率・MeSH
+              抽出）の正確性、サービスの継続性、Google API・Gemini API・NCBI API の仕様変更に対する追随についても保証しません。</span
+            >
+            <span class="en" lang="en"
+              >The extension is provided <strong>“AS IS”</strong> under the MIT licence, without warranty of any kind,
+              including merchantability, fitness for a particular purpose and non-infringement. No guarantee is made
+              as to the completeness or accuracy of the drafted search strategy, the accuracy of validation results
+              (hit counts, capture rate, MeSH extraction), continued availability, or compatibility with future
+              changes to the Google, Gemini or NCBI APIs.</span
+            >
+          </p>
+          <p>
+            <span class="ja" lang="ja"
+              >本拡張の利用または利用不能から生じたいかなる損害（データの消失、研究上の損失、API
+              利用料金の発生を含む）についても、適用法令が許す最大限の範囲で開発者は責任を負いません。</span
+            >
+            <span class="en" lang="en"
+              >To the fullest extent permitted by law, the developer is not liable for any damages arising from use
+              or inability to use the extension, including data loss, research setbacks or API charges you
+              incur.</span
+            >
+          </p>
+        </section>
+
+        <section>
+          <h2>
+            <span class="ja" lang="ja">7. 第三者サービス</span>
+            <span class="en" lang="en">7. Third-party services</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja"
+              >本拡張は Google API（Sheets / Drive / OAuth）、Gemini API、および NCBI
+              E-utilities を利用します。これらのサービスの提供条件・可用性・料金は各提供者が定めるものであり、開発者は関与しません。</span
+            >
+            <span class="en" lang="en"
+              >The extension uses Google APIs (Sheets, Drive, OAuth), the Gemini API, and NCBI E-utilities. The terms,
+              availability and pricing of those services are set by their providers, not by the developer.</span
+            >
+          </p>
+        </section>
+
+        <section>
+          <h2>
+            <span class="ja" lang="ja">8. 規約の変更</span>
+            <span class="en" lang="en">8. Changes to these terms</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja"
+              >本規約は、機能の追加・法令の変更等に応じて改定されることがあります。改定後の規約は本ページに掲載した時点で効力を生じます（最終更新日は冒頭に表示します）。</span
+            >
+            <span class="en" lang="en"
+              >These terms may be revised as features or applicable law change. Revisions take effect when published
+              on this page; the last-updated date is shown at the top.</span
+            >
+          </p>
+        </section>
+
+        <section>
+          <h2>
+            <span class="ja" lang="ja">9. 準拠法</span>
+            <span class="en" lang="en">9. Governing law</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja">本規約は日本法に準拠して解釈されます。</span>
+            <span class="en" lang="en">These terms are interpreted under the laws of Japan.</span>
+          </p>
+        </section>
+
+        <section>
+          <h2>
+            <span class="ja" lang="ja">10. お問い合わせ</span>
+            <span class="en" lang="en">10. Contact</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja"
+              >本規約に関する問い合わせ・不具合の報告は、GitHub リポジトリの
+              <a href="https://github.com/youkiti/sr-query-builder-plugin/issues">Issues</a> へお願いします。</span
+            >
+            <span class="en" lang="en"
+              >For questions about these terms or to report a problem, please open an issue on
+              <a href="https://github.com/youkiti/sr-query-builder-plugin/issues">GitHub</a>.</span
+            >
+          </p>
+        </section>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="container">
+        <div class="footer-content">
+          <div class="footer-links">
+            <a href="index.html"
+              ><span class="ja" lang="ja">ホーム</span><span class="en" lang="en">Home</span></a
+            >
+            <a href="help.html"
+              ><span class="ja" lang="ja">使い方</span><span class="en" lang="en">Help</span></a
+            >
+            <a href="privacy-policy.html"
+              ><span class="ja" lang="ja">プライバシーポリシー</span
+              ><span class="en" lang="en">Privacy</span></a
+            >
+            <a href="terms-of-service.html"
+              ><span class="ja" lang="ja">利用規約</span><span class="en" lang="en">Terms</span></a
+            >
+            <a href="https://github.com/youkiti/sr-query-builder-plugin">GitHub</a>
+          </div>
+          <p class="copyright">© 2026 youkiti — MIT License</p>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

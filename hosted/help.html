@@ -1,0 +1,620 @@
+<!doctype html>
+<!-- SR Query Builder Plugin 使い方ガイド（GitHub Pages 配信）。
+     正典はこのファイル（master の hosted/）。デプロイ手順は hosted/README.md を参照。
+     内容はワークフローレベルに留める（画面細部はアプリ内のリード文が担う）。
+     文言は ja / en を両方持ち、表示は lang.js + CSS が片方だけに絞る（併記しない）。
+     version: 2026-08-07 -->
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title data-en="User guide — SR Query Builder Plugin">使い方ガイド — SR Query Builder Plugin</title>
+    <meta
+      name="description"
+      content="SR Query Builder Plugin の使い方ガイド。プロトコル入力から検索式ドラフト生成・検証・対話的シード拡張・エクスポートまでの操作手順とトラブルシューティング。"
+      data-en-content="User guide for SR Query Builder Plugin: from entering a protocol through drafting and validating a search strategy, interactive seed expansion, and export, plus troubleshooting."
+    />
+    <link rel="stylesheet" href="style.css" />
+    <!-- 表示言語（ja / en）の解決と切替。初期描画前に確定させるため head で同期読み込みする -->
+    <script src="lang.js"></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container">
+        <a class="logo" href="index.html">SR Query Builder Plugin</a>
+        <nav
+          class="site-nav"
+          aria-label="サイト内ナビゲーション"
+          data-en-aria-label="Site navigation"
+        >
+          <a href="index.html"
+            ><span class="ja" lang="ja">ホーム</span><span class="en" lang="en">Home</span></a
+          >
+          <a href="help.html" aria-current="page"
+            ><span class="ja" lang="ja">使い方</span><span class="en" lang="en">Help</span></a
+          >
+          <a href="privacy-policy.html"
+            ><span class="ja" lang="ja">プライバシー</span><span class="en" lang="en">Privacy</span></a
+          >
+          <a href="terms-of-service.html"
+            ><span class="ja" lang="ja">利用規約</span><span class="en" lang="en">Terms</span></a
+          >
+          <a href="https://github.com/youkiti/sr-query-builder-plugin">GitHub</a>
+        </nav>
+        <!-- 言語切替ボタンは lang.js が組み立てる（JS 無効時は空のまま = 両言語が並ぶ） -->
+        <div class="lang-switch" data-lang-switch></div>
+      </div>
+    </header>
+
+    <main class="help-page">
+      <div class="container">
+        <h1>
+          <span class="ja" lang="ja">使い方ガイド</span>
+          <span class="en" lang="en">User guide</span>
+        </h1>
+        <p class="last-updated">
+          <span class="ja" lang="ja">最終更新: 2026-08-07 / 対象バージョン: v0.2.0</span>
+          <span class="en" lang="en">Last updated: 2026-08-07 / Covers v0.2.0</span>
+        </p>
+
+        <nav class="toc" aria-label="目次" data-en-aria-label="Table of contents">
+          <h2>
+            <span class="ja" lang="ja">目次</span>
+            <span class="en" lang="en">Contents</span>
+          </h2>
+          <ol>
+            <li>
+              <a href="#setup"
+                ><span class="ja" lang="ja">初期設定（API キーの登録）</span
+                ><span class="en" lang="en">Setup: register your API keys</span></a
+              >
+            </li>
+            <li>
+              <a href="#project"
+                ><span class="ja" lang="ja">プロジェクトを作る</span
+                ><span class="en" lang="en">Create a project</span></a
+              >
+            </li>
+            <li>
+              <a href="#protocol"
+                ><span class="ja" lang="ja">#/protocol 研究プロトコルを入力する</span
+                ><span class="en" lang="en">#/protocol — Enter the research protocol</span></a
+              >
+            </li>
+            <li>
+              <a href="#blocks"
+                ><span class="ja" lang="ja">#/blocks 検索式ブロックを承認する</span
+                ><span class="en" lang="en">#/blocks — Approve the search blocks</span></a
+              >
+            </li>
+            <li>
+              <a href="#seeds"
+                ><span class="ja" lang="ja">#/seeds シード論文を登録する</span
+                ><span class="en" lang="en">#/seeds — Register seed papers</span></a
+              >
+            </li>
+            <li>
+              <a href="#draft"
+                ><span class="ja" lang="ja">#/draft 検索式ドラフトの生成と検証</span
+                ><span class="en" lang="en">#/draft — Draft and validate the search strategy</span></a
+              >
+            </li>
+            <li>
+              <a href="#expand"
+                ><span class="ja" lang="ja">#/expand 対話的シード拡張（実験的機能）</span
+                ><span class="en" lang="en">#/expand — Interactive seed expansion (experimental)</span></a
+              >
+            </li>
+            <li>
+              <a href="#edit"
+                ><span class="ja" lang="ja">#/edit 検索式を編集する</span
+                ><span class="en" lang="en">#/edit — Edit the search strategy</span></a
+              >
+            </li>
+            <li>
+              <a href="#export"
+                ><span class="ja" lang="ja">#/export 各データベースへ変換・エクスポートする</span
+                ><span class="en" lang="en">#/export — Convert and export for each database</span></a
+              >
+            </li>
+            <li>
+              <a href="#done"
+                ><span class="ja" lang="ja">#/done 完了画面（各データベースの検索ページへ誘導）</span
+                ><span class="en" lang="en">#/done — Finish screen (links to each database’s search page)</span></a
+              >
+            </li>
+            <li>
+              <a href="#history"
+                ><span class="ja" lang="ja">#/history バージョン履歴</span
+                ><span class="en" lang="en">#/history — Version history</span></a
+              >
+            </li>
+            <li>
+              <a href="#troubleshooting"
+                ><span class="ja" lang="ja">トラブルシューティング</span
+                ><span class="en" lang="en">Troubleshooting</span></a
+              >
+            </li>
+            <li>
+              <a href="#faq"
+                ><span class="ja" lang="ja">よくある質問</span
+                ><span class="en" lang="en">FAQ</span></a
+              >
+            </li>
+          </ol>
+        </nav>
+
+        <section id="setup">
+          <h2>
+            <span class="ja" lang="ja">1. 初期設定（API キーの登録）</span>
+            <span class="en" lang="en">1. Setup: register your API keys</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja"
+              >拡張アイコンを右クリック →「オプション」で設定画面を開き、ご自身の API キーを保存します（BYOK = Bring
+              Your Own Key）。検索式ドラフトの生成には LLM プロバイダの API キーが必須です。既定は Gemini
+              なので Gemini API キーが必要ですが、設定画面の「使用モデル」で OpenRouter 系のモデルへ切り替えた場合は
+              OpenRouter の API キーが必要になります。NCBI API キーは任意で、NCBI E-utilities
+              のレート制限を緩和したい場合に設定します。</span
+            >
+            <span class="en" lang="en"
+              >Right-click the extension icon → “Options” to open the settings screen and save your own API keys
+              (BYOK = Bring Your Own Key). Drafting the search strategy requires an API key for whichever LLM
+              provider is selected. The default is Gemini, so a Gemini API key is needed by default — but if you
+              switch to an OpenRouter model in “Model” on the settings screen, an OpenRouter API key is required
+              instead. An NCBI API key is optional and eases the rate limit on NCBI E-utilities.</span
+            >
+          </p>
+          <div class="note">
+            <p>
+              <span class="ja" lang="ja"
+                >研究プロトコルの本文が外部へ送信されるのは、Gemini API へのドラフト生成リクエストと、NCBI
+                E-utilities への検索式検証リクエストのときだけです。開発者が運用するサーバーは存在しません（<a
+                  href="privacy-policy.html"
+                  >プライバシーポリシー</a
+                >）。</span
+              >
+              <span class="en" lang="en"
+                >Your protocol text leaves your browser only in drafting requests to the Gemini API and validation
+                requests to NCBI E-utilities. There is no developer-operated server (see the
+                <a href="privacy-policy.html">privacy policy</a>).</span
+              >
+            </p>
+          </div>
+        </section>
+
+        <section id="project">
+          <h2>
+            <span class="ja" lang="ja">2. プロジェクトを作る</span>
+            <span class="en" lang="en">2. Create a project</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja"
+              >拡張アイコンをクリックすると Popup が開きます。「Google でログイン」のあと、新規プロジェクトを作成するか、最近のプロジェクトから選びます。プロジェクトを作成すると、プロジェクト
+              DB になる Google スプレッドシートがあなたの Google アカウント内に生成されます（1 スプレッドシート = 1
+              プロジェクト = 1 Drive フォルダ）。作成後、メインビューが新しいタブで開きます。</span
+            >
+            <span class="en" lang="en"
+              >Clicking the extension icon opens the Popup. After signing in with Google, create a new project or
+              pick one from your recent projects. Creating a project generates a Google Sheet inside your own Google
+              account as the project database (one spreadsheet = one project = one Drive folder). The main view then
+              opens in a new tab.</span
+            >
+          </p>
+        </section>
+
+        <section id="protocol">
+          <h2>
+            <span class="ja" lang="ja">3. #/protocol 研究プロトコルを入力する</span>
+            <span class="en" lang="en">3. #/protocol — Enter the research protocol</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja"
+              >リサーチクエスチョン・フレームワーク種別（PICO / PECO / PCC / SPIDER / custom）・組入 / 除外基準を、手入力するか
+              <code>.md</code> ファイルから取り込みます。保存は常に新しい版として追記され、過去の版は残ります。入力直後には、シード論文（すでに知っている採用予定の論文）があれば
+              PMID を登録するよう案内されます。</span
+            >
+            <span class="en" lang="en"
+              >Enter your research question, framework type (PICO / PECO / PCC / SPIDER / custom) and eligibility
+              criteria by hand, or import them from a <code>.md</code> file. Every save is appended as a new version;
+              earlier versions are kept. Right after saving, you are prompted to register any seed papers (studies
+              you already know should be included) by PMID.</span
+            >
+          </p>
+          <div class="note">
+            <p>
+              <span class="ja" lang="ja"
+                ><code>.docx</code> ファイルからの取り込みは現時点で未対応です。<code>.md</code>
+                または手入力を利用してください。</span
+              >
+              <span class="en" lang="en"
+                >Importing from <code>.docx</code> is not supported yet. Use a <code>.md</code> file or enter the
+                protocol by hand.</span
+              >
+            </p>
+          </div>
+        </section>
+
+        <section id="blocks">
+          <h2>
+            <span class="ja" lang="ja">4. #/blocks 検索式ブロックを承認する</span>
+            <span class="en" lang="en">4. #/blocks — Approve the search blocks</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja"
+              >AI がプロトコルから 1〜5 個の検索式ブロック（PICO の各要素に固定されない汎用モデル）を抽出してドラフトします。ブロックごとの用語を確認し、必要であれば編集してから承認します。承認内容は版として追記されます。</span
+            >
+            <span class="en" lang="en"
+              >AI drafts 1–5 search blocks from the protocol (a generic model, not fixed to PICO’s elements). Review
+              the terms in each block, edit them if needed, and approve. The approved set is appended as a
+              version.</span
+            >
+          </p>
+        </section>
+
+        <section id="seeds">
+          <h2>
+            <span class="ja" lang="ja">5. #/seeds シード論文を登録する</span>
+            <span class="en" lang="en">5. #/seeds — Register seed papers</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja"
+              >検索式の捕捉率を検証するための基準として、すでに採用が分かっている論文の PMID
+              を登録します。この工程はスキップして先に進むこともできますが、その場合は捕捉率検証ができません。</span
+            >
+            <span class="en" lang="en"
+              >Register the PMIDs of studies you already know should be included, so the search strategy’s capture
+              rate can be checked against them. This step can be skipped, but capture-rate validation will then be
+              unavailable.</span
+            >
+          </p>
+        </section>
+
+        <section id="draft">
+          <h2>
+            <span class="ja" lang="ja">6. #/draft 検索式ドラフトの生成と検証</span>
+            <span class="en" lang="en">6. #/draft — Draft and validate the search strategy</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja"
+              >「生成して検証する」ボタンひとつで、AI が承認済みブロックから PubMed
+              検索式のドラフトを生成し、ブロックごとのヒット数（line_hits）をライブ表示します。生成が完了すると、シード論文の捕捉率検証と
+              MeSH 検証を自動的に実行します。</span
+            >
+            <span class="en" lang="en"
+              >A single “Generate and validate” action drafts a PubMed search strategy from the approved blocks and
+              shows each block’s hit count (line_hits) live as it runs. Once the draft is complete, seed-paper capture
+              rate validation and a MeSH check run automatically.</span
+            >
+          </p>
+        </section>
+
+        <section id="expand">
+          <h2>
+            <span class="ja" lang="ja">7. #/expand 対話的シード拡張（実験的機能）</span>
+            <span class="en" lang="en">7. #/expand — Interactive seed expansion (experimental)</span>
+          </h2>
+          <div class="note">
+            <p>
+              <span class="ja" lang="ja"
+                ><strong>実験的機能（dev）です。</strong>結果や UI は今後変更される可能性があります。</span
+              >
+              <span class="en" lang="en"
+                ><strong>This is an experimental (dev) feature.</strong> Its behaviour and UI may change.</span
+              >
+            </p>
+          </div>
+          <p>
+            <span class="ja" lang="ja"
+              >現在の検索式を 2 軸（MeSH 一段上＋explode／フリーワードの synonym）で広げた「拡張式」を作り、その外側（拡張式
+              NOT 現式 = margin）を検索します。その中から AI が境界事例っぽい数件を選び、include / exclude / maybe
+              をワンクリックで判定させます。include した論文は <code>SeedPapers</code> に <code>source=interactive</code>
+              として追加され、自動的に再検証が走ります（margin は現式の外側なので、include が増えると捕捉率が
+              100% を割ることがあります）。あわせて「どの拡張語が拾えたか」を集計し、ブロックへの追加候補（更新提案）を提示します。採用するかどうかは
+              <a href="#draft">#/draft</a> で手動判断します。</span
+            >
+            <span class="en" lang="en"
+              >It builds an “expanded” version of the current query along two axes (one level up in MeSH plus
+              explode, and free-text synonyms), then searches the margin outside it (expanded query NOT current
+              query). AI picks a few borderline-looking candidates from that margin for you to judge with one click:
+              include / exclude / maybe. Included papers are added to <code>SeedPapers</code> with
+              <code>source=interactive</code> and trigger automatic re-validation (since the margin lies outside the
+              current query, adding includes can push the capture rate below 100%). It also tallies which expansion
+              terms were picked up and suggests updates to add to a block. Whether to adopt them is decided manually
+              back in <a href="#draft">#/draft</a>.</span
+            >
+          </p>
+        </section>
+
+        <section id="edit">
+          <h2>
+            <span class="ja" lang="ja">8. #/edit 検索式を編集する</span>
+            <span class="en" lang="en">8. #/edit — Edit the search strategy</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja"
+              >ブロックはカード単位で並びます。カードにカーソルを合わせて出る鉛筆ボタンから直接インライン編集するか、「AI
+              に改善させる」で改善したい内容を指示文として入力します。指示を送る際、リサーチクエスチョン・ブロック定義・シード論文・直近の検証結果（捕捉率・取りこぼし）が文脈として
+              AI に開示されます。AI の提案は diff で表示され、accept / reject を選べます。</span
+            >
+            <span class="en" lang="en"
+              >Blocks are laid out as cards. Hover a card to reveal a pencil button for direct inline editing, or use
+              “Improve with AI” to describe what you want changed. When you submit an instruction, the research
+              question, block definitions, seed papers and the most recent validation result (capture rate, misses)
+              are disclosed to the AI as context. Its proposal is shown as a diff, and you accept or reject it.</span
+            >
+          </p>
+        </section>
+
+        <section id="export">
+          <h2>
+            <span class="ja" lang="ja">9. #/export 各データベースへ変換・エクスポートする</span>
+            <span class="en" lang="en">9. #/export — Convert and export for each database</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja"
+              >確定した PubMed 検索式を、CENTRAL / Embase(Dialog) / ClinicalTrials.gov / ICTRP
+              向けに変換します。変換結果は <code>.md</code> としてダウンロードでき、検索式を直接 PubMed
+              で開くリンクも表示されます。各データベースの検索ページへ実際に案内し、nbib
+              形式でのダウンロード手順を示すのは、次の <a href="#done">#/done</a>
+              画面です（ダウンロード自体の自動化はしません）。</span
+            >
+            <span class="en" lang="en"
+              >Convert the finalized PubMed search strategy for CENTRAL, Embase (Dialog), ClinicalTrials.gov and
+              ICTRP. The converted output can be downloaded as <code>.md</code>, and a link to open the query
+              directly in PubMed is shown too. The actual links to each database’s search page, and the
+              step-by-step guidance for downloading in nbib format, are on the next screen,
+              <a href="#done">#/done</a> (the download itself is not automated).</span
+            >
+          </p>
+        </section>
+
+        <section id="done">
+          <h2>
+            <span class="ja" lang="ja">10. #/done 完了画面</span>
+            <span class="en" lang="en">10. #/done — Finish screen</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja"
+              >検索式の開発が完了したことを示す画面です。PubMed
+              を検索式つきで直接開くリンクに加え、Cochrane CENTRAL / Embase(Dialog) / ClinicalTrials.gov / ICTRP
+              それぞれの検索ページへのリンクと、貼り付け先（Advanced search の場所など）を database
+              ごとに一言で案内します。あわせて「PubMed は Send to → Citation manager → PubMed format
+              (NBIB)、ClinicalTrials.gov / ICTRP は各画面の XML / CSV から書き出せます」という案内文を表示します。実際のダウンロード操作は各データベースのサイト上でご自身で行ってください（自動化はしません）。</span
+            >
+            <span class="en" lang="en"
+              >This screen marks that the search strategy is finished. Besides a link that opens PubMed directly
+              with the query, it links to the search page of Cochrane CENTRAL, Embase (Dialog),
+              ClinicalTrials.gov and ICTRP, each with a one-line note on where to paste the converted query (e.g.
+              which advanced-search field). It also shows guidance text: “PubMed: Send to → Citation manager →
+              PubMed format (NBIB); ClinicalTrials.gov / ICTRP: export from each site’s XML / CSV.” The actual
+              download happens on each database’s own site — it is not automated here.</span
+            >
+          </p>
+        </section>
+
+        <section id="history">
+          <h2>
+            <span class="ja" lang="ja">11. #/history バージョン履歴</span>
+            <span class="en" lang="en">11. #/history — Version history</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja"
+              >これまでに生成・編集した検索式のバージョン一覧です。各バージョンには、バージョン ID・作成者
+              （<code>ai_draft</code> = AI ドラフト / <code>user_edit</code> = 手動編集 /
+              <code>auto_optimize</code> = 自動最適化のいずれかの値が画面にそのまま表示されます）・作成日時・メモ（あれば）・検索式のプレビューが並びます。「このバージョンを読み込む」を押すと、そのバージョンを
+              <a href="#draft">#/draft</a> の状態として読み込みます。</span
+            >
+            <span class="en" lang="en"
+              >A list of every version of the search strategy you have drafted or edited. Each entry shows its
+              version ID, creator (the raw value is shown as-is: <code>ai_draft</code> = AI draft,
+              <code>user_edit</code> = manual edit, or <code>auto_optimize</code> = auto-optimize), creation time,
+              note (if any), and a preview of the search strategy. Clicking “Load this version” loads it back into
+              <a href="#draft">#/draft</a>.</span
+            >
+          </p>
+        </section>
+
+        <section id="troubleshooting">
+          <h2>
+            <span class="ja" lang="ja">12. トラブルシューティング</span>
+            <span class="en" lang="en">12. Troubleshooting</span>
+          </h2>
+
+          <h3>
+            <span class="ja" lang="ja">Google API のエラーが表示される（認証切れ・書き込み権限不足など）</span>
+            <span class="en" lang="en">A Google API error is shown (expired auth, missing write permission, etc.)</span>
+          </h3>
+          <p>
+            <span class="ja" lang="ja"
+              >専用のモーダルやボタンは無く、その画面のエラー欄にそのままエラーメッセージが表示されます（例:
+              「Google API failed: HTTP 401 …」「… HTTP 403 …」）。頻発する・解消しない場合は、Popup の
+              「ログアウト」ボタンでキャッシュされた認証情報を破棄してから再度「Google でログイン」してください。書き込み権限の不足（403）が疑われる場合は、プロジェクトの
+              Google スプレッドシート自体を開き、共有設定で編集権限があるか確認してください。</span
+            >
+            <span class="en" lang="en"
+              >There is no dedicated modal or button — the error message is shown as plain text in that screen’s
+              error area (e.g. “Google API failed: HTTP 401 …” or “… HTTP 403 …”). If this happens repeatedly or
+              won’t clear, use the “Log out” button in the Popup to discard the cached credentials, then sign in
+              with Google again. If you suspect a missing write permission (403), open the project’s Google Sheet
+              itself and check its sharing settings for edit access.</span
+            >
+          </p>
+
+          <h3>
+            <span class="ja" lang="ja">NCBI のレート制限に当たる</span>
+            <span class="en" lang="en">Hitting the NCBI rate limit</span>
+          </h3>
+          <p>
+            <span class="ja" lang="ja"
+              >専用のバナーは表示されません。NCBI E-utilities の呼び出しはレート制限（429 等）を検知すると内部で自動的に指数バックオフ再試行するため、進行中の操作（例:
+              「生成して検証する」）がいつもより時間がかかって見えるだけです。頻発する場合は、Options
+              画面で NCBI API キー（任意）を設定すると割り当てが 3 req/s → 10 req/s に上がり緩和されます。</span
+            >
+            <span class="en" lang="en"
+              >There is no dedicated banner. Calls to NCBI E-utilities automatically retry with exponential backoff
+              internally when they hit a rate limit (e.g. 429), so the in-progress action (e.g. “Generate and
+              validate”) just appears to take longer than usual. If this happens often, set the optional NCBI API
+              key in Options — it raises the allowance from 3 req/s to 10 req/s.</span
+            >
+          </p>
+
+          <h3>
+            <span class="ja" lang="ja">Gemini（LLM）API がエラーになる</span>
+            <span class="en" lang="en">The LLM (Gemini) API returns an error</span>
+          </h3>
+          <p>
+            <span class="ja" lang="ja"
+              >専用のバッジや「再試行」ボタンは無く、その画面のエラー欄に「生成に失敗しました: 〈エラー内容〉」のようにそのまま表示されます。API
+              キーが正しいか、利用枠を超えていないかを Options 画面で確認したうえで、同じ操作ボタン（例:
+              「生成して検証する」/「再生成して再検証する」）をもう一度押してください。エラーは成功・失敗を問わず
+              <code>LLMApiLog</code> タブに自動的に記録されます。</span
+            >
+            <span class="en" lang="en"
+              >There is no dedicated badge or “Retry” button — the screen’s error area shows the message as-is,
+              e.g. “Generation failed: 〈error detail〉”. Check in Options that your API key is correct and that you
+              have not exceeded your quota, then press the same action button again (e.g. “Generate and validate” /
+              “Regenerate and revalidate”). Every call — successful or not — is recorded automatically in the
+              <code>LLMApiLog</code> tab.</span
+            >
+          </p>
+        </section>
+
+        <section id="faq">
+          <h2>
+            <span class="ja" lang="ja">13. よくある質問</span>
+            <span class="en" lang="en">13. FAQ</span>
+          </h2>
+
+          <details class="faq">
+            <summary>
+              <span class="ja" lang="ja">BYOK とは何ですか？</span>
+              <span class="en" lang="en">What is BYOK?</span>
+            </summary>
+            <p>
+              <span class="ja" lang="ja"
+                >Bring Your Own Key の略で、利用者自身が契約・取得した API キーを Options 画面に保存して使う方式です。検索式ドラフトの生成には選択した
+                LLM プロバイダ（既定は Gemini。OpenRouter への切替も可）のキーが必要で、NCBI API キーは任意です。キーはブラウザ内にのみ保存され、開発者へ送信されることはありません。</span
+              >
+              <span class="en" lang="en"
+                >BYOK stands for Bring Your Own Key: you save the API keys you obtained yourself in the Options
+                screen. Drafting the search strategy needs a key for whichever LLM provider is selected (Gemini by
+                default; you can switch to OpenRouter), and an NCBI API key is optional. Keys stay in your browser
+                and are never sent to the developer.</span
+              >
+            </p>
+          </details>
+
+          <details class="faq">
+            <summary>
+              <span class="ja" lang="ja">どのデータベースに対応していますか？</span>
+              <span class="en" lang="en">Which databases are supported?</span>
+            </summary>
+            <p>
+              <span class="ja" lang="ja"
+                >検索式は PubMed/MEDLINE 向けにドラフト・検証し、CENTRAL / Embase(Dialog) / ClinicalTrials.gov / ICTRP
+                向けの変換に対応しています。</span
+              >
+              <span class="en" lang="en"
+                >The search strategy is drafted and validated for PubMed/MEDLINE, and can be converted for CENTRAL,
+                Embase (Dialog), ClinicalTrials.gov and ICTRP.</span
+              >
+            </p>
+          </details>
+
+          <details class="faq">
+            <summary>
+              <span class="ja" lang="ja">スクリーニングや重複除去もできますか？</span>
+              <span class="en" lang="en">Does it handle screening or deduplication?</span>
+            </summary>
+            <p>
+              <span class="ja" lang="ja"
+                >いいえ。本拡張の責務は「研究プロトコル → 検証済み検索式 → 各データベースで抄録をダウンロードするところまで」です。スクリーニング・重複除去・全文
+                PDF 取得は対象外で、同シリーズの <a href="https://github.com/youkiti/tiab-review-plugin"
+                  >tiab-review-plugin</a
+                > や外部ツールに引き継ぐ設計です。</span
+              >
+              <span class="en" lang="en"
+                >No. The extension’s scope ends at “research protocol → validated search strategy → downloading
+                abstracts from each database”. Screening, deduplication and full-text PDF retrieval are out of scope
+                and are meant to be handed off to tools such as
+                <a href="https://github.com/youkiti/tiab-review-plugin">tiab-review-plugin</a> or other external
+                tools.</span
+              >
+            </p>
+          </details>
+
+          <details class="faq">
+            <summary>
+              <span class="ja" lang="ja"><code>.docx</code> のプロトコルは読み込めますか？</span>
+              <span class="en" lang="en">Can I import a <code>.docx</code> protocol?</span>
+            </summary>
+            <p>
+              <span class="ja" lang="ja"
+                >現時点では未対応です。<code>.md</code> ファイルからの取り込み、または手入力をご利用ください。</span
+              >
+              <span class="en" lang="en">Not yet. Please use a <code>.md</code> file or enter the protocol by hand.</span>
+            </p>
+          </details>
+
+          <details class="faq">
+            <summary>
+              <span class="ja" lang="ja">AI が作った検索式をそのまま使ってよいですか？</span>
+              <span class="en" lang="en">Can I use the AI-drafted search strategy as-is?</span>
+            </summary>
+            <p>
+              <span class="ja" lang="ja"
+                >いいえ。<a href="#draft">#/draft</a> のブロックごとのヒット数・シード論文捕捉率・MeSH
+                検証で確認し、必要であれば <a href="#edit">#/edit</a> や <a href="#expand">#/expand</a>
+                で修正してから確定してください。</span
+              >
+              <span class="en" lang="en"
+                >No. Check it against the per-block hit counts, seed-paper capture rate and MeSH validation in
+                <a href="#draft">#/draft</a>, and revise it in <a href="#edit">#/edit</a> or
+                <a href="#expand">#/expand</a> as needed before finalizing.</span
+              >
+            </p>
+          </details>
+
+          <details class="faq">
+            <summary>
+              <span class="ja" lang="ja">不具合を見つけました / 機能を提案したいです</span>
+              <span class="en" lang="en">I found a bug / I have a feature request</span>
+            </summary>
+            <p>
+              <span class="ja" lang="ja"
+                >GitHub の <a href="https://github.com/youkiti/sr-query-builder-plugin/issues">Issues</a>
+                へお寄せください。</span
+              >
+              <span class="en" lang="en">Please open an issue on GitHub.</span>
+            </p>
+          </details>
+        </section>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="container">
+        <div class="footer-content">
+          <div class="footer-links">
+            <a href="index.html"
+              ><span class="ja" lang="ja">ホーム</span><span class="en" lang="en">Home</span></a
+            >
+            <a href="help.html"
+              ><span class="ja" lang="ja">使い方</span><span class="en" lang="en">Help</span></a
+            >
+            <a href="privacy-policy.html"
+              ><span class="ja" lang="ja">プライバシーポリシー</span
+              ><span class="en" lang="en">Privacy</span></a
+            >
+            <a href="terms-of-service.html"
+              ><span class="ja" lang="ja">利用規約</span><span class="en" lang="en">Terms</span></a
+            >
+            <a href="https://github.com/youkiti/sr-query-builder-plugin">GitHub</a>
+          </div>
+          <p class="copyright">© 2026 youkiti — MIT License</p>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

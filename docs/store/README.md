@@ -9,6 +9,8 @@ Chrome Web Store 提出フェーズ1（manifest / アイコン配線 / 提出物
 | [privacy-policy.md](privacy-policy.md) | プライバシーポリシー（審査必須。公開 URL が要る → 下記参照） | 原稿完成 |
 | [permissions-justification.md](permissions-justification.md) | 各権限の使用理由（審査フォームへ貼り付け。日英併記） | 原稿完成 |
 
+ストア掲載ページ（プライバシーポリシー / ヘルプ / 利用規約 / ウェブサイト）の実体は [hosted/](../../hosted/) に作成済み。ホスティング手順は [hosted/README.md](../../hosted/README.md) を参照。
+
 ## ストア掲載メタ情報（登録フォームへ入力予定）
 
 - **名称**: SR Query Builder Plugin（確定）
@@ -18,8 +20,8 @@ Chrome Web Store 提出フェーズ1（manifest / アイコン配線 / 提出物
 - **カテゴリ**: 仕事効率化（Productivity）
 - **言語**: 日本語（`default_locale: "ja"`）
 - **公開範囲**: **一般公開（public）**（確定）— ストア検索・リンクのどちらからでも誰でもインストールできる。同シリーズの sr-data-extraction-plugin と同じ方針
-- **プライバシーポリシー URL**: `https://youkiti.github.io/sr-query-builder-plugin/privacy-policy.html`（想定 URL。**未公開・予定** — GitHub Pages でのホスティングは後続フェーズで実施する）
-- **ウェブサイト**: `https://youkiti.github.io/sr-query-builder-plugin/`（想定 URL。**未公開・予定**）
+- **プライバシーポリシー URL**: `https://youkiti.github.io/sr-query-builder-plugin/privacy-policy.html`（想定 URL。ページは [hosted/](../../hosted/) に作成済み。`gh-pages` へのデプロイと GitHub Pages の有効化は未実施 — 手順は [hosted/README.md](../../hosted/README.md) 参照）
+- **ウェブサイト**: `https://youkiti.github.io/sr-query-builder-plugin/`（想定 URL。ページは [hosted/](../../hosted/) に作成済み。`gh-pages` へのデプロイと GitHub Pages の有効化は未実施）
 
 ## 必要な画像
 
@@ -28,7 +30,7 @@ Chrome ウェブストアの掲載に必要な画像。スクリーンショッ�
 | 画像 | 仕様 | 状態 |
 |---|---|---|
 | ストアアイコン | 128×128 PNG | 済 — [src/icons/icon128.png](../../src/icons/icon128.png) を使用可 |
-| スクリーンショット | 1280×800、最低 1 枚（最大 5 枚） | 未取得 |
+| スクリーンショット | 1280×800、最低 1 枚（最大 5 枚） | 未取得（取得手段は整備済み: `npm run manual:check -- --shots` で `hosted/screenshots/` に 5 枚を出力する。詳細は [docs/manual-testing.md](../manual-testing.md)） |
 | 小型プロモタイル（任意） | 440×280 PNG | 任意・未設定 |
 
 ## 提出前チェック（本フェーズの実施状況）
@@ -37,7 +39,8 @@ Chrome ウェブストアの掲載に必要な画像。スクリーンショッ�
 - [x] プライバシーポリシー原稿
 - [x] 権限の使用理由原稿（日英）
 - [x] 提出用 zip の作成・検証ツール整備（[tools/release/](../../tools/release/)。`npm run release` / `npm run pack:release`）
-- [ ] スクリーンショット取得
+- [x] GitHub Pages 公開ページの作成（[hosted/](../../hosted/)。**作成済み・デプロイ未実施** — `gh-pages` ブランチへの反映と Pages の有効化はまだ行っていない。手順は [hosted/README.md](../../hosted/README.md)）
+- [ ] スクリーンショット取得（取得手段は整備済み。上記「必要な画像」参照。画像そのものはまだ無い）
 - [ ] クリーンな Chrome プロファイルでの実 Google 認証つき dist smoke
 - [ ] Chrome ウェブストア デベロッパーアカウントで提出
 - [ ] 審査通過・一般公開
