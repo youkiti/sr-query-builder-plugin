@@ -47,9 +47,16 @@ Chrome ウェブストアの掲載に必要な画像。スクリーンショッ�
 [src/manifest.json](../../src/manifest.json) に対して本フェーズ（フェーズ1）で行った変更点。
 
 - **`icons` / `action.default_icon` を追加**: `16` / `48` / `128` の 3 サイズ（[src/icons/](../../src/icons/)）。Chrome ウェブストアはストアアイコン（128×128）と拡張機能アイコンの配線を要求するため。webpack の CopyPlugin（[webpack.config.js](../../webpack.config.js)）に `src/icons` → `dist/icons` のコピー設定を追加し、dev / production 両ビルドで反映されるようにした。
-- **`oauth2.scopes` を `https://www.googleapis.com/auth/drive.file` の 1 本に変更**（`https://www.googleapis.com/auth/spreadsheets` を削除）: `spreadsheets` はセンシティブスコープに分類され、OAuth 同意画面が Testing 状態の間は登録テストユーザー 100 人までしか使えない（tiab-review-plugin で実際にこの上限に到達した実績がある）。本拡張は Sheets の読み書きも `drive.file`（利用者が選択した/拡張が作成したファイルのみへのアクセス）で行えるため、より狭いスコープへ寄せた。
+- **`oauth2.scopes` を `https://www.googleapis.com/auth/drive.file` の 1 本に変更**（`https://www.googleapis.com/auth/spreadsheets` を削除）: センシティブスコープ（`spreadsheets` 等）を含むアプリを Production（一般公開）で運用するには Google の OAuth 検証（app verification）を通す必要があり、検証を通さないまま Production に出すと「確認されていないアプリ」の警告が出たうえ利用者 100 人で打ち止めになる（tiab-review-plugin が実際にこの上限に到達した実績がある）。一方 `drive.file` は非センシティブ（推奨）スコープのため、これ 1 本に絞れば OAuth 検証そのものが不要になり利用者数の上限も付かない。Sheets API v4 は `drive.file` を正式な認可スコープとして受理する（公式ドキュメントに明記）ため、本拡張は Sheets の読み書きも `drive.file`（利用者が選択した/拡張が作成したファイルのみへのアクセス）で機能上の損失なく行える。
 - **`permissions` から `"tabs"` を削除**: メインビューは `chrome.tabs.create({ url: chrome.runtime.getURL('app.html') })` で開いており、これは `"tabs"` permission が無くても動作する（`"tabs"` は他タブの URL / title / favicon など機微情報を読み取る場合にのみ必要）。typecheck / test / lint / dev / test:e2e のすべてが通ることを確認した上で削除した。
 
 ## `key.pem` の扱い（確定事項）
 
 拡張 ID は現行の **`bckokafmjighegpjiocopkagghppnjld`** を維持できる。production ビルド（`npm run build`）は manifest から `key` フィールドを削除する（Chrome ウェブストアは manifest に `key` があるとアップロードを拒否するため）が、**初回ストアアップロード時だけ**、対応する秘密鍵を `key.pem` として zip ルートに同梱すれば、Store がその `key.pem` から同じ拡張 ID を導出する。したがって、ストア用に別の OAuth client_id を新規発行する必要はなく、既存の `client_id`（アルファ配布と共通）がそのまま使える。秘密鍵の実体はリポジトリ外で管理し、コミットしないこと。2 回目以降の更新 zip には `key.pem` は不要（ID はストアのアイテムに固定される）。
+
+## 既知のリスク・要検証
+
+`oauth2.scopes` を `drive.file` 1 本へ縮小したことに伴い、本フェーズでは未解決で、実機確認または後続フェーズで対応が必要な事項が 2 点ある。
+
+1. **既存プロジェクトへの影響（要実機検証）**: 旧スコープ（`spreadsheets`）を持った状態で作成された既存のスプレッドシート（アルファ配布中のテスターが作成済みのもの）に対し、`drive.file` のファイル単位のアクセス付与が引き継がれるかは未検証。引き継がれない場合、既存プロジェクトを開くと 403 になり得るため、実機（実 Google 認証）での確認が必要。403 になる場合は移行導線（下記の Picker、またはプロジェクト再作成）が要る。
+2. **「スプレッドシート ID から開く」の制約**: `drive.file` は「本拡張が作成したファイル + 利用者が Picker で明示的に選択したファイル」に限られるため、popup の「スプレッドシート ID から開く」導線（[src/popup/bootstrap.ts](../../src/popup/bootstrap.ts)）は、他人が作成した共有スプレッドシートに対しては 403 になる。後続フェーズで Google Picker を移植して解消する予定（同シリーズの sr-data-extraction-plugin が `hosted/picker.html` を GitHub Pages に置き `externally_connectable` で拡張と通信する方式で実装済み。これを移植する）。

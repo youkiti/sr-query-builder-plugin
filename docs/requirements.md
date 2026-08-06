@@ -67,7 +67,7 @@
 https://www.googleapis.com/auth/drive.file          # Sheets 読み書き + LLM ログ保存用
 ```
 
-`spreadsheets` スコープは要求しない。理由: `spreadsheets` はセンシティブスコープに分類され、OAuth 同意画面が Testing 状態の間は登録テストユーザー 100 人までしか使えない（tiab-review-plugin で実際にこの上限に到達した実績がある）。本拡張が読み書きするのは本拡張自身が作成したスプレッドシートのみのため、`drive.file`（利用者が選択した／拡張が作成したファイルのみへのアクセス）でスコープを賄い、Sheets API の呼び出しもこの範囲で行う。
+`spreadsheets` スコープは要求しない。理由: センシティブスコープ（`spreadsheets` 等）を含むアプリを Production（一般公開）で運用するには、Google の OAuth 検証（app verification）を通す必要がある。検証を通さないまま Production に出すと「確認されていないアプリ」の警告が出たうえ、利用者 100 人で打ち止めになる（tiab-review-plugin が実際にこの上限に到達した実績がある）。一方 `drive.file` は非センシティブ（推奨）スコープに分類されるため、これ 1 本に絞れば OAuth 検証そのものが不要になり、利用者数の上限も付かない。Sheets API v4 は `drive.file` を正式な認可スコープとして受理する（公式ドキュメントに明記）ため、機能上の損失なくスコープを狭められる。本拡張が読み書きするのは本拡張自身が作成したスプレッドシートのみのため、`drive.file`（利用者が選択した／拡張が作成したファイルのみへのアクセス）でスコープを賄い、Sheets API の呼び出しもこの範囲で行う。
 
 ユーザーのメールアドレスは OAuth スコープではなく、Chrome 拡張 API の `chrome.identity.getProfileUserInfo()` で取得する（§2.2 の `identity.email` permission を参照）。こちらはプロファイル情報の取得だけなので OAuth スコープを広げずに済む。
 
