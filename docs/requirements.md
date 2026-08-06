@@ -64,16 +64,18 @@
 ### 2.1 OAuth スコープ
 
 ```
-https://www.googleapis.com/auth/spreadsheets        # Sheets 読み書き
-https://www.googleapis.com/auth/drive.file          # Drive Picker + LLM ログ保存用
+https://www.googleapis.com/auth/drive.file          # Sheets 読み書き + LLM ログ保存用
 ```
+
+`spreadsheets` スコープは要求しない。理由: センシティブスコープ（`spreadsheets` 等）を含むアプリを Production（一般公開）で運用するには、Google の OAuth 検証（app verification）を通す必要がある。検証を通さないまま Production に出すと「確認されていないアプリ」の警告が出たうえ、利用者 100 人で打ち止めになる（tiab-review-plugin が実際にこの上限に到達した実績がある）。一方 `drive.file` は非センシティブ（推奨）スコープに分類されるため、これ 1 本に絞れば OAuth 検証そのものが不要になり、利用者数の上限も付かない。Sheets API v4 は `drive.file` を正式な認可スコープとして受理する（公式ドキュメントに明記）ため、機能上の損失なくスコープを狭められる。本拡張が読み書きするのは本拡張自身が作成したスプレッドシートのみのため、`drive.file`（利用者が選択した／拡張が作成したファイルのみへのアクセス）でスコープを賄い、Sheets API の呼び出しもこの範囲で行う。
 
 ユーザーのメールアドレスは OAuth スコープではなく、Chrome 拡張 API の `chrome.identity.getProfileUserInfo()` で取得する（§2.2 の `identity.email` permission を参照）。こちらはプロファイル情報の取得だけなので OAuth スコープを広げずに済む。
 
 ### 2.2 Manifest V3 要件
 
-- `permissions`: `identity`, `identity.email`, `storage`, `tabs`（メインビューを新規タブで開く用途）
+- `permissions`: `identity`, `identity.email`, `storage`
   - `identity.email` は `chrome.identity.getProfileUserInfo({ accountStatus: 'ANY' })` でユーザーのメールアドレスを取得するために必須。`created_by` / `decided_by` 列にはこの API で取得したメールを書き込む（OAuth の `userinfo.email` スコープは取得せず、Chrome の同期アカウント情報を使う）
+  - メインビューを開く `chrome.tabs.create` は `"tabs"` permission が無くても動作する（`"tabs"` は他タブの URL / title / favicon など機微情報を読み取る場合にのみ必要）ため、`permissions` には含めない
 - `host_permissions`:
   - `https://sheets.googleapis.com/*`
   - `https://www.googleapis.com/*`
@@ -294,10 +296,11 @@ https://www.googleapis.com/auth/drive.file          # Drive Picker + LLM ログ�
 2. `project_id`（UUID v4）を発行
 3. **Drive トップフォルダを作成**（`マイドライブ/sr-query-builder/{project_title}_{project_id_short}/`）→ `drive_folder_id` 取得
 4. トップフォルダ配下に `raw_protocols/` / `logs/llm/` / `logs/validation/` のサブフォルダを作成
-5. 同フォルダ内に新規スプレッドシートを作成（`spreadsheets.create` + Drive API で親フォルダ指定）→ `spreadsheet_id` 取得
-6. スプレッドシートに 9 タブを初期化
-7. `Meta` タブに 1 行書き込み（`project_id` / `drive_folder_id` / `spreadsheet_id` / `schema_version=1.0` 等）
-8. `chrome.storage.currentProject` に `{ projectId, spreadsheetId, driveFolderId, title }` を保存
+5. 新規スプレッドシートを作成（`spreadsheets.create`）→ `spreadsheet_id` 取得。Sheets API はマイドライブ直下にしか作成できないため、この時点ではまだトップフォルダの外にある
+6. 作成したスプレッドシートを Drive API `files.update`（`addParents` / `removeParents`）でトップフォルダ配下へ移動
+7. スプレッドシートに 9 タブを初期化
+8. `Meta` タブに 1 行書き込み（`project_id` / `drive_folder_id` / `spreadsheet_id` / `schema_version=1.0` 等）
+9. `chrome.storage.currentProject` に `{ projectId, spreadsheetId, driveFolderId, title }` を保存
 
 #### 既存プロジェクト選択
 
@@ -553,7 +556,7 @@ tiab-review-plugin と合わせる：
 | `search-formula-developper` の CLI ロジック TS 移植工数が膨らむ | MVP スケジュール遅延 | P0 4 スクリプトに絞り込み、MVP 段階では `check_block_overlap` 等は諦める |
 | LLM のトークン消費が BYOK ユーザーのコスト負担に直結 | ユーザー離脱 | `LLMApiLog.cost_estimate_usd` で累積コスト可視化、プロンプト最適化 |
 | 50,000 文字 / セル制限 | データ欠損 | Drive 退避で回避（実装済み方針） |
-| OAuth スコープ過大で Chrome Web Store 審査遅延 | リリース遅延 | `drive.file` に限定（`drive.readonly` 等は使わない） |
+| OAuth スコープ過大で Chrome Web Store 審査遅延 | リリース遅延 | `drive.file` の 1 スコープのみに限定済み（`spreadsheets` / `drive.readonly` 等は要求しない。§2.1） |
 | Gemini API 仕様変更 | 検索式生成不能 | プロバイダ抽象化で即座に別 LLM へ切替可能に |
 | LLM が勝手にフィルタを追加（`English[lang]` / `Humans[mh]` 等）→ 感度低下で seed 捕捉漏れ | 検索品質低下（SR 方法論上の致命傷） | `filter-designer` skill をホワイトリスト方式に固定（Cochrane HSSS PubMed 2024 sensitivity-maximizing + 明示された年代のみ）。他フィルタは「ヒット数 10,000 件超 → ユーザー承認」経路でのみ追加 |
 

@@ -4,6 +4,7 @@ import {
   appendRow,
   createFolder,
   ensureRootFolder,
+  moveFileToFolder,
   createSpreadsheet,
   writeHeaderRow,
   type CreatedSpreadsheet,
@@ -20,9 +21,12 @@ import { newUuid, shortUuid } from '@/utils/uuid';
  * 1. project_id（UUID v4）発行
  * 2. Drive トップフォルダ作成（`マイドライブ/sr-query-builder/{title}_{id_short}/`）
  * 3. サブフォルダ（raw_protocols / logs/llm / logs/validation）作成
- * 4. トップフォルダ内にスプレッドシート作成（9 タブを一括初期化）
- * 5. 各タブのヘッダ行書き込み
- * 6. Meta タブに 1 行追記
+ * 4. スプレッドシート作成（9 タブを一括初期化）。Sheets API はマイドライブ
+ *    直下にしか作成できないため、この時点ではまだトップフォルダの外にある
+ * 5. 作成したスプレッドシートをトップフォルダ配下へ移動（Drive API の
+ *    `files.update` で親フォルダを付け替え）
+ * 6. 各タブのヘッダ行書き込み
+ * 7. Meta タブに 1 行追記
  */
 
 const ROOT_FOLDER_NAME = 'sr-query-builder';
@@ -79,8 +83,9 @@ export async function createProject(
     deps
   );
 
-  // 新規スプレッドシートをプロジェクトフォルダ配下に移動することは本 MVP では省略する
-  // （Drive API files.update の parents 操作が必要。§9 では要件に含めない）
+  // spreadsheets.create はマイドライブ直下にファイルを作るため、
+  // 作成したスプレッドシートをプロジェクトのトップフォルダ配下へ移動する。
+  await moveFileToFolder(spreadsheet.spreadsheetId, driveFolder.id, deps);
 
   for (const tab of SHEET_TABS) {
     await writeHeaderRow(spreadsheet.spreadsheetId, tab, SHEET_HEADERS[tab], deps);

@@ -1,4 +1,11 @@
-import { createFolder, ensureChildFolder, ensureRootFolder, getFileText, uploadTextFile } from './drive';
+import {
+  createFolder,
+  ensureChildFolder,
+  ensureRootFolder,
+  getFileText,
+  moveFileToFolder,
+  uploadTextFile,
+} from './drive';
 
 function okJson(body: unknown): Response {
   return {
@@ -139,5 +146,67 @@ describe('getFileText', () => {
     await expect(getFileText('FILE-id', deps)).resolves.toBe('hello world');
     const [url] = fetch.mock.calls[0];
     expect(url).toContain('/drive/v3/files/FILE-id?alt=media');
+  });
+});
+
+describe('moveFileToFolder', () => {
+  test('既存の親が1つある場合は取得した親を外して新しい親を付ける', async () => {
+    const fetch = jest
+      .fn()
+      .mockResolvedValueOnce(okJson({ parents: ['OLD_PARENT'] }))
+      .mockResolvedValueOnce(okJson({ id: 'FILE1', parents: ['NEW_FOLDER'] }));
+    const deps = { fetch, getAccessToken: jest.fn().mockResolvedValue('t') };
+    const result = await moveFileToFolder('FILE1', 'NEW_FOLDER', deps);
+    expect(result).toEqual({ id: 'FILE1', parents: ['NEW_FOLDER'] });
+    expect(fetch).toHaveBeenCalledTimes(2);
+
+    const [getUrl, getInit] = fetch.mock.calls[0] as [string, RequestInit];
+    expect(getUrl).toContain('/drive/v3/files/FILE1?fields=parents');
+    expect(getInit.method).toBe('GET');
+
+    const [patchUrl, patchInit] = fetch.mock.calls[1] as [string, RequestInit];
+    expect(patchInit.method).toBe('PATCH');
+    const decoded = decodeURIComponent(patchUrl);
+    expect(decoded).toContain('/drive/v3/files/FILE1?addParents=NEW_FOLDER');
+    expect(decoded).toContain('removeParents=OLD_PARENT');
+    expect(decoded).toContain('fields=id,parents');
+    expect((patchInit.headers as Headers).get('Content-Type')).toBe('application/json');
+    expect(patchInit.body).toBe('{}');
+  });
+
+  test('親が複数ある場合はすべてカンマ区切りで外す', async () => {
+    const fetch = jest
+      .fn()
+      .mockResolvedValueOnce(okJson({ parents: ['PARENT_A', 'PARENT_B'] }))
+      .mockResolvedValueOnce(okJson({ id: 'FILE2', parents: ['NEW_FOLDER'] }));
+    const deps = { fetch, getAccessToken: jest.fn().mockResolvedValue('t') };
+    await moveFileToFolder('FILE2', 'NEW_FOLDER', deps);
+    const [patchUrl] = fetch.mock.calls[1] as [string, RequestInit];
+    const decoded = decodeURIComponent(patchUrl);
+    expect(decoded).toContain('removeParents=PARENT_A,PARENT_B');
+  });
+
+  test('親が空の場合は removeParents を付けない', async () => {
+    const fetch = jest
+      .fn()
+      .mockResolvedValueOnce(okJson({ parents: [] }))
+      .mockResolvedValueOnce(okJson({ id: 'FILE3', parents: ['NEW_FOLDER'] }));
+    const deps = { fetch, getAccessToken: jest.fn().mockResolvedValue('t') };
+    await moveFileToFolder('FILE3', 'NEW_FOLDER', deps);
+    const [patchUrl] = fetch.mock.calls[1] as [string, RequestInit];
+    expect(patchUrl).not.toContain('removeParents');
+    const decoded = decodeURIComponent(patchUrl);
+    expect(decoded).toContain('/drive/v3/files/FILE3?addParents=NEW_FOLDER&fields=id,parents');
+  });
+
+  test('parents フィールド自体が無い場合も removeParents を付けない', async () => {
+    const fetch = jest
+      .fn()
+      .mockResolvedValueOnce(okJson({}))
+      .mockResolvedValueOnce(okJson({ id: 'FILE4', parents: ['NEW_FOLDER'] }));
+    const deps = { fetch, getAccessToken: jest.fn().mockResolvedValue('t') };
+    await moveFileToFolder('FILE4', 'NEW_FOLDER', deps);
+    const [patchUrl] = fetch.mock.calls[1] as [string, RequestInit];
+    expect(patchUrl).not.toContain('removeParents');
   });
 });
