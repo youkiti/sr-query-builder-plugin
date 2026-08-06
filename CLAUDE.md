@@ -81,7 +81,7 @@ Chrome ウェブストア審査・利用者向けに公開する静的ページ 
 - **プライバシーポリシーの正典は [docs/store/privacy-policy.md](docs/store/privacy-policy.md)**。`hosted/privacy-policy.html` はその転記＋英訳なので、**内容を変えるときは両方を直す**（乖離するとストア審査で参照される URL の内容とリポジトリの原稿がずれる）
 - ja / en は**併記ではなく切替**（`lang.js` が `html[data-lang]` で表示側を絞る）。文言を足すときは両言語分を書くこと
 - ストア掲載用スクリーンショットは `npm run shots`（Playwright + stub 環境。無人実行）で `hosted/screenshots/` へ出力する（1280×800 の 5 枚）。実 API を叩いた本物の画面で撮り直したいときは `npm run manual:check -- --shots` を使う
-- デプロイは手動（`gh-pages` ブランチへ push）。手順は [hosted/README.md](hosted/README.md)。**`gh-pages` ブランチはまだ存在せず、デプロイも未実施**（現時点では公開 URL はまだ有効になっていない）
+- デプロイは手動（`gh-pages` ブランチへ push）。手順は [hosted/README.md](hosted/README.md)。**初回デプロイ済み**（`gh-pages` ブランチが存在し、公開 URL `https://youkiti.github.io/sr-query-builder-plugin/` は有効）
 - 提出物一式の全体像・進捗は [docs/store/README.md](docs/store/README.md) を参照
 
 ## アーキテクチャ
