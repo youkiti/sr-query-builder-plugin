@@ -11,14 +11,13 @@ Chrome Web Store 提出フェーズ1（manifest / アイコン配線 / 提出物
 
 ## ストア掲載メタ情報（登録フォームへ入力予定）
 
-- **名称**: SR Query Builder
-  - 出典: [src/_locales/ja/messages.json](../../src/_locales/ja/messages.json) の `extName`。
-  - **注記**: 未マージのブランチ `test/pr19-verify` に拡張名を「SR Query Builder Plugin」へ変更するコミットがある。マージ後は `extName` の値を再確認し、本ドキュメントの名称もそれに追随させること。
+- **名称**: SR Query Builder Plugin（確定）
+  - 出典: [src/_locales/ja/messages.json](../../src/_locales/ja/messages.json) の `extName`。en 側も同じ値。
 - **概要（日本語）**: 研究プロトコルから PubMed 検索式を生成・検証し、各データベース向けに変換する Chrome 拡張
   - 出典: [src/_locales/ja/messages.json](../../src/_locales/ja/messages.json) の `extDescription`。
 - **カテゴリ**: 仕事効率化（Productivity）
 - **言語**: 日本語（`default_locale: "ja"`）
-- **公開範囲**: 未定（本フェーズでは決定しない。後続フェーズでユーザーと合意の上で決定する）
+- **公開範囲**: **一般公開（public）**（確定）— ストア検索・リンクのどちらからでも誰でもインストールできる。同シリーズの sr-data-extraction-plugin と同じ方針
 - **プライバシーポリシー URL**: `https://youkiti.github.io/sr-query-builder-plugin/privacy-policy.html`（想定 URL。**未公開・予定** — GitHub Pages でのホスティングは後続フェーズで実施する）
 - **ウェブサイト**: `https://youkiti.github.io/sr-query-builder-plugin/`（想定 URL。**未公開・予定**）
 
