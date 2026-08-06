@@ -18,6 +18,8 @@ npm run dev            # dist/ を生成（dist/manifest.json の client_id が�
 npm run manual:check -- prepare   # 専用プロファイルの Chrome が開く
 ```
 
+> 実機確認は**必ず `npm run dev`（`dist/`）を使う**。`npm run build`（本番ビルド）は `dist-release/` へ出力され、manifest から `key` を削除するため、unpacked 読込すると拡張 ID が固定値からずれて OAuth が通らない。
+
 `prepare` で開いた Chrome で:
 
 1. `chrome://extensions` の「デベロッパーモード」を ON

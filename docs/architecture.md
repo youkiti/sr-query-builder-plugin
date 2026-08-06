@@ -40,7 +40,7 @@ sr-query-builder-plugin/
 
 ## 2. `src/` 配下
 
-tiab-review-plugin と同じ方針で、**UI ライブラリは使わず素の TypeScript + DOM API** で実装する。画面ごとのフォルダ（`popup/` / `app/` / `options/` / `background/`）に HTML・CSS・TS を同居させ、webpack の `copy-webpack-plugin` で `dist/` に転写する。
+tiab-review-plugin と同じ方針で、**UI ライブラリは使わず素の TypeScript + DOM API** で実装する。画面ごとのフォルダ（`popup/` / `app/` / `options/` / `background/`）に HTML・CSS・TS を同居させ、webpack の `copy-webpack-plugin` で出力先（dev ビルドは `dist/`、本番ビルドは `dist-release/`。§3.1 参照）に転写する。
 
 ```
 src/
@@ -216,16 +216,18 @@ startApp(document);
 
 `webpack.config.js` は tiab-review-plugin のものを踏襲：
 
-| エントリ | 出力 |
+| エントリ | 出力（dev = `dist/`、production = `dist-release/`） |
 |---|---|
-| `src/background/service-worker.ts` | `dist/background/service-worker.js` |
-| `src/popup/popup.ts` | `dist/popup/popup.js` |
-| `src/app/app.ts` | `dist/app/app.js` |
-| `src/options/options.ts` | `dist/options/options.js` |
+| `src/background/service-worker.ts` | `background/service-worker.js` |
+| `src/popup/popup.ts` | `popup/popup.js` |
+| `src/app/app.ts` | `app/app.js` |
+| `src/options/options.ts` | `options/options.js` |
 
-`copy-webpack-plugin` で以下を `dist/` へ転写：
+出力先は `--mode` に応じて `output.path` を切り替える。**production ビルドは manifest から `key` フィールドを削除する**ため、unpacked 読込で拡張 ID が固定される dev ビルド（`key` あり）と同じディレクトリを共有すると、本番ビルドを誤って unpacked 読込したときに拡張 ID が変わり OAuth が通らなくなる事故が起きる。これを避けるため production だけ `dist-release/` へ分離している。ローカルでの実機確認（unpacked 読込 / Selenium ハーネス）は常に dev ビルド（`dist/`）を使う。
 
-- `src/manifest.json`（`OAUTH_CLIENT_ID` 置換あり）
+`copy-webpack-plugin` で以下をビルド出力先へ転写：
+
+- `src/manifest.json`（`OAUTH_CLIENT_ID` 置換あり。production では `key` を削除）
 - 各画面の `*.html` / `*.css`
 - `src/icons/` / `src/_locales/` / `src/styles/`
 
@@ -237,7 +239,7 @@ startApp(document);
     "dev": "webpack --mode development",
     "watch": "webpack --mode development --watch",
     "build": "webpack --mode production",
-    "build:zip": "npm run build && cd dist && zip -r ../sr-query-builder-plugin.zip .",
+    "pack:release": "pwsh -NoProfile -File tools/release/pack.ps1",
     "lint": "eslint 'src/**/*.ts'",
     "typecheck": "tsc --noEmit",
     "test": "jest",

@@ -15,8 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 npm run dev          # webpack 開発ビルド（dist/ へ出力。完了報告前に必ず通すこと）
 npm run watch        # 開発ビルドの watch
-npm run build        # 本番ビルド（.env の OAUTH_CLIENT_ID 必須）
-npm run build:zip    # ストア配布用 zip（※ zip コマンド依存。Windows では未動作。アルファは release:alpha を使う）
+npm run build        # 本番ビルド（dist-release/ へ出力。.env の OAUTH_CLIENT_ID 必須）
 npm run release:alpha # アルファ配布: dev ビルド → zip 化 → Drive アップロードを一発（詳細は「アルファ配布」節）
 npm test             # jest（jsdom）unit テスト
 npm run test:e2e     # Playwright E2E（実 Chromium + axe a11y。API はすべて stub）
@@ -28,6 +27,8 @@ npm run manual:check # Selenium 実機確認（本物の Chrome + Google/Gemini/
 ```
 
 単一テストの実行: `npx jest src/app/views/blocksView.test.ts`、E2E 単体: `npx playwright test tests/e2e/app-blocks.spec.ts`。
+
+**dev ビルドと本番ビルドは出力先を分離している**（`dist/` と `dist-release/`）。**ローカルで実機確認するときは必ず dev ビルド（`dist/`）を読み込むこと**。本番ビルド（`dist-release/`）は webpack が manifest から `key` を削除しており、`key` の無い拡張を unpacked 読込すると Chrome が拡張 ID をパスから導出してしまい、OAuth クライアントに登録済みの `bckokafmjighegpjiocopkagghppnjld` と一致せず認証できない。
 
 **実機確認（Selenium 半自動ハーネス）**: jest / Playwright（すべて stub）ではカバーできない「本物の Chrome 拡張ランタイム + 本物の Google / Gemini / NCBI API」の結合部は [tools/selenium/manualCheck.mjs](tools/selenium/manualCheck.mjs) で通し確認する。操作・検証を自動化し、ログイン / OAuth 同意 / API キー入力だけコンソールで一時停止する。初回は `npm run manual:check -- prepare` で専用プロファイル（`.selenium-profile/`）に dist/ を手動読込。詳細と手順書は [docs/manual-testing.md](docs/manual-testing.md)。
 
@@ -61,14 +62,14 @@ npm run release -- patch -NoPush         # push せずローカル commit + zip 
 npm run release -- minor -SkipCiCheck    # CI 状態チェックを省略（gh 未導入 / 未認証の環境）
 npm run release -- minor -Force          # 前提チェックの警告（ブランチ不一致等）を停止ではなく警告に落とす
 npm run release -- minor -IncludeKeyPem  # 初回ストアアップロード専用。key.pem を zip に同梱
-npm run pack:release                     # 既存 dist/ だけをパッケージング（version バンプ・commit・push はしない）
+npm run pack:release                     # 既存 dist-release/ だけをパッケージング（version バンプ・commit・push はしない）
 ```
 
-実体は [tools/release/release.ps1](tools/release/release.ps1)（前提チェック → version バンプ → commit → 本番ビルド → [tools/release/pack.ps1](tools/release/pack.ps1) の実行 → push）と、パッケージング単体を担う [tools/release/pack.ps1](tools/release/pack.ps1)（既存 dist/ だけを検証・zip 化したいときはこちら単体で実行できる）。
+実体は [tools/release/release.ps1](tools/release/release.ps1)（前提チェック → version バンプ → commit → 本番ビルド → [tools/release/pack.ps1](tools/release/pack.ps1) の実行 → push）と、パッケージング単体を担う [tools/release/pack.ps1](tools/release/pack.ps1)（既存 dist-release/ だけを検証・zip 化したいときはこちら単体で実行できる）。
 
 - version は **`src/manifest.json` / `package.json` / `package-lock.json` の 3 箇所を揃える運用**。`release.ps1` が 3 箇所同時にバンプし、`pack.ps1` が不一致を検出して停止する
 - `key.pem`（リポジトリルート直下・gitignore 対象）は**初回ストアアップロードのときだけ** `-IncludeKeyPem` で zip に同梱する。以後の更新提出では同梱しない（Store がアイテムの拡張 ID を既に固定しているため）
-- `src/manifest.json` の `key` フィールドは常に保持する（dev の unpacked 読込で拡張 ID を固定するため）。production dist からの除去は webpack.config.js の CopyPlugin transform が自動で行い、`pack.ps1` はその除去が起きたことを確認するだけで、削除そのものはしない
+- `src/manifest.json` の `key` フィールドは常に保持する（dev の unpacked 読込で拡張 ID を固定するため）。production ビルド（`dist-release/`）からの除去は webpack.config.js の CopyPlugin transform が自動で行い、`pack.ps1` はその除去が起きたことを確認するだけで、削除そのものはしない
 - **CI チェックは現状オートスキップ**: 本リポジトリはまだ `.github/workflows/` を持たないため（「未実装・既知のギャップ」参照）、`release.ps1` は `gh run list` を呼ばずに `CI 未配置のためスキップ` と警告して先へ進む。将来 CI を追加すれば、workflow ファイルの存在を検知して自動的に CI green 判定へ切り替わる
 
 ## アーキテクチャ

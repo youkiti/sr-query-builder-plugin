@@ -1,12 +1,12 @@
 <#
 .SYNOPSIS
-  Chrome ウェブストア提出用 zip を dist/ から作成する（CLAUDE.md「本番リリース」節の実体）。
+  Chrome ウェブストア提出用 zip を dist-release/ から作成する（CLAUDE.md「本番リリース」節の実体）。
 
 .DESCRIPTION
-  `npm run build` 済みの dist/ を入力として、以下を一括で行う:
+  `npm run build` 済みの dist-release/ を入力として、以下を一括で行う:
     1. 事前検証（本番ビルドか・version・oauth2 セクション存在・client_id 注入済み）
     2. release/ 内の過去 zip をすべて削除（提出用・過去バージョンとも。手元に残す意味がないため）
-    3. dist/ をステージングし、manifest から `key` フィールドが既に無いことを確認する
+    3. dist-release/ をステージングし、manifest から `key` フィールドが既に無いことを確認する
        （本リポジトリでは webpack.config.js の CopyPlugin transform が production ビルド時に
        自分で `delete manifest.key` する。Store は key を持つ manifest を拒否するため）
     4. release/sr-query-builder-plugin-<version>.zip を作成
@@ -50,7 +50,8 @@ function Write-Ok([string]$message) {
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$distDir = Join-Path $repoRoot 'dist'
+# 本番ビルドは dist-release/ へ出力される（webpack.config.js 参照。dev ビルドの dist/ とは分離）
+$distDir = Join-Path $repoRoot 'dist-release'
 $releaseDir = Join-Path $repoRoot 'release'
 $stageDir = Join-Path $releaseDir 'stage'
 $verifyDir = Join-Path $releaseDir '_verify'
@@ -72,12 +73,12 @@ $requiredEntries = @(
 )
 
 # ---------------------------------------------------------------------------
-# 1. 事前検証（dist/）
+# 1. 事前検証（dist-release/）
 # ---------------------------------------------------------------------------
-Write-Host '=== 1. dist/ の事前検証 ===' -ForegroundColor Cyan
+Write-Host '=== 1. dist-release/ の事前検証 ===' -ForegroundColor Cyan
 
 if (-not (Test-Path $distManifestPath)) {
-  Stop-WithError "dist/manifest.json がありません。先に ``npm run build`` を実行してください"
+  Stop-WithError "dist-release/manifest.json がありません。先に ``npm run build`` を実行してください"
 }
 
 $distManifestRaw = Get-Content $distManifestPath -Raw
@@ -90,11 +91,11 @@ $distManifest = $distManifestRaw | ConvertFrom-Json
 # manifest.json の name を直接書き換える方式ではないので、name を見るチェックは常に false になり無意味）
 $distLocaleJaPath = Join-Path $distDir '_locales\ja\messages.json'
 if (-not (Test-Path $distLocaleJaPath)) {
-  Stop-WithError 'dist/_locales/ja/messages.json がありません'
+  Stop-WithError 'dist-release/_locales/ja/messages.json がありません'
 }
 $distExtName = (Get-Content $distLocaleJaPath -Raw | ConvertFrom-Json).extName.message
 if ($distExtName -match '\(dev\)') {
-  Stop-WithError "dist が dev ビルドです（拡張名 = '$distExtName'）。``npm run build``（production）で作り直してください"
+  Stop-WithError "dist-release が dev ビルドです（拡張名 = '$distExtName'）。``npm run build``（production）で作り直してください"
 }
 Write-Ok "本番ビルド（拡張名 = '$distExtName'）"
 
@@ -122,7 +123,7 @@ if ($distManifest.PSObject.Properties.Name -notcontains 'oauth2') {
 Write-Ok 'oauth2 セクションあり'
 
 # client_id は webpack.config.js の CopyPlugin transform が manifest.oauth2.client_id へ直接注入する
-# （DE plugin のような DefinePlugin 経由の JS 注入ではない）。dist/manifest.json を直接見れば足りる
+# （DE plugin のような DefinePlugin 経由の JS 注入ではない）。dist-release/manifest.json を直接見れば足りる
 $clientId = $distManifest.oauth2.client_id
 if ([string]::IsNullOrWhiteSpace($clientId) -or $clientId -eq '__OAUTH_CLIENT_ID__') {
   Stop-WithError 'manifest の oauth2.client_id が未設定です（.env の OAUTH_CLIENT_ID を確認してください）'
@@ -158,11 +159,11 @@ Copy-Item $distDir $stageDir -Recurse
 
 # DE plugin 版は key 行を正規表現で除去する責務を pack.ps1 側に持たせていたが、
 # 本リポジトリでは webpack.config.js の CopyPlugin transform が production ビルド時に
-# 自分で `delete manifest.key` する（dist/manifest.json は最初から key を持たないのが正常形）。
+# 自分で `delete manifest.key` する（dist-release/manifest.json は最初から key を持たないのが正常形）。
 # よってここでの役割は「除去されたこと」のアサーションのみ。key が残っていたら
 # webpack 側の回帰なので、黙って削るのではなく止めて調査を促す
 if ($distManifest.PSObject.Properties.Name -contains 'key') {
-  Stop-WithError 'dist/manifest.json に key フィールドが残っています（webpack.config.js の production 分岐に回帰がないか確認してください。本スクリプトは key の除去は行いません）'
+  Stop-WithError 'dist-release/manifest.json に key フィールドが残っています（webpack.config.js の production 分岐に回帰がないか確認してください。本スクリプトは key の除去は行いません）'
 }
 Write-Ok 'key フィールドは元から不在（webpack が production ビルド時に除去済み）'
 
@@ -194,7 +195,7 @@ Expand-Archive $zipPath -DestinationPath $verifyDir
 try {
   $zipManifestPath = Join-Path $verifyDir 'manifest.json'
   if (-not (Test-Path $zipManifestPath)) {
-    Stop-WithError 'manifest.json が zip のルートにありません（dist/ ごと入れ子になっている可能性）'
+    Stop-WithError 'manifest.json が zip のルートにありません（dist-release/ ごと入れ子になっている可能性）'
   }
   Write-Ok 'manifest.json が zip のルートにある'
 
@@ -204,13 +205,13 @@ try {
   }
   Write-Ok 'manifest に key フィールドなし'
 
-  # zip 化の過程で manifest を一切書き換えていないので、dist と完全一致するはず（破損検知）
+  # zip 化の過程で manifest を一切書き換えていないので、dist-release と完全一致するはず（破損検知）
   $expected = $distManifest | ConvertTo-Json -Depth 20 -Compress
   $actual = $zipManifest | ConvertTo-Json -Depth 20 -Compress
   if ($expected -ne $actual) {
-    Stop-WithError 'zip の manifest が dist と一致しません（zip 化の過程で破損した可能性）'
+    Stop-WithError 'zip の manifest が dist-release と一致しません（zip 化の過程で破損した可能性）'
   }
-  Write-Ok 'manifest が dist と完全一致（permissions / host_permissions / oauth2 等）'
+  Write-Ok 'manifest が dist-release と完全一致（permissions / host_permissions / oauth2 等）'
 
   # 手順 1 と同じ観点（oauth2 セクション存在・client_id 注入済み）を、展開し直した zip 側でも確認する
   if ($zipManifest.PSObject.Properties.Name -notcontains 'oauth2') {

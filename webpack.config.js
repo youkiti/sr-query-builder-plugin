@@ -26,8 +26,13 @@ module.exports = (env, argv) => {
       'app/app': './src/app/app.ts',
       'options/options': './src/options/options.ts',
     },
+    // 出力先をモードで分離する: production ビルドは manifest から `key` を削除するため、
+    // dev ビルド（key あり = 拡張 ID 固定）と同じ dist/ を共有すると、
+    // 「unpacked で本番ビルドを読み込んだら拡張 ID がパス由来に変わり OAuth が通らない」
+    // 「dev/本番が互いを上書きし、今 dist/ にあるのがどちらのビルドか分からなくなる」
+    // という事故が起きる。production だけ dist-release/ へ分離することで両方防ぐ。
     output: {
-      path: path.resolve(__dirname, 'dist'),
+      path: isProduction ? path.resolve(__dirname, 'dist-release') : path.resolve(__dirname, 'dist'),
       filename: '[name].js',
       clean: true,
     },
