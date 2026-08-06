@@ -49,7 +49,7 @@ npm run release:alpha -- -SkipBuild   # 既存 dist をそのまま zip → ア�
 - source map（`*.map`）は除外して圧縮
 - アップロードは `rclone` の `gdrive:` リモート経由、宛先は `.env` の `GOOGLE_DRIVE`（フォルダ URL でも ID でも可）。`docs/alpha-test-guide.md` も同時アップロード
 - **自動化できない 2 点（毎回手動）**: ① 新規テスターの Gmail を OAuth テストユーザーに登録（<https://console.cloud.google.com/auth/audience>。同意画面が Testing 状態のため未登録だと他アカウントはログイン不可）／ ② Drive ファイルの共有権限付与（rclone は転送のみ）
-- **本番リリース時の注意**: `npm run build`（production）は manifest から `key` を削除し ID が変わるため、**ストア用の別 OAuth client_id**（ストア発行 ID を登録）が必要。スコープに `spreadsheets` / `drive.file`（センシティブ）を含むので Production 公開には OAuth 検証が要る。アルファのうちは Testing + テストユーザー方式が早い
+- **本番リリース時の注意**: `npm run build`（production）は manifest から `key` を削除するが、初回ストアアップロード時だけ zip ルートに対応する `key.pem` を同梱すれば Chrome ウェブストアが同じ拡張 ID（`bckokafmjighegpjiocopkagghppnjld`）を導出するため、ストア用に別の OAuth client_id を作る必要はない。スコープは `drive.file` のみ（非センシティブ）なので Production 公開に OAuth 検証は不要
 
 ## アーキテクチャ
 
