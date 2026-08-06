@@ -1,0 +1,389 @@
+<!doctype html>
+<!-- SR Query Builder Plugin ランディングページ（GitHub Pages 配信）。
+     正典はこのファイル（master の hosted/）。デプロイ手順は hosted/README.md を参照。
+     ja / en は両方を持ち、表示は lang.js + CSS が片方だけに絞る（併記しない）。
+     version: 2026-08-07 -->
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title data-en="SR Query Builder Plugin — a Chrome extension for building PubMed search strategies">SR Query Builder Plugin — PubMed 検索式の作成・検証を支援する Chrome 拡張</title>
+    <meta
+      name="description"
+      content="研究プロトコルから PubMed 検索式のドラフトを生成し、NCBI E-utilities で検証、各データベース向けに変換する MIT ライセンスの Chrome 拡張。"
+      data-en-content="An MIT-licensed Chrome extension that drafts a PubMed search strategy from your research protocol, validates it with NCBI E-utilities, and converts it for other databases."
+    />
+    <link rel="stylesheet" href="style.css" />
+    <!-- 表示言語（ja / en）の解決と切替。初期描画前に確定させるため head で同期読み込みする -->
+    <script src="lang.js"></script>
+  </head>
+  <body>
+    <header class="hero">
+      <div class="container">
+        <!-- 言語切替ボタンは lang.js が組み立てる（JS 無効時は空のまま = 両言語が並ぶ） -->
+        <div class="lang-switch lang-switch--hero" data-lang-switch></div>
+        <p class="hero-meta">
+          <span class="ja" lang="ja">最終更新: 2026-08-07 / 対象バージョン: v0.2.0</span>
+          <span class="en" lang="en">Last updated: 2026-08-07 / Covers v0.2.0</span>
+        </p>
+        <h1>SR Query Builder Plugin</h1>
+        <p class="subtitle">
+          <span class="ja" lang="ja"
+            >研究プロトコルの入力から <strong>PubMed 検索式のドラフト生成</strong>・検証・各データベース向け変換までを支援する Chrome 拡張</span
+          >
+          <span class="en" lang="en"
+            >A Chrome extension that takes you from a research protocol to a drafted, validated PubMed search strategy — and converts it for other databases</span
+          >
+        </p>
+        <div class="hero-buttons">
+          <a class="btn btn-primary" href="https://github.com/youkiti/sr-query-builder-plugin"
+            ><span class="ja" lang="ja">GitHub でソースを見る</span
+            ><span class="en" lang="en">View source on GitHub</span></a
+          >
+          <a class="btn btn-secondary" href="help.html"
+            ><span class="ja" lang="ja">使い方を見る</span
+            ><span class="en" lang="en">Read the user guide</span></a
+          >
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="section">
+        <div class="container">
+          <h2>
+            <span class="ja" lang="ja">なにをするツールか</span>
+            <span class="en" lang="en">What it does</span>
+          </h2>
+          <ol class="steps">
+            <li>
+              <span class="ja" lang="ja"
+                >研究プロトコル（リサーチクエスチョン・PICO 等）を入力します（手入力 / <code>.md</code> ファイル）。</span
+              >
+              <span class="en" lang="en"
+                >Enter your research protocol (research question, PICO, …) by hand or import it from a <code>.md</code> file.</span
+              >
+            </li>
+            <li>
+              <span class="ja" lang="ja"
+                >生成 AI（Gemini、BYOK）が、プロトコルから PubMed 検索式のドラフトを作成します。</span
+              >
+              <span class="en" lang="en"
+                >Generative AI (Gemini, BYOK) drafts a PubMed search strategy from the protocol.</span
+              >
+            </li>
+            <li>
+              <span class="ja" lang="ja"
+                >NCBI E-utilities を使い、ブロックごとのヒット数・シード論文の捕捉率・MeSH 用語をライブ検証します。</span
+              >
+              <span class="en" lang="en"
+                >NCBI E-utilities validate the draft live: per-block hit counts, seed-paper capture rate, and MeSH terms.</span
+              >
+            </li>
+            <li>
+              <span class="ja" lang="ja"
+                >（実験的機能）境界事例となりそうなシード論文候補を対話的に提示し、include / exclude 判定で検索式を最適化します。</span
+              >
+              <span class="en" lang="en"
+                >(Experimental) Borderline seed-paper candidates are presented interactively; your include / exclude decisions refine the query.</span
+              >
+            </li>
+            <li>
+              <span class="ja" lang="ja"
+                >最終検索式を CENTRAL / Embase(Dialog) / ClinicalTrials.gov / ICTRP 向けに変換して出力し、PubMed の nbib ダウンロードなどへ案内します。</span
+              >
+              <span class="en" lang="en"
+                >The final query is converted for CENTRAL / Embase (Dialog) / ClinicalTrials.gov / ICTRP, with guidance to the PubMed nbib download.</span
+              >
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="section section--alt">
+        <div class="container container--wide">
+          <h2>
+            <span class="ja" lang="ja">画面イメージ</span>
+            <span class="en" lang="en">Screenshots</span>
+          </h2>
+          <div class="shots">
+            <figure class="shot">
+              <img
+                src="screenshots/s1-protocol.png"
+                alt="研究プロトコル入力画面（#/protocol）"
+                data-en-alt="Research protocol input screen (#/protocol)"
+                loading="lazy"
+              />
+              <figcaption>
+                <span class="ja" lang="ja">研究プロトコル入力画面（#/protocol）</span>
+                <span class="en" lang="en">Research protocol input screen (#/protocol)</span>
+              </figcaption>
+            </figure>
+            <figure class="shot">
+              <img
+                src="screenshots/s2-blocks.png"
+                alt="検索式ブロック承認画面（#/blocks）"
+                data-en-alt="Search block approval screen (#/blocks)"
+                loading="lazy"
+              />
+              <figcaption>
+                <span class="ja" lang="ja">検索式ブロック承認画面（#/blocks）</span>
+                <span class="en" lang="en">Search block approval screen (#/blocks)</span>
+              </figcaption>
+            </figure>
+            <figure class="shot">
+              <img
+                src="screenshots/s3-draft.png"
+                alt="検索式ドラフト生成画面（#/draft）。「生成して検証する」でブロックごとのヒット数をライブ表示"
+                data-en-alt="Search draft generation screen (#/draft): “Generate and validate” shows per-block hit counts live"
+                loading="lazy"
+              />
+              <figcaption>
+                <span class="ja" lang="ja"
+                  >検索式ドラフト生成画面（#/draft）。「生成して検証する」でブロックごとのヒット数をライブ表示</span
+                >
+                <span class="en" lang="en"
+                  >Search draft generation screen (#/draft): “Generate and validate” shows per-block hit counts live</span
+                >
+              </figcaption>
+            </figure>
+            <figure class="shot">
+              <img
+                src="screenshots/s4-validation.png"
+                alt="検証結果（捕捉率・MeSH 検証。#/draft 内に統合表示）"
+                data-en-alt="Validation results (capture rate and MeSH check, shown inline within #/draft)"
+                loading="lazy"
+              />
+              <figcaption>
+                <span class="ja" lang="ja">検証結果（捕捉率・MeSH 検証。#/draft 内に統合表示）</span>
+                <span class="en" lang="en">Validation results (capture rate and MeSH check, shown inline within #/draft)</span>
+              </figcaption>
+            </figure>
+            <figure class="shot">
+              <img
+                src="screenshots/s5-export.png"
+                alt="各データベース変換・エクスポート画面（#/export）"
+                data-en-alt="Database conversion and export screen (#/export)"
+                loading="lazy"
+              />
+              <figcaption>
+                <span class="ja" lang="ja">各データベース変換・エクスポート画面（#/export）</span>
+                <span class="en" lang="en">Database conversion and export screen (#/export)</span>
+              </figcaption>
+            </figure>
+          </div>
+          <p>
+            <span class="ja" lang="ja">画像はテスト用データで、実データは含みません。</span>
+            <span class="en" lang="en">The screenshots use test data only; no real study data is shown.</span>
+          </p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="container">
+          <h2>
+            <span class="ja" lang="ja">サーバーレス構成（BYOK）</span>
+            <span class="en" lang="en">Serverless by design (BYOK)</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja"
+              >開発者が運用するサーバーは存在しません。データは、利用者自身の Google アカウントと、利用者が自分の
+              API キーで契約する Gemini API / NCBI API の間でのみ流通します。</span
+            >
+            <span class="en" lang="en"
+              >There is no developer-operated server. Your data flows only between your own Google account and the
+              Gemini API / NCBI API you use with your own key.</span
+            >
+          </p>
+          <div class="cards">
+            <div class="card">
+              <h3>
+                <span class="ja" lang="ja">保存先はあなたの Google アカウント</span>
+                <span class="en" lang="en">Stored in your Google account</span>
+              </h3>
+              <p>
+                <span class="ja" lang="ja"
+                  >プロジェクト DB は Google Sheets、LLM API ログの実体は Google Drive に置かれます。</span
+                >
+                <span class="en" lang="en"
+                  >The project database is a Google Sheet; LLM API log files live in your Google Drive.</span
+                >
+              </p>
+            </div>
+            <div class="card">
+              <h3>
+                <span class="ja" lang="ja">要求する OAuth スコープは 1 つだけ</span>
+                <span class="en" lang="en">Only one OAuth scope</span>
+              </h3>
+              <p>
+                <span class="ja" lang="ja"
+                  >「<code>drive.file</code>」のみ。Drive 全体や全スプレッドシートを読む権限は要求しません。</span
+                >
+                <span class="en" lang="en"
+                  >Just <code>drive.file</code> — never full Drive or all-spreadsheet access.</span
+                >
+              </p>
+            </div>
+            <div class="card">
+              <h3>
+                <span class="ja" lang="ja">BYOK の API キー</span>
+                <span class="en" lang="en">Bring your own API keys</span>
+              </h3>
+              <p>
+                <span class="ja" lang="ja"
+                  >検索式ドラフト生成は Gemini API のキー、NCBI API キーは検証時のレート制限緩和用（任意）です。キーはブラウザ内にのみ保存されます。</span
+                >
+                <span class="en" lang="en"
+                  >A Gemini API key drafts your search strategy; an NCBI API key (optional) eases rate limits during
+                  validation. Keys never leave your browser.</span
+                >
+              </p>
+            </div>
+            <div class="card">
+              <h3>
+                <span class="ja" lang="ja">MIT ライセンスの OSS</span>
+                <span class="en" lang="en">MIT-licensed open source</span>
+              </h3>
+              <p>
+                <span class="ja" lang="ja">ソースコードは GitHub で公開しています。</span>
+                <span class="en" lang="en">The source is public on GitHub.</span>
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section--alt">
+        <div class="container">
+          <h2>
+            <span class="ja" lang="ja">はじめかた</span>
+            <span class="en" lang="en">Getting started</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja"
+              >本拡張は現時点で Chrome ウェブストア未公開です。GitHub からソースを取得し、自分でビルドして読み込みます。
+              Google ログインまで通すには、<strong>利用者自身の Google Cloud OAuth クライアント ID</strong>
+              を発行して設定する必要があります（後述）。</span
+            >
+            <span class="en" lang="en"
+              >The extension is not yet published on the Chrome Web Store. Get the source from GitHub and build it
+              yourself. To get Google sign-in working, you’ll need to issue and configure
+              <strong>your own Google Cloud OAuth client ID</strong> (see below).</span
+            >
+          </p>
+          <ol>
+            <li>
+              <span class="ja" lang="ja"
+                ><a href="https://github.com/youkiti/sr-query-builder-plugin">GitHub リポジトリ</a>を取得し、
+                <code>npm install</code> を実行します。</span
+              >
+              <span class="en" lang="en"
+                >Clone the <a href="https://github.com/youkiti/sr-query-builder-plugin">GitHub repository</a> and run
+                <code>npm install</code>.</span
+              >
+            </li>
+            <li>
+              <span class="ja" lang="ja"
+                >Google Cloud Console で OAuth クライアント ID（種類: Chrome
+                拡張機能。コンソールの表記が「Chrome App」になっている場合もあります）を発行します。アプリケーション
+                ID には <code>bckokafmjighegpjiocopkagghppnjld</code> を指定してください。これは
+                <code>src/manifest.json</code> に固定の公開鍵（<code>key</code>）が含まれているため、誰の環境でビルドしてもこの値になります（手順4の
+                <code>npm run dev</code> はこの鍵を残したままビルドするので拡張 ID が固定されます。鍵を取り除くのは本番ビルドの
+                <code>npm run build</code> の方で、この手順では使いません）。OAuth 同意画面は要求スコープが非センシティブな
+                <code>drive.file</code> のみのため Google の追加審査は不要ですが、画面自体（アプリ名・サポートメール等）の設定は必要です。</span
+              >
+              <span class="en" lang="en"
+                >In Google Cloud Console, issue an OAuth client ID of type “Chrome Extension” (some versions of the
+                console label this “Chrome App”), using <code>bckokafmjighegpjiocopkagghppnjld</code> as the
+                application ID. This value is fixed because <code>src/manifest.json</code> ships with a pinned
+                public key (<code>key</code>), so it’s the same regardless of who builds it (step 4’s
+                <code>npm run dev</code> keeps this key in the build, which is exactly why the extension ID stays
+                fixed — it’s the production build, <code>npm run build</code>, that strips the key, and this guide
+                doesn’t use that). The OAuth consent screen only needs to request the non-sensitive
+                <code>drive.file</code> scope, so no extra Google verification is required — but you do still need
+                to fill in the basics (app name, support email, etc.).</span
+              >
+            </li>
+            <li>
+              <span class="ja" lang="ja"
+                >リポジトリ直下に <code>.env</code> を作成し（<code>.env.example</code>
+                を参考に）、発行したクライアント ID を <code>OAUTH_CLIENT_ID</code>（または
+                <code>LOCAL_OAUTH_CLIENT_ID</code>）に設定します。</span
+              >
+              <span class="en" lang="en"
+                >Create a <code>.env</code> at the repository root (see <code>.env.example</code>) and set the
+                client ID you issued as <code>OAUTH_CLIENT_ID</code> (or <code>LOCAL_OAUTH_CLIENT_ID</code>).</span
+              >
+            </li>
+            <li>
+              <span class="ja" lang="ja"
+                ><code>npm run dev</code> を実行して <code>dist/</code> を生成します（<strong
+                  >本番ビルドの <code>npm run build</code> は使わないでください</strong
+                >。<code>.env</code> に <code>OAUTH_CLIENT_ID</code> が無いとエラーで停止するうえ、manifest から
+                <code>key</code> を取り除くため拡張 ID が変わってしまい、手順2で発行した OAuth クライアント ID と一致しなくなります）。</span
+              >
+              <span class="en" lang="en"
+                >Run <code>npm run dev</code> to produce <code>dist/</code> (<strong
+                  >do not use the production build, <code>npm run build</code></strong
+                >: it fails without <code>OAUTH_CLIENT_ID</code> in <code>.env</code>, and it also strips
+                <code>key</code> from the manifest, which changes the extension ID so it no longer matches the OAuth
+                client ID you issued in step 2).</span
+              >
+            </li>
+            <li>
+              <span class="ja" lang="ja"
+                ><code>chrome://extensions</code> でデベロッパーモードを有効にし、「パッケージ化されていない拡張機能を読み込む」で
+                <code>dist/</code> を選びます。</span
+              >
+              <span class="en" lang="en"
+                >Enable developer mode at <code>chrome://extensions</code> and load <code>dist/</code> via “Load
+                unpacked”.</span
+              >
+            </li>
+            <li>
+              <span class="ja" lang="ja"
+                >拡張の Options 画面で、ご自身の Gemini API キー（必須）と NCBI API キー（任意）を保存します（BYOK）。</span
+              >
+              <span class="en" lang="en"
+                >Save your own Gemini API key (required) and NCBI API key (optional) in the extension options
+                (BYOK).</span
+              >
+            </li>
+            <li>
+              <span class="ja" lang="ja">Google アカウントでログインし、プロジェクトを作成します。</span>
+              <span class="en" lang="en">Sign in with Google and create a project.</span>
+            </li>
+          </ol>
+          <p>
+            <span class="ja" lang="ja">操作の詳細は<a href="help.html">使い方ガイド</a>を参照してください。</span>
+            <span class="en" lang="en">See the <a href="help.html">user guide</a> for the full walkthrough.</span>
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container">
+        <div class="footer-content">
+          <div class="footer-links">
+            <a href="index.html"
+              ><span class="ja" lang="ja">ホーム</span><span class="en" lang="en">Home</span></a
+            >
+            <a href="help.html"
+              ><span class="ja" lang="ja">使い方</span><span class="en" lang="en">Help</span></a
+            >
+            <a href="privacy-policy.html"
+              ><span class="ja" lang="ja">プライバシーポリシー</span
+              ><span class="en" lang="en">Privacy</span></a
+            >
+            <a href="terms-of-service.html"
+              ><span class="ja" lang="ja">利用規約</span><span class="en" lang="en">Terms</span></a
+            >
+            <a href="https://github.com/youkiti/sr-query-builder-plugin">GitHub</a>
+          </div>
+          <p class="copyright">© 2026 youkiti — MIT License</p>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>
