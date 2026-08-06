@@ -142,3 +142,39 @@ export async function getFileText(fileId: string, deps: GoogleApiDeps): Promise<
   const res = await googleFetch(url, { method: 'GET' }, deps);
   return await res.text();
 }
+
+interface DriveParentsResponse {
+  parents?: string[];
+}
+
+export interface DriveMoveResult {
+  id: string;
+  parents?: string[];
+}
+
+/**
+ * ファイルを指定フォルダ配下へ移動する。`spreadsheets.create` のように
+ * マイドライブ直下にしか作成できない API の後始末に使う。
+ * `removeParents=root` のようなエイリアスには頼らず、現在の親 ID を実際に
+ * 取得してから外すことで確実に付け替える。
+ */
+export async function moveFileToFolder(
+  fileId: string,
+  folderId: string,
+  deps: GoogleApiDeps
+): Promise<DriveMoveResult> {
+  const getUrl = `${METADATA_API}/${encodeURIComponent(fileId)}?fields=parents`;
+  const getRes = await googleFetch(getUrl, { method: 'GET' }, deps);
+  const current = (await getRes.json()) as DriveParentsResponse;
+  const currentParents = current.parents ?? [];
+
+  const removeParentsQuery =
+    currentParents.length > 0
+      ? `&removeParents=${currentParents.map(encodeURIComponent).join(',')}`
+      : '';
+  const patchUrl =
+    `${METADATA_API}/${encodeURIComponent(fileId)}` +
+    `?addParents=${encodeURIComponent(folderId)}${removeParentsQuery}&fields=id,parents`;
+  const patchRes = await googleFetch(patchUrl, { method: 'PATCH' }, deps);
+  return (await patchRes.json()) as DriveMoveResult;
+}

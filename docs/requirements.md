@@ -295,10 +295,11 @@ https://www.googleapis.com/auth/drive.file          # Sheets 読み書き + LLM 
 2. `project_id`（UUID v4）を発行
 3. **Drive トップフォルダを作成**（`マイドライブ/sr-query-builder/{project_title}_{project_id_short}/`）→ `drive_folder_id` 取得
 4. トップフォルダ配下に `raw_protocols/` / `logs/llm/` / `logs/validation/` のサブフォルダを作成
-5. 同フォルダ内に新規スプレッドシートを作成（`spreadsheets.create` + Drive API で親フォルダ指定）→ `spreadsheet_id` 取得
-6. スプレッドシートに 9 タブを初期化
-7. `Meta` タブに 1 行書き込み（`project_id` / `drive_folder_id` / `spreadsheet_id` / `schema_version=1.0` 等）
-8. `chrome.storage.currentProject` に `{ projectId, spreadsheetId, driveFolderId, title }` を保存
+5. 新規スプレッドシートを作成（`spreadsheets.create`）→ `spreadsheet_id` 取得。Sheets API はマイドライブ直下にしか作成できないため、この時点ではまだトップフォルダの外にある
+6. 作成したスプレッドシートを Drive API `files.update`（`addParents` / `removeParents`）でトップフォルダ配下へ移動
+7. スプレッドシートに 9 タブを初期化
+8. `Meta` タブに 1 行書き込み（`project_id` / `drive_folder_id` / `spreadsheet_id` / `schema_version=1.0` 等）
+9. `chrome.storage.currentProject` に `{ projectId, spreadsheetId, driveFolderId, title }` を保存
 
 #### 既存プロジェクト選択
 
