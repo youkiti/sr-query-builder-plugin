@@ -36,6 +36,7 @@ Chrome ウェブストアの掲載に必要な画像。スクリーンショッ�
 - [x] manifest の permissions / OAuth スコープを見直し、`icons` / `action.default_icon` を配線（→ [manifest レビュー結果](#manifest-レビュー結果)）
 - [x] プライバシーポリシー原稿
 - [x] 権限の使用理由原稿（日英）
+- [x] 提出用 zip の作成・検証ツール整備（[tools/release/](../../tools/release/)。`npm run release` / `npm run pack:release`）
 - [ ] スクリーンショット取得
 - [ ] クリーンな Chrome プロファイルでの実 Google 認証つき dist smoke
 - [ ] Chrome ウェブストア デベロッパーアカウントで提出
