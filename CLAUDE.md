@@ -72,6 +72,17 @@ npm run pack:release                     # 既存 dist-release/ だけをパッ�
 - `src/manifest.json` の `key` フィールドは常に保持する（dev の unpacked 読込で拡張 ID を固定するため）。production ビルド（`dist-release/`）からの除去は webpack.config.js の CopyPlugin transform が自動で行い、`pack.ps1` はその除去が起きたことを確認するだけで、削除そのものはしない
 - **CI チェックは現状オートスキップ**: 本リポジトリはまだ `.github/workflows/` を持たないため（「未実装・既知のギャップ」参照）、`release.ps1` は `gh run list` を呼ばずに `CI 未配置のためスキップ` と警告して先へ進む。将来 CI を追加すれば、workflow ファイルの存在を検知して自動的に CI green 判定へ切り替わる
 
+## 公開ページ（GitHub Pages / `hosted/`）
+
+Chrome ウェブストア審査・利用者向けに公開する静的ページ 4 枚（ランディング / 使い方ガイド / プライバシーポリシー / 利用規約）+ 共通 `style.css` / `lang.js` / `screenshots/` の正典は [hosted/](hosted/) に置く。デプロイ先は GitHub Pages（`gh-pages` ブランチのルート）。
+
+- **プライバシーポリシーの公開 URL は Chrome ウェブストア審査の必須要件**。想定 URL は `https://youkiti.github.io/sr-query-builder-plugin/privacy-policy.html`
+- **プライバシーポリシーの正典は [docs/store/privacy-policy.md](docs/store/privacy-policy.md)**。`hosted/privacy-policy.html` はその転記＋英訳なので、**内容を変えるときは両方を直す**（乖離するとストア審査で参照される URL の内容とリポジトリの原稿がずれる）
+- ja / en は**併記ではなく切替**（`lang.js` が `html[data-lang]` で表示側を絞る）。文言を足すときは両言語分を書くこと
+- ストア掲載用スクリーンショットは `npm run manual:check -- --shots` で `hosted/screenshots/` へ出力する（1280×800 の 5 枚）
+- デプロイは手動（`gh-pages` ブランチへ push）。手順は [hosted/README.md](hosted/README.md)。**`gh-pages` ブランチはまだ存在せず、デプロイも未実施**（現時点では公開 URL はまだ有効になっていない）
+- 提出物一式の全体像・進捗は [docs/store/README.md](docs/store/README.md) を参照
+
 ## アーキテクチャ
 
 詳細は [docs/architecture.md](docs/architecture.md)。vanilla TypeScript（UI フレームワーク不使用）+ webpack。
@@ -102,7 +113,7 @@ src/
 
 - **`.docx` パース未配線**: UI と型（`DocxExtractor`）はあるが、mammoth.js が未導入で extractor が注入されていない。現状 .docx をアップロードすると「パーサが注入されていません」エラーになる
 - **P1 ロジック未移植**: `check_block_overlap` / `check_mesh` / `check_mesh_overlap`（ブロック重複・MeSH 分析）
-- **LLM は Gemini のみ**（`LLMProvider` 抽象はあり。OpenAI / Claude / OpenRouter は後続）
+- **OpenAI / Anthropic Claude への直接連携は未実装**: 実装済みなのは Gemini と OpenRouter の 2 プロバイダ（`src/lib/llm/GeminiProvider.ts` / `OpenRouterProvider.ts`。既定モデルは `gemini-3.5-flash`）。Options 画面で OpenRouter の API キーとカスタムモデル ID（最大 20 件）を追加登録できるため OpenRouter 経由で多くのモデルに到達できるが、OpenAI / Anthropic の API を直接叩く `LLMProvider` 実装は無い（`LlmProviderId` 型に `openai` / `anthropic` の値はあるが対応実装が無い）
 - **CI/CD なし**（`.github/workflows/` 未配置。検証はローカルで `typecheck → test → test:e2e → lint → dev` を回す）
 - E2E ジャーニー J1（新規作成→export 貫通）/ J4（expand キーボード判定）/ J5 の API エラー系は LLM・fetch stub の拡充待ち（[docs/ui-deep-test-plan.md](docs/ui-deep-test-plan.md) Phase D/E）
 
@@ -151,7 +162,7 @@ MIT ライセンスの OSS Chrome 拡張 **sr-query-builder-plugin**。ユーザ
 
 ### LLM 戦略
 
-- **MVP は Gemini のみ**。後続で OpenAI / Anthropic Claude / OpenRouter を予定し、**`LLMProvider` 抽象**（[src/lib/llm/](src/lib/llm/)）を最初から設けてある。
+- **当初の合意は「MVP は Gemini のみ」**。後続で OpenAI / Anthropic Claude / OpenRouter への対応を見据え、**`LLMProvider` 抽象**（[src/lib/llm/](src/lib/llm/)）を最初から設けていた。その後 OpenRouter 対応が先行して実装され、現在は Gemini + OpenRouter の 2 プロバイダが使える（OpenAI / Anthropic Claude は未実装。詳細は「[未実装・既知のギャップ](#未実装既知のギャップ)」参照）。
 - API キーは **BYOK**。`chrome.storage` に保存し、Options 画面で設定する。
 - AI の役割: 検索式ドラフト生成・MeSH 提案・シノニム展開・ブロック改善案・検証結果の解釈補助まで、ワークフロー全体のアシスタント。
 
@@ -177,7 +188,7 @@ MIT ライセンスの OSS Chrome 拡張 **sr-query-builder-plugin**。ユーザ
 - Chrome Extension Manifest V3（メインビューは `chrome.tabs.create` で開くフルページ。Side Panel API は使わない。補助的に Popup + Background）
 - TypeScript / HTML / CSS（vanilla、フレームワーク不使用）+ webpack
 - Google OAuth 2.0（`chrome.identity`）+ Google Sheets / Drive API
-- LLM: Gemini API（`LLMProvider` 抽象経由）
+- LLM: Gemini API + OpenRouter API（`LLMProvider` 抽象経由。既定モデルは Gemini）
 - テスト: jest（jsdom）+ Playwright（実 Chromium）+ `@axe-core/playwright`
 - Node.js ≥ 18
 
