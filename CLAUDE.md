@@ -51,6 +51,26 @@ npm run release:alpha -- -SkipBuild   # 既存 dist をそのまま zip → ア�
 - **自動化できない 2 点（毎回手動）**: ① 新規テスターの Gmail を OAuth テストユーザーに登録（<https://console.cloud.google.com/auth/audience>。同意画面が Testing 状態のため未登録だと他アカウントはログイン不可）／ ② Drive ファイルの共有権限付与（rclone は転送のみ）
 - **本番リリース時の注意**: `npm run build`（production）は manifest から `key` を削除するが、初回ストアアップロード時だけ zip ルートに対応する `key.pem` を同梱すれば Chrome ウェブストアが同じ拡張 ID（`bckokafmjighegpjiocopkagghppnjld`）を導出するため、ストア用に別の OAuth client_id を作る必要はない。スコープは `drive.file` のみ（非センシティブ）なので Production 公開に OAuth 検証は不要
 
+## 本番リリース（Chrome ウェブストア提出用 zip）
+
+Chrome ウェブストアへ提出・更新する zip を作る運用。**アルファ配布（`release:alpha`）とは別物**なので混同しないこと — `release:alpha` はテスター配布用（dev ビルド・拡張名に `(dev)` 付与・version バンプなし・key 除去なし・提出物としての検証なし）、`release`（本節）はストア提出用（本番ビルド・version バンプ必須・key 除去を検証・ストア提出用 zip の内容を機械検証）。
+
+```bash
+npm run release -- minor                 # 機能追加を含むリリース（patch / major / 明示 version も可）
+npm run release -- patch -NoPush         # push せずローカル commit + zip まで
+npm run release -- minor -SkipCiCheck    # CI 状態チェックを省略（gh 未導入 / 未認証の環境）
+npm run release -- minor -Force          # 前提チェックの警告（ブランチ不一致等）を停止ではなく警告に落とす
+npm run release -- minor -IncludeKeyPem  # 初回ストアアップロード専用。key.pem を zip に同梱
+npm run pack:release                     # 既存 dist/ だけをパッケージング（version バンプ・commit・push はしない）
+```
+
+実体は [tools/release/release.ps1](tools/release/release.ps1)（前提チェック → version バンプ → commit → 本番ビルド → [tools/release/pack.ps1](tools/release/pack.ps1) の実行 → push）と、パッケージング単体を担う [tools/release/pack.ps1](tools/release/pack.ps1)（既存 dist/ だけを検証・zip 化したいときはこちら単体で実行できる）。
+
+- version は **`src/manifest.json` / `package.json` / `package-lock.json` の 3 箇所を揃える運用**。`release.ps1` が 3 箇所同時にバンプし、`pack.ps1` が不一致を検出して停止する
+- `key.pem`（リポジトリルート直下・gitignore 対象）は**初回ストアアップロードのときだけ** `-IncludeKeyPem` で zip に同梱する。以後の更新提出では同梱しない（Store がアイテムの拡張 ID を既に固定しているため）
+- `src/manifest.json` の `key` フィールドは常に保持する（dev の unpacked 読込で拡張 ID を固定するため）。production dist からの除去は webpack.config.js の CopyPlugin transform が自動で行い、`pack.ps1` はその除去が起きたことを確認するだけで、削除そのものはしない
+- **CI チェックは現状オートスキップ**: 本リポジトリはまだ `.github/workflows/` を持たないため（「未実装・既知のギャップ」参照）、`release.ps1` は `gh run list` を呼ばずに `CI 未配置のためスキップ` と警告して先へ進む。将来 CI を追加すれば、workflow ファイルの存在を検知して自動的に CI green 判定へ切り替わる
+
 ## アーキテクチャ
 
 詳細は [docs/architecture.md](docs/architecture.md)。vanilla TypeScript（UI フレームワーク不使用）+ webpack。
@@ -177,6 +197,7 @@ MIT ライセンスの OSS Chrome 拡張 **sr-query-builder-plugin**。ユーザ
 ## 作業上の原則（tiab-review-plugin/AGENTS.md より継承）
 
 1. **ブランチ強制**: `main` / `master` / `develop` で直接作業しない。変更前に作業ブランチを切る。
+   - **例外（意図的）**: `npm run release`（[tools/release/release.ps1](tools/release/release.ps1)）による version バンプ commit は `master` へ直接 push する。差分は `src/manifest.json` / `package.json` / `package-lock.json` の version 文字列 3 箇所のみで機能変更を含まず、スクリプト自身が push 前に「作業ツリーがクリーンであること」「本番ビルドと zip 化・検証が通ること」を機械的にゲートする。PR / レビュー待ちを挟む理由がないほど差分が小さく、かつ安全装置がスクリプト側にある場合に限った狭い例外であり、抜け穴として拡大解釈しないこと（機能変更を混ぜようとしても作業ツリーの汚れチェックで止まる）。
 2. **日本語化**: ユーザー向けアーティファクト（計画書・タスク・要件書・コミットメッセージ・コード内コメント）は日本語で書く。思考プロセスだけ英語でよい。
 3. **既存テスト保護**: 既存テストが落ちたら、まず実装のバグを疑う。テスト側を直す場合は「意図した仕様変更」であることをユーザーに確認する。
 4. **ドキュメント同期**: 仕様や機能を変えたら、関連ドキュメント（README、仕様書、コメント）も同時に更新する。

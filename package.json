@@ -1,6 +1,6 @@
 {
   "name": "sr-query-builder-plugin",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Chrome 拡張: 研究プロトコルから PubMed 検索式を生成・検証・各 DB 向けに変換する",
   "private": true,
   "license": "MIT",
@@ -13,6 +13,8 @@
     "build": "webpack --mode production",
     "build:zip": "npm run build && cd dist && zip -r ../sr-query-builder-plugin.zip .",
     "release:alpha": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release-alpha.ps1",
+    "release": "pwsh -NoProfile -File tools/release/release.ps1",
+    "pack:release": "pwsh -NoProfile -File tools/release/pack.ps1",
     "lint": "eslint src tests --ext .ts",
     "lint:css": "stylelint \"src/**/*.css\"",
     "typecheck": "tsc --noEmit",

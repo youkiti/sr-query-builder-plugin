@@ -27,6 +27,8 @@ key.pem
 
 # ビルド成果物
 *.zip
+# リポジトリ直下の release/ のみ対象（tools/release/ は zip 化スクリプトの置き場なので除外しない）
+/release/
 
 # Jest / tsbuildinfo
 .jest-cache/
