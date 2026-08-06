@@ -23,6 +23,29 @@ export class GoogleApiError extends Error {
   }
 }
 
+/** 生レスポンス本文をメッセージに埋め込む際の切り詰め長（文字数） */
+const RESPONSE_BODY_PREVIEW_LIMIT = 200;
+
+/**
+ * エラーレスポンス本文から画面表示用の詳細メッセージを抽出する。
+ * Google API は `{"error":{"message":"..."}}` 形式の JSON を返すことが多いので
+ * それを優先し、JSON として解釈できない場合は本文をそのまま（切り詰めて）使う。
+ */
+function extractErrorDetail(responseBody: string): string {
+  if (!responseBody) return '';
+  try {
+    const parsed = JSON.parse(responseBody) as { error?: { message?: string } };
+    if (parsed?.error?.message) {
+      return parsed.error.message;
+    }
+  } catch {
+    // JSON ではない（HTML エラーページ等）。生本文にフォールバックする。
+  }
+  return responseBody.length > RESPONSE_BODY_PREVIEW_LIMIT
+    ? `${responseBody.slice(0, RESPONSE_BODY_PREVIEW_LIMIT)}...`
+    : responseBody;
+}
+
 /**
  * 認証ヘッダ付きで fetch し、非 2xx を GoogleApiError に変換する共通ラッパ。
  */
@@ -37,8 +60,11 @@ export async function googleFetch(
   const res = await deps.fetch(url, { ...init, headers });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
+    const method = init.method ?? 'GET';
+    const detail = extractErrorDetail(body);
+    const detailSegment = detail ? ` - ${detail}` : '';
     throw new GoogleApiError(
-      `Google API failed: HTTP ${res.status}`,
+      `Google API failed: HTTP ${res.status}${detailSegment} (${method} ${url})`,
       res.status,
       url,
       body

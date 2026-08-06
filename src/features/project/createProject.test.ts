@@ -16,6 +16,14 @@ function makeFetch(): {
         const id = `FOLDER-${body.name}`;
         return jsonResponse({ id, webViewLink: `https://drive/${id}` });
       }
+      if (init.method === 'GET') {
+        // moveFileToFolder: スプレッドシートの現在の親を取得（マイドライブ直下想定）
+        return jsonResponse({ parents: ['MYDRIVE-ROOT'] });
+      }
+      if (init.method === 'PATCH') {
+        // moveFileToFolder: 親フォルダの付け替え
+        return jsonResponse({ id: 'SHEET-1', parents: ['FOLDER-TOP'] });
+      }
     }
     if (url === 'https://sheets.googleapis.com/v4/spreadsheets') {
       return jsonResponse({ spreadsheetId: 'SHEET-1', spreadsheetUrl: 'https://sheet/x' });
@@ -77,6 +85,33 @@ describe('createProject', () => {
     expect(appendCalls).toHaveLength(1);
     const appendBody = JSON.parse(appendCalls[0]!.init.body as string);
     expect(appendBody.values[0][0]).toBe('12345678-aaaa-4aaa-8aaa-000000000000');
+
+    // 新規スプレッドシートをトップフォルダ配下へ移動する処理（moveFileToFolder）が
+    // 呼ばれていること。まず現在の親を取得し、続けて付け替える。
+    const moveGetCall = calls.find(
+      (c) => c.url === 'https://www.googleapis.com/drive/v3/files/SHEET-1?fields=parents' &&
+        c.init.method === 'GET'
+    );
+    expect(moveGetCall).toBeTruthy();
+
+    const movePatchCall = calls.find(
+      (c) => c.url.startsWith('https://www.googleapis.com/drive/v3/files/SHEET-1?') &&
+        c.init.method === 'PATCH'
+    );
+    expect(movePatchCall).toBeTruthy();
+    const decodedPatchUrl = decodeURIComponent(movePatchCall!.url);
+    expect(decodedPatchUrl).toContain(`addParents=${result.driveFolder.id}`);
+    expect(decodedPatchUrl).toContain('removeParents=MYDRIVE-ROOT');
+    expect(decodedPatchUrl).toContain('fields=id,parents');
+
+    // 移動処理は createSpreadsheet の直後・ヘッダ書き込みより前に行われる
+    const spreadsheetCreateIndex = calls.findIndex(
+      (c) => c.url === 'https://sheets.googleapis.com/v4/spreadsheets'
+    );
+    const moveGetIndex = calls.indexOf(moveGetCall!);
+    const firstHeaderIndex = calls.indexOf(headerCalls[0]!);
+    expect(moveGetIndex).toBeGreaterThan(spreadsheetCreateIndex);
+    expect(moveGetIndex).toBeLessThan(firstHeaderIndex);
   });
 
   test('ensureRootFolder が null を返すとマイドライブ直下に作る', async () => {

@@ -24,5 +24,7 @@ export {
   ensureRootFolder,
   uploadTextFile,
   getFileText,
+  moveFileToFolder,
   type DriveFileRef,
+  type DriveMoveResult,
 } from './drive';
