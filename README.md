@@ -22,10 +22,10 @@
 ```bash
 npm install
 cp .env.example .env  # OAuth クライアント ID を設定
-npm run dev           # 開発ビルド
+npm run dev           # 開発ビルド（dist/ へ出力）
 npm run watch         # 差分ビルド
-npm run build         # 本番ビルド
-npm run build:zip     # dist/ を zip 化
+npm run build         # 本番ビルド（dist-release/ へ出力）
+npm run pack:release  # dist-release/ をストア提出用 zip に変換（要 npm run build）
 npm run lint
 npm run lint:css      # stylelint（[hidden] 規約の固定化）
 npm run typecheck

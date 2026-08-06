@@ -15,6 +15,7 @@ Thumbs.db
 # Node / ビルド
 node_modules/
 dist/
+dist-release/
 coverage/
 
 # 環境変数（OAuth クライアント ID は個別配置）
