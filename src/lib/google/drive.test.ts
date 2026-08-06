@@ -170,6 +170,8 @@ describe('moveFileToFolder', () => {
     expect(decoded).toContain('/drive/v3/files/FILE1?addParents=NEW_FOLDER');
     expect(decoded).toContain('removeParents=OLD_PARENT');
     expect(decoded).toContain('fields=id,parents');
+    expect((patchInit.headers as Headers).get('Content-Type')).toBe('application/json');
+    expect(patchInit.body).toBe('{}');
   });
 
   test('親が複数ある場合はすべてカンマ区切りで外す', async () => {

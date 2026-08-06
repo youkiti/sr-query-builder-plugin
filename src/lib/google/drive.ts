@@ -175,6 +175,16 @@ export async function moveFileToFolder(
   const patchUrl =
     `${METADATA_API}/${encodeURIComponent(fileId)}` +
     `?addParents=${encodeURIComponent(folderId)}${removeParentsQuery}&fields=id,parents`;
-  const patchRes = await googleFetch(patchUrl, { method: 'PATCH' }, deps);
+  // 付け替え内容はクエリパラメータで完結するためボディは空でよいが、他の書き込み系
+  // （createFolder / uploadTextFile）と流儀を揃えるため Content-Type + JSON ボディを付ける。
+  const patchRes = await googleFetch(
+    patchUrl,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    },
+    deps
+  );
   return (await patchRes.json()) as DriveMoveResult;
 }

@@ -73,6 +73,71 @@ describe('googleFetch', () => {
     });
   });
 
+  test('エラーメッセージに Google の error.message が含まれる', async () => {
+    const res = {
+      ok: false,
+      status: 503,
+      json: async () => ({}),
+      text: async () =>
+        JSON.stringify({
+          error: { code: 503, message: 'The service is currently unavailable.', status: 'UNAVAILABLE' },
+        }),
+    } as Response;
+    const deps = makeDeps(res);
+    await expect(
+      googleFetch('https://sheets.googleapis.com/v4/spreadsheets', { method: 'POST' }, deps)
+    ).rejects.toMatchObject({
+      message: expect.stringContaining('The service is currently unavailable.'),
+    });
+  });
+
+  test('JSON でない本文はそのまま（長い場合は 200 文字程度に切り詰めて）含まれる', async () => {
+    const longBody = 'x'.repeat(250);
+    const res = {
+      ok: false,
+      status: 500,
+      json: async () => ({}),
+      text: async () => longBody,
+    } as Response;
+    const deps = makeDeps(res);
+    try {
+      await googleFetch('https://api/x', { method: 'GET' }, deps);
+      throw new Error('should have thrown');
+    } catch (err) {
+      const e = err as GoogleApiError;
+      expect(e.message).toContain('x'.repeat(200));
+      expect(e.message).not.toContain('x'.repeat(201));
+    }
+  });
+
+  test('本文が空でも壊れず、余計な区切り文字が残らない', async () => {
+    const res = {
+      ok: false,
+      status: 500,
+      json: async () => ({}),
+      text: async () => '',
+    } as Response;
+    const deps = makeDeps(res);
+    await expect(googleFetch('https://api/', { method: 'GET' }, deps)).rejects.toMatchObject({
+      message: 'Google API failed: HTTP 500 (GET https://api/)',
+    });
+  });
+
+  test('メソッドと URL がメッセージに含まれる', async () => {
+    const res = {
+      ok: false,
+      status: 403,
+      json: async () => ({}),
+      text: async () => 'forbidden',
+    } as Response;
+    const deps = makeDeps(res);
+    await expect(
+      googleFetch('https://www.googleapis.com/drive/v3/files/F1', { method: 'PATCH' }, deps)
+    ).rejects.toMatchObject({
+      message: expect.stringContaining('(PATCH https://www.googleapis.com/drive/v3/files/F1)'),
+    });
+  });
+
   test('初期ヘッダをマージする', async () => {
     const res = {
       ok: true,
