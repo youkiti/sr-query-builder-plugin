@@ -1,6 +1,6 @@
 # Chrome ウェブストア 提出物一式（docs/store/）
 
-Chrome Web Store 提出フェーズ1（manifest / アイコン配線 / 提出物ドキュメント整備）の成果物置き場。**まだストアには提出していない**（本フェーズの範囲外）。
+Chrome Web Store 提出フェーズ1（manifest / アイコン配線 / 提出物ドキュメント整備）の成果物置き場。**2026-08-07 に v0.2.0 を提出し、審査結果を待っている**（まだ公開されていない）。
 
 ## このフォルダの中身
 
@@ -44,8 +44,10 @@ Chrome ウェブストアの掲載に必要な画像。スクリーンショッ�
 - [x] GitHub Pages 公開ページの作成・デプロイ（[hosted/](../../hosted/)。**作成・デプロイ済み** — `gh-pages` ブランチへ反映済みで、公開 URL `https://youkiti.github.io/sr-query-builder-plugin/` は有効。手順は [hosted/README.md](../../hosted/README.md)）
 - [x] スクリーンショット取得（[hosted/screenshots/](../../hosted/screenshots/) に 1280×800 の 5 枚。`npm run shots` で再生成できる。上記「必要な画像」参照）
 - [x] クリーンな Chrome プロファイルでの実 Google 認証つき dist smoke
-- [ ] Chrome ウェブストア デベロッパーアカウントで提出
-- [ ] 審査通過・一般公開
+- [x] Chrome ウェブストア デベロッパーアカウントで提出（**2026-08-07 に v0.2.0 を提出**。`release/sr-query-builder-plugin-0.2.0.zip` を `key.pem` 同梱でアップロード。version バンプはしていない＝0.2.0 は本提出が初出）
+- [ ] 審査通過・一般公開（**審査待ち**）
+- [ ] 公開後: ストアに表示された拡張 ID が `bckokafmjighegpjiocopkagghppnjld` と一致することを確認する（一致していれば既存の OAuth client_id がそのまま使える）
+- [ ] 公開後: [hosted/index.html](../../hosted/index.html) のヒーロー CTA と「はじめかた」を、自前ビルド手順からストアのインストールリンク・手順へ差し替える（[hosted/README.md](../../hosted/README.md) の「更新時に守ること」参照）
 
 ## manifest レビュー結果
 
