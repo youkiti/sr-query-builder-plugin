@@ -1,7 +1,8 @@
 # 操作解説動画 要件定義書・制作計画
 
 作成日: 2026-08-07
-ステータス: **計画のみ（実装未着手）**。本書は PR0（計画）の成果物で、PR1 以降の実装は未着手。
+ステータス: **PR0（計画）+ PR1（パイプライン基盤 + スモークシーン 1 本）完了**（2026-08-07）。
+PR2 以降（デモビルド層 → 実チャプター 01〜14 → QA/QC → 公開）は未着手。PR1 の達成内容と実測値は §11。
 
 姉妹リポジトリ [sr-data-extraction-plugin/video](https://github.com/youkiti/sr-data-extraction-plugin/tree/master/video)
 で実績のある「Playwright 収録 → VOICEVOX で TTS → ffmpeg で合成 → YouTube 手動公開」パイプラインを
@@ -242,8 +243,45 @@ PR1〜PR4 は `npm test` / `npm run typecheck` / `npm run lint` / `npm run dev` 
 - [ ] **日本語フォントの確認**。無いと Chromium が中国語フォント（WenQuanYi Zen Hei）で日本語を描画する。
       字形が変わるだけでレイアウトは崩れないので、完成後に見返すまで気づかない。
       **本コンテナは初期状態で未導入であることを確認済み（§3）。毎セッション必ず見る。**
+      **フォント本体を入れるだけでは直らない**（本コンテナに元から入っている中国語フォント
+      向けの fontconfig alias に順番で負ける）。`npm run video:setup` は総称 `sans-serif` を
+      Noto Sans JP に強制する fontconfig alias（`binding="strong"`）の書き出しまで行う
+      （詳細・実測の経緯は `video/scripts/setup.sh` ステップ3のコメントと
+      [video/README.md](./README.md#制作の勘所do--dont) 参照）。
+
+  **一次スクリーニング**（速いが偽陽性がありうる。下の最終確認とセットで使うこと）:
   ```bash
-  fc-match -s "sans-serif:lang=ja" | head -1   # Noto Sans JP が返れば OK
+  fc-match -s "sans-serif:lang=ja" | head -1   # Noto Sans JP が返れば一次チェックは通過
+  ```
+  これだけでは不十分（実測で確認済み）: fontconfig は `lang=ja` を**実際に描画するテキストの
+  文字種からではなく、本コンテナのロケール環境変数（`LANG`/`LC_ALL`）から**補うため、
+  この CLI 呼び出しのように明示的に `lang=ja` を指定すれば正しく解決できても、`LANG` が
+  未設定な本コンテナで Chromium が実際に発行するフォント問い合わせには `lang=ja` が乗らず、
+  中国語フォントのまま描画されることがある（Playwright の `locale: 'ja'` も Blink 側の設定で
+  fontconfig には効かない）。
+
+  **最終確認は Chromium の実描画で行う。** CDP の `CSS.getPlatformFontsForNode` で、実際に
+  日本語テキストを描画したときの解決フォントを直接見る。`playwright` パッケージの解決に
+  リポジトリの `node_modules/` を使うため、**リポジトリルートで実行する**こと（`/tmp` 等では
+  `ERR_MODULE_NOT_FOUND` になる）。確認用の一時スクリプトなので、確認後は削除する。
+  ```bash
+  cat > fontcheck-tmp.mjs <<'EOF'
+  import { chromium } from 'playwright';
+  const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+  const p = await b.newPage();
+  await p.setContent(`
+    <div id="app" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Hiragino Sans','Yu Gothic UI','Meiryo',sans-serif;font-size:32px">検索式を生成して検証する</div>
+  `);
+  const cdp = await p.context().newCDPSession(p);
+  await cdp.send('DOM.enable'); await cdp.send('CSS.enable');
+  const { root } = await cdp.send('DOM.getDocument');
+  const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#app' });
+  const { fonts } = await cdp.send('CSS.getPlatformFontsForNode', { nodeId });
+  console.log(fonts.map((f) => `${f.familyName} (${f.glyphCount} glyphs)`).join(', '));
+  await b.close();
+  EOF
+  node fontcheck-tmp.mjs   # "Noto Sans JP ..." が出れば OK。WenQuanYi 等が出たら fontconfig alias を疑う
+  rm fontcheck-tmp.mjs
   ```
   なお `src/styles/` のフォント指定（Hiragino → Noto Sans JP → Yu Gothic UI）は正しく、実機の
   macOS / Windows 利用者には起きない。**収録環境固有の問題なので `src/` は直さない。**
@@ -265,7 +303,8 @@ PR1〜PR4 は `npm test` / `npm run typecheck` / `npm run lint` / `npm run dev` 
   import urllib.parse; print(urllib.parse.quote('確認したい文'))")" \
     | python3 -c "import json,sys; q=json.load(sys.stdin); print(''.join(m['text'] for ap in q['accent_phrases'] for m in ap['moras']))"
   ```
-      誤読する語は原稿側をカタカナに書き下す（`MeSH` → `メッシュ` 等）
+      誤読する語は原稿側をカタカナに書き下す（`MeSH` → `メッシュ` 等）。
+      実測済みの誤読一覧は [video/README.md](./README.md#制作の勘所do--dont) を参照
 - [ ] 英語字幕が日本語ナレーションと同じ内容を言っている（cue 番号の対応も）
 
 ### 8-3. 収録直後
@@ -295,6 +334,20 @@ PR1〜PR4 は `npm test` / `npm run typecheck` / `npm run lint` / `npm run dev` 
   ```
 - [ ] 可視カーソルが映っていて、各 cue で「見るべき場所」を指している
 - [ ] ナレーションと画面のズレ（各章の冒頭・末尾を重点的に）
+- [ ] **長時間の静止画（フリーズフレーム）が無い。** ナレーションが画面操作より長い cue があると、
+      `assemble.mjs` が最終フレームを複製して尺を合わせる（`tpad`）ため、「もう終わった操作」を
+      喋り続ける絵になる。PR1 のスモークシーンで実際に総尺の 68% が静止画になった
+      （収録 18 秒 / 完成 58 秒）。**シーン側で `scenes/lib/pacing.mjs` を使えば起きない**ので、
+      起きていたらシーンスクリプトの側を直す（原稿を削るか、操作を足す）。
+      検出は「収録尺と完成尺の比較」と「フレームの md5 が連続して一致しないこと」で行う
+  ```bash
+  # 収録尺と完成尺（乖離が大きいほど静止画が長い）
+  ffprobe -v error -show_entries format=duration -of csv=p=0 video/build/scenes/<NN-slug>/segment-0.webm
+  ffprobe -v error -show_entries format=duration -of csv=p=0 video/build/final.mp4
+  # 3 秒おきに抜いたフレームの md5 が全て異なることを確認する
+  for t in $(seq 3 3 60); do ffmpeg -v error -ss $t -i video/build/final.mp4 -frames:v 1 -y /tmp/p$t.png; done
+  md5sum /tmp/p*.png | awk '{print $1}' | sort | uniq -d   # 何か出たら静止区間あり
+  ```
 - [ ] `00-` 始まりのスモークシーンが `final.mp4` に混入していない
 - [ ] 総尺・解像度・コーデック（1920×1080 / 30fps / h264 + aac / 15〜16 分）
 - [ ] `chapters.txt` が YouTube のチャプター要件を満たす（**最初が `0:00`**・**3 個以上**・**昇順**・
@@ -373,14 +426,29 @@ PR1〜PR4 は `npm test` / `npm run typecheck` / `npm run lint` / `npm run dev` 
 
 ## 11. 受け入れ基準
 
-### PR1（基盤）
-- [ ] `bash video/scripts/setup.sh` が冪等に完走する（既存の ffmpeg / VOICEVOX / フォントを検出してスキップ）
-- [ ] `xvfb-run -a -s "-screen 0 1920x1080x24" node video/scripts/record.mjs 00-smoke` で
+### PR1（基盤）— 2026-08-07 達成
+- [x] `bash video/scripts/setup.sh` が冪等に完走する（既存の ffmpeg / VOICEVOX / フォントを検出してスキップ）
+- [x] `xvfb-run -a -s "-screen 0 1920x1080x24" node video/scripts/record.mjs 00-smoke` で
       `video/build/scenes/00-smoke/segment-0.webm` と cue 時刻入り `meta.json` が生成される
-- [ ] `node video/scripts/tts.mjs 00-smoke` で音声が生成され、2 回目はハッシュ一致でスキップされる
-- [ ] `node video/scripts/assemble.mjs` が `final.mp4`（h264 + aac / 1920×1080 / 30fps）を出す
-- [ ] 可視カーソルが `final.mp4` に映っている（PNG 切り出しで目視）
-- [ ] `typecheck` / `lint` / `lint:css` / `test` / `dev` が緑
+- [x] `node video/scripts/tts.mjs 00-smoke` で音声が生成され、2 回目はハッシュ一致でスキップされる
+      （実測: 2 回目は「合成 0 件 / 再利用 3 件」）
+- [x] `node video/scripts/assemble.mjs --include-examples` が `final.mp4` を出す
+      （実測: h264 High + aac 48kHz stereo / 1920×1080 / 30fps / 54.15 秒）。
+      **`--include-examples` は PR1 で追加した検証専用のオプトイン**。既定では `00-` 始まりの
+      シーンを本編から除外する規約（§4）を維持しており、スモークシーンしか無い PR1 の段階で
+      合成まで通すためだけに使う
+- [x] 可視カーソルが `final.mp4` に映っている（PNG 切り出しで目視）
+- [x] **日本語が中国語フォントで描画されていない**（PNG 切り出しで目視 + CDP による実描画確認。
+      §8-1 参照。フォント本体の導入だけでは解決せず、fontconfig alias の書き出しが必要だった）
+- [x] **ナレーションと画面がずれていない**（収録 54.12 秒 / 完成 54.15 秒 = 引き伸ばし 0.06%。
+      3 秒おきに抜いた 9 フレームの md5 がすべて異なり、静止区間が無いことを確認）
+- [x] `typecheck` / `lint` / `test` / `dev` が緑（`test` は Linux 環境で元から落ちている
+      `tests/playwright-server.test.ts` の 1 件を除く。下記「既知の失敗」参照）
+
+> **既知の失敗（PR1 と無関係・本作業前から）**: `tests/playwright-server.test.ts` の
+> 「rejects traversal into sibling paths that only share the same prefix」は、POSIX が
+> バックスラッシュをパス区切りとして扱わないため Linux でのみ失敗する（Windows では通る）。
+> 本 PR は `src/` にも `tools/` にも触れていないため対象外とした。
 
 ### PR2（デモビルド層）
 - [ ] `npm run build:demo` が `dist-demo/` を出す
