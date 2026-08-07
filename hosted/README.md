@@ -93,12 +93,15 @@ PC 幅とスマホ幅の両方で確認する:
 - `index.html` のスクリーンショット 5 枚が表示されるか（リンク切れ・404 が無いか）
 - 言語切替が機能するか: ヘッダー（index はヒーロー）の切替ボタン／URL に `?lang=en` を付けて開いた場合／言語を切り替えた状態で別ページへ遷移したときに選択が保持されるか（`localStorage`）
 
-## 未実施の運用作業（本 README には手順のみ記載。実行はしていない）
+## ストアダッシュボードへの反映（実施済み）
 
-GitHub Pages への公開自体は完了済み（上記「デプロイ手順（初回。実施済み）」参照）。残っているのは
-Chrome ウェブストア側の設定のみ:
+GitHub Pages への公開と、その URL のストアダッシュボードへの登録はどちらも完了している。
+2026-08-07 の v0.2.0 提出時に、以下 2 欄を入力済み:
 
-- ストアダッシュボードの「プライバシーポリシー URL」欄を `https://youkiti.github.io/sr-query-builder-plugin/privacy-policy.html` に設定する
-- ストアダッシュボードの「ウェブサイト」欄を `https://youkiti.github.io/sr-query-builder-plugin/` に設定する
+- 「プライバシーポリシー URL」欄 = `https://youkiti.github.io/sr-query-builder-plugin/privacy-policy.html`
+- 「ウェブサイト」欄 = `https://youkiti.github.io/sr-query-builder-plugin/`
 
-（[docs/store/README.md](../docs/store/README.md) に記載の通り、本拡張はまだ Chrome ウェブストアに提出していないため、上記 2 点は提出フェーズで行う）
+**この 2 つの URL を変えるとき（ページのファイル名変更・独自ドメインへの移行など）は、ダッシュボード側も必ず同時に直すこと。**
+プライバシーポリシー URL は審査の必須要件なので、リンク切れのまま更新を提出すると審査で止まる。
+
+提出状況と公開後の残作業は [docs/store/README.md](../docs/store/README.md) を参照。
