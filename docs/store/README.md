@@ -8,6 +8,7 @@ Chrome Web Store 提出フェーズ1（manifest / アイコン配線 / 提出物
 |---|---|---|
 | [privacy-policy.md](privacy-policy.md) | プライバシーポリシー（審査必須。公開 URL が要る → 下記参照） | 原稿完成 |
 | [permissions-justification.md](permissions-justification.md) | 各権限の使用理由（審査フォームへ貼り付け。日英併記） | 原稿完成 |
+| [store-listing-description.md](store-listing-description.md) | ストア掲載ページの詳細な説明（審査フォームへ貼り付け。日英併記） | 原稿完成 |
 
 ストア掲載ページ（プライバシーポリシー / ヘルプ / 利用規約 / ウェブサイト）の実体は [hosted/](../../hosted/) に作成済み。ホスティング手順は [hosted/README.md](../../hosted/README.md) を参照。
 
@@ -22,6 +23,7 @@ Chrome Web Store 提出フェーズ1（manifest / アイコン配線 / 提出物
 - **公開範囲**: **一般公開（public）**（確定）— ストア検索・リンクのどちらからでも誰でもインストールできる。同シリーズの sr-data-extraction-plugin と同じ方針
 - **プライバシーポリシー URL**: `https://youkiti.github.io/sr-query-builder-plugin/privacy-policy.html`（公開済み。ページの正典は [hosted/](../../hosted/)、デプロイ手順は [hosted/README.md](../../hosted/README.md) 参照）
 - **ウェブサイト**: `https://youkiti.github.io/sr-query-builder-plugin/`（公開済み。ページの正典は [hosted/](../../hosted/)）
+- **詳細な説明**: 原稿は [store-listing-description.md](store-listing-description.md) を参照
 
 ## 必要な画像
 
@@ -41,7 +43,7 @@ Chrome ウェブストアの掲載に必要な画像。スクリーンショッ�
 - [x] 提出用 zip の作成・検証ツール整備（[tools/release/](../../tools/release/)。`npm run release` / `npm run pack:release`）
 - [x] GitHub Pages 公開ページの作成・デプロイ（[hosted/](../../hosted/)。**作成・デプロイ済み** — `gh-pages` ブランチへ反映済みで、公開 URL `https://youkiti.github.io/sr-query-builder-plugin/` は有効。手順は [hosted/README.md](../../hosted/README.md)）
 - [x] スクリーンショット取得（[hosted/screenshots/](../../hosted/screenshots/) に 1280×800 の 5 枚。`npm run shots` で再生成できる。上記「必要な画像」参照）
-- [ ] クリーンな Chrome プロファイルでの実 Google 認証つき dist smoke
+- [x] クリーンな Chrome プロファイルでの実 Google 認証つき dist smoke
 - [ ] Chrome ウェブストア デベロッパーアカウントで提出
 - [ ] 審査通過・一般公開
 
