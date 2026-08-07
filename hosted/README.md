@@ -13,6 +13,7 @@
 | [style.css](style.css) | 4 ページ共通スタイル（青基調。`src/styles/tokens.css` の `--color-primary: #2a63d6` に準拠） | `https://youkiti.github.io/sr-query-builder-plugin/style.css` |
 | [lang.js](lang.js) | 表示言語（ja / en）の解決・切替 | `https://youkiti.github.io/sr-query-builder-plugin/lang.js` |
 | [screenshots/](screenshots/) | index.html が参照するスクリーンショット 5 枚（`s1-protocol.png` 〜 `s5-export.png`） | `https://youkiti.github.io/sr-query-builder-plugin/screenshots/*.png` |
+| `.nojekyll` | Jekyll のビルド処理を無効化し、静的ファイルをそのまま配信させるための空マーカーファイル。`hosted/` には存在せず、`gh-pages` worktree のルートに直接作成する（下記「デプロイ手順」参照） | 配信対象外（Jekyll 無効化用） |
 
 ## 表示言語の仕組み（ja / en の切替。併記はしない）
 
@@ -32,14 +33,18 @@
   - `index.html` のヒーロー CTA（現在は「GitHub でソースを見る」）を、ストアのインストールリンクへ差し替える
   - `index.html`「はじめかた」の自前ビルド手順（`.env` の OAuth クライアント ID 発行を含む一連の手順）を、ストアからのインストール手順に差し替える
 
-## デプロイ手順（初回。`gh-pages` ブランチはまだ存在しない）
+## デプロイ手順（初回。実施済み）
+
+**初回デプロイは完了済み**（`gh-pages` ブランチが存在し、`https://youkiti.github.io/sr-query-builder-plugin/` は有効）。
+以下は実施した手順の記録であり、今後の通常の更新には使わない（それは次の「デプロイ手順（2 回目以降の更新）」節を使う）。
+リポジトリを作り直す等で `gh-pages` ブランチが無い状態からやり直す場合の参照として残す。
 
 > **作業ツリーを壊す操作（`git checkout --orphan` + `git rm -rf .` を今のツリーで実行する等）はしないこと。**
 > このリポジトリは submodule を 2 つ持ち、かつ複数セッションが同じ作業ツリーを共有することがあるため、
 > 今の作業ツリーの中身を消すコマンドは事故になる。`git worktree` で `gh-pages` 専用の別ディレクトリを作り、
 > そちらでコミット・push する。
 
-1. **先にスクリーンショットを撮る**: `npm run manual:check -- --shots` でアプリの実画面から `screenshots/` の 5 枚（`s1-protocol.png` 〜 `s5-export.png`）を取得する。撮影せずにデプロイすると `index.html` のスクリーンショットセクションの画像リンクが切れる
+1. **先にスクリーンショットを撮る**: `npm run shots`（Playwright + stub 環境。実 API を叩かず無人実行できる）で `screenshots/` の 5 枚（`s1-protocol.png` 〜 `s5-export.png`）を取得する。撮影せずにデプロイすると `index.html` のスクリーンショットセクションの画像リンクが切れる。実際にアプリを動かした本物の画面で撮り直したいとき（stub のデモデータではなく実 Google/Gemini/NCBI API の応答を見せたいとき）は、代わりに `npm run manual:check -- --shots` を使う（詳細は [docs/manual-testing.md](../docs/manual-testing.md)）
 2. `gh-pages` 用の孤立 worktree を、今の作業ツリーの外（兄弟ディレクトリ）に作る:
    ```bash
    git worktree add --orphan -b gh-pages ../sr-query-builder-plugin-gh-pages
@@ -47,11 +52,14 @@
    （`git worktree add --orphan` は Git 2.42 以降が必要。それ以前の git しか無い場合は、代わりに
    `git clone --no-checkout <このリポジトリの URL> ../sr-query-builder-plugin-gh-pages && cd ../sr-query-builder-plugin-gh-pages && git checkout --orphan gh-pages && git rm -rf .`
    で同じ状態を作れる。いずれも**今の作業ツリーには触れない**）
-3. `hosted/` 配下の内容（`index.html` / `help.html` / `privacy-policy.html` / `terms-of-service.html` / `style.css` / `lang.js` / `screenshots/`）を、作成した worktree のルートへコピーする
+3. `hosted/` 配下の内容（`index.html` / `help.html` / `privacy-policy.html` / `terms-of-service.html` / `style.css` / `lang.js` / `screenshots/`）を、作成した worktree のルートへコピーする。
+   **加えて、空の `.nojekyll` ファイルを worktree のルートに作成する**（`hosted/` には無いのでコピー元が無い。
+   `touch .nojekyll` 等で新規作成する）。GitHub Pages は既定で Jekyll によるビルドを試みるため、
+   `.nojekyll` を置いて Jekyll 処理を無効化し、静的ファイルをそのまま配信させる
 4. worktree 側でコミットして push する:
    ```bash
    cd ../sr-query-builder-plugin-gh-pages
-   git add index.html help.html privacy-policy.html terms-of-service.html style.css lang.js screenshots
+   git add index.html help.html privacy-policy.html terms-of-service.html style.css lang.js screenshots .nojekyll
    git commit -m "chore: GitHub Pages 公開ページを追加"
    git push -u origin gh-pages
    ```
@@ -60,9 +68,16 @@
    cd -
    git worktree remove ../sr-query-builder-plugin-gh-pages
    ```
-6. GitHub の Settings → Pages で Source を `gh-pages` ブランチ / `/ (root)` に設定して有効化する
+6. GitHub の Settings → Pages で Source を `gh-pages` ブランチ / `/ (root)` に設定して有効化する。
+   **実施時はこの手順は不要だった**: `gh-pages` ブランチを push した時点で GitHub 側が自動的に
+   Pages を有効化した（`build_type: legacy` / `source: gh-pages, path: /`）。念のため API で明示的に
+   有効化しようとしたところ `409 GitHub Pages is already enabled.` が返っている。ただし自動有効化は
+   アカウント・リポジトリ設定に依存する可能性があるため、手順としては残す（自動で有効化されていなければ
+   この手順を実施する）
 
 ## デプロイ手順（2 回目以降の更新）
+
+**初回デプロイ完了後、今後の通常の更新はこちらを使う。**
 
 1. 上記「更新時に守ること」を反映する
 2. `gh-pages` ブランチのルートへ、変更したファイルを本ディレクトリの内容で上書きして push する。
@@ -79,6 +94,9 @@ PC 幅とスマホ幅の両方で確認する:
 - 言語切替が機能するか: ヘッダー（index はヒーロー）の切替ボタン／URL に `?lang=en` を付けて開いた場合／言語を切り替えた状態で別ページへ遷移したときに選択が保持されるか（`localStorage`）
 
 ## 未実施の運用作業（本 README には手順のみ記載。実行はしていない）
+
+GitHub Pages への公開自体は完了済み（上記「デプロイ手順（初回。実施済み）」参照）。残っているのは
+Chrome ウェブストア側の設定のみ:
 
 - ストアダッシュボードの「プライバシーポリシー URL」欄を `https://youkiti.github.io/sr-query-builder-plugin/privacy-policy.html` に設定する
 - ストアダッシュボードの「ウェブサイト」欄を `https://youkiti.github.io/sr-query-builder-plugin/` に設定する

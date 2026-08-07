@@ -20,8 +20,8 @@ Chrome Web Store 提出フェーズ1（manifest / アイコン配線 / 提出物
 - **カテゴリ**: 仕事効率化（Productivity）
 - **言語**: 日本語（`default_locale: "ja"`）
 - **公開範囲**: **一般公開（public）**（確定）— ストア検索・リンクのどちらからでも誰でもインストールできる。同シリーズの sr-data-extraction-plugin と同じ方針
-- **プライバシーポリシー URL**: `https://youkiti.github.io/sr-query-builder-plugin/privacy-policy.html`（想定 URL。ページは [hosted/](../../hosted/) に作成済み。`gh-pages` へのデプロイと GitHub Pages の有効化は未実施 — 手順は [hosted/README.md](../../hosted/README.md) 参照）
-- **ウェブサイト**: `https://youkiti.github.io/sr-query-builder-plugin/`（想定 URL。ページは [hosted/](../../hosted/) に作成済み。`gh-pages` へのデプロイと GitHub Pages の有効化は未実施）
+- **プライバシーポリシー URL**: `https://youkiti.github.io/sr-query-builder-plugin/privacy-policy.html`（公開済み。ページの正典は [hosted/](../../hosted/)、デプロイ手順は [hosted/README.md](../../hosted/README.md) 参照）
+- **ウェブサイト**: `https://youkiti.github.io/sr-query-builder-plugin/`（公開済み。ページの正典は [hosted/](../../hosted/)）
 
 ## 必要な画像
 
@@ -30,7 +30,7 @@ Chrome ウェブストアの掲載に必要な画像。スクリーンショッ�
 | 画像 | 仕様 | 状態 |
 |---|---|---|
 | ストアアイコン | 128×128 PNG | 済 — [src/icons/icon128.png](../../src/icons/icon128.png) を使用可 |
-| スクリーンショット | 1280×800、最低 1 枚（最大 5 枚） | 未取得（取得手段は整備済み: `npm run manual:check -- --shots` で `hosted/screenshots/` に 5 枚を出力する。詳細は [docs/manual-testing.md](../manual-testing.md)） |
+| スクリーンショット | 1280×800、最低 1 枚（最大 5 枚） | 済 — [hosted/screenshots/](../../hosted/screenshots/) に 5 枚（`s1-protocol.png` 〜 `s5-export.png`）。`npm run shots`（Playwright + stub 環境・無人実行）で再生成できる。実 API を叩いた本物の画面で撮り直す場合は `npm run manual:check -- --shots`（詳細は [docs/manual-testing.md](../manual-testing.md)） |
 | 小型プロモタイル（任意） | 440×280 PNG | 任意・未設定 |
 
 ## 提出前チェック（本フェーズの実施状況）
@@ -39,8 +39,8 @@ Chrome ウェブストアの掲載に必要な画像。スクリーンショッ�
 - [x] プライバシーポリシー原稿
 - [x] 権限の使用理由原稿（日英）
 - [x] 提出用 zip の作成・検証ツール整備（[tools/release/](../../tools/release/)。`npm run release` / `npm run pack:release`）
-- [x] GitHub Pages 公開ページの作成（[hosted/](../../hosted/)。**作成済み・デプロイ未実施** — `gh-pages` ブランチへの反映と Pages の有効化はまだ行っていない。手順は [hosted/README.md](../../hosted/README.md)）
-- [ ] スクリーンショット取得（取得手段は整備済み。上記「必要な画像」参照。画像そのものはまだ無い）
+- [x] GitHub Pages 公開ページの作成・デプロイ（[hosted/](../../hosted/)。**作成・デプロイ済み** — `gh-pages` ブランチへ反映済みで、公開 URL `https://youkiti.github.io/sr-query-builder-plugin/` は有効。手順は [hosted/README.md](../../hosted/README.md)）
+- [x] スクリーンショット取得（[hosted/screenshots/](../../hosted/screenshots/) に 1280×800 の 5 枚。`npm run shots` で再生成できる。上記「必要な画像」参照）
 - [ ] クリーンな Chrome プロファイルでの実 Google 認証つき dist smoke
 - [ ] Chrome ウェブストア デベロッパーアカウントで提出
 - [ ] 審査通過・一般公開
