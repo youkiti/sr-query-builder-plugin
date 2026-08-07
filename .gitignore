@@ -17,6 +17,8 @@ node_modules/
 dist/
 dist-release/
 coverage/
+# 動画収録用デモビルド（video/REQUIREMENTS.md の PR2 で追加予定。webpack --env demo の出力）
+dist-demo/
 
 # 環境変数（OAuth クライアント ID は個別配置）
 .env
@@ -44,3 +46,10 @@ playwright/.cache/
 # ログイン済みセッションと拡張の読み込み状態を再利用するため永続化するが、
 # 認証情報を含むためコミットしない
 .selenium-profile/
+
+# 動画制作パイプライン（video/）。video/scripts/setup.sh が展開する ffmpeg / VOICEVOX の
+# 実体（video/tools/）と、record.mjs / tts.mjs / assemble.mjs の生成物（video/build/）は
+# いずれも video/scripts/setup.sh・npm run video:* から再生成できるためコミットしない
+# （video/README.md 参照）
+video/tools/
+video/build/

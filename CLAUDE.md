@@ -25,9 +25,17 @@ npm run typecheck    # tsc --noEmit
 npm run lint         # eslint（src + tests）
 npm run lint:css     # stylelint
 npm run manual:check # Selenium 実機確認（本物の Chrome + Google/Gemini/NCBI。手動確認用・CI 非対象）
+npm run video:setup  # 操作解説動画の環境構築（ffmpeg / VOICEVOX / 日本語フォント。冪等）
+npm run video:record # シーン収録（video/scenes/ → video/build/scenes/。Linux は xvfb 経由）
+npm run video:tts    # ナレーション音声合成（video/narration/ → video/build/audio/）
+npm run video:assemble # 合成（build/ 一式 → final.mp4 / chapters.txt / 字幕 / 説明文）
 ```
 
 単一テストの実行: `npx jest src/app/views/blocksView.test.ts`、E2E 単体: `npx playwright test tests/e2e/app-blocks.spec.ts`。
+
+**既知の失敗（Linux のみ）**: `tests/playwright-server.test.ts` の `safeJoin › rejects traversal into sibling paths that only share the same prefix` は Linux で必ず落ちる。POSIX の `path` はバックスラッシュをパス区切りとして扱わないため、テストが与える Windows 形式の traversal パスがそもそも別セグメントに分解されないことによるもので、Windows では通る。**本体の不具合ではないので、Linux で `npm test` を回したときはこの 1 件だけが失敗している状態が正常**。他に失敗が出ていたらそれは自分の変更が原因。
+
+**操作解説動画（`video/`）**: YouTube 公開用の解説動画を Playwright 収録 + VOICEVOX 音声合成 + ffmpeg 合成で作るパイプライン。正典は [video/REQUIREMENTS.md](video/REQUIREMENTS.md)（PR 分割・受け入れ基準・QA/QC チェックリスト）、実行手順と過去に踏んだ失敗の再発防止メモは [video/README.md](video/README.md)。収録は dev ビルド（`dist/`）を読み込むので事前に `npm run dev` が要る。Chrome 拡張の録画には仮想ディスプレイが必要なため、Linux では `xvfb-run -a -s "-screen 0 1920x1080x24" node video/scripts/record.mjs` のように xvfb 経由で実行する。現状はパイプライン基盤 + スモークシーン 1 本までで、実チャプター 01〜14 とデモビルド層は後続 PR のスコープ。
 
 **dev ビルドと本番ビルドは出力先を分離している**（`dist/` と `dist-release/`）。**ローカルで実機確認するときは必ず dev ビルド（`dist/`）を読み込むこと**。本番ビルド（`dist-release/`）は webpack が manifest から `key` を削除しており、`key` の無い拡張を unpacked 読込すると Chrome が拡張 ID をパスから導出してしまい、OAuth クライアントに登録済みの `bckokafmjighegpjiocopkagghppnjld` と一致せず認証できない。
 
