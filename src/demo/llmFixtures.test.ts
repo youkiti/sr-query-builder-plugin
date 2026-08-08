@@ -1,5 +1,6 @@
 import { GeminiProvider } from '@/lib/llm';
 import type { LLMProvider } from '@/lib/llm';
+import { detectGeminiTier } from '@/lib/llm/geminiTierDetector';
 import {
   designBlock,
   designFreewords,
@@ -90,6 +91,71 @@ describe('mesh-suggester / freeword-designer フィクスチャ', () => {
     );
     expect(mesh).toEqual([]);
   });
+
+  /*
+   * 回帰: seed 情報を空で渡すとこの不具合は再現しない。
+   * mesh-suggester / freeword-designer のプロンプトは末尾に seed の MeSH 一覧や
+   * ti/ab コーパスを丸ごと含むため、ブロック判定をテキスト全体で行うと
+   * seed 側の語（デモの seed は ARDS/ECMO の論文なので "ARDS" を含む）を拾って
+   * BLOCK_DEFS 先頭の ards のフィクスチャが全ブロックに返っていた。
+   * 実害は第 7 章の生成結果で、#2 ECMO と #3 RCT フィルタが両方とも
+   * ARDS のフリーワードになっていた。必ず seed 込みで検証すること。
+   */
+  describe('seed 側の語に引きずられない（ブロック取り違えの回帰）', () => {
+    // 他ブロックのキーワード（ARDS）を必ず含む、実際に近い seed コーパス
+    const SEED_SAMPLES = [
+      {
+        title: 'ECMO for severe ARDS: a randomized controlled trial',
+        abstract:
+          'Patients with acute respiratory distress syndrome were randomized to extracorporeal membrane oxygenation or conventional ventilation.',
+      },
+      {
+        title: 'Venovenous extracorporeal membrane oxygenation in ARDS',
+        abstract: 'A randomised multicentre trial in adults with acute respiratory distress syndrome.',
+      },
+    ];
+    const SEED_MESH = {
+      seedCount: 2,
+      concepts: [
+        { descriptor: 'Respiratory Distress Syndrome', count: 2, majorCount: 2, qualifiers: [] },
+        { descriptor: 'Extracorporeal Membrane Oxygenation', count: 2, majorCount: 2, qualifiers: [] },
+      ],
+      checkTags: [],
+    };
+
+    it.each(['ards', 'ecmo', 'rct'] as const)(
+      '%s ブロックは seed に ARDS が出てきても自分のフリーワードを返す',
+      async (key) => {
+        const def = getBlockDef(key);
+        const freewords = await designFreewords(
+          {
+            conceptSummary: def.conceptSummary,
+            freewordRequirements: [...def.freewordRequirements],
+            meshSuggestions: def.meshV1.map((m) => ({ descriptor: m.descriptor })),
+            seedSamples: SEED_SAMPLES,
+          },
+          makeProvider()
+        );
+        expect(freewords).toEqual(def.freewords);
+      }
+    );
+
+    it.each(['ards', 'ecmo', 'rct'] as const)(
+      '%s ブロックは seed の MeSH に引きずられず自分の MeSH 提案を返す',
+      async (key) => {
+        const def = getBlockDef(key);
+        const mesh = await suggestMesh(
+          {
+            conceptSummary: def.conceptSummary,
+            meshRequirements: [...def.meshRequirements],
+            seedMesh: SEED_MESH,
+          },
+          makeProvider()
+        );
+        expect(mesh).toEqual(def.meshV1);
+      }
+    );
+  });
 });
 
 describe('expand-query-for-recall フィクスチャ（09 章の拡張語）', () => {
@@ -179,5 +245,38 @@ describe('improve-block フィクスチャ（/edit の AI 改善）', () => {
       makeProvider()
     );
     expect(proposal.proposedExpression).toContain('Extracorporeal Membrane Oxygenation');
+  });
+});
+
+describe('プラン判定プローブ（第 2 章の tier バッジ）', () => {
+  const probeFetch = (async (_url: RequestInfo | URL, init?: RequestInit) =>
+    handleGeminiGenerateContent(init ?? {})) as unknown as typeof fetch;
+
+  it('detectGeminiTier が paid を返す（バッジが空欄にならない）', async () => {
+    await expect(detectGeminiTier('demo-api-key', probeFetch)).resolves.toBe('paid');
+  });
+
+  it('systemInstruction を持たない maxOutputTokens=1 のリクエストは skill 判定へ流れない', async () => {
+    const res = handleGeminiGenerateContent({
+      method: 'POST',
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: 'hi' }] }],
+        generationConfig: { maxOutputTokens: 1 },
+      }),
+    });
+    expect(res.ok).toBe(true);
+  });
+
+  it('systemInstruction 付きのリクエストは従来どおり skill 判定される', () => {
+    expect(() =>
+      handleGeminiGenerateContent({
+        method: 'POST',
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: 'hi' }] }],
+          systemInstruction: { parts: [{ text: '未登録のシステムプロンプト' }] },
+          generationConfig: { maxOutputTokens: 1 },
+        }),
+      })
+    ).toThrow(/skill を判定できません/);
   });
 });

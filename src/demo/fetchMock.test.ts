@@ -1,8 +1,18 @@
-import { demoFetch, installDemoFetch } from './fetchMock';
+import {
+  demoFetch,
+  installDemoFetch,
+  resolveDemoLatencyFactor,
+  setDemoLatencyFactor,
+} from './fetchMock';
 import { resetDemoBackend } from './sheetStore';
 
 beforeEach(async () => {
   await resetDemoBackend();
+});
+
+// 人工レイテンシは既定 0（無効）。テストで有効化したら必ず戻す。
+afterEach(() => {
+  setDemoLatencyFactor(0);
 });
 
 describe('demoFetch', () => {
@@ -51,5 +61,46 @@ describe('installDemoFetch', () => {
     installDemoFetch();
     expect(globalThis.fetch).not.toBe(original);
     globalThis.fetch = original;
+  });
+});
+
+describe('resolveDemoLatencyFactor', () => {
+  it('demoLatency 未指定なら等倍（1）', () => {
+    expect(resolveDemoLatencyFactor('')).toBe(1);
+    expect(resolveDemoLatencyFactor('?demoSeed=07-draft')).toBe(1);
+  });
+
+  it('demoLatency=0 は無効化として 0 を返す', () => {
+    expect(resolveDemoLatencyFactor('?demoLatency=0')).toBe(0);
+  });
+
+  it('倍率を指定できる', () => {
+    expect(resolveDemoLatencyFactor('?demoSeed=07-draft&demoLatency=1.5')).toBe(1.5);
+  });
+
+  it('数値として読めない値・負値は等倍にフォールバックする', () => {
+    expect(resolveDemoLatencyFactor('?demoLatency=abc')).toBe(1);
+    expect(resolveDemoLatencyFactor('?demoLatency=-2')).toBe(1);
+    expect(resolveDemoLatencyFactor('?demoLatency=')).toBe(1);
+  });
+});
+
+describe('人工レイテンシ', () => {
+  it('既定（倍率 0）では待たずに応答する', async () => {
+    const startedAt = Date.now();
+    await demoFetch(
+      'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=90000001%5Buid%5D&retmode=json&retmax=1'
+    );
+    expect(Date.now() - startedAt).toBeLessThan(100);
+  });
+
+  it('倍率を設定すると E-utilities 応答が遅延する', async () => {
+    setDemoLatencyFactor(1);
+    const startedAt = Date.now();
+    await demoFetch(
+      'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=90000001%5Buid%5D&retmode=json&retmax=1'
+    );
+    // LATENCY_MS.eutils = 250ms。タイマー精度のぶん少し緩めに見る
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(200);
   });
 });

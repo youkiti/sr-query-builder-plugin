@@ -1,17 +1,18 @@
 /**
  * デモビルド専用の `options.html` エントリ。
  *
- * Options 画面自体は `chrome.storage.local` の読み書きのみで完結し
- * identity / fetch は使わないが、他 2 エントリ（app / popup）と方針を揃え、
- * 将来 Options がモデル一覧取得等でネットワークに触れても安全なように
- * 同じモックを差し込んでおく。
+ * Options 画面は大半が `chrome.storage.local` の読み書きで完結するが、
+ * Gemini のプラン判定（`detectGeminiTier`）だけは `globalThis.fetch` で
+ * `generateContent` を叩くため、fetch モックが要る。identity は他 2 エントリ
+ * （app / popup）と方針を揃えて差し込んでおく。
  */
 
 import { createChromeOptionsDeps, startOptions } from '@/options/bootstrap';
-import { installDemoFetch } from './fetchMock';
+import { installDemoFetch, resolveDemoLatencyFactor, setDemoLatencyFactor } from './fetchMock';
 import { installDemoIdentity } from './identity';
 
 installDemoIdentity();
 installDemoFetch();
+setDemoLatencyFactor(resolveDemoLatencyFactor(window.location.search));
 
 void startOptions(document, createChromeOptionsDeps());

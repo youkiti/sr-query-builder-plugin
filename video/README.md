@@ -8,9 +8,13 @@ VOICEVOX による自動音声合成 + ffmpeg による自動合成で作るた�
 移植だったため、本件は3リポジトリ目の移植になる。本拡張固有の適応点は
 [REQUIREMENTS.md §5](./REQUIREMENTS.md#5-パイプライン構成移植後のディレクトリ) を参照。
 
-> **現状**: PR1（パイプライン基盤の移植 + スモークシーン1本）まで実装済み。
-> 実チャプター 01〜14（約16分想定）とデモビルド層（`dist-demo/`）はまだ無く、後続 PR
-> （REQUIREMENTS.md §7 の PR2〜PR4）のスコープ。YouTube への公開もまだ行っていない。
+> **現状**: PR1（パイプライン基盤 + スモークシーン1本）・PR2（デモビルド層 `dist-demo/`）・
+> PR3（実チャプター **01〜07**）まで実装済み。残る章 08〜14 と QA/QC は後続 PR
+> （REQUIREMENTS.md §7 の PR4〜PR5）のスコープ。YouTube への公開もまだ行っていない。
+>
+> 章 01〜07 は `npm run video:assemble`（引数無し・`--include-examples` 無し）で
+> `final.mp4` まで通る。章ごとの初期状態は `?demoSeed=`、進捗表示を映すための
+> 人工レイテンシは `?demoLatency=` で渡す（REQUIREMENTS.md §6-4 に係数の実測表がある）。
 >
 > 動画を作り直す・章を追加する前に、必ず下の「制作の勘所（DO / DON'T）」の節を読むこと。
 > 移植元（sr-data-extraction-plugin。そのまた移植元は tiab-review-plugin）の制作過程で
@@ -86,22 +90,28 @@ npm run video:assemble
 `video/build/audio/<key>/index.json`（`tts.mjs` の出力）を読んで各 cue の実尺を得る。音声より
 先に収録すると、シーン側が待つべき秒数を知らないままナレーションと画面がずれる。
 
-**現状（PR1）の制約**: `video/scenes/` 直下にはまだ実チャプターが無く、シーンは
-`video/scenes/examples/00-smoke.mjs`（スモークテスト）1本のみ。`npm run video:record` /
-`npm run video:assemble` は**引数無しでは対象が空になる**ため、スモークシーンの収録・TTS は
-明示的にキーを指定して行う。
+章 01〜07 が揃った現在は、引数無しの通常運用がそのまま使える。
 
 ```bash
-npm run video:tts -- 00-smoke
-xvfb-run -a -s "-screen 0 1920x1080x24" node video/scripts/record.mjs 00-smoke
+npm run video:tts                                                        # narration/ 全部
+xvfb-run -a -s "-screen 0 1920x1080x24" node video/scripts/record.mjs    # scenes/ 直下全部
+npm run video:assemble
+```
+
+1 章だけ撮り直すときは番号を渡す（`record.mjs 07` のように、`NN` でも `NN-slug` でも一致する）。
+原稿を変えた章は `tts.mjs` も同じキーで回してから収録し直すこと。
+
+```bash
+npm run video:tts -- 07-draft
+xvfb-run -a -s "-screen 0 1920x1080x24" node video/scripts/record.mjs 07
+npm run video:assemble
 ```
 
 `assemble.mjs` は `00-` 始まりのシーン（examples/ 用の予約番号。後述）を**既定では**最終動画から
-除外する設計のため、実チャプター（`video/scenes/01-*.mjs` 以降）が1本も無い PR1 の状態で
-`npm run video:assemble`（引数無し）を実行すると「本編シーンがありません」で意図的に停止する。
-実チャプターが追加される PR3 以降は、これがそのまま本編用の呼び方になる。
+除外する。実チャプターが 1 本も無い状態で `npm run video:assemble` を実行すると
+「本編シーンがありません」で意図的に停止する。
 
-**PR1 の時点でパイプライン全体（収録 → TTS → 合成）が最後まで通ることを検証したいときは**、
+**実チャプターを撮らずにパイプライン全体（収録 → TTS → 合成）が通ることだけを検証したいときは**、
 `--include-examples` を明示的に渡す。この場合だけ `00-` シーンも合成対象に含まれ、その旨が
 ログに出る（黙って本編扱いにはしない）。
 
@@ -221,15 +231,24 @@ tiab-review-plugin）の制作過程で実際に踏まれた失敗と、その�
   | PICO | ピイアイシイオオ | 「ピコ」と書き下す |
   | CENTRAL | シイイイエヌティイアアルエエエル（1 文字ずつ） | 「セントラル」と書き下す |
   | nbib | ニブ | 「エヌビブ」と書き下す |
+  | **ECMO** | **イイシイエムオオ** | **「エクモ」と書き下す**（PR3 で追加） |
+  | **efetch** | **エフェッチ** | **「イーフェッチ」と書き下す**（PR3 で追加） |
+  | **Sheets** | **シイツ**（寝具の「シーツ」と同音） | **「Google スプレッドシート」と書き下す**（PR3 で追加） |
   | Embase | エンベイス | 許容範囲（「エンベース」推奨） |
   | PubMed | パブメド | そのままでよい |
-  | MeSH | メッシュ | そのままでよい |
+  | MeSH / MeSH 階層 | メッシュ / メッシュカイソオ | そのままでよい |
   | PMID | ピイエムアイディイ | そのままでよい |
   | tiab | タイアブ | そのままでよい |
   | ICTRP | アイシイティイアアルピイ | そのままでよい |
   | BYOK | ビイワイオオケエ | そのままでよい |
   | SR | エスアアル | そのままでよい |
+  | ARDS | エエアアルディイエス | そのままでよい（PR3 で確認） |
+  | esearch | イイサアチ | そのままでよい（PR3 で確認） |
+  | OAuth | オオオオス | そのままでよい（PR3 で確認） |
+  | Gemini / Drive | ジェミニ / ドライブ | そのままでよい（PR3 で確認） |
+  | NCBI | エヌシイビイアイ | そのままでよい（PR3 で確認） |
   | 検索式 / 捕捉率 / シード論文 | ケンサクシキ / ホソクリツ / シイドロンブン | そのままでよい |
+  | 結合式 / 組入基準 / 除外基準 | ケツゴオシキ / クミイレキジュン / ジョガイキジュン | そのままでよい（PR3 で確認） |
 
   「SR Query Builder Plugin」のような製品名の英語表記全体も上記の Plugin の誤読を含むため、
   ナレーションでは「エスアール・クエリビルダー・プラグイン」のようにカタカナで書き下す
@@ -248,6 +267,19 @@ tiab-review-plugin）の制作過程で実際に踏まれた失敗と、その�
   「AI でも見つかりませんでした」で終わっていた（デモの LLM モックが対応するプロンプトに
   未対応だったため）。**機能が失敗する絵をチュートリアルに載せない。** 本拡張で特に注意が
   必要なのは対話的シード拡張（境界事例選定）とブロック改善案（REQUIREMENTS.md §6-3）。
+
+- **DON'T: デモのブロック判定を「プロンプト全体」で行わない。** PR3 で踏んだ失敗。
+  `mesh-suggester` / `freeword-designer` のユーザープロンプトは末尾に seed の MeSH 一覧や
+  ti/ab コーパスを丸ごと含むため、`detectBlockKey` をテキスト全体に掛けると seed 側の語を拾う。
+  デモの seed は ARDS/ECMO の論文なので、**ECMO ブロックにも RCT ブロックにも ARDS の
+  フリーワードが返り、3 ブロックがほぼ同じ検索式になっていた** — 第 7 章の中心となる絵が
+  壊れていたのに、収録した映像を目視するまで気づけなかった。判定はブロック自身の記述に絞る
+  （`src/demo/llmFixtures.ts` の `extractBlockScope`）。
+
+- **DO: デモのフィクスチャは seed 込みでテストする。** 上の不具合を既存テストが素通りしたのは、
+  `seedMesh` / `seedSamples` を空で渡していたためだった。**他ブロックのキーワードを含む
+  現実的な seed コーパスを渡す回帰テストを書く**（`src/demo/llmFixtures.test.ts` の
+  「seed 側の語に引きずられない」）。空の入力しか試さないテストは、この種の取り違えを検出できない。
   新しい機能を章に入れるときは、`src/demo/llmFixtures.ts` がその skill に対応しているか
   先に見る。
 
@@ -266,6 +298,48 @@ tiab-review-plugin）の制作過程で実際に踏まれた失敗と、その�
 
 - **DO: マウス移動を伴う操作を各 cue に入れる。** ホバーが無いと視聴者はどこを見ればよいか
   分からない。`gestures.mjs` の `hoverSlow` / `hoverSequence` / `smoothWheel` を使う。
+
+- **注意: `zoom` はナビゲーションのたびにリセットされる。** `openExtensionPage()` や `goto()` の
+  **直後に毎回** `applyPageZoom` を呼び直すこと。自動での再適用はしない（`scenes/lib/zoom.mjs`）。
+
+- **DO: 新しいタブへ移るときは `ctx.newSegment(page)` を使う。** `ctx.openExtensionPage()` は
+  現ページを `goto` するだけで**新しいタブを作らない**。popup の「作成」のように
+  `chrome.tabs.create` が走る導線を追うには、`ctx.page.context().waitForEvent('page')` で
+  新規ページを拾って `newSegment` に渡す（第 3 章 `03-project.mjs` が実例。segment-0 = popup /
+  segment-1 = メインビュー の 2 本になる）。
+
+- **DO: `chrome.storage` にしか無い前提条件は `storageSeed` で入れる。** `record.mjs` は
+  シーンごとに使い捨てのプロファイルを作るので、前の章で入れた設定は残らない。
+  第 3 章は Gemini API キーが未設定だと popup が `app.html` ではなく `#/settings` へ
+  リダイレクトしてしまい、章の筋書きが成立しない（`openAppOrRedirect`。実測で確認済み）。
+  アプリの業務状態のほうは `?demoSeed=` で入れる（使い分けは REQUIREMENTS.md §6-4）。
+
+- **DO: モックが即答する画面には `?demoLatency=` で人工的な待ちを入れる。** デモ層の fetch は
+  in-memory で即答するため、そのままだと進捗インジケータもライブ表示も**映らないまま静止画**になる。
+  何倍にすべきかは章ごとに実測して決める（REQUIREMENTS.md §6-4 の表）。とくに
+  **実行中にナレーションが流れる章は、実行時間をその cue の合計尺に合わせる**こと
+  （第 7 章は cue 02〜05 の合計 62.3 秒に対して係数 5.4）。ずれると「生成中です」と
+  言っているのに画面は終わっている、という絵になる。
+
+- **DO: 実行時間の係数は「録画を回した状態」で測る。** PR3 で踏んだ失敗。素の Playwright で
+  測って係数を決めたところ、収録時は 1920×1080 の録画ぶんの CPU 負荷が乗って倍近く遅くなり、
+  ナレーションが終わったあとに 70 秒の無音が残った。録画ありで測り直すこと
+  （第 7 章は録画ありで係数 2.4 → 29.9 秒 / 3.4 → 39.8 秒。傾き ≒ 9.9 秒／係数 1）。
+
+- **DON'T: 実行中にしか出ない要素を素の `hoverSlow` でなぞらない。** 実行が終わって DOM から
+  消えると `scrollIntoViewIfNeeded` → `locator.hover()` の既定 30 秒タイムアウトで詰まり、
+  1 つの cue が 90 秒スタックした（PR3 で実測）。`isVisible()` で存在を確かめてから
+  ホバーするヘルパーを噛ませる（`video/scenes/07-draft.mjs` の `hoverIfVisible`）。
+  待ちが残るときも `waitFor` で固まらず、カーソルを動かしながら待つ（静止画区間を作らない）。
+
+- **DON'T: 人工レイテンシを収録前の準備にまで効かせない。** PR3 で踏んだ失敗。
+  `?demoLatency=` を**モジュール読み込み時**に立てたところ、`applyDemoSeed()` が
+  プリセットを Sheets/Drive モックへ書き込む数十回の fetch にも倍率がかかり、
+  **章の冒頭に無音の待ちが生まれた**（実測: 第 7 章 14.9 秒 / 第 4 章 13.9 秒。
+  cue 01 の発火時刻が異常に遅いことで気づいた）。seed の投入は演出ではなく準備なので、
+  倍率は `applyDemoSeed()` の**あと**に立てる（`src/demo/app-entry.ts`）。
+  修正後は 0.2〜1.4 秒。**収録ログの `cue 01 @ ... t=` が 1 秒前後に収まっているかを
+  毎回確認すること。** 大きければ、待たせるべきでないものを待たせている。
 
 ### 収録・合成
 

@@ -1,8 +1,9 @@
 # 操作解説動画 要件定義書・制作計画
 
 作成日: 2026-08-07
-ステータス: **PR0（計画）+ PR1（パイプライン基盤 + スモークシーン 1 本）完了**（2026-08-07）。
-PR2 以降（デモビルド層 → 実チャプター 01〜14 → QA/QC → 公開）は未着手。PR1 の達成内容と実測値は §11。
+ステータス: **PR0（計画）+ PR1（パイプライン基盤 + スモークシーン 1 本）+ PR2（デモビルド層）
++ PR3（実チャプター 01〜07）完了**（2026-08-08）。残りは PR4（章 08〜14）→ PR5（QA/QC）
+→ PR6（公開）。各 PR の達成内容と実測値は §11。
 
 姉妹リポジトリ [sr-data-extraction-plugin/video](https://github.com/youkiti/sr-data-extraction-plugin/tree/master/video)
 で実績のある「Playwright 収録 → VOICEVOX で TTS → ffmpeg で合成 → YouTube 手動公開」パイプラインを
@@ -73,13 +74,13 @@ PR2 以降（デモビルド層 → 実チャプター 01〜14 → QA/QC → 公
 
 | # | チャプター | 目安 | help.html 対応 | 主な画面 |
 | --- | --- | --- | --- | --- |
-| 1 | イントロ（何ができるか・SR 3 部作での位置づけ） | 0:40 | 冒頭 | タイトルカード → `#/home` |
-| 2 | 準備（インストール・BYOK の API キー登録） | 1:20 | `#setup` | `options.html` |
-| 3 | プロジェクトを作る・開く | 1:00 | `#project` | `popup.html`（要ページ拡大）→ `#/home` |
-| 4 | 研究プロトコルを入力する | 1:30 | `#protocol` | `#/protocol` |
-| 5 | 検索式ブロックを承認する | 1:20 | `#blocks` | `#/blocks` |
-| 6 | シード論文を登録する | 1:10 | `#seeds` | `#/seeds` |
-| 7 | 検索式を生成して検証する | 2:00 | `#draft` | `#/draft`（生成 → line_hits ライブ表示） |
+| 1 | イントロ（何ができるか・SR 3 部作での位置づけ） | 0:40 → **1:00** | 冒頭 | タイトルカード → `?demoSeed=11-export#/home` |
+| 2 | 準備（インストール・BYOK の API キー登録） | 1:20 → **1:44** | `#setup` | **`#/settings`**（`options.html` ではない。下記 ⚠️ 参照） |
+| 3 | プロジェクトを作る・開く | 1:00 → **1:08** | `#project` | `popup.html`（要ページ拡大）→ **`#/protocol`** |
+| 4 | 研究プロトコルを入力する | 1:30 → **1:45** | `#protocol` | `?demoSeed=04-protocol#/protocol` |
+| 5 | 検索式ブロックを承認する | 1:20 → **1:21** | `#blocks` | `?demoSeed=05-blocks#/blocks` |
+| 6 | シード論文を登録する | 1:10 → **1:19** | `#seeds` | `?demoSeed=06-seeds#/seeds` |
+| 7 | 検索式を生成して検証する | 2:00 → **2:13** | `#draft` | `?demoSeed=07-draft#/draft`（生成 → line_hits ライブ表示） |
 | 8 | 検証結果を読む（捕捉率・MeSH・行ごとのヒット数） | 1:20 | `#draft` | `#/draft`（検証結果パネル） |
 | 9 | 対話的シード拡張（実験的機能） | 1:30 | `#expand` | `#/expand` |
 | 10 | 検索式を編集して再検証する | 1:10 | `#edit` | `#/edit` → `#/draft` |
@@ -88,10 +89,28 @@ PR2 以降（デモビルド層 → 実チャプター 01〜14 → QA/QC → 公
 | 13 | バージョン履歴と設定・困ったときは | 1:00 | `#history` / `#troubleshooting` | `#/history` → `#/settings` |
 | 14 | アウトロ | 0:30 | — | エンドカード |
 
-合計目安: **約 15 分 50 秒**
+合計目安: **約 15 分 50 秒**（章 01〜07 の実測合計は **10 分 30 秒**。太字は PR3 で TTS 実測に置き換えた値）
 
 > **シーン番号 `00` は `scenes/examples/`（スモークテスト）専用の予約番号**。実チャプターは 01〜14。
 > `assemble.mjs` は `00-` 始まりのシーンキーを最終動画から自動除外する。
+
+> ⚠️ **PR3 で判明した実装とのずれ（章 01〜07 ぶんは解消済み）**
+>
+> 1. **第 2 章の主画面は `options.html` ではなく `app/app.html#/settings`。**
+>    `options.html` を開く UI 導線が実装に存在しない（`options_ui` 経由＝ chrome://extensions からしか
+>    開けない）。popup の「設定を開く」(`#open-options`) が開くのも `#/settings` で、こちらは
+>    `settingsView.ts` の別実装のため ID 体系も別（`#settings-gemini-key` 等。§8-5 も修正済み）。
+>    利用者がたどり着けない画面を「これが設定画面です」と説明するのは下記「章立ての注意」3 に反するため、
+>    `#/settings` を撮る。
+> 2. **第 3 章の着地は `#/home` ではなく `#/protocol`。** `DEFAULT_ROUTE = 'protocol'`（`src/app/router.ts`）
+>    なので、作成後に開く `app.html`（ハッシュ無し）は `#/protocol` になる。第 4 章へ自然に繋がるので
+>    実装どおりとする。
+> 3. **第 6 章に include / exclude / maybe の判定は無い。** `#/seeds` に判定 UI は存在せず、
+>    境界事例の判定は `#/expand`（第 9 章）の `button[data-decision]`。第 6 章は
+>    「登録・詳細確認・有効無効の切り替え」までで切る。
+> 4. **第 3 章は `storageSeed` で Gemini キーを先に入れる必要がある。** `openAppOrRedirect`
+>    （`src/popup/bootstrap.ts`）がキー未設定だと `app.html` ではなく `#/settings` へ飛ばすため。
+>    `record.mjs` はシーンごとに使い捨てプロファイルを作るので、第 2 章で入れた値は残らない。
 
 ### 章立ての注意（移植元の失敗の反映）
 
@@ -211,8 +230,32 @@ E2E フィクスチャと同じテーマを使う（`tests/e2e/fixtures/scenario
 ### 6-4. 章ごとの状態の作り分け
 
 1 つのプロジェクトで全章を撮ると状態が衝突する（12 の完了画面を撮ったあとに 07 の未検証状態は撮れない）。
-シーンスクリプトの `storageSeed` で **章ごとに `chrome.storage.local` の初期状態を流し込む**方式にする
-（移植元の `scenes/NN-*.mjs` が使っている契約）。デモ層は seed の投入口を持つこと。
+**章ごとに初期状態を流し込む**方式にする。`record.mjs` はシーンごとに使い捨ての Chrome プロファイルを
+作る（`mkdtempSync` → `finally` で削除）ので、章をまたいで状態が漏れることはない。
+
+投入口は 2 つあり、**用途で使い分ける**（PR2 の実装に合わせて PR3 で追記）。
+
+| 方式 | 実体 | 使いどころ |
+| --- | --- | --- |
+| **`?demoSeed=<name>`**（主） | `src/demo/app-entry.ts` が読み、`applyDemoSeed()` が Sheets/Drive の in-memory バックエンドへ書いて store の初期値にする | アプリの業務状態（プロトコル・ブロック・シード・検索式）。プリセットは `04-protocol` / `05-blocks` / `06-seeds` / `07-draft` / `08-validation` / `09-expand` / `10-edit` / `11-export` / `13-history`（`src/demo/seeds.ts`） |
+| **`storageSeed`**（従） | シーンの default export に書くと `record.mjs` が収録前に `chrome.storage.local.set()` する | `chrome.storage` にしか無い設定値。第 3 章の Gemini API キー（未設定だと popup が `#/settings` へリダイレクトする）が唯一の実例 |
+
+章 01 / 02 / 03 に `demoSeed` プリセットは無い。それぞれタイトルカード・設定画面・popup が主画面で、
+業務状態を必要としないため（章 01 だけは「完成状態を見せる」意図で `11-export` を流用する）。
+
+あわせて **`?demoLatency=<係数>`** で fetch モックの人工レイテンシ倍率を渡す（`src/demo/fetchMock.ts`）。
+モックは in-memory で即答するため、無効のままだと進捗表示やライブ表示が映らないまま静止画になる。
+PR3 で実測して決めた章ごとの係数は次のとおり。
+
+| 章 | 係数 | 実測 |
+| --- | --- | --- |
+| 01 | 0 | fetch は起動時の seed 適用のみ |
+| 02 | 8 | プラン判定 ≒ 4.8 秒（「確認中...」が読める） |
+| 03 | 2 | 作成 → 新規タブ ≒ 3.6 秒 |
+| 04 | 8 | submit → `#/blocks` 6.9 秒（進捗の 2 段階が両方出る） |
+| 05 | 3 | 承認時の保存に間を持たせる |
+| 06 | 2 | シード 5 件の登録 ≒ 5.8 秒 |
+| 07 | 5.6 | 生成 → 検証 ≒ 62 秒（実行中に流れる cue 02〜05 の合計 62.5 秒に合わせた）。**録画を回した状態で測ること**（素の Playwright だと倍近く速く出る） |
 
 ---
 
@@ -357,9 +400,10 @@ PR1〜PR4 は `npm test` / `npm run typecheck` / `npm run lint` / `npm run dev` 
 
 ### 8-5. 公開前（映り込みの確認）★ 本拡張固有
 
-- [ ] **API キーが映っていない。** 第 2 章で Options 画面に API キーを入力する。入力欄は
-      `type="password"` でマスクされる（`src/options/options.html` の
-      `#gemini-api-key` / `#openrouter-api-key` / `#ncbi-api-key` で確認済み）が、
+- [ ] **API キーが映っていない。** 第 2 章で `#/settings` に API キーを入力する。入力欄は
+      `type="password"` でマスクされる（`src/app/views/settingsView.ts` の
+      `#settings-gemini-key` / `#settings-openrouter-key` / `#settings-ncbi-key` で確認済み。
+      表示切替の目アイコンは無い）が、
       **デモビルドでは実キーではなくダミー文字列を入力し、完成品でもマスクを目視確認する**
 - [ ] **実在のメールアドレス・スプレッドシート URL・Drive フォルダが映っていない**
       （デモ層は `demo@example.com` と架空 ID で固定）
@@ -419,7 +463,7 @@ PR1〜PR4 は `npm test` / `npm run typecheck` / `npm run lint` / `npm run dev` 
 | --- | --- | --- |
 | デモビルドの拡張名サフィックス | ` (demo)` を付ける / 付けない（動画映えを優先） | PR2 |
 | `src/demo/` を jest カバレッジ対象にするか | 対象外にする / 最小限のテストを書く | PR2 |
-| 第 2 章で見せる LLM プロバイダ | Gemini のみ / OpenRouter も触れる | PR3（原稿執筆時） |
+| ~~第 2 章で見せる LLM プロバイダ~~ | **決定: Gemini のみ**（PR3）。OpenRouter のカードは画面に映るので 1 文だけ触れ、操作はしない | 決定済み |
 | サムネイルの文言・配色 | `hosted/style.css` のトンマナに合わせる | PR4 |
 | ストア URL を説明欄に入れるか | 審査結果次第 | 公開直前 |
 
@@ -478,7 +522,46 @@ PR1〜PR4 は `npm test` / `npm run typecheck` / `npm run lint` / `npm run dev` 
   検索式が復元されない画面（＝一見「壊れているだけ」の絵）になる。章を追加して
   初期表示がおかしいときは、まず devtools コンソールではなくこの経路を疑うこと
 
-### PR3・PR4（章）
+### PR3（章 01〜07）— 2026-08-08 達成
+- [x] 章 01〜07 が収録 → TTS → 合成まで通り、フレーム目視で説明対象が映っている
+- [x] `npm run video:assemble`（**`--include-examples` 無し**）が `final.mp4` を出す
+      （実チャプターが揃ったので、PR1 で使った検証専用の抜け道はもう要らない）。
+      実測: h264 High + aac 48kHz stereo / 1920×1080 / 30fps / **11 分 11 秒**
+- [x] `chapters.txt` が 01〜07 の 7 章ぶん・昇順・`0:00` 始まり
+- [x] 静止画区間が無い（3 秒おきに抜いた 224 フレームの md5 がすべて相異。
+      収録尺と完成尺の乖離も章 03 以外は ±0.02% 以内。章 03 の −20.5% は
+      複数セグメントの trim（popup 側の録画が新規タブ開始時点で切られる）で仕様どおり）
+- [x] 章間で内容が重複していない（02 は初回セットアップまで／13 に設定画面の機能を残す。
+      07 は「操作して待つ」まで／08 に結果の読み方を残す。06 は登録まで／09 に判定を残す）
+- [x] §8-5 の映り込みチェックを全項目パス（API キーは `type="password"` でマスク・
+      入力値はシーン内のダミー定数、メールは `demo@example.com` のみ、
+      PMID は `90000001`〜`90000005` のみ、誌名は「(fictional)」付き）
+- [x] `typecheck` / `lint` / `test` / `dev` / `build:demo` が緑（`test` は 1270/1271。
+      Linux 環境で元から落ちている `tests/playwright-server.test.ts` の 1 件を除く）
+
+**PR3 で踏んだ失敗（PR4 で繰り返さないための申し送り）**
+- **人工レイテンシを収録前の準備にまで効かせない。** `?demoLatency=` をモジュール読み込み時に
+  立てたところ、`applyDemoSeed()` の数十回の fetch にも倍率がかかり、**章の冒頭に無音の待ち**が
+  生まれた（第 7 章 14.9 秒 / 第 4 章 13.9 秒）。倍率は `applyDemoSeed()` の**あと**に立てる
+  （`src/demo/app-entry.ts`）。**収録ログの `cue 01 @ ... t=` が 1 秒前後に収まっているかを毎回確認する。**
+- **原稿は必ず TTS で実尺を測ってから尺を判断する。** §4 の「目安」は机上の値で、
+  素直に書くと 1.4〜2.4 倍に膨らんだ（第 1 章は 0:40 の目安に対し初稿 1:36）。
+  VOICEVOX 話者 2 の実測はおおむね **5.8 文字／秒**。目標 T 秒なら本文 ≒ 5.8×T 文字で見積もる。
+- **デモのブロック判定を「プロンプト全体」で行わない。** `mesh-suggester` /
+  `freeword-designer` のユーザープロンプトは末尾に seed の MeSH 一覧や ti/ab コーパスを
+  丸ごと含むため、`detectBlockKey` をテキスト全体に掛けると seed 側の語を拾う。
+  デモの seed は ARDS/ECMO の論文なので、**ECMO ブロックにも RCT ブロックにも ARDS の
+  フリーワードが返り、3 ブロックがほぼ同じ検索式になっていた**（第 7 章の中心となる絵が
+  壊れていた）。既存テストは seed を空で渡していたため素通りしていた。
+  判定はブロック自身の記述に絞り、**回帰テストは必ず seed 込みで書く**こと。
+- **実行時間の係数は「録画を回した状態」で測る。** 素の Playwright での実測に合わせると、
+  収録時は 1920×1080 の録画ぶんの CPU 負荷が乗って倍近く遅くなる。
+- **実行中に消える要素を素の `hoverSlow` でなぞらない。** 実行が終わって DOM から消えると
+  `locator.hover()` の既定 30 秒タイムアウトで詰まり、1 つの cue が 90 秒スタックした。
+  `isVisible()` で存在を確かめてからホバーする（`07-draft.mjs` の `hoverIfVisible`）。
+  待ち時間が残る場合も、カーソルを動かしながら待って静止画にしない。
+
+### PR4（章 08〜14）
 - [ ] 各章が収録 → TTS → 合成まで通り、フレーム目視で説明対象が映っている
 - [ ] 章間で内容が重複していない
 
