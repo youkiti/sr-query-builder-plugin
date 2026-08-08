@@ -6,9 +6,27 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { injectAppStub } from './fixtures/appStub';
-import { fullStateScenario } from './fixtures/scenarios/fullState';
+import { fullStateScenario, FULL_APP_STATE } from './fixtures/scenarios/fullState';
+import type { AppState } from '../../src/app/store';
 
 const APP_URL = '/app/app.html#/edit';
+
+/**
+ * ブロック #1 の AI 改善提案（store.blockImprovement）。
+ * issue #39: LLM コスト集計の setState による全ビュー再描画でも提案が消えないことの回帰確認用。
+ */
+const BLOCK_IMPROVEMENT: NonNullable<AppState['blockImprovement']> = {
+  formulaVersionId: 'fv-20260420-01',
+  blockId: '1',
+  status: 'ready',
+  result: {
+    blockId: '1',
+    currentExpression: '"ARDS"[tiab] OR "acute respiratory distress"[tiab]',
+    proposedExpression: '"ARDS"[Mesh] OR "acute respiratory distress"[tiab]',
+    rationale: 'MeSH を追加して感度を上げる',
+  },
+  error: null,
+};
 
 test.describe('app-edit (#/edit)', () => {
   test('formula 有り: ブロックに分解表示され、鉛筆編集と AI 改善 UI が出る', async ({ page }) => {
@@ -37,10 +55,45 @@ test.describe('app-edit (#/edit)', () => {
     await expect(firstRow.locator('.edit__block-ai-submit')).toBeVisible();
   });
 
+  test('AI 改善提案は store から復元される: diff / accept / reject が出る（issue #39 回帰）', async ({
+    page,
+  }) => {
+    await injectAppStub(
+      page,
+      fullStateScenario({
+        preloadedState: { ...FULL_APP_STATE, blockImprovement: BLOCK_IMPROVEMENT },
+      })
+    );
+    await page.goto(APP_URL);
+
+    const firstRow = page.locator('.edit__block-row').first();
+    await expect(firstRow.locator('.edit__block-rationale')).toContainText('MeSH');
+    await expect(firstRow.locator('.edit__block-diff-before pre')).toContainText('"ARDS"[tiab]');
+    await expect(firstRow.locator('.edit__block-diff-after pre')).toContainText('"ARDS"[Mesh]');
+    await expect(firstRow.locator('.edit__block-accept')).toBeVisible();
+    await expect(firstRow.locator('.edit__block-reject')).toBeVisible();
+    // 改善中のブロックは「AI に改善させる」ボタン自体はまだ活性（ready 状態のため）だが、
+    // 提案 UI が対象ブロックの行に紐づいて出ていることを確認する。
+    await expect(firstRow.locator('.edit__block-improve')).toBeEnabled();
+  });
+
   test('a11y: axe violation zero', async ({ page }) => {
     await injectAppStub(page, fullStateScenario());
     await page.goto(APP_URL);
     await expect(page.locator('.edit__block-list')).toBeVisible();
+    const result = await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze();
+    expect(result.violations, JSON.stringify(result.violations, null, 2)).toEqual([]);
+  });
+
+  test('a11y: axe violation zero（AI 改善提案の diff 表示時）', async ({ page }) => {
+    await injectAppStub(
+      page,
+      fullStateScenario({
+        preloadedState: { ...FULL_APP_STATE, blockImprovement: BLOCK_IMPROVEMENT },
+      })
+    );
+    await page.goto(APP_URL);
+    await expect(page.locator('.edit__block-accept')).toBeVisible();
     const result = await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze();
     expect(result.violations, JSON.stringify(result.violations, null, 2)).toEqual([]);
   });

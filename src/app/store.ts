@@ -6,6 +6,7 @@ import type {
 } from './services/validationService';
 import type { DraftBlockHit, DraftProgress } from './services/draftService';
 import type { BoundaryCasesResult, ExpandFetchStep } from './services/expandService';
+import type { BlockImprovementResult } from './services/editService';
 import { DEFAULT_ROUTE, type RouteName } from './router';
 
 /**
@@ -139,6 +140,47 @@ export interface ExpandRunState {
   result: BoundaryCasesResult | null;
 }
 
+/**
+ * 検索式手編集画面（#/edit）で編集中の markdown 全文。
+ *
+ * editView は textarea を出さず、md 全文をコントローラのローカル変数（旧 `currentMd`）に
+ * 持つ構造だった。しかし LLM コスト集計（cumulativeCostUsd）の setState は全ビューを
+ * 無条件に再描画し、editView は再描画のたびに `container.innerHTML = ''` で丸ごと作り直す
+ * ため、ローカル変数に置いた編集内容は再描画のたびに元の `currentFormulaMarkdown` へ
+ * 巻き戻ってしまう（issue #39）。draftRun / validationResult と同じく store に置くことで
+ * 再描画に耐えるようにする。
+ *
+ * formulaVersionId が currentFormulaVersionId と一致するときだけ有効
+ * （別バージョンを読み込み直した後に古い draft を表示しないため。ValidationResultEntry と同じ判定）。
+ */
+export interface FormulaEditDraft {
+  formulaVersionId: string;
+  markdown: string;
+}
+
+/**
+ * #/edit のブロック単位 AI 改善（requirements.md §4.7）の実行状態。同時に 1 ブロックのみ。
+ *
+ * improve-block skill は LLM を呼ぶため、完了時に LLM コスト集計（cumulativeCostUsd）の
+ * setState が走り、editView も含めた全ビューが再描画される。提案・進捗・エラーをローカル
+ * DOM（旧コードは Promise の `.then()` で受け取ったスロット要素に直接書き込んでいた）に
+ * 保持すると、この再描画で該当スロットが DOM ツリーから切り離され、提案が届いても画面に
+ * 何も反映されない（issue #39 の本体）。draftRun / expandRun と同じく store に保持して
+ * 再描画に耐えるようにする。
+ *
+ * formulaVersionId が currentFormulaVersionId と一致するときだけ有効
+ * （別バージョンの stale な提案を表示しないため。ValidationResultEntry と同じ判定）。
+ */
+export interface BlockImprovementState {
+  formulaVersionId: string;
+  blockId: string;
+  status: 'running' | 'ready' | 'error';
+  /** status='ready' のときの提案。それ以外は null */
+  result: BlockImprovementResult | null;
+  /** status='error' のときのメッセージ。それ以外は null */
+  error: string | null;
+}
+
 export interface AppState {
   /** 現在のハッシュルート */
   route: RouteName;
@@ -175,6 +217,10 @@ export interface AppState {
   validationResult: ValidationResultEntry | null;
   /** 未捕捉 PMID の AI 原因分析結果。未実行なら null */
   missedAnalysis: MissedAnalysisEntry | null;
+  /** #/edit で編集中の検索式 markdown 全文。未編集（未読込含む）なら null */
+  formulaEditDraft: FormulaEditDraft | null;
+  /** #/edit のブロック単位 AI 改善の実行状態。未実行なら null */
+  blockImprovement: BlockImprovementState | null;
 }
 
 export const INITIAL_STATE: AppState = {
@@ -192,6 +238,8 @@ export const INITIAL_STATE: AppState = {
   expandRun: null,
   validationResult: null,
   missedAnalysis: null,
+  formulaEditDraft: null,
+  blockImprovement: null,
 };
 
 export type Updater = (prev: AppState) => AppState;

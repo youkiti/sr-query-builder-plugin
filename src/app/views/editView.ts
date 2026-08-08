@@ -8,6 +8,7 @@ import {
 } from '@/app/services';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
 import { ROUTE_LABELS } from '../router';
+import type { AppState, BlockImprovementState } from '../store';
 import type { RenderView } from './types';
 
 /**
@@ -21,18 +22,30 @@ import type { RenderView } from './types';
  *    任意の指示文を入力する欄が開き（空でも可）、improve-block skill を実行する。
  *    提案 expression と rationale を diff 表示し、「置き換える」で内部 md に反映する。
  *
- * 検索式 Markdown 全文は内部状態 `currentMd` として保持し（テキストエリアは出さない）、
- * 「新バージョンとして保存」で FormulaVersions に user_edit として追記する。
+ * 検索式 Markdown 全文は `state.formulaEditDraft`、ブロック単位 AI 改善の進捗/提案/エラーは
+ * `state.blockImprovement` から描画する（詳細は store.ts の doc コメント参照）。
+ * どちらも LLM コスト集計（cumulativeCostUsd）の setState による全ビュー再描画
+ * （editView は再描画のたびに `container.innerHTML = ''` で丸ごと作り直す）でも消えない
+ * ようにするための設計で、draftRun / validationResult / expandRun と同じ理由（issue #39）。
+ * 「AI への指示」プロンプトフォームの開閉・入力途中テキストは未送信の一時入力なので、
+ * これだけは従来どおりローカル DOM のまま扱う。
  *
  * サービス呼び出しは bootstrap 側で editService の各関数を callback として渡す。
  */
 
 export interface EditViewCallbacks {
   onSave?: (input: SaveEditedFormulaInput) => Promise<SaveEditedFormulaResult>;
-  /** 指定ブロックを LLM で改善させる（instruction はユーザー任意の指示） */
-  onImproveBlock?: (input: RequestBlockImprovementInput) => Promise<BlockImprovementResult>;
+  /**
+   * 指定ブロックを LLM で改善させる（instruction はユーザー任意の指示）。
+   * 結果は返り値ではなく store.blockImprovement 経由で view に届く（view は解決値を使わない）。
+   */
+  onImproveBlock?: (input: RequestBlockImprovementInput) => Promise<void>;
   /** 「AI に渡す内容を見る」表示用の文脈スナップショットを取得する（SeedPapers 読み取りを伴う） */
   onGetImproveContext?: (blockId: string) => Promise<BlockImprovementContext | null>;
+  /** 編集中の md 全文を store（formulaEditDraft）へ反映する */
+  onDraftChange?: (markdown: string) => void;
+  /** ブロック単位 AI 改善の提案を破棄する（accept / reject の両方で呼ぶ） */
+  onClearImprovement?: () => void;
 }
 
 /** 検索式 Markdown 全文を保持し、更新時にブロック一覧を再描画する内部コントローラ。 */
@@ -42,9 +55,29 @@ interface FormulaEditor {
   setMd(next: string): void;
 }
 
-interface ProposalEntry extends BlockImprovementResult {
-  /** 提案受信時点の md 全文（accept 時の base として使う） */
-  baseFormulaMd: string;
+/**
+ * 表示する md を state から解決する。
+ * formulaEditDraft が現在の formula バージョンと一致すればそちらを優先し、
+ * 一致しない（stale、または未編集）なら currentFormulaMarkdown にフォールバックする。
+ */
+function resolveMarkdown(state: AppState, fallback: string): string {
+  const draft = state.formulaEditDraft;
+  if (draft !== null && draft.formulaVersionId === state.currentFormulaVersionId) {
+    return draft.markdown;
+  }
+  return fallback;
+}
+
+/**
+ * state.blockImprovement を現在の formula バージョンに照らして取り出す。
+ * stale（別バージョンの提案）なら null を返す。
+ */
+function resolveBlockImprovement(state: AppState): BlockImprovementState | null {
+  const improvement = state.blockImprovement;
+  if (improvement === null || improvement.formulaVersionId !== state.currentFormulaVersionId) {
+    return null;
+  }
+  return improvement;
 }
 
 export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
@@ -76,14 +109,52 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
       '各ブロックは鉛筆アイコンで直接編集するか、「AI に改善させる」で再設計できます。最後に「新バージョンとして保存」を押すと FormulaVersions に user_edit として追記されます。';
     container.appendChild(lead);
 
-    // 内部状態。テキストエリアは表示せず、この変数を単一の真実とする。
-    let currentMd = ctx.state.currentFormulaMarkdown;
+    // 表示する md は store（formulaEditDraft）優先、無ければ現在の formula。
+    // テキストエリアは表示せず、この変数を単一の真実とする。
+    let currentMd = resolveMarkdown(ctx.state, ctx.state.currentFormulaMarkdown);
     const editor: FormulaEditor = {
       getMd: () => currentMd,
       setMd: (next: string) => {
+        if (callbacks.onDraftChange) {
+          // store 更新 → 再描画で反映される（この render 実行のローカル DOM はそのまま
+          // 破棄される想定なので、ここではローカル再描画をしない）。
+          callbacks.onDraftChange(next);
+          return;
+        }
+        // callback 未指定時は view 単体で完結させるためローカル再描画にフォールバックする。
         currentMd = next;
         rerenderBlocks();
       },
+    };
+
+    // ブロック単位 AI 改善の提案（running/ready/error）。store 由来の値で初期化するが、
+    // 「引っ込める」操作（改善ボタンのトグル close / 破棄 / 置換）を store 未配線
+    // （onClearImprovement が無い＝フォールバック経路）で扱うときだけ再代入する。
+    // rerenderBlocks はこの変数を都度参照するので、null にしておけば以後何度ローカル
+    // 再描画が起きても同じ提案が復元されない（store 配線ありなら store 側の再描画で
+    // resolveBlockImprovement が毎回 null を返すのでこちらは触らなくてよい）。
+    let improvement = resolveBlockImprovement(ctx.state);
+
+    /**
+     * 提案パネル（ready/error）を恒久的に引っ込める。
+     * 配線あり: onClearImprovement() を呼んで store.blockImprovement を消す（同期的に
+     * 全ビュー再描画が走り、以後は resolveBlockImprovement 経由で常に null になる）。
+     * 配線なし（フォールバック）: 上の `improvement` を null にする。DOM 自体は
+     * 呼び出し元（トグル close / renderProposal の accept・reject）が空にする。
+     */
+    function clearImprovement(): void {
+      if (callbacks.onClearImprovement) {
+        callbacks.onClearImprovement();
+        return;
+      }
+      improvement = null;
+    }
+    // renderBlockList 以下（buildBlockRow / renderProposal）へは、onClearImprovement を
+    // 上の clearImprovement で常に上書きしたバージョンを渡す。配線あり/なしの分岐を
+    // 呼び出し側に持たせず、末端は常に「呼べば恒久的に引っ込む」ものとして扱えるようにする。
+    const internalCallbacks: EditViewCallbacks = {
+      ...callbacks,
+      onClearImprovement: clearImprovement,
     };
 
     const blocksSection = doc.createElement('section');
@@ -127,7 +198,7 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
     container.appendChild(errorBox);
 
     function rerenderBlocks(): void {
-      renderBlockList(doc, blocksList, editor, callbacks);
+      renderBlockList(doc, blocksList, editor, internalCallbacks, improvement);
     }
     rerenderBlocks();
 
@@ -162,7 +233,8 @@ function renderBlockList(
   doc: Document,
   ul: HTMLElement,
   editor: FormulaEditor,
-  callbacks: EditViewCallbacks
+  callbacks: EditViewCallbacks,
+  improvement: BlockImprovementState | null
 ): void {
   ul.innerHTML = '';
   let formula;
@@ -183,7 +255,16 @@ function renderBlockList(
     return;
   }
   for (const block of formula.blocks) {
-    ul.appendChild(buildBlockRow(doc, block.id, block.expression, editor, callbacks));
+    ul.appendChild(
+      buildBlockRow(
+        doc,
+        block.id,
+        block.expression,
+        editor,
+        callbacks,
+        improvement !== null && improvement.blockId === block.id ? improvement : null
+      )
+    );
   }
 }
 
@@ -192,7 +273,8 @@ function buildBlockRow(
   blockId: string,
   expression: string,
   editor: FormulaEditor,
-  callbacks: EditViewCallbacks
+  callbacks: EditViewCallbacks,
+  improvement: BlockImprovementState | null
 ): HTMLElement {
   const li = doc.createElement('li');
   li.className = 'edit__block-row';
@@ -218,6 +300,8 @@ function buildBlockRow(
   improveBtn.type = 'button';
   improveBtn.className = 'edit__block-improve';
   improveBtn.textContent = 'AI に改善させる';
+  // 進行中は二重起動を防ぐため disabled にする（状態は store.blockImprovement 由来）。
+  improveBtn.disabled = improvement?.status === 'running';
   tools.appendChild(improveBtn);
   header.appendChild(tools);
   li.appendChild(header);
@@ -232,11 +316,15 @@ function buildBlockRow(
   editSlot.className = 'edit__block-edit';
   li.appendChild(editSlot);
 
-  // AI 改善（プロンプト欄 → 提案）用スロット
+  // AI 改善（プロンプト欄 → 提案）用スロット。
+  // running / ready / error は store.blockImprovement から復元する（再描画に耐えるため）。
   const aiSlot = doc.createElement('div');
   aiSlot.className = 'edit__block-ai';
   aiSlot.setAttribute('aria-live', 'polite');
   li.appendChild(aiSlot);
+  if (improvement) {
+    renderImprovementState(doc, aiSlot, improvement, editor, callbacks, blockId);
+  }
 
   editToggle.addEventListener('click', () => {
     if (editSlot.childElementCount > 0) {
@@ -252,17 +340,23 @@ function buildBlockRow(
       return;
     }
     if (aiSlot.childElementCount > 0) {
-      // 既に開いていればトグルで閉じる
+      // 既に開いていればトグルで閉じる。
       aiSlot.innerHTML = '';
+      if (improvement) {
+        // store 由来の提案パネル（ready/error）を閉じる場合は恒久的に引っ込める
+        // （呼ばなければ次の再描画で同じ内容が復元されてしまう）。
+        // improvement が null（＝未送信の指示入力フォームを閉じるだけ）のときは
+        // store 側に消すものが無いので呼ばない（他ブロックの編集中の状態を無駄に
+        // 巻き込む全ビュー再描画を誘発しないため）。
+        callbacks.onClearImprovement?.();
+      }
       return;
     }
     openAiPromptForm(
       doc,
       aiSlot,
-      improveBtn,
       blockId,
       expression,
-      editor,
       callbacks.onImproveBlock,
       callbacks.onGetImproveContext
     );
@@ -323,7 +417,8 @@ function openInlineEdit(
     }
     try {
       const updated = applyBlockImprovement(editor.getMd(), blockId, next);
-      // setMd がブロック一覧を丸ごと再描画するため、この row は破棄され新値で再生成される。
+      // setMd がブロック一覧（または store 経由の全体）を再描画するため、
+      // この row は破棄され新値で再生成される。
       editor.setMd(updated);
     } catch (err) {
       editError.textContent = `保存に失敗しました: ${formatError(err)}`;
@@ -348,15 +443,14 @@ function closeInlineEdit(
 /**
  * 「AI に改善させる」で開くプロンプト入力フォーム。
  * 任意の指示文（空でも可）と、「AI に渡す内容を見る」の開示を備える。
- * 「改善案を取得」で onImproveBlock を呼び、結果を同じスロットに diff 表示する。
+ * 「改善案を取得」で onImproveBlock を呼ぶ。進捗・結果は store.blockImprovement 経由で
+ * 反映されるため、ここでは呼び出すだけで解決値は扱わない（expand の onFetch と同じ思想）。
  */
 function openAiPromptForm(
   doc: Document,
   slot: HTMLElement,
-  improveBtn: HTMLButtonElement,
   blockId: string,
   expression: string,
-  editor: FormulaEditor,
   onImproveBlock: NonNullable<EditViewCallbacks['onImproveBlock']>,
   onGetImproveContext: EditViewCallbacks['onGetImproveContext']
 ): void {
@@ -418,29 +512,12 @@ function openAiPromptForm(
   });
 
   submitBtn.addEventListener('click', () => {
+    // store 側が blockImprovement.status='running' を設定し、その setState が
+    // 再描画を起こしてこのフォームごと置き換える想定。ここでのローカル無効化は保険のみ
+    // （store 連携が無い呼び出し側でも二重送信を軽減する）。
     submitBtn.disabled = true;
     cancelBtn.disabled = true;
-    const pendingInstruction = instruction.value;
-    slot.innerHTML = '';
-    const pending = doc.createElement('p');
-    pending.className = 'edit__block-pending';
-    pending.textContent = '改善提案を取得中…';
-    slot.appendChild(pending);
-    const base = editor.getMd();
-    onImproveBlock({ blockId, instruction: pendingInstruction })
-      .then((result) => {
-        renderProposal(doc, slot, editor, { ...result, baseFormulaMd: base });
-      })
-      .catch((err: unknown) => {
-        slot.innerHTML = '';
-        const errEl = doc.createElement('p');
-        errEl.className = 'edit__block-error';
-        errEl.textContent = `改善提案の取得に失敗しました: ${formatError(err)}`;
-        slot.appendChild(errEl);
-      })
-      .finally(() => {
-        improveBtn.disabled = false;
-      });
+    void onImproveBlock({ blockId, instruction: instruction.value });
   });
 }
 
@@ -525,20 +602,58 @@ function appendContextItem(
 }
 
 /**
+ * store.blockImprovement の状態（running / ready / error）を AI スロットへ復元する。
+ * running: 取得中インジケータ。ready: 提案の diff 表示（renderProposal）。error: エラー表示。
+ */
+function renderImprovementState(
+  doc: Document,
+  slot: HTMLElement,
+  improvement: BlockImprovementState,
+  editor: FormulaEditor,
+  callbacks: EditViewCallbacks,
+  blockId: string
+): void {
+  slot.innerHTML = '';
+  if (improvement.status === 'running') {
+    const pending = doc.createElement('p');
+    pending.className = 'edit__block-pending';
+    pending.textContent = '改善提案を取得中…';
+    slot.appendChild(pending);
+    return;
+  }
+  if (improvement.status === 'error') {
+    const errEl = doc.createElement('p');
+    errEl.className = 'edit__block-error';
+    errEl.textContent = `改善提案の取得に失敗しました: ${improvement.error ?? '不明なエラー'}`;
+    slot.appendChild(errEl);
+    return;
+  }
+  const result = improvement.result;
+  /* istanbul ignore if -- status='ready' は bootstrap 側が result 付きでしか設定しない不変条件 */
+  if (result === null) {
+    return;
+  }
+  renderProposal(doc, slot, editor, callbacks, blockId, result);
+}
+
+/**
  * improve-block 結果の diff を表示し、accept / reject ボタンを用意する。
- * 受信時点の md を base として握り、accept 時はその base に対して
- * applyBlockImprovement を当てて差し替える。
+ * accept は「現在の編集中 md」（editor.getMd()、他ブロックへの並行編集を含みうる）に対して
+ * applyBlockImprovement を当てる。提案受信時点の md を base として握らないのは、md が
+ * store 化された今それをやると他ブロックへの並行編集を巻き戻してしまうため。
  */
 function renderProposal(
   doc: Document,
   slot: HTMLElement,
   editor: FormulaEditor,
-  entry: ProposalEntry
+  callbacks: EditViewCallbacks,
+  blockId: string,
+  result: BlockImprovementResult
 ): void {
   slot.innerHTML = '';
   const rationale = doc.createElement('p');
   rationale.className = 'edit__block-rationale';
-  rationale.textContent = entry.rationale === '' ? '（改善ポイントの説明なし）' : entry.rationale;
+  rationale.textContent = result.rationale === '' ? '（改善ポイントの説明なし）' : result.rationale;
   slot.appendChild(rationale);
 
   const diff = doc.createElement('div');
@@ -549,7 +664,7 @@ function renderProposal(
   beforeHeader.textContent = 'Before:';
   before.appendChild(beforeHeader);
   const beforePre = doc.createElement('pre');
-  beforePre.textContent = entry.currentExpression;
+  beforePre.textContent = result.currentExpression;
   before.appendChild(beforePre);
 
   const after = doc.createElement('div');
@@ -558,7 +673,7 @@ function renderProposal(
   afterHeader.textContent = 'After:';
   after.appendChild(afterHeader);
   const afterPre = doc.createElement('pre');
-  afterPre.textContent = entry.proposedExpression;
+  afterPre.textContent = result.proposedExpression;
   after.appendChild(afterPre);
 
   diff.appendChild(before);
@@ -578,8 +693,8 @@ function renderProposal(
   rejectBtn.textContent = '破棄';
 
   // proposed == current なら accept の意味が無いので無効化
-  if (entry.proposedExpression.trim() === '' ||
-      entry.proposedExpression.trim() === entry.currentExpression.trim()) {
+  if (result.proposedExpression.trim() === '' ||
+      result.proposedExpression.trim() === result.currentExpression.trim()) {
     acceptBtn.disabled = true;
     acceptBtn.title = '提案が空、または現式と同じです';
   }
@@ -595,12 +710,12 @@ function renderProposal(
 
   acceptBtn.addEventListener('click', () => {
     try {
-      const next = applyBlockImprovement(
-        entry.baseFormulaMd,
-        entry.blockId,
-        entry.proposedExpression
-      );
-      // setMd がブロック一覧を再描画するので、提案スロットは破棄され新値で再生成される。
+      const next = applyBlockImprovement(editor.getMd(), blockId, result.proposedExpression);
+      // 提案を先に引っ込めてから setMd する（順序が重要）。setMd はフォールバック経路では
+      // ローカル rerenderBlocks を同期的に起こすため、先に引っ込めておかないとその再描画で
+      // まだ nullified されていない古い提案を拾って復元してしまう。
+      callbacks.onClearImprovement?.();
+      // setMd が onDraftChange（store 経由の再描画）またはローカル再描画のいずれかで反映する。
       editor.setMd(next);
     } catch (err) {
       feedback.textContent = `置き換えに失敗しました: ${formatError(err)}`;
@@ -608,7 +723,10 @@ function renderProposal(
   });
 
   rejectBtn.addEventListener('click', () => {
+    // md は変わらない（setMd を呼ばない）ため、この操作自体では再描画が起きるとは限らない。
+    // フォールバック経路では特に、ここで DOM を空にしないと見た目上パネルが閉じない。
     slot.innerHTML = '';
+    callbacks.onClearImprovement?.();
   });
 }
 
