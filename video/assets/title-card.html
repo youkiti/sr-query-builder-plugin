@@ -8,6 +8,9 @@
 
   配色は本拡張の公開ページ（hosted/style.css）のトンマナに合わせた青グラデーション
   （--primary: #2a63d6 / --primary-dark: #1f4fb8 / --primary-light: #5b93ef）。
+  ブランドバッジだけは背景と別系統で、実アイコン（tools/icons/generate_icons.py の
+  PRESETS: sr-query-builder-plugin = "QB" / #54B7D1）と同じ意匠にする。
+  **2 文字略号は "SR" ではなく "QB"**（SR は 3 拡張共通の接頭辞であって本拡張の記号ではない）。
   sr-data-extraction-plugin/video からの移植時の適応点（PR1 の適応点3）。
   移植元は緑（--primary: #1b5e4a）だったが、本拡張の公開ページのトンマナは青系のため
   差し替えている。
@@ -63,8 +66,12 @@
     width: 84px;
     height: 84px;
     border-radius: 20px;
-    background: #ffffff;
-    color: #2a63d6;
+    /* 実アイコン（tools/icons/generate_icons.py の "QB" / #54B7D1）と同じ意匠。
+       角丸スクエア + 水色の縦グラデーション + 白文字。青系の背景に埋もれないよう
+       白の細いリングで縁取る（アイコン本体には無いが、カード上での可読性のため） */
+    background: linear-gradient(180deg, #6ac4dc 0%, #54B7D1 55%, #45a5bf 100%);
+    color: #ffffff;
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.9);
     font-size: 38px;
     font-weight: 700;
     letter-spacing: -1px;
@@ -114,7 +121,7 @@
 <body>
   <div class="stage">
     <div class="brand-row">
-      <span class="brand-badge">SR</span>
+      <span class="brand-badge">QB</span>
       <span class="brand-name">SR Query Builder Plugin</span>
     </div>
     <div class="headline">操作解説</div>
