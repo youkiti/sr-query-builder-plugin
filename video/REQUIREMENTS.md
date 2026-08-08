@@ -2,8 +2,8 @@
 
 作成日: 2026-08-07
 ステータス: **PR0（計画）+ PR1（パイプライン基盤 + スモークシーン 1 本）+ PR2（デモビルド層）
-+ PR3（実チャプター 01〜07）+ PR4（章 08〜14）完了**（2026-08-08）。**全 14 章がそろい `final.mp4` は 19 分 57 秒**。残りは PR5（QA/QC）
-→ PR6（公開）。各 PR の達成内容と実測値は §11。
++ PR3（実チャプター 01〜07）+ PR4（章 08〜14）+ PR5（QA/QC）完了**（2026-08-08）。**全 14 章がそろい `final.mp4` は 20 分 01 秒**。
+残るは PR6（YouTube 公開）のみ。各 PR の達成内容と実測値は §11、QA の実施記録は [README.md](./README.md#qaqc-実施記録)。
 
 姉妹リポジトリ [sr-data-extraction-plugin/video](https://github.com/youkiti/sr-data-extraction-plugin/tree/master/video)
 で実績のある「Playwright 収録 → VOICEVOX で TTS → ffmpeg で合成 → YouTube 手動公開」パイプラインを
@@ -617,7 +617,10 @@ PR1〜PR4 は `npm test` / `npm run typecheck` / `npm run lint` / `npm run dev` 
   見えた（実際は 5.2 秒）。`assemble.mjs` と同じ切り詰めロジックで測ること。
 
 ### PR5（QA/QC）
-- [ ] §8 のチェックリストを全項目消化し、結果を `video/README.md` に記録する
+- [x] §8 のチェックリストを全項目消化し、結果を `video/README.md` に記録する
+      （「QA/QC 実施記録 › 2026-08-08 全 14 章（PR5）」。`final.mp4` 20 分 01 秒）
+- [x] QA で見つけた不備 2 種を是正して再収録した
+      （VOICEVOX の誤読 `maybe` / `Embase` → 章 09・11、章 07 と 08 の解釈の重複 → 章 08）
 
 ### PR6（公開）
 - [ ] YouTube に一般公開され、説明欄のチャプターが機能している

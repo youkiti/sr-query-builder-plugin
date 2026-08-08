@@ -24,7 +24,7 @@ target_seconds: 96
 
 ## cue 04
 <!-- action: 1 件目を include、残り 2 件を exclude -->
-判定は include、exclude、maybe の三択です。
+判定は include、exclude、メイビー の三択です。
 ボタンを押しても、キーボードの i、e、m でも判定できます。
 判定するとカードが自動で次へ下がるので、続けて処理できます。
 include を選んだ論文は、シード論文として登録されます。
