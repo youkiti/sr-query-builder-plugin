@@ -35,6 +35,19 @@ npm run video:assemble # 合成（build/ 一式 → final.mp4 / chapters.txt / �
 
 **既知の失敗（Linux のみ）**: `tests/playwright-server.test.ts` の `safeJoin › rejects traversal into sibling paths that only share the same prefix` は Linux で必ず落ちる。POSIX の `path` はバックスラッシュをパス区切りとして扱わないため、テストが与える Windows 形式の traversal パスがそもそも別セグメントに分解されないことによるもので、Windows では通る。**本体の不具合ではないので、Linux で `npm test` を回したときはこの 1 件だけが失敗している状態が正常**。他に失敗が出ていたらそれは自分の変更が原因。
 
+**カバレッジ閾値は実際には発火していない**: [jest.config.ts](jest.config.ts) は `coverageThreshold` に global 100%（branches / functions / lines / statements）を宣言しているが、`npm test` は `--coverage` を付けないため**この閾値は通常のテスト実行では一度も評価されない**。`npx jest --coverage` を実行すると実測は 95% 前後（2026-08 時点で stmts 95.3% / branches 91.3%）で、閾値割れとして赤くなる。ビュー層には構造的に到達不可能な catch 節（例: [src/app/views/editView.ts](src/app/views/editView.ts) の `applyBlockImprovement` の失敗経路）が元から残っており、**これは自分の変更が壊したものではない**。カバレッジを気にするときは「global 100% を満たすこと」ではなく「自分が足した分岐にテストが付いていること」を基準にすること。
+
+**リモート / web セッションで E2E を回すとき**: `npx playwright install` はエージェントプロキシに 403 で弾かれるうえ、実行してはいけない。Chromium は `/opt/pw-browsers/` に導入済みだが、ビルド番号がプロジェクトの `@playwright/test` の要求と食い違うと `Executable doesn't exist at ...` で 5 件まとめて落ちる（**環境の問題であって変更の回帰ではない**）。`/opt/pw-browsers/chromium-<build>/chrome-linux/chrome` を指す一時設定を作って `--config` で渡せば通る:
+
+```ts
+// playwright.local.config.ts（一時ファイル。コミットしないこと）
+import base from './playwright.config';
+export default {
+  ...base,
+  use: { ...base.use, launchOptions: { executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' } },
+};
+```
+
 **操作解説動画（`video/`）**: YouTube 公開用の解説動画を Playwright 収録 + VOICEVOX 音声合成 + ffmpeg 合成で作るパイプライン。正典は [video/REQUIREMENTS.md](video/REQUIREMENTS.md)（PR 分割・受け入れ基準・QA/QC チェックリスト）、実行手順と過去に踏んだ失敗の再発防止メモは [video/README.md](video/README.md)。収録は dev ビルド（`dist/`）を読み込むので事前に `npm run dev` が要る。Chrome 拡張の録画には仮想ディスプレイが必要なため、Linux では `xvfb-run -a -s "-screen 0 1920x1080x24" node video/scripts/record.mjs` のように xvfb 経由で実行する。
 
 **現状はパイプライン基盤 + デモビルド層（`dist-demo/`）+ 実チャプター 01〜07 まで**。章 08〜14 と QA/QC は後続 PR のスコープ。収録はデモビルド（`npm run build:demo` → `dist-demo/`）を読み込む（`resolveExtensionDir()` が `dist-demo/` → `dist/` の順で解決する）。章ごとの初期状態は `?demoSeed=<プリセット名>`、進捗表示を映すための人工レイテンシは `?demoLatency=<係数>` で URL から渡す（`src/demo/`。係数の実測表は [video/REQUIREMENTS.md](video/REQUIREMENTS.md) §6-4）。**原稿 → TTS → 収録の順を守ること**（シーンが `loadCueDurations()` で音声の実尺を読んで画面を追従させるため）。

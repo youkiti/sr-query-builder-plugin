@@ -1,6 +1,6 @@
-import { INITIAL_STATE, type AppState } from '../store';
+import { INITIAL_STATE, type AppState, type BlockImprovementState } from '../store';
 import { createEditView } from './editView';
-import type { BlockImprovementContext } from '@/app/services';
+import type { BlockImprovementContext, BlockImprovementResult } from '@/app/services';
 
 function buildContainer(): HTMLElement {
   const doc = document.implementation.createHTMLDocument('test');
@@ -233,14 +233,9 @@ describe('createEditView - 鉛筆インライン編集', () => {
   });
 });
 
-describe('createEditView - ブロック単位 AI 改善', () => {
-  test('AI ボタンでプロンプトフォームが開き、submit で onImproveBlock が指示付きで呼ばれ diff が出る', async () => {
-    const onImproveBlock = jest.fn().mockResolvedValue({
-      blockId: '1',
-      currentExpression: 'asthma[tiab]',
-      proposedExpression: '"Asthma"[Mesh] OR asthma*[tiab]',
-      rationale: 'MeSH 追加で感度向上',
-    });
+describe('createEditView - ブロック単位 AI 改善（送信は fire-and-forget、結果は store 経由）', () => {
+  test('AI ボタンでプロンプトフォームが開き、submit で onImproveBlock が指示付きで呼ばれる', () => {
+    const onImproveBlock = jest.fn().mockResolvedValue(undefined);
     const view = createEditView({ onImproveBlock });
     const container = buildContainer();
     view(container, { state: stateReadyFull, navigate: jest.fn() });
@@ -249,16 +244,8 @@ describe('createEditView - ブロック単位 AI 改善', () => {
     const instruction = row.querySelector<HTMLTextAreaElement>('.edit__block-ai-instruction')!;
     instruction.value = '同義語を増やして';
     row.querySelector<HTMLButtonElement>('.edit__block-ai-submit')!.click();
-    await flushAsync();
-    await flushAsync();
+    // 新契約: view はこの呼び出しの解決値を使わない（結果は state.blockImprovement 経由）。
     expect(onImproveBlock).toHaveBeenCalledWith({ blockId: '1', instruction: '同義語を増やして' });
-    expect(row.querySelector('.edit__block-rationale')?.textContent).toContain('MeSH 追加');
-    expect(row.querySelector('.edit__block-diff-before pre')?.textContent).toBe('asthma[tiab]');
-    expect(row.querySelector('.edit__block-diff-after pre')?.textContent).toBe(
-      '"Asthma"[Mesh] OR asthma*[tiab]'
-    );
-    expect(row.querySelector('.edit__block-accept')).toBeTruthy();
-    expect(row.querySelector('.edit__block-reject')).toBeTruthy();
   });
 
   test('AI ボタン再クリックでフォームをトグルで閉じる', () => {
@@ -285,114 +272,6 @@ describe('createEditView - ブロック単位 AI 改善', () => {
     expect(row.querySelector('.edit__block-ai-form')).toBeNull();
   });
 
-  test('accept を押すと #1 の式が提案で置き換わる（再描画）', async () => {
-    const onImproveBlock = jest.fn().mockResolvedValue({
-      blockId: '1',
-      currentExpression: 'asthma[tiab]',
-      proposedExpression: '"Asthma"[Mesh]',
-      rationale: 'r',
-    });
-    const view = createEditView({ onImproveBlock });
-    const container = buildContainer();
-    view(container, { state: stateReadyFull, navigate: jest.fn() });
-    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
-    blockRow(container, '1')
-      .querySelector<HTMLButtonElement>('.edit__block-ai-submit')!
-      .click();
-    await flushAsync();
-    await flushAsync();
-    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-accept')!.click();
-    expect(blockRow(container, '1').querySelector('.edit__block-current')?.textContent).toBe(
-      '"Asthma"[Mesh]'
-    );
-    expect(blockRow(container, '2').querySelector('.edit__block-current')?.textContent).toBe(
-      'children[tiab]'
-    );
-  });
-
-  test('reject で AI スロットがクリアされる', async () => {
-    const onImproveBlock = jest.fn().mockResolvedValue({
-      blockId: '1',
-      currentExpression: 'asthma[tiab]',
-      proposedExpression: 'new',
-      rationale: 'r',
-    });
-    const view = createEditView({ onImproveBlock });
-    const container = buildContainer();
-    view(container, { state: stateReadyFull, navigate: jest.fn() });
-    const row = blockRow(container, '1');
-    row.querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
-    row.querySelector<HTMLButtonElement>('.edit__block-ai-submit')!.click();
-    await flushAsync();
-    await flushAsync();
-    row.querySelector<HTMLButtonElement>('.edit__block-reject')!.click();
-    expect(row.querySelector('.edit__block-rationale')).toBeNull();
-    expect(row.querySelector('.edit__block-accept')).toBeNull();
-  });
-
-  test('提案が現式と同じなら accept が disabled', async () => {
-    const onImproveBlock = jest.fn().mockResolvedValue({
-      blockId: '1',
-      currentExpression: 'asthma[tiab]',
-      proposedExpression: 'asthma[tiab]',
-      rationale: '改善余地無し',
-    });
-    const view = createEditView({ onImproveBlock });
-    const container = buildContainer();
-    view(container, { state: stateReadyFull, navigate: jest.fn() });
-    const row = blockRow(container, '1');
-    row.querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
-    row.querySelector<HTMLButtonElement>('.edit__block-ai-submit')!.click();
-    await flushAsync();
-    await flushAsync();
-    expect(row.querySelector<HTMLButtonElement>('.edit__block-accept')!.disabled).toBe(true);
-  });
-
-  test('提案が空文字でも accept は disabled', async () => {
-    const onImproveBlock = jest.fn().mockResolvedValue({
-      blockId: '1',
-      currentExpression: 'asthma[tiab]',
-      proposedExpression: '',
-      rationale: '',
-    });
-    const view = createEditView({ onImproveBlock });
-    const container = buildContainer();
-    view(container, { state: stateReadyFull, navigate: jest.fn() });
-    const row = blockRow(container, '1');
-    row.querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
-    row.querySelector<HTMLButtonElement>('.edit__block-ai-submit')!.click();
-    await flushAsync();
-    await flushAsync();
-    expect(row.querySelector<HTMLButtonElement>('.edit__block-accept')!.disabled).toBe(true);
-    expect(row.querySelector('.edit__block-rationale')?.textContent).toContain('（改善ポイント');
-  });
-
-  test('onImproveBlock が reject したらエラーを表示', async () => {
-    const onImproveBlock = jest.fn().mockRejectedValue(new Error('llm boom'));
-    const view = createEditView({ onImproveBlock });
-    const container = buildContainer();
-    view(container, { state: stateReadyFull, navigate: jest.fn() });
-    const row = blockRow(container, '1');
-    row.querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
-    row.querySelector<HTMLButtonElement>('.edit__block-ai-submit')!.click();
-    await flushAsync();
-    await flushAsync();
-    expect(row.querySelector('.edit__block-error')?.textContent).toContain('llm boom');
-  });
-
-  test('Error 以外の例外も String 化される', async () => {
-    const onImproveBlock = jest.fn().mockRejectedValue('oops');
-    const view = createEditView({ onImproveBlock });
-    const container = buildContainer();
-    view(container, { state: stateReadyFull, navigate: jest.fn() });
-    const row = blockRow(container, '1');
-    row.querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
-    row.querySelector<HTMLButtonElement>('.edit__block-ai-submit')!.click();
-    await flushAsync();
-    await flushAsync();
-    expect(row.querySelector('.edit__block-error')?.textContent).toContain('oops');
-  });
-
   test('onImproveBlock 未指定なら AI ボタンを押してもフォームは開かない', () => {
     const view = createEditView();
     const container = buildContainer();
@@ -402,31 +281,330 @@ describe('createEditView - ブロック単位 AI 改善', () => {
     expect(() => btn.click()).not.toThrow();
     expect(row.querySelector('.edit__block-ai-form')).toBeNull();
   });
+});
 
-  test('accept で base に該当行が無いと feedback にエラーを出す', async () => {
-    // 提案受信後に、別ブロックを鉛筆編集して #1 行を作り替え…ではなく、
-    // base が握られた時点の md と異なる accept を作るのは難しいため、
-    // ここでは applyBlockImprovement が投げる経路（base から #N が消えている）を
-    // 直接は作れない。代わりに proposedExpression を変更した上で
-    // accept → 成功する正常系をもう一度確認する（catch 経路は service 層でカバー）。
-    const onImproveBlock = jest.fn().mockResolvedValue({
+describe('createEditView - AI 改善の進捗・提案・エラーは state.blockImprovement から復元される（issue #39）', () => {
+  const READY_RESULT: BlockImprovementResult = {
+    blockId: '1',
+    currentExpression: 'asthma[tiab]',
+    proposedExpression: '"Asthma"[Mesh] OR asthma*[tiab]',
+    rationale: 'MeSH 追加で感度向上',
+  };
+
+  function improvementFor(
+    status: BlockImprovementState['status'],
+    overrides: Partial<BlockImprovementState> = {}
+  ): BlockImprovementState {
+    return {
+      formulaVersionId: 'v1',
       blockId: '1',
-      currentExpression: 'asthma[tiab]',
-      proposedExpression: 'new-expr',
-      rationale: 'r',
-    });
+      status,
+      result: status === 'ready' ? READY_RESULT : null,
+      error: status === 'error' ? 'llm boom' : null,
+      ...overrides,
+    };
+  }
+
+  test('回帰: onImproveBlock 実行中に無関係な再描画が挟まっても、ready state になれば diff が表示される', () => {
+    // 実運用では LLM コスト集計の setState が全ビュー再描画を起こし、旧実装はこの再描画で
+    // .then() の宛先スロットが DOM から切り離されて提案が画面に反映されなかった（issue #39）。
+    const onImproveBlock = jest.fn().mockReturnValue(new Promise<void>(() => undefined));
     const view = createEditView({ onImproveBlock });
     const container = buildContainer();
     view(container, { state: stateReadyFull, navigate: jest.fn() });
     const row = blockRow(container, '1');
     row.querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
+    const instruction = row.querySelector<HTMLTextAreaElement>('.edit__block-ai-instruction')!;
+    instruction.value = '同義語を増やして';
     row.querySelector<HTMLButtonElement>('.edit__block-ai-submit')!.click();
-    await flushAsync();
-    await flushAsync();
-    row.querySelector<HTMLButtonElement>('.edit__block-accept')!.click();
-    expect(blockRow(container, '1').querySelector('.edit__block-current')?.textContent).toBe(
-      'new-expr'
+    expect(onImproveBlock).toHaveBeenCalledWith({ blockId: '1', instruction: '同義語を増やして' });
+
+    // 無関係な setState による全ビュー再描画をシミュレート（同じ container に再度 view を適用）。
+    view(container, {
+      state: { ...stateReadyFull, blockImprovement: improvementFor('running') },
+      navigate: jest.fn(),
+    });
+    expect(blockRow(container, '1').querySelector('.edit__block-pending')).toBeTruthy();
+
+    // LLM 完了後、bootstrap が status='ready' に更新した state で再描画された想定。
+    view(container, {
+      state: { ...stateReadyFull, blockImprovement: improvementFor('ready') },
+      navigate: jest.fn(),
+    });
+    const finalRow = blockRow(container, '1');
+    expect(finalRow.querySelector('.edit__block-rationale')?.textContent).toContain('MeSH 追加');
+    expect(finalRow.querySelector('.edit__block-diff-before pre')?.textContent).toBe('asthma[tiab]');
+    expect(finalRow.querySelector('.edit__block-diff-after pre')?.textContent).toBe(
+      '"Asthma"[Mesh] OR asthma*[tiab]'
     );
+    expect(finalRow.querySelector('.edit__block-accept')).toBeTruthy();
+    expect(finalRow.querySelector('.edit__block-reject')).toBeTruthy();
+  });
+
+  test('running: .edit__block-pending が出て、対象ブロックの改善ボタンだけ disabled になる', () => {
+    const view = createEditView({ onImproveBlock: jest.fn() });
+    const container = buildContainer();
+    view(container, {
+      state: { ...stateReadyFull, blockImprovement: improvementFor('running') },
+      navigate: jest.fn(),
+    });
+    const row1 = blockRow(container, '1');
+    expect(row1.querySelector('.edit__block-pending')?.textContent).toContain('取得中');
+    expect(row1.querySelector<HTMLButtonElement>('.edit__block-improve')!.disabled).toBe(true);
+    const row2 = blockRow(container, '2');
+    expect(row2.querySelector<HTMLButtonElement>('.edit__block-improve')!.disabled).toBe(false);
+  });
+
+  test('error: .edit__block-error にメッセージが出る', () => {
+    const view = createEditView({ onImproveBlock: jest.fn() });
+    const container = buildContainer();
+    view(container, {
+      state: { ...stateReadyFull, blockImprovement: improvementFor('error') },
+      navigate: jest.fn(),
+    });
+    expect(blockRow(container, '1').querySelector('.edit__block-error')?.textContent).toContain(
+      'llm boom'
+    );
+  });
+
+  test('stale（formulaVersionId が現在の formula と不一致）な blockImprovement は描画されない', () => {
+    const view = createEditView({ onImproveBlock: jest.fn() });
+    const container = buildContainer();
+    view(container, {
+      state: {
+        ...stateReadyFull,
+        blockImprovement: improvementFor('ready', { formulaVersionId: 'old-v' }),
+      },
+      navigate: jest.fn(),
+    });
+    const row = blockRow(container, '1');
+    expect(row.querySelector('.edit__block-rationale')).toBeNull();
+    expect(row.querySelector<HTMLButtonElement>('.edit__block-improve')!.disabled).toBe(false);
+  });
+
+  test('提案が現式と同じなら accept が disabled', () => {
+    const view = createEditView({ onImproveBlock: jest.fn() });
+    const container = buildContainer();
+    view(container, {
+      state: {
+        ...stateReadyFull,
+        blockImprovement: improvementFor('ready', {
+          result: {
+            blockId: '1',
+            currentExpression: 'asthma[tiab]',
+            proposedExpression: 'asthma[tiab]',
+            rationale: '改善余地無し',
+          },
+        }),
+      },
+      navigate: jest.fn(),
+    });
+    expect(
+      blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-accept')!.disabled
+    ).toBe(true);
+  });
+
+  test('提案が空文字でも accept は disabled、rationale 空文字は代替テキストで表示', () => {
+    const view = createEditView({ onImproveBlock: jest.fn() });
+    const container = buildContainer();
+    view(container, {
+      state: {
+        ...stateReadyFull,
+        blockImprovement: improvementFor('ready', {
+          result: {
+            blockId: '1',
+            currentExpression: 'asthma[tiab]',
+            proposedExpression: '',
+            rationale: '',
+          },
+        }),
+      },
+      navigate: jest.fn(),
+    });
+    const row = blockRow(container, '1');
+    expect(row.querySelector<HTMLButtonElement>('.edit__block-accept')!.disabled).toBe(true);
+    expect(row.querySelector('.edit__block-rationale')?.textContent).toContain('（改善ポイント');
+  });
+
+  test('accept: onDraftChange が置換後 md 全文で呼ばれ、onClearImprovement も呼ばれる', () => {
+    const onDraftChange = jest.fn();
+    const onClearImprovement = jest.fn();
+    const view = createEditView({
+      onImproveBlock: jest.fn(),
+      onDraftChange,
+      onClearImprovement,
+    });
+    const container = buildContainer();
+    view(container, {
+      state: { ...stateReadyFull, blockImprovement: improvementFor('ready') },
+      navigate: jest.fn(),
+    });
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-accept')!.click();
+    expect(onDraftChange).toHaveBeenCalledTimes(1);
+    expect(onDraftChange.mock.calls[0]![0]).toContain('#1 "Asthma"[Mesh] OR asthma*[tiab]');
+    expect(onClearImprovement).toHaveBeenCalledTimes(1);
+  });
+
+  test('accept: onDraftChange 未指定ならローカル再描画で反映される（フォールバック）', () => {
+    const onClearImprovement = jest.fn();
+    const view = createEditView({ onImproveBlock: jest.fn(), onClearImprovement });
+    const container = buildContainer();
+    view(container, {
+      state: { ...stateReadyFull, blockImprovement: improvementFor('ready') },
+      navigate: jest.fn(),
+    });
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-accept')!.click();
+    expect(blockRow(container, '1').querySelector('.edit__block-current')?.textContent).toBe(
+      '"Asthma"[Mesh] OR asthma*[tiab]'
+    );
+    expect(blockRow(container, '2').querySelector('.edit__block-current')?.textContent).toBe(
+      'children[tiab]'
+    );
+    expect(onClearImprovement).toHaveBeenCalledTimes(1);
+  });
+
+  test('reject: onClearImprovement が呼ばれる', () => {
+    const onClearImprovement = jest.fn();
+    const view = createEditView({ onImproveBlock: jest.fn(), onClearImprovement });
+    const container = buildContainer();
+    view(container, {
+      state: { ...stateReadyFull, blockImprovement: improvementFor('ready') },
+      navigate: jest.fn(),
+    });
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-reject')!.click();
+    expect(onClearImprovement).toHaveBeenCalledTimes(1);
+  });
+
+  test('改善ボタンのトグルで ready の提案を閉じると onClearImprovement が呼ばれ、DOM も消える', () => {
+    const onClearImprovement = jest.fn();
+    const view = createEditView({ onImproveBlock: jest.fn(), onClearImprovement });
+    const container = buildContainer();
+    view(container, {
+      state: { ...stateReadyFull, blockImprovement: improvementFor('ready') },
+      navigate: jest.fn(),
+    });
+    const row = blockRow(container, '1');
+    expect(row.querySelector('.edit__block-diff')).toBeTruthy();
+    row.querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
+    expect(row.querySelector('.edit__block-diff')).toBeNull();
+    expect(onClearImprovement).toHaveBeenCalledTimes(1);
+  });
+
+  test('改善ボタンのトグルで未送信のプロンプト入力フォームを閉じても onClearImprovement は呼ばれない', () => {
+    // store 上の提案（blockImprovement）が無い状態でプロンプト欄だけ開いて閉じるケース。
+    // 他ブロックの編集中の状態を巻き込む全ビュー再描画を無駄に誘発しないことの回帰確認。
+    const onClearImprovement = jest.fn();
+    const view = createEditView({ onImproveBlock: jest.fn(), onClearImprovement });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    const row = blockRow(container, '1');
+    const btn = row.querySelector<HTMLButtonElement>('.edit__block-improve')!;
+    btn.click();
+    expect(row.querySelector('.edit__block-ai-form')).toBeTruthy();
+    btn.click();
+    expect(row.querySelector('.edit__block-ai-form')).toBeNull();
+    expect(onClearImprovement).not.toHaveBeenCalled();
+  });
+
+  test('reject（フォールバック）: onClearImprovement 未指定でも DOM が消え、以後のローカル再描画でも復活しない', () => {
+    const view = createEditView({ onImproveBlock: jest.fn() });
+    const container = buildContainer();
+    view(container, {
+      state: { ...stateReadyFull, blockImprovement: improvementFor('ready') },
+      navigate: jest.fn(),
+    });
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-reject')!.click();
+    expect(blockRow(container, '1').querySelector('.edit__block-diff')).toBeNull();
+
+    // 他ブロックの鉛筆編集保存でローカル rerenderBlocks を誘発する。
+    const row2 = blockRow(container, '2');
+    row2.querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!.click();
+    const input = blockRow(container, '2').querySelector<HTMLTextAreaElement>(
+      '.edit__block-edit-input'
+    )!;
+    input.value = 'children2[tiab]';
+    blockRow(container, '2').querySelector<HTMLButtonElement>('.edit__block-edit-save')!.click();
+
+    // ブロック #1 の提案は復活しない。
+    const row1After = blockRow(container, '1');
+    expect(row1After.querySelector('.edit__block-diff')).toBeNull();
+    expect(row1After.querySelector('.edit__block-rationale')).toBeNull();
+  });
+
+  test('accept（フォールバック）: onClearImprovement 未指定でも、置換後の再描画で古い提案が復活しない', () => {
+    const view = createEditView({ onImproveBlock: jest.fn() });
+    const container = buildContainer();
+    view(container, {
+      state: { ...stateReadyFull, blockImprovement: improvementFor('ready') },
+      navigate: jest.fn(),
+    });
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-accept')!.click();
+    const row1 = blockRow(container, '1');
+    expect(row1.querySelector('.edit__block-current')?.textContent).toBe(
+      '"Asthma"[Mesh] OR asthma*[tiab]'
+    );
+    expect(row1.querySelector('.edit__block-diff')).toBeNull();
+    expect(row1.querySelector('.edit__block-rationale')).toBeNull();
+  });
+});
+
+describe('createEditView - 編集中 md は state から解決される（formulaEditDraft）', () => {
+  test('formulaEditDraft が現在の formula バージョンと一致すればそちらの md を表示する', () => {
+    const view = createEditView();
+    const container = buildContainer();
+    const draftMd = [
+      '## PubMed/MEDLINE',
+      '',
+      '```',
+      '#1 DRAFT-EXPRESSION',
+      '#2 children[tiab]',
+      '#3 #1 AND #2',
+      '```',
+      '',
+    ].join('\n');
+    view(container, {
+      state: { ...stateReadyFull, formulaEditDraft: { formulaVersionId: 'v1', markdown: draftMd } },
+      navigate: jest.fn(),
+    });
+    expect(blockRow(container, '1').querySelector('.edit__block-current')?.textContent).toBe(
+      'DRAFT-EXPRESSION'
+    );
+  });
+
+  test('formulaEditDraft が別バージョン（stale）なら currentFormulaMarkdown にフォールバックする', () => {
+    const view = createEditView();
+    const container = buildContainer();
+    view(container, {
+      state: {
+        ...stateReadyFull,
+        formulaEditDraft: {
+          formulaVersionId: 'old-v',
+          markdown: '## PubMed/MEDLINE\n\n```\n#1 STALE\n```\n',
+        },
+      },
+      navigate: jest.fn(),
+    });
+    expect(blockRow(container, '1').querySelector('.edit__block-current')?.textContent).toBe(
+      'asthma[tiab]'
+    );
+  });
+
+  test('鉛筆の手編集: onDraftChange が新しい md 全文で呼ばれる', () => {
+    const onDraftChange = jest.fn();
+    const view = createEditView({ onDraftChange });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    blockRow(container, '1')
+      .querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!
+      .click();
+    const input = blockRow(container, '1').querySelector<HTMLTextAreaElement>(
+      '.edit__block-edit-input'
+    )!;
+    input.value = '"Asthma"[Mesh]';
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-edit-save')!.click();
+    expect(onDraftChange).toHaveBeenCalledTimes(1);
+    expect(onDraftChange.mock.calls[0]![0]).toContain('#1 "Asthma"[Mesh]');
+    expect(onDraftChange.mock.calls[0]![0]).toContain('#2 children[tiab]');
   });
 });
 

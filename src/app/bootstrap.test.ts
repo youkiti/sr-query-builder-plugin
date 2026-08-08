@@ -63,6 +63,8 @@ describe('startApp', () => {
       expandRun: null,
       validationResult: null,
       missedAnalysis: null,
+      formulaEditDraft: null,
+      blockImprovement: null,
     });
     startApp(doc, { ...noopHashOptions('#/home'), store });
     expect(doc.getElementById('app-status')?.textContent).toContain('My SR');
@@ -105,6 +107,8 @@ describe('startApp', () => {
       expandRun: null,
       validationResult: null,
       missedAnalysis: null,
+      formulaEditDraft: null,
+      blockImprovement: null,
     });
     startApp(doc, { ...noopHashOptions('#/home'), setHash, store });
     const protocolBtn = Array.from(
@@ -1030,6 +1034,150 @@ describe('startApp - wiring 層', () => {
       (c[0] as string).includes('LLMApiLog') && (c[0] as string).includes(':append')
     );
     expect(logAppends.length).toBeGreaterThan(0);
+  });
+
+  test('edit view 既定 onImproveBlock は store.blockImprovement を running → ready と遷移させる', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+      'apiKeys.gemini': 'KEY',
+    });
+    fetchMock.mockImplementation(async (url: string) => {
+      if (typeof url === 'string' && url.includes('generativelanguage.googleapis.com')) {
+        return jsonResponse({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      proposed_expression: '"Asthma"[Mesh]',
+                      rationale: 'MeSH に寄せる',
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        });
+      }
+      if (typeof url === 'string' && url.includes('/upload/drive/v3/files')) {
+        return jsonResponse({ id: 'f', webViewLink: '' });
+      }
+      return jsonResponse({});
+    });
+    const handle = startApp(doc, {
+      getHash: () => '#/edit',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({
+      ...s,
+      currentFormulaVersionId: 'v1',
+      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 asthma[tiab]\n```\n',
+    }));
+    doc.querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
+    for (let i = 0; i < 5; i += 1) {
+      await flush();
+    }
+    doc.querySelector<HTMLButtonElement>('.edit__block-ai-submit')!.click();
+    // runImproveBlock は最初の await 前に同期で running へ遷移させる
+    expect(handle.store.getState().blockImprovement).toEqual({
+      formulaVersionId: 'v1',
+      blockId: '1',
+      status: 'running',
+      result: null,
+      error: null,
+    });
+    for (let i = 0; i < 5; i += 1) {
+      await flush();
+    }
+    const improvement = handle.store.getState().blockImprovement;
+    expect(improvement?.status).toBe('ready');
+    expect(improvement?.result?.proposedExpression).toBe('"Asthma"[Mesh]');
+    expect(improvement?.error).toBeNull();
+  });
+
+  test('edit view 既定 onImproveBlock は失敗時に store.blockImprovement を error にする', async () => {
+    const doc = buildDocument();
+    // Gemini API キー未設定 → buildLlmProviderFactory が LlmApiKeyMissingError を投げる
+    const { runtime } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+    });
+    const handle = startApp(doc, {
+      getHash: () => '#/edit',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({
+      ...s,
+      currentFormulaVersionId: 'v1',
+      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 asthma[tiab]\n```\n',
+    }));
+    doc.querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
+    for (let i = 0; i < 5; i += 1) {
+      await flush();
+    }
+    doc.querySelector<HTMLButtonElement>('.edit__block-ai-submit')!.click();
+    for (let i = 0; i < 10; i += 1) {
+      await flush();
+    }
+    const improvement = handle.store.getState().blockImprovement;
+    expect(improvement?.status).toBe('error');
+    expect(improvement?.error).toContain('API キー');
+    expect(doc.querySelector('.edit__block-error')?.textContent).toContain('API キー');
+  });
+
+  test('edit view 既定 onDraftChange / onClearImprovement が store を更新する', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+    });
+    fetchMock.mockResolvedValue(jsonResponse({}));
+    const handle = startApp(doc, {
+      getHash: () => '#/edit',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({
+      ...s,
+      currentFormulaVersionId: 'v1',
+      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 asthma[tiab]\n```\n',
+    }));
+    // 鉛筆編集 → onDraftChange 経由で store.formulaEditDraft が更新される
+    doc
+      .querySelector<HTMLButtonElement>('.edit__block-row[data-block-id="1"] .edit__block-edit-toggle')!
+      .click();
+    const input = doc.querySelector<HTMLTextAreaElement>('.edit__block-edit-input')!;
+    input.value = 'edited[tiab]';
+    doc.querySelector<HTMLButtonElement>('.edit__block-edit-save')!.click();
+    expect(handle.store.getState().formulaEditDraft?.formulaVersionId).toBe('v1');
+    expect(handle.store.getState().formulaEditDraft?.markdown).toContain('#1 edited[tiab]');
+
+    // onClearImprovement: reject ボタンで store.blockImprovement が null に戻る
+    handle.store.setState((s) => ({
+      ...s,
+      blockImprovement: {
+        formulaVersionId: 'v1',
+        blockId: '1',
+        status: 'ready',
+        result: {
+          blockId: '1',
+          currentExpression: 'edited[tiab]',
+          proposedExpression: 'proposed[tiab]',
+          rationale: 'r',
+        },
+        error: null,
+      },
+    }));
+    doc.querySelector<HTMLButtonElement>('.edit__block-reject')!.click();
+    expect(handle.store.getState().blockImprovement).toBeNull();
   });
 
   test('expand view 既定 onFetch が esearch→efetch→skill を呼び、onDecide が SeedPapers に追記する', async () => {
