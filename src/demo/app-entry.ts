@@ -12,16 +12,20 @@
  *
  * `?demoSeed=` 未指定 / 空文字なら何もせず「まっさら」（プロジェクト未作成）から
  * 始まる（video/REQUIREMENTS.md §6-4）。
+ *
+ * あわせて `?demoLatency=<係数>` で fetch モックの人工レイテンシ倍率を渡す
+ * （未指定なら等倍、`0` で無効化。詳細は `./fetchMock` のヘッダーコメント）。
  */
 
 import { createLocationOptions, startApp } from '@/app/bootstrap';
 import { createStore, INITIAL_STATE } from '@/app/store';
-import { installDemoFetch } from './fetchMock';
+import { installDemoFetch, resolveDemoLatencyFactor, setDemoLatencyFactor } from './fetchMock';
 import { installDemoIdentity } from './identity';
 import { applyDemoSeed } from './seeds';
 
 installDemoIdentity();
 installDemoFetch();
+setDemoLatencyFactor(resolveDemoLatencyFactor(window.location.search));
 
 async function boot(): Promise<void> {
   const demoSeed = new URLSearchParams(window.location.search).get('demoSeed');

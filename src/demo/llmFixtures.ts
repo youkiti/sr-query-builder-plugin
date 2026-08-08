@@ -290,6 +290,7 @@ function buildInterpretResultResponse(userText: string): unknown {
 interface GeminiRequestBody {
   contents?: Array<{ role?: string; parts?: Array<{ text?: string }> }>;
   systemInstruction?: { parts?: Array<{ text?: string }> };
+  generationConfig?: { maxOutputTokens?: number };
 }
 
 function buildResponseObject(skill: SkillId, userText: string): unknown {
@@ -319,6 +320,20 @@ function estimateTokens(text: string): number {
 }
 
 /**
+ * `geminiTierDetector.probeOnce()` のプラン判定リクエストかどうかを判定する。
+ *
+ * プローブは `systemInstruction` を持たず `generationConfig.maxOutputTokens: 1` で
+ * 有料モデルへ最小プロンプトを投げる（src/lib/llm/geminiTierDetector.ts）。
+ * スキル用のプロンプトは必ず `systemInstruction` を伴うので、その有無で切り分ける。
+ */
+function isTierProbe(body: GeminiRequestBody): boolean {
+  const hasSystemInstruction = (body.systemInstruction?.parts ?? []).some(
+    (p) => (p.text ?? '').trim() !== ''
+  );
+  return !hasSystemInstruction && body.generationConfig?.maxOutputTokens === 1;
+}
+
+/**
  * `https://generativelanguage.googleapis.com/v1beta/models/<model>:generateContent` を処理する。
  * `init.body` は `GeminiProvider.buildRequestBody` が組み立てた JSON 文字列。
  */
@@ -330,6 +345,19 @@ export function handleGeminiGenerateContent(init: RequestInit): Response {
   } catch {
     throw new Error('[demo] llmFixtures: Gemini リクエストボディが JSON として解釈できません');
   }
+  // プラン判定プローブは skill を持たないので、スキル判定より先に返す。
+  // ここで弾かないと detectSkill('') が throw し、probeOnce の catch に握り潰されて
+  // 'unknown' が返り、第 2 章の tier バッジが「確認中...」→ 空欄で終わってしまう。
+  // 200 OK は 'paid'（= 有料プラン）と解釈される。'free' を返すとモデル選択が
+  // gemini-2.0-flash へ強制的に切り替わって永続化され、他章の gemini-3.5-flash と
+  // 食い違うため、必ず 200 側に倒すこと（src/options/bootstrap.ts の tier 判定）。
+  if (isTierProbe(body)) {
+    return jsonResponse({
+      candidates: [{ content: { parts: [{ text: 'ok' }], role: 'model' }, finishReason: 'STOP' }],
+      usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
+    });
+  }
+
   const systemText = (body.systemInstruction?.parts ?? []).map((p) => p.text ?? '').join('\n');
   const userText = (body.contents ?? [])
     .map((c) => (c.parts ?? []).map((p) => p.text ?? '').join(''))

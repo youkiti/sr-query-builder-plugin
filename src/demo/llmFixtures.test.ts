@@ -1,5 +1,6 @@
 import { GeminiProvider } from '@/lib/llm';
 import type { LLMProvider } from '@/lib/llm';
+import { detectGeminiTier } from '@/lib/llm/geminiTierDetector';
 import {
   designBlock,
   designFreewords,
@@ -179,5 +180,38 @@ describe('improve-block フィクスチャ（/edit の AI 改善）', () => {
       makeProvider()
     );
     expect(proposal.proposedExpression).toContain('Extracorporeal Membrane Oxygenation');
+  });
+});
+
+describe('プラン判定プローブ（第 2 章の tier バッジ）', () => {
+  const probeFetch = (async (_url: RequestInfo | URL, init?: RequestInit) =>
+    handleGeminiGenerateContent(init ?? {})) as unknown as typeof fetch;
+
+  it('detectGeminiTier が paid を返す（バッジが空欄にならない）', async () => {
+    await expect(detectGeminiTier('demo-api-key', probeFetch)).resolves.toBe('paid');
+  });
+
+  it('systemInstruction を持たない maxOutputTokens=1 のリクエストは skill 判定へ流れない', async () => {
+    const res = handleGeminiGenerateContent({
+      method: 'POST',
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: 'hi' }] }],
+        generationConfig: { maxOutputTokens: 1 },
+      }),
+    });
+    expect(res.ok).toBe(true);
+  });
+
+  it('systemInstruction 付きのリクエストは従来どおり skill 判定される', () => {
+    expect(() =>
+      handleGeminiGenerateContent({
+        method: 'POST',
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: 'hi' }] }],
+          systemInstruction: { parts: [{ text: '未登録のシステムプロンプト' }] },
+          generationConfig: { maxOutputTokens: 1 },
+        }),
+      })
+    ).toThrow(/skill を判定できません/);
   });
 });
