@@ -32,6 +32,7 @@ import {
   INCLUSION_CRITERIA,
   RESEARCH_QUESTION,
   STUDY_DESIGN,
+  buildBlockExpressions,
   detectBlockKey,
   getBlockDef,
   type ScenarioBlockKey,
@@ -214,7 +215,11 @@ function buildImproveBlockResponse(userText: string): unknown {
   const key = detectBlockKey(`${label} ${description} ${current}`);
   if (key === 'ecmo' && !current.toLowerCase().includes('[mesh]')) {
     return {
-      proposed_expression: `(${current}) OR ${ECMO_MESH_ADDITION.tagSyntax}`,
+      // v2-demo（buildFormulaV2）と**同じビルダー**から作る。素朴に
+      // `(${current}) OR ${tagSyntax}` と連結すると二重括弧の別表記になり、
+      // 操作解説動画で「AI 提案を採用した式」と「後の章で映る v2-demo の式」が
+      // 別物に見えてしまうため（video/REQUIREMENTS.md §6-2 の再現性の要求）。
+      proposed_expression: buildBlockExpressions({ ecmo: [ECMO_MESH_ADDITION] }).ecmo,
       rationale:
         '本文表記が "extracorporeal life support" 等にゆれても取りこぼさないよう、MeSH タグを追加しました。',
     };
