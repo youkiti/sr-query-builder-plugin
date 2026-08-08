@@ -8,13 +8,20 @@
  * （§4 の「07 と 08 を分ける理由」）。この章は「操作して待つ」で切り、
  * 最後の cue で次章に渡す。
  *
- * ## demoLatency=5.4 の根拠
+ * ## demoLatency=5.6 の根拠
  *
- * 実行中に流れるナレーションは cue 02〜05 の 4 本で合計 62.3 秒。
- * 実測は係数 3 で 35.1 秒、係数 4 で 46.6 秒（傾き ≒ 11.5 秒／係数 1）なので、
- * 62 秒に合わせるには 5.4 倍が要る。ここがずれると、ナレーションが
- * 「いま生成中です」と言っているのに画面が終わっている（または逆）ことになる。
+ * 実行中に流れるナレーションは cue 02〜05 の 4 本で合計 62.5 秒。ここがずれると、
+ * ナレーションが「いま生成中です」と言っているのに画面が終わっている（または逆に、
+ * 喋り終わったあと無音で進捗バーを眺める）ことになる。
+ *
+ * **係数は「録画を回した状態」で測ること。** 素の Playwright で測ると 1920x1080 の
+ * 録画ぶんの CPU 負荷が乗らず、収録時より速く出る。録画ありの実測は
+ * 係数 2.4 で 29.9 秒 / 3.4 で 39.8 秒（傾き ≒ 9.9 秒／係数 1、切片 ≒ 6 秒）で、
+ * 62.5 秒に合わせると 5.6 倍。
+ *
  * 実 API でも LLM 9 回ぶんで 30〜60 秒はかかるので、映像としても妥当な範囲。
+ * なお多少ずれても破綻しないよう、cue 05 のあとに「カーソルを動かしたまま待つ」
+ * ループを置いてある（下記）。
  *
  * セレクタの注意: 「生成して検証する」ボタンには id も class も無い。
  * `.draft__actions button` で取る（この div の子はこのボタン 1 つだけ）。
@@ -23,6 +30,23 @@
 
 import { hoverSlow, smoothWheel } from './lib/gestures.mjs';
 import { loadCueDurations, sleepRemainder } from './lib/pacing.mjs';
+
+/**
+ * 「いま画面にあれば」ホバーする。
+ *
+ * この章は実行中のトラッカーやライブ表示（`li.draft__block-hit` 等）をなぞるが、
+ * それらは**実行が終わると DOM から消える**。消えた要素に `hoverSlow` を掛けると
+ * `scrollIntoViewIfNeeded` → `locator.hover()` の既定 30 秒タイムアウトで詰まり、
+ * 1 つの cue が 90 秒スタックした（実測）。`isVisible()` は待たずに即返るので、
+ * 実行の進み具合が多少ずれても収録が破綻しない。
+ */
+async function hoverIfVisible(page, locator, options) {
+    if (await locator.isVisible().catch(() => false)) {
+        await hoverSlow(page, locator, options);
+        return true;
+    }
+    return false;
+}
 
 export default {
     id: '07',
@@ -33,7 +57,7 @@ export default {
     async run(ctx) {
         const durations = loadCueDurations('07-draft');
 
-        await ctx.openExtensionPage('app/app.html?demoSeed=07-draft&demoLatency=5.4#/draft');
+        await ctx.openExtensionPage('app/app.html?demoSeed=07-draft&demoLatency=5.6#/draft');
         await ctx.page.locator('.draft__actions button').waitFor({ state: 'visible', timeout: 20000 });
         await ctx.sleep(800);
 
@@ -63,19 +87,19 @@ export default {
         ctx.cue(3);
         const cue3StartedAt = Date.now();
         const genPhase = ctx.page.locator('.draft__phase').first();
-        await hoverSlow(ctx.page, genPhase.locator('.draft__phase-label'), { durationMs: 800 });
+        await hoverIfVisible(ctx.page, genPhase.locator('.draft__phase-label'), { durationMs: 800 });
         await ctx.sleep(1000);
         // ブロック 1 の 4 つのチップ（骨格 / MeSH / フリーワード / 件数）をなぞる
         const firstBlockSteps = genPhase.locator('.draft__step-block').first().locator('.draft__step');
         const chipCount = await firstBlockSteps.count();
         for (let i = 0; i < chipCount; i++) {
-            await hoverSlow(ctx.page, firstBlockSteps.nth(i), { durationMs: 600 });
+            await hoverIfVisible(ctx.page, firstBlockSteps.nth(i), { durationMs: 600 });
             await ctx.sleep(800);
         }
         await ctx.sleep(1200);
-        await hoverSlow(ctx.page, ctx.page.locator('.draft__status'), { durationMs: 800 });
+        await hoverIfVisible(ctx.page, ctx.page.locator('.draft__status'), { durationMs: 800 });
         await ctx.sleep(1500);
-        await hoverSlow(ctx.page, ctx.page.locator('.draft__progressbar'), { durationMs: 800 });
+        await hoverIfVisible(ctx.page, ctx.page.locator('.draft__progressbar'), { durationMs: 800 });
         await sleepRemainder(ctx, cue3StartedAt, durations['03'] * 1000 + 500);
 
         // --- cue 04: ブロックごとのヒット数がライブで埋まる ---
@@ -84,10 +108,10 @@ export default {
         const blockHits = ctx.page.locator('li.draft__block-hit');
         const hitCount = await blockHits.count();
         for (let i = 0; i < hitCount; i++) {
-            await hoverSlow(ctx.page, blockHits.nth(i), { durationMs: 700 });
+            await hoverIfVisible(ctx.page, blockHits.nth(i), { durationMs: 700 });
             await ctx.sleep(1400);
         }
-        await hoverSlow(ctx.page, ctx.page.locator('.draft__block-hits'), { durationMs: 900 });
+        await hoverIfVisible(ctx.page, ctx.page.locator('.draft__block-hits'), { durationMs: 900 });
         await sleepRemainder(ctx, cue4StartedAt, durations['04'] * 1000 + 500);
 
         // --- cue 05: 検証フェーズ ---
@@ -95,21 +119,35 @@ export default {
         const cue5StartedAt = Date.now();
         const validationPhase = ctx.page.locator('.draft__phase').nth(1);
         if (await validationPhase.count()) {
-            await hoverSlow(ctx.page, validationPhase.locator('.draft__phase-label'), { durationMs: 800 });
+            await hoverIfVisible(ctx.page, validationPhase.locator('.draft__phase-label'), { durationMs: 800 });
             await ctx.sleep(900);
             const valChips = validationPhase.locator('.draft__step');
             const valCount = await valChips.count();
             for (let i = 0; i < valCount; i++) {
-                await hoverSlow(ctx.page, valChips.nth(i), { durationMs: 550 });
+                await hoverIfVisible(ctx.page, valChips.nth(i), { durationMs: 550 });
                 await ctx.sleep(600);
             }
         }
-        await hoverSlow(ctx.page, ctx.page.locator('.draft__status'), { durationMs: 800 });
+        await hoverIfVisible(ctx.page, ctx.page.locator('.draft__status'), { durationMs: 800 });
         await sleepRemainder(ctx, cue5StartedAt, durations['05'] * 1000 + 500);
 
+        // --- 実行が終わるのを待つ（カーソルを動かしたまま）---
+        // 係数を合わせても収録機の負荷しだいで数秒〜十数秒ずれる。ここで素朴に
+        // waitFor すると、その間だけカーソルが止まって静止画に見える
+        // （§8-4 の md5 検査に引っかかる）。待つあいだも画面をなぞり続ける。
+        const doneMarker = ctx.page.locator('.draft__validate-status');
+        const waitDeadline = Date.now() + 180000;
+        while (!(await doneMarker.isVisible().catch(() => false))) {
+            if (Date.now() > waitDeadline) {
+                throw new Error('[07-draft] 生成・検証が 180 秒たっても完了しませんでした');
+            }
+            await hoverIfVisible(ctx.page, ctx.page.locator('.draft__progressbar'), { durationMs: 700 });
+            await ctx.sleep(500);
+            await hoverIfVisible(ctx.page, ctx.page.locator('.draft__status'), { durationMs: 700 });
+            await ctx.sleep(500);
+        }
+
         // --- cue 06: 完成した検索式 ---
-        // ここまでで実行が終わっている想定。念のため完了を待ってから読み始める。
-        await ctx.page.locator('.draft__validate-status').waitFor({ state: 'visible', timeout: 120000 });
         await ctx.page.locator('.draft__formula').waitFor({ state: 'visible', timeout: 30000 });
         await ctx.sleep(700);
 

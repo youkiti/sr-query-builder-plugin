@@ -82,6 +82,27 @@ function extractLabelAndDescription(text: string): { label: string; description:
   return { label: match[1] ?? '', description: match[2] ?? '' };
 }
 
+/**
+ * `ブロック概念:` から `seed 論文` の直前までを切り出す。
+ *
+ * mesh-suggester / freeword-designer のユーザープロンプトは、末尾に seed 論文の
+ * MeSH 一覧や ti/ab コーパスを丸ごと含む（`MESH_SUGGESTER_USER_PROMPT_TEMPLATE` /
+ * `FREEWORD_DESIGNER_USER_PROMPT_TEMPLATE`）。テキスト全体に `detectBlockKey` を
+ * 掛けると seed 側に出てくる語を拾ってしまい、`BLOCK_DEFS` の先頭にある ards の
+ * フィクスチャがどのブロックにも返る。デモの seed は ARDS/ECMO の論文なので、
+ * ECMO ブロックにも RCT ブロックにも "ARDS" が引っかかった。
+ *
+ * 実害として、第 7 章の生成結果が #2 ECMO・#3 RCT フィルタとも ARDS の
+ * フリーワードになる（＝ 3 ブロックがほぼ同じ式になる）不具合を出している。
+ * 判定はブロック自身の記述（概念・要件・提案済み MeSH）だけに絞る。
+ */
+function extractBlockScope(text: string): string {
+  const start = text.indexOf('ブロック概念:');
+  if (start === -1) return text;
+  const end = text.indexOf('seed 論文', start);
+  return end === -1 ? text.slice(start) : text.slice(start, end);
+}
+
 function requireBlockKey(text: string, context: string): ScenarioBlockKey {
   const key = detectBlockKey(text);
   if (key === null) {
@@ -125,7 +146,7 @@ function buildBlockDesignerResponse(userText: string): unknown {
 }
 
 function buildMeshSuggesterResponse(userText: string): unknown {
-  const key = requireBlockKey(userText, 'mesh-suggester');
+  const key = requireBlockKey(extractBlockScope(userText), 'mesh-suggester');
   const def = getBlockDef(key);
   return {
     suggestions: def.meshV1.map((m) => ({
@@ -137,7 +158,7 @@ function buildMeshSuggesterResponse(userText: string): unknown {
 }
 
 function buildFreewordDesignerResponse(userText: string): unknown {
-  const key = requireBlockKey(userText, 'freeword-designer');
+  const key = requireBlockKey(extractBlockScope(userText), 'freeword-designer');
   const def = getBlockDef(key);
   return { freewords: def.freewords.map((f) => ({ query: f.query, rationale: f.rationale })) };
 }
