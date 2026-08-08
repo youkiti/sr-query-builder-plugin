@@ -58,7 +58,7 @@
 | ストレージ | Google Sheets（主 DB）/ Google Drive（LLM ログの実体）/ `chrome.storage`（API キー、ローカルキャッシュ） |
 | LLM（MVP） | Gemini API |
 | LLM（将来） | OpenAI / Anthropic Claude / OpenRouter |
-| docx パース | `mammoth.js`（TS） |
+| docx パース | `fflate`（TS） |
 | Node.js | ≥ 18 |
 
 ### 2.1 OAuth スコープ
@@ -324,7 +324,7 @@ https://www.googleapis.com/auth/drive.file          # Sheets 読み書き + LLM 
 |---|---|
 | 手入力 | プロトコル全文の 1 つのテキストエリアに貼り付け。そのまま `extract-protocol` skill に渡す |
 | `protocol.md` アップロード | テンプレート（[templates/rq_template.md](../search-formula-developper/templates/rq_template.md)）互換のマークダウンを Drive に保存後、テキストを `extract-protocol` skill に渡す |
-| `.docx` アップロード | `mammoth.js` でプレーンテキスト化 → Drive に保存 → `extract-protocol` skill に渡す |
+| `.docx` アップロード | `fflate` ベースの抽出（zip 展開 + `word/document.xml` 走査）でプレーンテキスト化 → Drive に保存 → `extract-protocol` skill に渡す |
 
 #### ブロック抽出・承認フロー
 
@@ -571,7 +571,7 @@ tiab-review-plugin と合わせる：
 | Cochrane HSSS のバージョン | **PubMed 版 2024 改訂版・sensitivity-maximizing バージョン**を既定。フィルタ文字列冒頭に版コメントを残す | §4.4 / §10 |
 | MVP リリース判定基準 | **本拡張のために新規に書いたコード（`src/` 配下の TS）に対するテストカバレッジ 100 %**（行・分岐とも）。テストは本実装フェーズで Claude が書いたものを正本とする。サブモジュール（`tiab-review-plugin` / `search-formula-developper`）は対象外 | 実装フェーズ |
 | ディレクトリ構造 | Claude が起案（[docs/architecture.md](architecture.md) 参照）。承認は実装着手のタイミングで取る | docs/architecture.md |
-| サードパーティライセンス表記 | Claude が起案。`THIRD_PARTY_NOTICES.md` をルート直下に作成し、`mammoth.js` / `jstat` 等を MIT 表記でまとめる | 実装フェーズ（依存追加時） |
+| サードパーティライセンス表記 | Claude が起案。`THIRD_PARTY_NOTICES.md` をルート直下に作成し、`fflate` / `jstat` 等を MIT 表記でまとめる | 実装フェーズ（依存追加時） |
 | CI / CD | MVP では不要。リリース判定が固まってから別途検討 | （MVP 対象外） |
 
 ### 11.1.1 確定事項（2026-06-13 確定: プロトコル再訪・改訂フロー）

@@ -2,7 +2,7 @@
 
 研究プロトコル（RQ / PICO / PECO / PCC / SPIDER / custom など）から PubMed 検索式を生成・検証し、CENTRAL / Embase(Dialog) / ClinicalTrials.gov / ICTRP 向けに変換する MIT ライセンスの OSS Chrome 拡張です。
 
-> **ステータス**: MVP 実装中。プロトコル入力 → ブロック承認 → シード論文 → 検索式ドラフト → 検証 → エクスポートの全 11 画面と unit / E2E テストスイートを実装済み（.docx パースの本配線・P1 分析ロジックなどが残タスク）。詳細は [docs/requirements.md](docs/requirements.md) と [docs/architecture.md](docs/architecture.md) を参照してください。
+> **ステータス**: MVP 実装中。プロトコル入力 → ブロック承認 → シード論文 → 検索式ドラフト → 検証 → エクスポートの全 11 画面と unit / E2E テストスイートを実装済み（P1 分析ロジックなどが残タスク）。詳細は [docs/requirements.md](docs/requirements.md) と [docs/architecture.md](docs/architecture.md) を参照してください。
 
 ## 主なドキュメント
 
