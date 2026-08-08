@@ -120,7 +120,6 @@ src/
 
 ## 未実装・既知のギャップ
 
-- **`.docx` パース未配線**: UI と型（`DocxExtractor`）はあるが、mammoth.js が未導入で extractor が注入されていない。現状 .docx をアップロードすると「パーサが注入されていません」エラーになる
 - **P1 ロジック未移植**: `check_block_overlap` / `check_mesh` / `check_mesh_overlap`（ブロック重複・MeSH 分析）
 - **OpenAI / Anthropic Claude への直接連携は未実装**: 実装済みなのは Gemini と OpenRouter の 2 プロバイダ（`src/lib/llm/GeminiProvider.ts` / `OpenRouterProvider.ts`。既定モデルは `gemini-3.5-flash`）。Options 画面で OpenRouter の API キーとカスタムモデル ID（最大 20 件）を追加登録できるため OpenRouter 経由で多くのモデルに到達できるが、OpenAI / Anthropic の API を直接叩く `LLMProvider` 実装は無い（`LlmProviderId` 型に `openai` / `anthropic` の値はあるが対応実装が無い）
 - **CI/CD なし**（`.github/workflows/` 未配置。検証はローカルで `typecheck → test → test:e2e → lint → dev` を回す）

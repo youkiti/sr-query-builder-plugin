@@ -56,7 +56,12 @@ import { efetchArticles, esearch, type EfetchArticle } from '@/lib/ncbi';
 import { getLatestFormulaVersion, listFormulaVersions } from '@/features/formula';
 import type { FormulaVersion } from '@/domain/formulaVersion';
 import { getCurrentProject } from '@/features/project';
-import { getLatestProtocol, getProtocolBlocksByVersion, listProtocols } from '@/features/protocol';
+import {
+  fflateDocxExtractor,
+  getLatestProtocol,
+  getProtocolBlocksByVersion,
+  listProtocols,
+} from '@/features/protocol';
 import type { Protocol, ProtocolBlock } from '@/domain/protocol';
 import type { BlocksDraft, ProtocolDraft } from './store';
 import { getCurrentUserEmail } from '@/lib/google';
@@ -695,7 +700,14 @@ async function runProtocolSubmit(
     spreadsheetId: project.spreadsheetId,
   });
   const provider = factory.forPurpose('extract_protocol');
-  await submitProtocol(input, { store, provider });
+  // .docx 提出時に extractor 未指定なら既定実装（fflate ベース）を補う。
+  // ここは DI 配線層なので既定値の注入はここで行い、テスト等で明示的に
+  // 別の extractor を渡したい呼び出し側の余地は残す（上書きしない）。
+  const resolvedInput =
+    input.sourceType === 'docx' && !input.docxExtractor
+      ? { ...input, docxExtractor: fflateDocxExtractor }
+      : input;
+  await submitProtocol(resolvedInput, { store, provider });
 }
 
 async function runApprove(store: AppStore, runtime: ChromeRuntimeDeps): Promise<void> {

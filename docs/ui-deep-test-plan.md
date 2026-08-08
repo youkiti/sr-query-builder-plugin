@@ -179,7 +179,7 @@ CLAUDE.md §目的 と [ui-flow.md §2](ui-flow.md) から逆算した 6 本。
 - **Phase A で E2E hook（§1.1 方式 X）を本体に入れないと、Phase B の各 route smoke は guard で弾かれて到達不能**。これが最優先。`chrome.storage.local` に `protocolDraft` 等を積んでも [bootstrap.ts:165-171](../src/app/bootstrap.ts#L165-L171) が読まないので、storage 注入だけのアプローチは機能しない。
 - **Phase A で Google / NCBI の fetch stub を固めておかないと、Phase D 以降の `#/draft` / `#/validate` / `#/expand` / `#/export` のジャーニーが動かない**。基盤投資は後回しにしない。
 - `chrome.tabs.create` や `chrome.identity.removeCachedAuthToken` は **副作用の録音**（呼ばれたか + 引数）で assertion する。実際にタブは開かない。
-- docx パースは [mammoth.js](https://github.com/mwilliamson/mammoth.js) 相当の導入が前提。未実装なら Phase D-3 は保留して Phase B の `app-protocol.spec.ts` で manual モードと file モード（md のみ）のみ検証する。
+- docx パースは `fflate` ベースの `fflateDocxExtractor`（[src/features/protocol/docxText.ts](../src/features/protocol/docxText.ts)）で実装済み。Phase D-3 も file モードの `.docx` を含めて検証してよい。
 - CI 導入時は **Phase B までを PR ブロッカー、C〜E は nightly** を推奨（実行時間の都合）。[requirements.md §11.1](requirements.md) の MVP 判定と合わせて確定する。
 - `@axe-core/playwright` の `color-contrast` は tokens.css の初期値が MVP 範囲外のため disable 継続（別 issue で扱う）。他ルールで violation が出たら実バグの可能性が高い。
 - **ui-states.md は一部 target spec**（実装より先行）。Phase B の spec 化時に実装と照合し、齟齬は「spec と実装のどちらを正とするか」を明示してから両方を直すこと。silent に spec 側を踏襲すると stale spec が Playwright で固定化される。
