@@ -31,7 +31,6 @@ import {
   submitProtocol,
   type AnalyzeMissedSeedsResult,
   type BlockImprovementContext,
-  type BlockImprovementResult,
   type ChromeRuntimeDeps,
   type DraftBlockHit,
   type DraftProgress,
@@ -401,12 +400,25 @@ function buildDefaultViewOptions(
     edit: {
       onSave: async (input: SaveEditedFormulaInput): Promise<SaveEditedFormulaResult> =>
         runSaveEditedFormula(store, runtime, input),
-      onImproveBlock: async (
-        input: RequestBlockImprovementInput
-      ): Promise<BlockImprovementResult> =>
+      // 結果は store.blockImprovement 経由で反映される（進捗・提案・エラーとも）。
+      // view はこの Promise の解決値を使わない（expand の onFetch と同じ思想。issue #39 対応）。
+      onImproveBlock: async (input: RequestBlockImprovementInput): Promise<void> =>
         runImproveBlock(store, runtime, llmFactoryDepsBase(), input),
       onGetImproveContext: (blockId: string): Promise<BlockImprovementContext | null> =>
         getBlockImprovementContext(blockId, { store, google: runtime.google }),
+      // 編集中 md を store（formulaEditDraft）へ反映する。鉛筆の手編集 / AI 提案 accept の
+      // 両方から呼ばれる（editView.ts の FormulaEditor.setMd）。
+      onDraftChange: (markdown: string) => {
+        const formulaVersionId = store.getState().currentFormulaVersionId;
+        /* istanbul ignore if -- guards.ts の edit: needsFormula() により #/edit 到達時点で必ず非 null */
+        if (formulaVersionId === null) {
+          return;
+        }
+        store.setState((s) => ({ ...s, formulaEditDraft: { formulaVersionId, markdown } }));
+      },
+      onClearImprovement: () => {
+        store.setState((s) => ({ ...s, blockImprovement: null }));
+      },
     },
     expand: {
       // 進捗・取得結果は store.expandRun 経由で反映される（draft の onGenerate と同じ思想）
@@ -444,27 +456,73 @@ async function runSaveEditedFormula(
   return saveEditedFormula(input, { google: runtime.google, store });
 }
 
+/**
+ * ブロック単位 AI 改善（#/edit）の実行状態を store.blockImprovement で管理する。
+ * requestBlockImprovement（LLM 呼び出し）の完了時に走る LLM コスト集計（cumulativeCostUsd）の
+ * setState による全ビュー再描画でも進捗・提案・エラーが消えないよう、
+ * runFetchBoundary / runGenerateAndValidate と同じく store 経由で状態遷移する（issue #39 対応）。
+ * view は解決値を使わないため、ここでは例外を投げず常に resolve する
+ * （呼び出し側の editView.ts は `.catch()` を持たない fire-and-forget 呼び出しのため）。
+ */
 async function runImproveBlock(
   store: AppStore,
   runtime: ChromeRuntimeDeps,
   baseDeps: Omit<LlmFactoryDeps, 'llmLogFolderId' | 'spreadsheetId'>,
   input: RequestBlockImprovementInput
-): Promise<BlockImprovementResult> {
+): Promise<void> {
   const project = store.getState().project;
   /* istanbul ignore if -- edit view は project 選択済みでしか onImproveBlock を呼ばない */
   if (!project) {
-    throw new Error('プロジェクトが選択されていません');
+    return;
   }
-  const factory: LlmProviderFactory = await buildLlmProviderFactory({
-    ...baseDeps,
-    llmLogFolderId: project.driveFolderId,
-    spreadsheetId: project.spreadsheetId,
-  });
-  return requestBlockImprovement(input, {
-    store,
-    google: runtime.google,
-    llmFactory: factory,
-  });
+  const formulaVersionId = store.getState().currentFormulaVersionId;
+  /* istanbul ignore if -- guards.ts の edit: needsFormula() により #/edit 到達時点で必ず非 null */
+  if (formulaVersionId === null) {
+    return;
+  }
+  store.setState((s) => ({
+    ...s,
+    blockImprovement: {
+      formulaVersionId,
+      blockId: input.blockId,
+      status: 'running',
+      result: null,
+      error: null,
+    },
+  }));
+  try {
+    const factory: LlmProviderFactory = await buildLlmProviderFactory({
+      ...baseDeps,
+      llmLogFolderId: project.driveFolderId,
+      spreadsheetId: project.spreadsheetId,
+    });
+    const result = await requestBlockImprovement(input, {
+      store,
+      google: runtime.google,
+      llmFactory: factory,
+    });
+    store.setState((s) => ({
+      ...s,
+      blockImprovement: {
+        formulaVersionId,
+        blockId: input.blockId,
+        status: 'ready',
+        result,
+        error: null,
+      },
+    }));
+  } catch (err) {
+    store.setState((s) => ({
+      ...s,
+      blockImprovement: {
+        formulaVersionId,
+        blockId: input.blockId,
+        status: 'error',
+        result: null,
+        error: err instanceof Error ? err.message : String(err),
+      },
+    }));
+  }
 }
 
 /**
