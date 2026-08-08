@@ -7,8 +7,13 @@ dotenv.config();
 
 module.exports = (env, argv) => {
   const isProduction = argv.mode === 'production';
+  // `npm run build:demo`（webpack --mode development --env demo）でのみ true。
+  // OAuth・LLM・NCBI・Sheets をすべてモックする動画収録専用ビルド（video/REQUIREMENTS.md §6）。
+  const isDemo = Boolean(env && env.demo);
   // 開発モード: LOCAL_OAUTH_CLIENT_ID → OAUTH_CLIENT_ID の順にフォールバック
   // 本番モード: OAUTH_CLIENT_ID（ストア用）を使用
+  // デモビルドは chrome.identity 自体をモックするため OAuth client_id を使わない。
+  // 未設定でも警告のみでビルドを継続する（isProduction が false のため下の throw に掛からない）。
   const oauthClientIdFromEnv = isProduction
     ? process.env.OAUTH_CLIENT_ID?.trim()
     : process.env.LOCAL_OAUTH_CLIENT_ID?.trim() || process.env.OAUTH_CLIENT_ID?.trim();
@@ -21,18 +26,24 @@ module.exports = (env, argv) => {
 
   return {
     entry: {
+      // background は demo でも実物をそのまま使う（popup.html を開くだけで、
+      // ネットワーク／chrome.identity に触れないため差し替え不要）。
       'background/service-worker': './src/background/service-worker.ts',
-      'popup/popup': './src/popup/popup.ts',
-      'app/app': './src/app/app.ts',
-      'options/options': './src/options/options.ts',
+      'popup/popup': isDemo ? './src/demo/popup-entry.ts' : './src/popup/popup.ts',
+      'app/app': isDemo ? './src/demo/app-entry.ts' : './src/app/app.ts',
+      'options/options': isDemo ? './src/demo/options-entry.ts' : './src/options/options.ts',
     },
     // 出力先をモードで分離する: production ビルドは manifest から `key` を削除するため、
     // dev ビルド（key あり = 拡張 ID 固定）と同じ dist/ を共有すると、
     // 「unpacked で本番ビルドを読み込んだら拡張 ID がパス由来に変わり OAuth が通らない」
     // 「dev/本番が互いを上書きし、今 dist/ にあるのがどちらのビルドか分からなくなる」
-    // という事故が起きる。production だけ dist-release/ へ分離することで両方防ぐ。
+    // という事故が起きる。production/demo をそれぞれ別出力先にすることで事故を防ぐ。
     output: {
-      path: isProduction ? path.resolve(__dirname, 'dist-release') : path.resolve(__dirname, 'dist'),
+      path: isDemo
+        ? path.resolve(__dirname, 'dist-demo')
+        : isProduction
+          ? path.resolve(__dirname, 'dist-release')
+          : path.resolve(__dirname, 'dist'),
       filename: '[name].js',
       clean: true,
     },
@@ -94,14 +105,16 @@ module.exports = (env, argv) => {
           {
             from: 'src/_locales',
             to: '_locales',
-            // 開発ビルドでは拡張機能名に "(dev)" を付与し、ストア版と区別できるようにする
+            // 開発ビルドでは拡張機能名に "(dev)" を、デモビルドには "(demo)" を付与し、
+            // ストア版・撮影用ビルドと見分けられるようにする。
             transform(content, absoluteFilename) {
               if (isProduction || !absoluteFilename.endsWith('messages.json')) {
                 return content;
               }
               const messages = JSON.parse(content.toString('utf8'));
-              if (messages.extName?.message && !messages.extName.message.includes('(dev)')) {
-                messages.extName.message = `${messages.extName.message} (dev)`;
+              const suffix = isDemo ? '(demo)' : '(dev)';
+              if (messages.extName?.message && !messages.extName.message.includes(suffix)) {
+                messages.extName.message = `${messages.extName.message} ${suffix}`;
               }
               return JSON.stringify(messages, null, 2);
             },

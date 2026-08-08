@@ -450,11 +450,32 @@ PR1〜PR4 は `npm test` / `npm run typecheck` / `npm run lint` / `npm run dev` 
 > バックスラッシュをパス区切りとして扱わないため Linux でのみ失敗する（Windows では通る）。
 > 本 PR は `src/` にも `tools/` にも触れていないため対象外とした。
 
-### PR2（デモビルド層）
-- [ ] `npm run build:demo` が `dist-demo/` を出す
-- [ ] `dist-demo/` を unpacked 読み込みすると、ネットワーク無しで §6-3 の筋書きを人手で通せる
-- [ ] 実在の PMID・メールアドレス・スプレッドシート ID が画面に出ない
-- [ ] 09 の境界事例と 08 のブロック改善案が**空にならない**
+### PR2（デモビルド層）— 2026-08-08 達成
+- [x] `npm run build:demo` が `dist-demo/` を出す（manifest の `key` は保持し拡張 ID は
+      `bckokafmjighegpjiocopkagghppnjld` のまま。拡張名は `(demo)` サフィックス付き）
+- [x] `dist-demo/` を unpacked 読み込みすると、ネットワーク無しで §6-3 の筋書きを人手で通せる
+      → 実 Chromium への unpacked 読み込みで自動確認済み。章 08 / 09 / 11 のいずれも
+      **JS エラー 0 件・拡張外への通信 0 件**で描画され、`chrome.identity` の差し替えも
+      実バインディングに対して機能した（残りは通し操作の目視のみ）
+- [x] 実在の PMID・メールアドレス・スプレッドシート ID が画面に出ない
+      → PMID は `90000001`〜`90000012` のみ、メールは `demo@example.com`、
+      スプレッドシート ID は `demo-sheet-N` 形式
+- [x] 09 の境界事例と 08 のブロック改善案が**空にならない**
+      → skill 単体ではなく本番 service（`fetchBoundaryCandidates` /
+      `requestBlockImprovement`）をデモモック越しに駆動して確認。09 は境界事例 3 本
+      （original 4 / broadened 8 / margin 4）、08 は MeSH 追加の具体案が返る
+
+**デモ固有の注意（PR3 以降で踏まないための申し送り）**
+- **検索式の version ID は 8 文字以内にすること。** `formatFormulaVersionShort`
+  （[src/app/views/formatHelpers.ts](../src/app/views/formatHelpers.ts)）がヘッダーの
+  version 表示を 8 文字で切るため、`demo-formula-v1` のような ID にすると
+  ほぼ全章のヘッダーに `Formula demo-for` という意味不明な文字列が映り込む
+  （実装当初これを踏んだ。現在は `v1-demo` / `v2-demo`）
+- **`hydrateCurrentProject` の Sheets エラーは握り潰される。**
+  [src/app/bootstrap.ts](../src/app/bootstrap.ts) の `catch {}` により、デモの
+  Sheets モックが hydrate 中に投げると**エラー表示が一切出ないまま**プロトコル・
+  検索式が復元されない画面（＝一見「壊れているだけ」の絵）になる。章を追加して
+  初期表示がおかしいときは、まず devtools コンソールではなくこの経路を疑うこと
 
 ### PR3・PR4（章）
 - [ ] 各章が収録 → TTS → 合成まで通り、フレーム目視で説明対象が映っている

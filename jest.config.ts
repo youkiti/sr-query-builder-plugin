@@ -23,6 +23,9 @@ const config: Config = {
     '<rootDir>/src/app/app.ts',
     '<rootDir>/src/options/options.ts',
     '<rootDir>/src/background/service-worker.ts',
+    // デモビルド専用層（撮影用 dist-demo/ にのみ載り、dist/・dist-release/ には
+    // 含まれない）。テスト自体は通常どおり実行されるが、カバレッジ集計からは除外する。
+    '<rootDir>/src/demo/',
   ],
   coverageThreshold: {
     global: {
