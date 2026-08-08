@@ -19,11 +19,26 @@
  * （v2-demo・捕捉率 100% を事前投入済み）へ切り替えて「保存済みの新バージョンでは
  * こうなる」と見せる。ナレーションもその言い方に合わせてある。
  *
+ * ## 「保存しました」は画面に残らない（#39 と同じ再描画が原因）
+ *
+ * `saveEditedFormula` の `setState` が `store.subscribe(render)` を叩いて**全ビューを
+ * 描き直す**ため、`p.edit__status` に入った「保存しました（version_id: …）」は
+ * 出た瞬間に破棄される（編集メモの入力欄も同時に空になる）。bootstrap.ts:470-475 の
+ * コメントが同じ現象を記録しており、expand ビューはローカル DOM を使わず store に
+ * 持たせることで回避している。
+ *
+ * **保存そのものは成功している**（実測: `user_edit` の新バージョンが親 v1-demo 付きで
+ * FormulaVersions に追記される）。よってこのシーンは消える確認メッセージを待たず、
+ * **アプリ内遷移で履歴を開き、増えた行そのものを証拠として見せる**。
+ * 完了判定にはステータス文言ではなく「編集メモが再描画で空になること」を使う。
+ *
  * ## セレクタの注意
  *
  * 鉛筆アイコン `.edit__block-edit-toggle` は **CSS で通常は不可視**、行の hover /
  * focus-within でだけ現れる。**必ず先に行をホバーしてからクリックする**。
  * 各種 `.edit__block-*` は 4 行ぶんあるので `li.edit__block-row[data-block-id="2"]` で絞る。
+ *
+ * demoLatency=1: この画面に多段の進捗表示は無く、伸ばす意味がない。等倍で 4〜6 秒。
  */
 
 import { hoverSlow } from './lib/gestures.mjs';
@@ -42,7 +57,7 @@ export default {
     async run(ctx) {
         const durations = loadCueDurations('10-edit');
 
-        await ctx.openExtensionPage('app/app.html?demoSeed=10-edit&demoLatency=4#/edit');
+        await ctx.openExtensionPage('app/app.html?demoSeed=10-edit&demoLatency=1#/edit');
         await ctx.page.locator('.edit__actions button').waitFor({ state: 'visible', timeout: 25000 });
         await ctx.sleep(800);
 
@@ -97,11 +112,23 @@ export default {
         const saveVersion = ctx.page.locator('.edit__actions button');
         await hoverSlow(ctx.page, saveVersion, { durationMs: 700 });
         await saveVersion.click();
-        await ctx.page.locator('p.edit__status')
-            .filter({ hasText: '保存しました' })
-            .waitFor({ state: 'visible', timeout: 60000 })
+        // 「保存しました」は再描画で消えるので、代わりに編集メモが空に戻ったことを完了判定に使う
+        await ctx.page.locator('input.edit__note-input')
+            .filter({ hasNotText: /./ })
+            .waitFor({ state: 'visible', timeout: 30000 })
             .catch(() => {});
-        await hoverSlow(ctx.page, ctx.page.locator('p.edit__status'), { durationMs: 800 });
+        await ctx.page.waitForFunction(
+            () => document.querySelector('input.edit__note-input')?.value === '',
+            undefined,
+            { timeout: 30000 }
+        ).catch(() => {});
+        await ctx.sleep(600);
+        // 保存された証拠は履歴に出る行そのもの。アプリ内遷移（リロード無し）で開く
+        await ctx.page.locator('#app-sidebar .app__nav-list button').filter({ hasText: '履歴' }).click();
+        await ctx.page.locator('li.history__item').first()
+            .waitFor({ state: 'visible', timeout: 25000 })
+            .catch(() => {});
+        await hoverSlow(ctx.page, ctx.page.locator('li.history__item').first(), { durationMs: 900 });
         await sleepRemainder(ctx, cue4StartedAt, durations['04'] * 1000 + 500);
 
         // --- cue 05: 保存済みの新バージョン（v2-demo）での検証結果 ---
