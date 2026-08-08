@@ -1,8 +1,9 @@
 # 操作解説動画 要件定義書・制作計画
 
 作成日: 2026-08-07
-ステータス: **PR0（計画）+ PR1（パイプライン基盤 + スモークシーン 1 本）完了**（2026-08-07）。
-PR2 以降（デモビルド層 → 実チャプター 01〜14 → QA/QC → 公開）は未着手。PR1 の達成内容と実測値は §11。
+ステータス: **PR0（計画）+ PR1（パイプライン基盤 + スモークシーン 1 本）+ PR2（デモビルド層）
++ PR3（実チャプター 01〜07）完了**（2026-08-08）。残りは PR4（章 08〜14）→ PR5（QA/QC）
+→ PR6（公開）。各 PR の達成内容と実測値は §11。
 
 姉妹リポジトリ [sr-data-extraction-plugin/video](https://github.com/youkiti/sr-data-extraction-plugin/tree/master/video)
 で実績のある「Playwright 収録 → VOICEVOX で TTS → ffmpeg で合成 → YouTube 手動公開」パイプラインを
