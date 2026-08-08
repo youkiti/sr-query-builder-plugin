@@ -15,6 +15,12 @@
  *
  * あわせて `?demoLatency=<係数>` で fetch モックの人工レイテンシ倍率を渡す
  * （未指定なら等倍、`0` で無効化。詳細は `./fetchMock` のヘッダーコメント）。
+ *
+ * **レイテンシは seed の投入が終わってから効かせる。** `applyDemoSeed()` は
+ * プリセットを Sheets/Drive モックへ書き込むのに何十回も `demoFetch` を通るため、
+ * 先に倍率を立てると章の冒頭に「画面が出るまでの無音の待ち」が生まれる
+ * （実測: 第 7 章で 14.9 秒、第 4 章で 13.9 秒）。seed の投入は演出の対象ではなく
+ * 収録前の準備なので、待たせるのは起動後に走る操作だけでよい。
  */
 
 import { createLocationOptions, startApp } from '@/app/bootstrap';
@@ -25,11 +31,14 @@ import { applyDemoSeed } from './seeds';
 
 installDemoIdentity();
 installDemoFetch();
-setDemoLatencyFactor(resolveDemoLatencyFactor(window.location.search));
 
 async function boot(): Promise<void> {
-  const demoSeed = new URLSearchParams(window.location.search).get('demoSeed');
+  const search = window.location.search;
+  const demoSeed = new URLSearchParams(search).get('demoSeed');
+  // seed 投入はレイテンシ 0（既定）のまま一気に流す
   const preloaded = demoSeed ? await applyDemoSeed(demoSeed) : undefined;
+  // ここから先（ユーザー操作に伴う fetch）だけを遅くする
+  setDemoLatencyFactor(resolveDemoLatencyFactor(search));
   const store = createStore({ ...INITIAL_STATE, ...preloaded });
   startApp(document, { ...createLocationOptions(window), store });
 }
