@@ -41,7 +41,7 @@ Chrome ウェブストアの掲載に必要な画像。スクリーンショッ�
 - [x] プライバシーポリシー原稿
 - [x] 権限の使用理由原稿（日英）
 - [x] 提出用 zip の作成・検証ツール整備（[tools/release/](../../tools/release/)。`npm run release` / `npm run pack:release`）
-- [x] GitHub Pages 公開ページの作成・デプロイ（[hosted/](../../hosted/)。**作成・デプロイ済み** — `gh-pages` ブランチへ反映済みで、公開 URL `https://youkiti.github.io/sr-query-builder-plugin/` は有効。手順は [hosted/README.md](../../hosted/README.md)）
+- [x] GitHub Pages 公開ページの作成・デプロイ（[hosted/](../../hosted/)。**作成・デプロイ済み**で、公開 URL `https://youkiti.github.io/sr-query-builder-plugin/` は有効。**デプロイは GitHub Actions で自動化済み** — `master` の `hosted/**` が変わると [.github/workflows/deploy-pages.yml](../../.github/workflows/deploy-pages.yml) が公開する。運用は [hosted/README.md](../../hosted/README.md)）
 - [x] スクリーンショット取得（[hosted/screenshots/](../../hosted/screenshots/) に 1280×800 の 5 枚。`npm run shots` で再生成できる。上記「必要な画像」参照）
 - [x] クリーンな Chrome プロファイルでの実 Google 認証つき dist smoke
 - [x] Chrome ウェブストア デベロッパーアカウントで提出（**2026-08-07 に v0.2.0 を提出**。`release/sr-query-builder-plugin-0.2.0.zip` を `key.pem` 同梱でアップロード。version バンプはしていない＝0.2.0 は本提出が初出）

@@ -4,7 +4,9 @@
 ステータス: **PR0（計画）+ PR1（パイプライン基盤 + スモークシーン 1 本）+ PR2（デモビルド層）
 + PR3（実チャプター 01〜07）+ PR4（章 08〜14）+ PR5（QA/QC）+ PR6（公開）**完了**（2026-08-09）。
 **全 14 章・20 分 48 秒で公開済み: <https://youtu.be/RqUFlmncuIE>**（`hosted/index.html` / `hosted/help.html` に埋め込み済み。
-`gh-pages` への手動デプロイのみ残り）。各 PR の達成内容と実測値は §11、QA の実施記録は [README.md](./README.md#qaqc-実施記録)。
+公開ページへの反映は GitHub Actions の自動デプロイに移行済み — [.github/workflows/deploy-pages.yml](../.github/workflows/deploy-pages.yml)。
+初回デプロイの成否確認だけ残り）。
+各 PR の達成内容と実測値は §11、QA の実施記録は [README.md](./README.md#qaqc-実施記録)。
 
 姉妹リポジトリ [sr-data-extraction-plugin/video](https://github.com/youkiti/sr-data-extraction-plugin/tree/master/video)
 で実績のある「Playwright 収録 → VOICEVOX で TTS → ffmpeg で合成 → YouTube 手動公開」パイプラインを
@@ -631,4 +633,10 @@ PR1〜PR4 は `npm test` / `npm run typecheck` / `npm run lint` / `npm run dev` 
       （<https://youtu.be/RqUFlmncuIE>。`description.txt` のチャプターをそのまま使用）
 - [x] `hosted/help.html` / `hosted/index.html` から動画に到達できる
       （目次直後 / ヒーロー直下に `youtube-nocookie.com` で埋め込み。`.video-frame` は 16:9 レスポンシブ）
-- [ ] **`gh-pages` へのデプロイは手動のため未実施**（手順は [hosted/README.md](../hosted/README.md)）
+- [x] 公開ページ（GitHub Pages）への反映を**自動化した**
+      （手動デプロイを廃止し [.github/workflows/deploy-pages.yml](../.github/workflows/deploy-pages.yml) へ移行。
+      `master` の `hosted/**` が変わると発火する。手動反映が残ったまま忘れられていた
+      ＝動画が公開ページに出ていなかった、のが自動化の動機。詳細は [hosted/README.md](../hosted/README.md)）
+      - 残: **初回デプロイの成否確認**（Pages のソースが legacy から `build_type: workflow` へ切り替わるか。
+        切り替わらなければ Settings → Pages → Source を "GitHub Actions" に手で変更して再実行する）。
+        公開ページで動画が見えることを確認したらこの項目は閉じる

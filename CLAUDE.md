@@ -50,7 +50,7 @@ export default {
 
 **操作解説動画（`video/`）**: YouTube 公開用の解説動画を Playwright 収録 + VOICEVOX 音声合成 + ffmpeg 合成で作るパイプライン。正典は [video/REQUIREMENTS.md](video/REQUIREMENTS.md)（PR 分割・受け入れ基準・QA/QC チェックリスト）、実行手順と過去に踏んだ失敗の再発防止メモは [video/README.md](video/README.md)。収録は dev ビルド（`dist/`）を読み込むので事前に `npm run dev` が要る。Chrome 拡張の録画には仮想ディスプレイが必要なため、Linux では `xvfb-run -a -s "-screen 0 1920x1080x24" node video/scripts/record.mjs` のように xvfb 経由で実行する。
 
-**現状はパイプライン基盤 + デモビルド層（`dist-demo/`）+ 実チャプター 01〜07 まで**。章 08〜14 と QA/QC は後続 PR のスコープ。収録はデモビルド（`npm run build:demo` → `dist-demo/`）を読み込む（`resolveExtensionDir()` が `dist-demo/` → `dist/` の順で解決する）。章ごとの初期状態は `?demoSeed=<プリセット名>`、進捗表示を映すための人工レイテンシは `?demoLatency=<係数>` で URL から渡す（`src/demo/`。係数の実測表は [video/REQUIREMENTS.md](video/REQUIREMENTS.md) §6-4）。**原稿 → TTS → 収録の順を守ること**（シーンが `loadCueDurations()` で音声の実尺を読んで画面を追従させるため）。
+**全 14 章を収録・QA 済みで、YouTube に一般公開済み**（<https://youtu.be/RqUFlmncuIE>。`hosted/index.html` / `hosted/help.html` に埋め込み済み）。収録はデモビルド（`npm run build:demo` → `dist-demo/`）を読み込む（`resolveExtensionDir()` が `dist-demo/` → `dist/` の順で解決する）。章ごとの初期状態は `?demoSeed=<プリセット名>`、進捗表示を映すための人工レイテンシは `?demoLatency=<係数>` で URL から渡す（`src/demo/`。係数の実測表は [video/REQUIREMENTS.md](video/REQUIREMENTS.md) §6-4）。**原稿 → TTS → 収録の順を守ること**（シーンが `loadCueDurations()` で音声の実尺を読んで画面を追従させるため）。
 
 **dev ビルドと本番ビルドは出力先を分離している**（`dist/` と `dist-release/`）。**ローカルで実機確認するときは必ず dev ビルド（`dist/`）を読み込むこと**。本番ビルド（`dist-release/`）は webpack が manifest から `key` を削除しており、`key` の無い拡張を unpacked 読込すると Chrome が拡張 ID をパスから導出してしまい、OAuth クライアントに登録済みの `bckokafmjighegpjiocopkagghppnjld` と一致せず認証できない。
 
@@ -94,17 +94,22 @@ npm run pack:release                     # 既存 dist-release/ だけをパッ�
 - version は **`src/manifest.json` / `package.json` / `package-lock.json` の 3 箇所を揃える運用**。`release.ps1` が 3 箇所同時にバンプし、`pack.ps1` が不一致を検出して停止する
 - `key.pem`（リポジトリルート直下・gitignore 対象）は**初回ストアアップロードのときだけ** `-IncludeKeyPem` で zip に同梱する。以後の更新提出では同梱しない（Store がアイテムの拡張 ID を既に固定しているため）
 - `src/manifest.json` の `key` フィールドは常に保持する（dev の unpacked 読込で拡張 ID を固定するため）。production ビルド（`dist-release/`）からの除去は webpack.config.js の CopyPlugin transform が自動で行い、`pack.ps1` はその除去が起きたことを確認するだけで、削除そのものはしない
-- **CI チェックは現状オートスキップ**: 本リポジトリはまだ `.github/workflows/` を持たないため（「未実装・既知のギャップ」参照）、`release.ps1` は `gh run list` を呼ばずに `CI 未配置のためスキップ` と警告して先へ進む。将来 CI を追加すれば、workflow ファイルの存在を検知して自動的に CI green 判定へ切り替わる
+- **CI チェックは 2026-08-09 から発火する**: `release.ps1` は `.github/workflows/` にファイルが 1 つでもあれば `gh run list` で `origin/master` の HEAD に対する run を見る。公開ページのデプロイ workflow（`deploy-pages.yml`）を追加したため、オートスキップ（`CI 未配置のためスキップ`）は終了した。実務上の挙動は次のとおり:
+  - version バンプ commit は `hosted/**` に触らないので `deploy-pages` は発火しない → 直前の master HEAD に run が無ければ `CI run が見つかりません` の**警告のみ**で先へ進む
+  - `hosted/**` を変えた直後にリリースすると、デプロイ実行中は「CI がまだ実行中です」で停止する（`-Force` / `-SkipCiCheck` で回避可）。デプロイ完了を待つのが本筋
+  - **`deploy-pages` が green でもテストが通ったことは意味しない**（テストの CI はまだ無い。「未実装・既知のギャップ」参照）。リリース前の検証はローカルで `typecheck → test → test:e2e → lint → build` を回すこと
 
 ## 公開ページ（GitHub Pages / `hosted/`）
 
-Chrome ウェブストア審査・利用者向けに公開する静的ページ 4 枚（ランディング / 使い方ガイド / プライバシーポリシー / 利用規約）+ 共通 `style.css` / `lang.js` / `screenshots/` の正典は [hosted/](hosted/) に置く。デプロイ先は GitHub Pages（`gh-pages` ブランチのルート）。
+Chrome ウェブストア審査・利用者向けに公開する静的ページ 4 枚（ランディング / 使い方ガイド / プライバシーポリシー / 利用規約）+ 共通 `style.css` / `lang.js` / `screenshots/` の正典は [hosted/](hosted/) に置く。デプロイ先は GitHub Pages（ソースは **GitHub Actions**）。
 
 - **プライバシーポリシーの公開 URL は Chrome ウェブストア審査の必須要件**。公開済み URL は `https://youkiti.github.io/sr-query-builder-plugin/privacy-policy.html`
 - **プライバシーポリシーの正典は [docs/store/privacy-policy.md](docs/store/privacy-policy.md)**。`hosted/privacy-policy.html` はその転記＋英訳なので、**内容を変えるときは両方を直す**（乖離するとストア審査で参照される URL の内容とリポジトリの原稿がずれる）
 - ja / en は**併記ではなく切替**（`lang.js` が `html[data-lang]` で表示側を絞る）。文言を足すときは両言語分を書くこと
 - ストア掲載用スクリーンショットは `npm run shots`（Playwright + stub 環境。無人実行）で `hosted/screenshots/` へ出力する（1280×800 の 5 枚）。実 API を叩いた本物の画面で撮り直したいときは `npm run manual:check -- --shots` を使う
-- デプロイは手動（`gh-pages` ブランチへ push）。手順は [hosted/README.md](hosted/README.md)。**初回デプロイ済み**（`gh-pages` ブランチが存在し、公開 URL `https://youkiti.github.io/sr-query-builder-plugin/` は有効）
+- **デプロイは自動**（[.github/workflows/deploy-pages.yml](.github/workflows/deploy-pages.yml)。`master` の `hosted/**` が変わると発火し、`hosted/` を `_site/` へ組み立てて `actions/deploy-pages` で公開する）。手動のコピー作業は不要。内容を変えずに再デプロイしたいときは Actions タブから `workflow_dispatch` で手動実行する。公開 URL は `https://youkiti.github.io/sr-query-builder-plugin/`（有効）
+- **旧方式（`gh-pages` ブランチへ worktree 経由で手動 push）は廃止**。`gh-pages` ブランチは Pages のソースから外れており、push しても公開内容は変わらない（履歴として残置）。経緯と注意点は [hosted/README.md](hosted/README.md)
+- スクリーンショットは `hosted/screenshots/*.png` としてリポジトリにコミット済みで、workflow はそれをコピーするだけ（CI で `npm run shots` は走らせない）。撮り直したら生成物をコミットすること
 - 提出物一式の全体像・進捗は [docs/store/README.md](docs/store/README.md) を参照
 
 ## アーキテクチャ
@@ -137,7 +142,7 @@ src/
 
 - **P1 ロジック未移植**: `check_block_overlap` / `check_mesh` / `check_mesh_overlap`（ブロック重複・MeSH 分析）
 - **OpenAI / Anthropic Claude への直接連携は未実装**: 実装済みなのは Gemini と OpenRouter の 2 プロバイダ（`src/lib/llm/GeminiProvider.ts` / `OpenRouterProvider.ts`。既定モデルは `gemini-3.5-flash`）。Options 画面で OpenRouter の API キーとカスタムモデル ID（最大 20 件）を追加登録できるため OpenRouter 経由で多くのモデルに到達できるが、OpenAI / Anthropic の API を直接叩く `LLMProvider` 実装は無い（`LlmProviderId` 型に `openai` / `anthropic` の値はあるが対応実装が無い）
-- **CI/CD なし**（`.github/workflows/` 未配置。検証はローカルで `typecheck → test → test:e2e → lint → dev` を回す）
+- **テストの CI が無い**（`.github/workflows/` にあるのは公開ページのデプロイ用 [deploy-pages.yml](.github/workflows/deploy-pages.yml) だけ。`typecheck` / `test` / `test:e2e` / `lint` / `dev` を回す workflow は未配置で、検証はローカル実行に依存している）
 - E2E ジャーニー J1（新規作成→export 貫通）/ J4（expand キーボード判定）/ J5 の API エラー系は LLM・fetch stub の拡充待ち（[docs/ui-deep-test-plan.md](docs/ui-deep-test-plan.md) Phase D/E）
 
 ## 目的（ゴール）

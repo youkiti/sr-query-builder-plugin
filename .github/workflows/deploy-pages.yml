@@ -1,0 +1,73 @@
+# 公開ページ（hosted/）を GitHub Pages へデプロイする。
+#
+# Pages のソースは「GitHub Actions」（build_type: workflow）を前提にしている。
+# 旧方式（gh-pages ブランチへ worktree 経由で手動 push）は廃止した。経緯と運用は
+# hosted/README.md「デプロイ（GitHub Actions による自動デプロイ）」を参照。
+name: deploy-pages
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      # 公開ページの正典が変わったときだけ動かす（本体の実装変更では走らせない）
+      - 'hosted/**'
+      - '.github/workflows/deploy-pages.yml'
+  # 内容を変えずに再デプロイしたいとき（設定変更後の再実行など）の手動起動
+  workflow_dispatch:
+
+# GITHUB_TOKEN の権限は Pages のデプロイに必要な 3 つだけに絞る
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同時実行は 1 本に制限する。走っているデプロイは止めない（公開物の取り違えを避けるため）
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # submodule（tiab-review-plugin / search-formula-developper）は公開ページに無関係なので取得しない
+      - name: リポジトリを取得する
+        uses: actions/checkout@v4
+
+      - name: 配信セットを組み立てる
+        # hosted/README.md は開発者向けなので配信しない（旧 gh-pages ブランチにも入れていなかった）。
+        # .nojekyll は不要 — artifact をそのまま配信するので Jekyll のビルドが走らない
+        run: |
+          mkdir -p _site
+          cp -R hosted/. _site/
+          rm -f _site/README.md _site/screenshots/.gitkeep
+
+      - name: 配信ファイルがそろっているか確認する
+        # 4 ページ + 共通アセット + スクリーンショット 5 枚。欠けたまま公開すると
+        # リンク切れ（ストア審査で参照されるプライバシーポリシー URL を含む）に気づけない
+        run: |
+          for f in index.html help.html privacy-policy.html terms-of-service.html style.css lang.js \
+                   screenshots/s1-protocol.png screenshots/s2-blocks.png screenshots/s3-draft.png \
+                   screenshots/s4-validation.png screenshots/s5-export.png; do
+            test -f "_site/$f" || { echo "::error::_site/$f が見つかりません"; exit 1; }
+          done
+
+      - name: Pages の設定を解決する
+        uses: actions/configure-pages@v5
+        with:
+          # legacy（gh-pages ブランチ）から build_type: workflow への切り替えも試みる。
+          # 切り替わらない場合は Settings → Pages → Source を "GitHub Actions" に手で変更して再実行する
+          enablement: true
+
+      - name: artifact をアップロードする
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: デプロイする
+        id: deployment
+        uses: actions/deploy-pages@v4

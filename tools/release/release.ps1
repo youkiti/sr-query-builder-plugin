@@ -12,7 +12,8 @@
     6. origin/master へ push
 
   version バンプは差分が version 文字列だけで、直前の master は CI green
-  （手順 1 で機械チェックする。ただし本リポジトリはまだ CI 未配置なので自動的にスキップされる）。
+  （手順 1 で機械チェックする。ただし本リポジトリの workflow は公開ページのデプロイ
+  （deploy-pages.yml）だけで、テストの CI は未配置。green でもテスト通過は意味しない）。
   そのため PR / CI 待ちを挟まず master へ直接コミットする
   ＝ CLAUDE.md 作業原則 1（master で直接作業しない）の明示的な例外。
   機能変更をこのスクリプトで master へ持ち込んではいけない（作業ツリーが汚れていれば止まる）。
@@ -29,7 +30,8 @@
 
 .PARAMETER SkipCiCheck
   master の CI 状態チェック（gh run list）を省略する。gh が無い環境や、CI 結果を待たずに作る場合。
-  本リポジトリはまだ `.github/workflows/` が無いため、指定しなくても自動でスキップされる。
+  `hosted/**` を変えた直後は公開ページのデプロイ（deploy-pages.yml）が実行中で停止することがあるので、
+  デプロイ完了を待てないときの逃げ道にもなる。
 
 .PARAMETER Force
   前提チェックの警告（master 以外のブランチ / origin と不一致 / CI が green でない）を
@@ -118,8 +120,9 @@ if ($headSha -ne $remoteSha) {
 if ($SkipCiCheck) {
   Write-Warn 'CI 状態チェックを省略（-SkipCiCheck）'
 } else {
-  # 本リポジトリはまだ .github/workflows/ を持たない（CLAUDE.md「未実装・既知のギャップ」参照）。
-  # ワークフローが無ければ gh を呼んでも判定材料が無いので、呼ばずに素通りさせる
+  # ワークフローが無ければ gh を呼んでも判定材料が無いので、呼ばずに素通りさせる。
+  # 現状の workflow は公開ページのデプロイ（deploy-pages.yml）のみで、hosted/** を変えたときだけ発火する。
+  # version バンプ commit では発火しないため、多くの場合は「run が見つかりません」の警告で通る
   $workflowsDir = Join-Path $repoRoot '.github\workflows'
   $hasWorkflows = (Test-Path $workflowsDir) -and (@(Get-ChildItem $workflowsDir -File -ErrorAction SilentlyContinue).Count -gt 0)
   if (-not $hasWorkflows) {
