@@ -8,11 +8,9 @@
  * LLM コスト集計 setState で全ビュー再描画を誘発し、メッセージとメモが生き残ることを見る。
  * ローカル DOM に書いていた旧実装では、この経路でだけメッセージが消えていた（#42）。
  *
- * docs/ui-deep-test-plan.md §Phase D の J1/J2 と同じく、外部 API はすべて page.route で止める。
- *
- * このファイルはスタブを自己完結で持つ（tests/e2e/fixtures/apiStubs.ts には依存しない。
- * 同ファイルは別ブランチ test/e2e-api-stubs にありこのブランチには存在しないため）。
- * 基盤 PR（#45）がマージされたら apiStubs.ts に寄せる。
+ * docs/ui-deep-test-plan.md §Phase D の J1/J2 と同じく、外部 API はすべて
+ * `tests/e2e/fixtures/apiStubs.ts` の共通スタブで止める（応答形や skill 判別の詳細は
+ * そちらの doc コメント参照）。
  */
 
 import { test, expect, type Page } from '@playwright/test';
@@ -22,6 +20,12 @@ import {
   FULL_APP_STATE,
   FULL_FORMULA_MARKDOWN,
 } from './fixtures/scenarios/fullState';
+import {
+  registerSheetsStub,
+  registerDriveStub,
+  registerGeminiStub,
+  type SheetsFake,
+} from './fixtures/apiStubs';
 
 const APP_URL = '/app/app.html#/edit';
 
@@ -55,17 +59,12 @@ const EXISTING_VERSION_ROW = [
   'gemini-3.5-flash',
 ];
 
-/**
- * Sheets タブの中身を持つ最小スタブ。append した行が後続の get に見えるので、
- * 「保存 → #/history に増えている」まで 1 本の筋で確認できる。
- */
-interface SheetsFake {
-  tabs: Record<string, string[][]>;
-  /** append を 500 で失敗させるタブ名（エラー系の検証用） */
-  failAppendTabs: Set<string>;
-  /** append 応答を遅らせる ms（「保存中…」を観測するため） */
-  appendDelayMs: number;
-}
+/** improve-block skill の応答。「AI 改善で全ビュー再描画を起こす」ための素材。 */
+const IMPROVE_BLOCK_RESPONSE = {
+  proposed_expression:
+    '"Extracorporeal Membrane Oxygenation"[Mesh] OR "ECMO"[tiab] OR "ECLS"[tiab]',
+  rationale: 'MeSH と略語 ECLS を足して感度を上げました。',
+};
 
 interface EditScenarioOptions {
   failAppendTabs?: string[];
@@ -74,7 +73,8 @@ interface EditScenarioOptions {
 
 /**
  * #/edit を実操作するための外部 API スタブ一式を仕込む。
- * - Sheets: FormulaVersions の get / append を状態付きで処理（他タブは空 or 追記のみ）
+ * - Sheets: FormulaVersions を状態付きで処理（append した行が後続の get に見えるので、
+ *   「保存 → #/history に増えている」まで 1 本の筋で確認できる）
  * - Drive: LLM ログ payload のアップロードを成功で返す
  * - Gemini: improve-block skill の JSON を返す（usageMetadata 付き＝コスト集計が動く）
  */
@@ -82,72 +82,19 @@ async function setupEditScenario(
   page: Page,
   options: EditScenarioOptions = {}
 ): Promise<SheetsFake> {
-  const fake: SheetsFake = {
+  const fake = await registerSheetsStub(page, {
     tabs: { FormulaVersions: [FORMULA_VERSIONS_HEADER, EXISTING_VERSION_ROW] },
-    failAppendTabs: new Set(options.failAppendTabs ?? []),
-    appendDelayMs: options.appendDelayMs ?? 0,
-  };
-
-  await page.route('**/sheets.googleapis.com/**', async (route) => {
-    // range は `Tab!A1:Z` / `Tab!A1` を encodeURIComponent したもの（`!` が %21）
-    const url = decodeURIComponent(route.request().url());
-    const tab = /\/values\/([^!]+)!/.exec(url)?.[1] ?? '';
-
-    if (url.includes(':append')) {
-      if (fake.failAppendTabs.has(tab)) {
-        await route.fulfill({
-          status: 500,
-          contentType: 'application/json',
-          body: JSON.stringify({ error: { message: `${tab} への追記に失敗しました（stub）` } }),
-        });
-        return;
-      }
-      if (fake.appendDelayMs > 0) {
-        await new Promise((resolve) => setTimeout(resolve, fake.appendDelayMs));
-      }
-      const body = route.request().postDataJSON() as { values?: string[][] };
-      const rows = (fake.tabs[tab] ??= []);
-      rows.push(...(body.values ?? []));
-      await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
-      return;
-    }
-
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        range: `${tab}!A1:Z`,
-        majorDimension: 'ROWS',
-        values: fake.tabs[tab] ?? [],
-      }),
-    });
+    failAppendTabs: options.failAppendTabs,
+    appendDelayMs: options.appendDelayMs,
   });
 
-  // LLM ログ payload の Drive アップロード
-  await page.route('**/www.googleapis.com/**', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ id: 'drive-file-1', webViewLink: 'https://drive.example/x' }),
-    });
-  });
+  await registerDriveStub(page);
 
-  // improve-block skill の応答。トークン数は累積コストの変化が目視できる大きさにする
+  // トークン数は累積コストの変化が目視できる大きさにする
   // （gemini-3.5-flash: in $1.5 / out $9.0 per 1M → 1000/1000 で +$0.0105）。
-  await page.route('**/generativelanguage.googleapis.com/**', async (route) => {
-    const skillJson = JSON.stringify({
-      proposed_expression:
-        '"Extracorporeal Membrane Oxygenation"[Mesh] OR "ECMO"[tiab] OR "ECLS"[tiab]',
-      rationale: 'MeSH と略語 ECLS を足して感度を上げました。',
-    });
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        candidates: [{ content: { parts: [{ text: skillJson }] } }],
-        usageMetadata: { promptTokenCount: 1000, candidatesTokenCount: 1000 },
-      }),
-    });
+  await registerGeminiStub(page, {
+    responses: { 'improve-block': IMPROVE_BLOCK_RESPONSE },
+    usage: { promptTokenCount: 1000, candidatesTokenCount: 1000 },
   });
 
   await injectAppStub(
