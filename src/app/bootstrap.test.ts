@@ -1048,6 +1048,35 @@ describe('startApp - wiring 層', () => {
     expect(doc.querySelector<HTMLButtonElement>('.edit__actions button')!.disabled).toBe(false);
   });
 
+  test('edit view 既定 onSave は Error 以外で失敗しても String 化して表示する', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+    });
+    const handle = startApp(doc, {
+      getHash: () => '#/edit',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({
+      ...s,
+      currentFormulaVersionId: 'parent-v',
+      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 old\n```\n',
+    }));
+    // googleFetch は reject をラップしないので、非 Error はそのまま catch まで届く
+    fetchMock.mockRejectedValue('rare');
+    doc.querySelector<HTMLButtonElement>('.edit__actions button')!.click();
+    for (let i = 0; i < 5; i += 1) {
+      await flush();
+    }
+    const save = handle.store.getState().formulaSave;
+    expect(save?.status).toBe('error');
+    expect(save?.error).toBe('rare');
+    expect(doc.querySelector('.edit__error')?.textContent).toBe('rare');
+  });
+
   test('edit view 既定 onNoteChange が store.formulaEditNote を更新し、md 編集で保存ステータスが消える', async () => {
     const doc = buildDocument();
     const { runtime, fetchMock } = makeRuntime({
