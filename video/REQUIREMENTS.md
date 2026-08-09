@@ -2,8 +2,9 @@
 
 作成日: 2026-08-07
 ステータス: **PR0（計画）+ PR1（パイプライン基盤 + スモークシーン 1 本）+ PR2（デモビルド層）
-+ PR3（実チャプター 01〜07）+ PR4（章 08〜14）+ PR5（QA/QC）完了**（2026-08-08）。**全 14 章がそろい `final.mp4` は 20 分 01 秒**。
-残るは PR6（YouTube 公開）のみ。各 PR の達成内容と実測値は §11、QA の実施記録は [README.md](./README.md#qaqc-実施記録)。
++ PR3（実チャプター 01〜07）+ PR4（章 08〜14）+ PR5（QA/QC）+ PR6（公開）**完了**（2026-08-09）。
+**全 14 章・20 分 48 秒で公開済み: <https://youtu.be/RqUFlmncuIE>**（`hosted/index.html` / `hosted/help.html` に埋め込み済み。
+`gh-pages` への手動デプロイのみ残り）。各 PR の達成内容と実測値は §11、QA の実施記録は [README.md](./README.md#qaqc-実施記録)。
 
 姉妹リポジトリ [sr-data-extraction-plugin/video](https://github.com/youkiti/sr-data-extraction-plugin/tree/master/video)
 で実績のある「Playwright 収録 → VOICEVOX で TTS → ffmpeg で合成 → YouTube 手動公開」パイプラインを
@@ -626,5 +627,8 @@ PR1〜PR4 は `npm test` / `npm run typecheck` / `npm run lint` / `npm run dev` 
       （VOICEVOX の誤読 `maybe` / `Embase` → 章 09・11、章 07 と 08 の解釈の重複 → 章 08）
 
 ### PR6（公開）
-- [ ] YouTube に一般公開され、説明欄のチャプターが機能している
-- [ ] `hosted/help.html` / `hosted/index.html` から動画に到達でき、`gh-pages` に反映済み
+- [x] YouTube に一般公開され、説明欄のチャプターが機能している
+      （<https://youtu.be/RqUFlmncuIE>。`description.txt` のチャプターをそのまま使用）
+- [x] `hosted/help.html` / `hosted/index.html` から動画に到達できる
+      （目次直後 / ヒーロー直下に `youtube-nocookie.com` で埋め込み。`.video-frame` は 16:9 レスポンシブ）
+- [ ] **`gh-pages` へのデプロイは手動のため未実施**（手順は [hosted/README.md](../hosted/README.md)）

@@ -8,9 +8,13 @@ VOICEVOX による自動音声合成 + ffmpeg による自動合成で作るた�
 移植だったため、本件は3リポジトリ目の移植になる。本拡張固有の適応点は
 [REQUIREMENTS.md §5](./REQUIREMENTS.md#5-パイプライン構成移植後のディレクトリ) を参照。
 
+> **公開済み: <https://youtu.be/RqUFlmncuIE>**（動画 ID `RqUFlmncuIE` / 全 14 章 / 20 分 48 秒）。
+> `hosted/index.html` と `hosted/help.html` に `youtube-nocookie.com` で埋め込み済み。
+> **YouTube は動画本体を差し替えられない**ので、作り直したときは新規公開 →
+> 上記 2 ページのリンクを同じ PR で更新 → 旧版を非公開化、の順で運用する（REQUIREMENTS.md §9）。
+>
 > **現状**: PR1（パイプライン基盤 + スモークシーン1本）・PR2（デモビルド層 `dist-demo/`）・
-> PR3（章 **01〜07**）・PR4（章 **08〜14**）・PR5（QA/QC）まで完了。**全 14 章がそろい、
-> `final.mp4` は 20 分 48 秒**。残るのは YouTube 公開（PR6）だけ。
+> PR3（章 **01〜07**）・PR4（章 **08〜14**）・PR5（QA/QC）・PR6（公開）まで完了。
 > QA の実施結果は下の「[QA/QC 実施記録](#qaqc-実施記録)」。
 >
 > `npm run video:assemble`（引数無し・`--include-examples` 無し）で `final.mp4` まで通る。
