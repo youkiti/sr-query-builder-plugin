@@ -2,7 +2,7 @@
 <!-- SR Query Builder Plugin ランディングページ（GitHub Pages 配信）。
      正典はこのファイル（master の hosted/）。デプロイ手順は hosted/README.md を参照。
      ja / en は両方を持ち、表示は lang.js + CSS が片方だけに絞る（併記しない）。
-     version: 2026-08-07 -->
+     version: 2026-08-09 -->
 <html lang="ja">
   <head>
     <meta charset="utf-8" />
@@ -49,7 +49,38 @@
     </header>
 
     <main>
-      <section class="section">
+      <section class="section" id="video">
+        <div class="container">
+          <h2>
+            <span class="ja" lang="ja">操作解説動画</span>
+            <span class="en" lang="en">Video walkthrough</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja"
+              >研究プロトコルの入力から検証済み検索式のエクスポートまでを、実際の画面で通して解説しています（約 21
+              分・全 14 章）。説明欄のチャプターから各工程へ頭出しできます。ナレーションは日本語、英語字幕（CC）付きです。</span
+            >
+            <span class="en" lang="en"
+              >A full walkthrough on the real screens, from entering a research protocol to exporting a validated
+              search strategy (about 21 minutes, 14 chapters). Use the chapters in the video description to jump to a
+              step. Narration is in Japanese with English subtitles (CC).</span
+            >
+          </p>
+          <div class="video-frame">
+            <iframe
+              src="https://www.youtube-nocookie.com/embed/RqUFlmncuIE"
+              title="SR Query Builder Plugin 操作解説（研究プロトコルから PubMed 検索式を作る）"
+              data-en-title="SR Query Builder Plugin walkthrough: from a research protocol to a PubMed search strategy"
+              loading="lazy"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              referrerpolicy="strict-origin-when-cross-origin"
+              allowfullscreen
+            ></iframe>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section--alt">
         <div class="container">
           <h2>
             <span class="ja" lang="ja">なにをするツールか</span>
@@ -100,7 +131,7 @@
         </div>
       </section>
 
-      <section class="section section--alt">
+      <section class="section">
         <div class="container container--wide">
           <h2>
             <span class="ja" lang="ja">画面イメージ</span>
@@ -179,7 +210,7 @@
         </div>
       </section>
 
-      <section class="section">
+      <section class="section section--alt">
         <div class="container">
           <h2>
             <span class="ja" lang="ja">サーバーレス構成（BYOK）</span>
@@ -253,7 +284,7 @@
         </div>
       </section>
 
-      <section class="section section--alt">
+      <section class="section">
         <div class="container">
           <h2>
             <span class="ja" lang="ja">はじめかた</span>

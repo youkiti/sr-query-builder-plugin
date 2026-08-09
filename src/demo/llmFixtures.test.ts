@@ -12,7 +12,13 @@ import {
   suggestMesh,
 } from '@/features/formula/skills';
 import { handleGeminiGenerateContent } from './llmFixtures';
-import { BLOCK_DEFS, RESEARCH_QUESTION, buildBlockExpressions, getBlockDef } from './scenario';
+import {
+  BLOCK_DEFS,
+  ECMO_MESH_ADDITION,
+  RESEARCH_QUESTION,
+  buildBlockExpressions,
+  getBlockDef,
+} from './scenario';
 
 /**
  * llmFixtures.ts を「本番の skill 関数から呼んだときに正しく応答するか」で検証する。
@@ -245,6 +251,26 @@ describe('improve-block フィクスチャ（/edit の AI 改善）', () => {
       makeProvider()
     );
     expect(proposal.proposedExpression).toContain('Extracorporeal Membrane Oxygenation');
+  });
+
+  it('提案する式は v2-demo（buildFormulaV2）の #2 と完全一致する', async () => {
+    // 操作解説動画の第 10 章は「AI 提案を採用 → 保存」を映し、第 11 章では v2-demo の
+    // 式を映す。両者が別表記だと同じ検索式に見えないため、素朴な連結による表記ゆれ
+    // （二重括弧・MeSH を外側に OR する等）が入らないことを固定する。
+    const v1 = buildBlockExpressions();
+    const proposal = await improveBlockExpression(
+      {
+        currentExpression: v1.ecmo,
+        blockLabel: 'ECMO',
+        blockDescription: getBlockDef('ecmo').blockDescription,
+        researchQuestion: RESEARCH_QUESTION,
+        userInstruction: '',
+      },
+      makeProvider()
+    );
+    expect(proposal.proposedExpression).toBe(
+      buildBlockExpressions({ ecmo: [ECMO_MESH_ADDITION] }).ecmo
+    );
   });
 });
 
