@@ -3,7 +3,7 @@
 - **作成日**: 2026-04-20
 - **親ドキュメント**: [ui-review-strategy.md](ui-review-strategy.md) §3 Tier 2 / [ui-states.md](ui-states.md) / [ui-flow.md](ui-flow.md)
 - **対象**: Playwright + `@axe-core/playwright` による実 Chromium スモーク
-- **現状** (2026-08-09 更新): Phase A〜G を初版実装済み。unit 1267 / E2E 104 すべて green。
+- **現状** (2026-08-09 更新): Phase A〜G を初版実装済み。unit 1295 / E2E 106 すべて green。
   - Phase A: [tests/e2e/fixtures/appStub.ts](../tests/e2e/fixtures/appStub.ts) + [src/app/app.ts](../src/app/app.ts) の `window.__E2E_PRELOADED_STATE__` hook、[app-smoke-of-smoke.spec.ts](../tests/e2e/app-smoke-of-smoke.spec.ts) 11 ケース。fetch インターセプタ（A#4）は [tests/e2e/fixtures/apiStubs.ts](../tests/e2e/fixtures/apiStubs.ts)（Sheets/Drive/NCBI/Gemini 共通スタブ）として実装済み
   - Phase B: `app-{home,protocol,blocks,seeds,draft,validate,expand,edit,export,done,history}.spec.ts` 計 37 ケース（含む a11y 11）
   - Phase C: [app-guards.spec.ts](../tests/e2e/app-guards.spec.ts) 6 ケース、[app-sidebar-visual.spec.ts](../tests/e2e/app-sidebar-visual.spec.ts) 4 ケース
