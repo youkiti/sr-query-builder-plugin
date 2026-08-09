@@ -181,6 +181,45 @@ export interface BlockImprovementState {
   error: string | null;
 }
 
+/**
+ * #/edit の「新バージョンとして保存」の実行状態。
+ *
+ * 保存（saveEditedFormula）は完了時に `currentFormulaVersionId` / `currentFormulaMarkdown` の
+ * setState を起こし、それが全ビュー再描画を誘発する（editView は再描画のたびに
+ * `container.innerHTML = ''` で丸ごと作り直す）。確認メッセージ・エラーをローカル DOM に
+ * 書くとこの再描画で要素ごと消え、「押しても何も起きていない」ように見える（issue #42）。
+ * formulaEditDraft / blockImprovement と同じく store に保持して再描画に耐えるようにする。
+ *
+ * formulaVersionId が currentFormulaVersionId と一致するときだけ有効。
+ * 保持する版は status で異なる:
+ * - `saving` / `error`: 保存前（＝編集元）の版。保存中もエラー後も current は変わらないので一致する
+ * - `saved`: 保存で**採番された新しい版**。保存成功時に current がこの版へ移るので一致する。
+ *   `保存しました（version_id: …）` に出す ID もこの値そのもの
+ * 別バージョンを履歴から読み込み直すと一致しなくなり、stale として表示されなくなる。
+ */
+export interface FormulaSaveState {
+  formulaVersionId: string;
+  status: 'saving' | 'saved' | 'error';
+  /** status='error' のときのメッセージ。それ以外は null */
+  error: string | null;
+}
+
+/**
+ * #/edit の編集メモ（`input.edit__note-input`）。
+ *
+ * 保存ステータスと同じ理由で、ローカル DOM に置くと全ビュー再描画で入力内容が消える。
+ * ただし打鍵のたびに setState すると再描画が毎回走り、開いている編集フォーム / AI 指示欄が
+ * 壊れてしまうため、**確定時（change イベント = blur・Enter）にだけ**ここへ書く
+ * （保存ボタンは押下時に入力欄の値を直接読むので、確定前の打鍵も保存内容には反映される）。
+ *
+ * stale 判定は FormulaEditDraft と同じ。保存に成功すると版が変わって stale になるため、
+ * メモは自動的に空へ戻る（＝次の編集に前回のメモが残らない）。
+ */
+export interface FormulaEditNote {
+  formulaVersionId: string;
+  note: string;
+}
+
 export interface AppState {
   /** 現在のハッシュルート */
   route: RouteName;
@@ -221,6 +260,10 @@ export interface AppState {
   formulaEditDraft: FormulaEditDraft | null;
   /** #/edit のブロック単位 AI 改善の実行状態。未実行なら null */
   blockImprovement: BlockImprovementState | null;
+  /** #/edit の「新バージョンとして保存」の実行状態。未実行なら null */
+  formulaSave: FormulaSaveState | null;
+  /** #/edit の編集メモ。未入力なら null */
+  formulaEditNote: FormulaEditNote | null;
 }
 
 export const INITIAL_STATE: AppState = {
@@ -240,6 +283,8 @@ export const INITIAL_STATE: AppState = {
   missedAnalysis: null,
   formulaEditDraft: null,
   blockImprovement: null,
+  formulaSave: null,
+  formulaEditNote: null,
 };
 
 export type Updater = (prev: AppState) => AppState;

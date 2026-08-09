@@ -40,6 +40,8 @@ function stateWithFormula(): AppState {
     missedAnalysis: null,
     formulaEditDraft: null,
     blockImprovement: null,
+    formulaSave: null,
+    formulaEditNote: null,
   };
 }
 

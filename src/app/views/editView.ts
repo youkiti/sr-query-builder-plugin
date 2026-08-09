@@ -4,11 +4,10 @@ import {
   type BlockImprovementResult,
   type RequestBlockImprovementInput,
   type SaveEditedFormulaInput,
-  type SaveEditedFormulaResult,
 } from '@/app/services';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
 import { ROUTE_LABELS } from '../router';
-import type { AppState, BlockImprovementState } from '../store';
+import type { AppState, BlockImprovementState, FormulaSaveState } from '../store';
 import type { RenderView } from './types';
 
 /**
@@ -23,10 +22,12 @@ import type { RenderView } from './types';
  *    提案 expression と rationale を diff 表示し、「置き換える」で内部 md に反映する。
  *
  * 検索式 Markdown 全文は `state.formulaEditDraft`、ブロック単位 AI 改善の進捗/提案/エラーは
- * `state.blockImprovement` から描画する（詳細は store.ts の doc コメント参照）。
- * どちらも LLM コスト集計（cumulativeCostUsd）の setState による全ビュー再描画
+ * `state.blockImprovement`、保存の進捗/結果/エラーは `state.formulaSave`、編集メモは
+ * `state.formulaEditNote` から描画する（詳細は store.ts の doc コメント参照）。
+ * いずれも LLM コスト集計（cumulativeCostUsd）や保存完了の setState による全ビュー再描画
  * （editView は再描画のたびに `container.innerHTML = ''` で丸ごと作り直す）でも消えない
- * ようにするための設計で、draftRun / validationResult / expandRun と同じ理由（issue #39）。
+ * ようにするための設計で、draftRun / validationResult / expandRun と同じ理由
+ * （提案と md は issue #39、保存ステータスとメモは issue #42）。
  * 「AI への指示」プロンプトフォームの開閉・入力途中テキストは未送信の一時入力なので、
  * これだけは従来どおりローカル DOM のまま扱う。
  *
@@ -34,7 +35,12 @@ import type { RenderView } from './types';
  */
 
 export interface EditViewCallbacks {
-  onSave?: (input: SaveEditedFormulaInput) => Promise<SaveEditedFormulaResult>;
+  /**
+   * 編集中の md を新バージョンとして保存する。
+   * 進捗・確認メッセージ・エラーは返り値ではなく store.formulaSave 経由で view に届く
+   * （view は解決値を使わない。onImproveBlock と同じ思想。issue #42）。
+   */
+  onSave?: (input: SaveEditedFormulaInput) => Promise<void>;
   /**
    * 指定ブロックを LLM で改善させる（instruction はユーザー任意の指示）。
    * 結果は返り値ではなく store.blockImprovement 経由で view に届く（view は解決値を使わない）。
@@ -46,6 +52,8 @@ export interface EditViewCallbacks {
   onDraftChange?: (markdown: string) => void;
   /** ブロック単位 AI 改善の提案を破棄する（accept / reject の両方で呼ぶ） */
   onClearImprovement?: () => void;
+  /** 編集メモを store（formulaEditNote）へ反映する（確定時＝change イベントのみ） */
+  onNoteChange?: (note: string) => void;
 }
 
 /** 検索式 Markdown 全文を保持し、更新時にブロック一覧を再描画する内部コントローラ。 */
@@ -78,6 +86,29 @@ function resolveBlockImprovement(state: AppState): BlockImprovementState | null 
     return null;
   }
   return improvement;
+}
+
+/**
+ * state.formulaSave を現在の formula バージョンに照らして取り出す。
+ * saved は保存で採番された新しい版を持つので保存直後の current と一致し、
+ * saving / error は保存前の版（保存が完了していないので current のまま）と一致する。
+ * どちらにも当てはまらない（別バージョンを読み込み直した）なら stale として null を返す。
+ */
+function resolveSaveState(state: AppState): FormulaSaveState | null {
+  const save = state.formulaSave;
+  if (save === null || save.formulaVersionId !== state.currentFormulaVersionId) {
+    return null;
+  }
+  return save;
+}
+
+/** state.formulaEditNote を現在の formula バージョンに照らして取り出す（stale なら空文字）。 */
+function resolveNote(state: AppState): string {
+  const note = state.formulaEditNote;
+  if (note === null || note.formulaVersionId !== state.currentFormulaVersionId) {
+    return '';
+  }
+  return note.note;
 }
 
 export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
@@ -175,26 +206,38 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
     noteInput.type = 'text';
     noteInput.className = 'edit__note-input';
     noteInput.placeholder = '変更理由・気づきなど（任意）';
+    noteInput.value = resolveNote(ctx.state);
+    // 確定時（blur / Enter）だけ store へ送る。打鍵ごとに setState すると全ビュー再描画が
+    // 走り、開いている鉛筆編集フォームや AI 指示欄が毎回壊れてしまうため。
+    noteInput.addEventListener('change', () => {
+      callbacks.onNoteChange?.(noteInput.value);
+    });
     noteLabel.appendChild(noteInput);
     noteRow.appendChild(noteLabel);
     container.appendChild(noteRow);
+
+    const save = resolveSaveState(ctx.state);
 
     const actions = doc.createElement('div');
     actions.className = 'edit__actions';
     const saveBtn = doc.createElement('button');
     saveBtn.type = 'button';
     saveBtn.textContent = '新バージョンとして保存';
+    // 保存中の二重起動防止（実行そのものの排他は bootstrap 側の guard が担う）。
+    saveBtn.disabled = save?.status === 'saving';
     actions.appendChild(saveBtn);
     container.appendChild(actions);
 
     const status = doc.createElement('p');
     status.className = 'edit__status';
     status.setAttribute('aria-live', 'polite');
+    status.textContent = formatSaveStatus(save);
     container.appendChild(status);
 
     const errorBox = doc.createElement('p');
     errorBox.className = 'edit__error';
     errorBox.setAttribute('aria-live', 'polite');
+    errorBox.textContent = save?.status === 'error' ? (save.error ?? '不明なエラー') : '';
     container.appendChild(errorBox);
 
     function rerenderBlocks(): void {
@@ -206,23 +249,25 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
       if (!callbacks.onSave) {
         return;
       }
-      saveBtn.disabled = true;
-      status.textContent = '保存中…';
-      errorBox.textContent = '';
-      callbacks
-        .onSave({ formulaMd: editor.getMd(), note: noteInput.value })
-        .then((result) => {
-          status.textContent = `保存しました（version_id: ${result.versionId}）`;
-        })
-        .catch((err: unknown) => {
-          errorBox.textContent = formatError(err);
-          status.textContent = '';
-        })
-        .finally(() => {
-          saveBtn.disabled = false;
-        });
+      // メモは「今画面に入っている値」を直接読む（change 未発火の打鍵も保存内容に含める）。
+      // 進捗・確認メッセージ・エラーは store.formulaSave 経由で描画されるため、
+      // ここでは解決値を扱わない（onSave の同期部分が status='saving' の setState を起こし、
+      // このボタンを含む DOM は即座に作り直される。issue #42）。
+      void callbacks.onSave({ formulaMd: editor.getMd(), note: noteInput.value });
     });
   };
+}
+
+/** 保存ステータス行（`p.edit__status`）の文言。error 時は `.edit__error` 側に出すので空にする。 */
+function formatSaveStatus(save: FormulaSaveState | null): string {
+  if (save === null || save.status === 'error') {
+    return '';
+  }
+  if (save.status === 'saving') {
+    return '保存中…';
+  }
+  // saved の formulaVersionId は保存で採番された新しい版そのもの（store.ts の doc コメント参照）。
+  return `保存しました（version_id: ${save.formulaVersionId}）`;
 }
 
 /**

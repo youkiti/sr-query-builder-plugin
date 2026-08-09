@@ -398,7 +398,8 @@ function buildDefaultViewOptions(
       },
     },
     edit: {
-      onSave: async (input: SaveEditedFormulaInput): Promise<SaveEditedFormulaResult> =>
+      // 進捗・確認メッセージ・エラーは store.formulaSave 経由で反映される（issue #42 対応）
+      onSave: async (input: SaveEditedFormulaInput): Promise<void> =>
         runSaveEditedFormula(store, runtime, input),
       // 結果は store.blockImprovement 経由で反映される（進捗・提案・エラーとも）。
       // view はこの Promise の解決値を使わない（expand の onFetch と同じ思想。issue #39 対応）。
@@ -414,10 +415,25 @@ function buildDefaultViewOptions(
         if (formulaVersionId === null) {
           return;
         }
-        store.setState((s) => ({ ...s, formulaEditDraft: { formulaVersionId, markdown } }));
+        // md を触った時点で直前の保存ステータス（保存しました / エラー）は現在の内容を
+        // 説明しなくなるので消す。未保存の編集があることが見た目でも分かる。
+        store.setState((s) => ({
+          ...s,
+          formulaEditDraft: { formulaVersionId, markdown },
+          formulaSave: null,
+        }));
       },
       onClearImprovement: () => {
         store.setState((s) => ({ ...s, blockImprovement: null }));
+      },
+      // 編集メモを store（formulaEditNote）へ反映する。確定時（change）にのみ呼ばれる。
+      onNoteChange: (note: string) => {
+        const formulaVersionId = store.getState().currentFormulaVersionId;
+        /* istanbul ignore if -- guards.ts の edit: needsFormula() により #/edit 到達時点で必ず非 null */
+        if (formulaVersionId === null) {
+          return;
+        }
+        store.setState((s) => ({ ...s, formulaEditNote: { formulaVersionId, note } }));
       },
     },
     expand: {
@@ -448,12 +464,56 @@ async function runListHistory(
   return listFormulaVersions(project.spreadsheetId, runtime.google);
 }
 
+/**
+ * 「新バージョンとして保存」（#/edit）の実行状態を store.formulaSave で管理する。
+ *
+ * saveEditedFormula は完了時に currentFormulaVersionId / currentFormulaMarkdown の setState を
+ * 起こし、それが全ビュー再描画を誘発する。確認メッセージ・エラーをローカル DOM（旧コードは
+ * `.then()` で `p.edit__status` に書き込んでいた）に置くと、この再描画で要素ごと作り直されて
+ * 消えてしまい、保存が成功しているのに「押しても何も起きていない」ように見える（issue #42）。
+ * runImproveBlock / runFetchBoundary と同じく store 経由で状態遷移させる。
+ * view は解決値を使わないため、ここでは例外を投げず常に resolve する。
+ */
 async function runSaveEditedFormula(
   store: AppStore,
   runtime: ChromeRuntimeDeps,
   input: SaveEditedFormulaInput
-): Promise<SaveEditedFormulaResult> {
-  return saveEditedFormula(input, { google: runtime.google, store });
+): Promise<void> {
+  if (store.getState().formulaSave?.status === 'saving') {
+    // 再描画タイミング次第でボタンが二度押せた場合の保険
+    return;
+  }
+  const formulaVersionId = store.getState().currentFormulaVersionId;
+  /* istanbul ignore if -- guards.ts の edit: needsFormula() により #/edit 到達時点で必ず非 null */
+  if (formulaVersionId === null) {
+    return;
+  }
+  store.setState((s) => ({
+    ...s,
+    formulaSave: { formulaVersionId, status: 'saving', error: null },
+  }));
+  try {
+    const result: SaveEditedFormulaResult = await saveEditedFormula(input, {
+      google: runtime.google,
+      store,
+    });
+    // 保存成功で currentFormulaVersionId は採番された新しい版へ移っているため、
+    // formulaSave もその版で持つ（stale 判定が一致し、確認メッセージが残る）。
+    store.setState((s) => ({
+      ...s,
+      formulaSave: { formulaVersionId: result.versionId, status: 'saved', error: null },
+    }));
+  } catch (err) {
+    // 失敗時は current が保存前の版のままなので、押下時の版で保持すれば表示される。
+    store.setState((s) => ({
+      ...s,
+      formulaSave: {
+        formulaVersionId,
+        status: 'error',
+        error: err instanceof Error ? err.message : String(err),
+      },
+    }));
+  }
 }
 
 /**
