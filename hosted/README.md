@@ -1,6 +1,8 @@
 # hosted/ — GitHub Pages 配信ファイル（公開ページ）
 
-`gh-pages` ブランチのルートへ配置する、ランディング・使い方ガイド・プライバシーポリシー・利用規約 4 ページの正典置き場。拡張本体とのメッセージプロトコル等の結合は無く、拡張側からは通常の外部リンク（`target="_blank"`）で新規タブに開くだけ。
+GitHub Pages で配信する、ランディング・使い方ガイド・プライバシーポリシー・利用規約 4 ページの正典置き場。拡張本体とのメッセージプロトコル等の結合は無く、拡張側からは通常の外部リンク（`target="_blank"`）で新規タブに開くだけ。
+
+**デプロイは自動**（`master` の `hosted/**` が変わると [.github/workflows/deploy-pages.yml](../.github/workflows/deploy-pages.yml) が公開する）。手動のコピー作業は不要になった。詳細は下記「デプロイ（GitHub Actions による自動デプロイ）」を参照。
 
 ## ファイルと公開 URL の対応
 
@@ -13,7 +15,9 @@
 | [style.css](style.css) | 4 ページ共通スタイル（青基調。`src/styles/tokens.css` の `--color-primary: #2a63d6` に準拠） | `https://youkiti.github.io/sr-query-builder-plugin/style.css` |
 | [lang.js](lang.js) | 表示言語（ja / en）の解決・切替 | `https://youkiti.github.io/sr-query-builder-plugin/lang.js` |
 | [screenshots/](screenshots/) | index.html が参照するスクリーンショット 5 枚（`s1-protocol.png` 〜 `s5-export.png`） | `https://youkiti.github.io/sr-query-builder-plugin/screenshots/*.png` |
-| `.nojekyll` | Jekyll のビルド処理を無効化し、静的ファイルをそのまま配信させるための空マーカーファイル。`hosted/` には存在せず、`gh-pages` worktree のルートに直接作成する（下記「デプロイ手順」参照） | 配信対象外（Jekyll 無効化用） |
+| [README.md](README.md) | 本ファイル（開発者向け）。**配信セットからは除外する**（workflow が `_site/README.md` を削除する） | 配信しない |
+
+`.nojekyll` は不要になった。GitHub Actions 方式では artifact をそのまま配信するので Jekyll のビルドが走らない（旧 `gh-pages` ブランチ方式では Jekyll 抑止のために必要だった）。
 
 ## 表示言語の仕組み（ja / en の切替。併記はしない）
 
@@ -38,57 +42,46 @@
   - `index.html` のヒーロー CTA（現在は「GitHub でソースを見る」）を、ストアのインストールリンクへ差し替える
   - `index.html`「はじめかた」の自前ビルド手順（`.env` の OAuth クライアント ID 発行を含む一連の手順）を、ストアからのインストール手順に差し替える
 
-## デプロイ手順（初回。実施済み）
+## デプロイ（GitHub Actions による自動デプロイ）
 
-**初回デプロイは完了済み**（`gh-pages` ブランチが存在し、`https://youkiti.github.io/sr-query-builder-plugin/` は有効）。
-以下は実施した手順の記録であり、今後の通常の更新には使わない（それは次の「デプロイ手順（2 回目以降の更新）」節を使う）。
-リポジトリを作り直す等で `gh-pages` ブランチが無い状態からやり直す場合の参照として残す。
+**手動のコピー作業は不要。** `master` の `hosted/**` が変わると
+[.github/workflows/deploy-pages.yml](../.github/workflows/deploy-pages.yml) が発火し、`hosted/` の内容を
+そのまま GitHub Pages へ公開する。Pages のソースは **「GitHub Actions」**（`build_type: workflow`）。
 
-> **作業ツリーを壊す操作（`git checkout --orphan` + `git rm -rf .` を今のツリーで実行する等）はしないこと。**
+workflow がやること:
+
+1. `hosted/` を `_site/` へコピーし、開発者向けの `README.md` と `screenshots/.gitkeep` を除く
+2. 4 ページ + `style.css` / `lang.js` + スクリーンショット 5 枚がそろっているか確認する（欠けていたら失敗させる）
+3. `actions/upload-pages-artifact` → `actions/deploy-pages` で公開する
+
+**通常の更新手順**: 上記「更新時に守ること」を反映して `hosted/` を編集し、PR を `master` へマージする。以上。
+内容を変えずに再デプロイしたいときは Actions タブから `deploy-pages` を `workflow_dispatch` で手動実行する。
+
+**Pages ソースの切り替え（一度だけ必要）**: このリポジトリの Pages は当初 legacy（`gh-pages` ブランチ / root）で
+有効化されていた。workflow の `actions/configure-pages` に `enablement: true` を渡して `build_type: workflow` への
+切り替えも試みているが、切り替わらずに失敗する場合は **Settings → Pages → Build and deployment → Source を
+"GitHub Actions" に手で変更して** workflow を再実行する。公開 URL は変わらない
+（`https://youkiti.github.io/sr-query-builder-plugin/`。ストアダッシュボードの登録 URL もそのまま有効）。
+
+**スクリーンショットを撮り直したときは、生成物をコミットすること。** `hosted/screenshots/*.png` はリポジトリに
+コミット済みで、workflow はそれをコピーするだけ（CI で `npm run shots` は走らせない）。撮り直しは
+`npm run shots`（Playwright + stub 環境。実 API を叩かず無人実行）、実 API の応答を見せたいときは
+`npm run manual:check -- --shots`（詳細は [docs/manual-testing.md](../docs/manual-testing.md)）。
+
+### 旧方式（`gh-pages` ブランチへの手動 push）— 廃止
+
+2026-08-09 まではこの方式だった。`git worktree` で `gh-pages` 専用ディレクトリを作り、`hosted/` の内容と
+空の `.nojekyll` をコピーして push する運用で、**反映漏れが実際に起きた**（操作解説動画の埋め込みを
+`index.html` / `help.html` / `style.css` に入れたあと、`gh-pages` への反映だけが残った）。自動化した動機はこれ。
+
+`gh-pages` ブランチは Pages のソースから外れたため配信されない（履歴として残してある）。**手動 push しても
+公開内容は変わらない**ので、緊急時も Actions の `workflow_dispatch` を使うこと。
+
+> 旧方式に戻す必要が生じた場合の注意（当時の申し送り）: **作業ツリーを壊す操作
+> （`git checkout --orphan` + `git rm -rf .` を今のツリーで実行する等）はしないこと。**
 > このリポジトリは submodule を 2 つ持ち、かつ複数セッションが同じ作業ツリーを共有することがあるため、
-> 今の作業ツリーの中身を消すコマンドは事故になる。`git worktree` で `gh-pages` 専用の別ディレクトリを作り、
-> そちらでコミット・push する。
-
-1. **先にスクリーンショットを撮る**: `npm run shots`（Playwright + stub 環境。実 API を叩かず無人実行できる）で `screenshots/` の 5 枚（`s1-protocol.png` 〜 `s5-export.png`）を取得する。撮影せずにデプロイすると `index.html` のスクリーンショットセクションの画像リンクが切れる。実際にアプリを動かした本物の画面で撮り直したいとき（stub のデモデータではなく実 Google/Gemini/NCBI API の応答を見せたいとき）は、代わりに `npm run manual:check -- --shots` を使う（詳細は [docs/manual-testing.md](../docs/manual-testing.md)）
-2. `gh-pages` 用の孤立 worktree を、今の作業ツリーの外（兄弟ディレクトリ）に作る:
-   ```bash
-   git worktree add --orphan -b gh-pages ../sr-query-builder-plugin-gh-pages
-   ```
-   （`git worktree add --orphan` は Git 2.42 以降が必要。それ以前の git しか無い場合は、代わりに
-   `git clone --no-checkout <このリポジトリの URL> ../sr-query-builder-plugin-gh-pages && cd ../sr-query-builder-plugin-gh-pages && git checkout --orphan gh-pages && git rm -rf .`
-   で同じ状態を作れる。いずれも**今の作業ツリーには触れない**）
-3. `hosted/` 配下の内容（`index.html` / `help.html` / `privacy-policy.html` / `terms-of-service.html` / `style.css` / `lang.js` / `screenshots/`）を、作成した worktree のルートへコピーする。
-   **加えて、空の `.nojekyll` ファイルを worktree のルートに作成する**（`hosted/` には無いのでコピー元が無い。
-   `touch .nojekyll` 等で新規作成する）。GitHub Pages は既定で Jekyll によるビルドを試みるため、
-   `.nojekyll` を置いて Jekyll 処理を無効化し、静的ファイルをそのまま配信させる
-4. worktree 側でコミットして push する:
-   ```bash
-   cd ../sr-query-builder-plugin-gh-pages
-   git add index.html help.html privacy-policy.html terms-of-service.html style.css lang.js screenshots .nojekyll
-   git commit -m "chore: GitHub Pages 公開ページを追加"
-   git push -u origin gh-pages
-   ```
-5. worktree を片付ける（任意。残しておいて次回の更新にも使い回してよい）:
-   ```bash
-   cd -
-   git worktree remove ../sr-query-builder-plugin-gh-pages
-   ```
-6. GitHub の Settings → Pages で Source を `gh-pages` ブランチ / `/ (root)` に設定して有効化する。
-   **実施時はこの手順は不要だった**: `gh-pages` ブランチを push した時点で GitHub 側が自動的に
-   Pages を有効化した（`build_type: legacy` / `source: gh-pages, path: /`）。念のため API で明示的に
-   有効化しようとしたところ `409 GitHub Pages is already enabled.` が返っている。ただし自動有効化は
-   アカウント・リポジトリ設定に依存する可能性があるため、手順としては残す（自動で有効化されていなければ
-   この手順を実施する）
-
-## デプロイ手順（2 回目以降の更新）
-
-**初回デプロイ完了後、今後の通常の更新はこちらを使う。**
-
-1. 上記「更新時に守ること」を反映する
-2. `gh-pages` ブランチのルートへ、変更したファイルを本ディレクトリの内容で上書きして push する。
-   初回デプロイで作った worktree（`../sr-query-builder-plugin-gh-pages`）を消さずに残してあればそれを再利用する。
-   消してしまった場合は `git worktree add ../sr-query-builder-plugin-gh-pages gh-pages`（`--orphan` は付けない。
-   既存の `gh-pages` ブランチを普通にチェックアウトするだけでよい）で作り直せる。いずれも今の作業ツリーでは行わない
+> 今の作業ツリーの中身を消すコマンドは事故になる。`git worktree` で別ディレクトリを作り、そちらで作業する。
+> また旧方式では Jekyll 抑止のため `.nojekyll` をルートに置く必要がある（Actions 方式では不要）。
 
 ## デプロイ後の確認項目
 
