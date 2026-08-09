@@ -143,7 +143,7 @@ src/
 - **P1 ロジック未移植**: `check_block_overlap` / `check_mesh` / `check_mesh_overlap`（ブロック重複・MeSH 分析）
 - **OpenAI / Anthropic Claude への直接連携は未実装**: 実装済みなのは Gemini と OpenRouter の 2 プロバイダ（`src/lib/llm/GeminiProvider.ts` / `OpenRouterProvider.ts`。既定モデルは `gemini-3.5-flash`）。Options 画面で OpenRouter の API キーとカスタムモデル ID（最大 20 件）を追加登録できるため OpenRouter 経由で多くのモデルに到達できるが、OpenAI / Anthropic の API を直接叩く `LLMProvider` 実装は無い（`LlmProviderId` 型に `openai` / `anthropic` の値はあるが対応実装が無い）
 - **テストの CI が無い**（`.github/workflows/` にあるのは公開ページのデプロイ用 [deploy-pages.yml](.github/workflows/deploy-pages.yml) だけ。`typecheck` / `test` / `test:e2e` / `lint` / `dev` を回す workflow は未配置で、検証はローカル実行に依存している）
-- E2E ジャーニー J1（新規作成→export 貫通）/ J4（expand キーボード判定）/ J5 の API エラー系は LLM・fetch stub の拡充待ち（[docs/ui-deep-test-plan.md](docs/ui-deep-test-plan.md) Phase D/E）
+- E2E ジャーニー J1（新規作成→export 貫通）は draft 生成〜検証の主要経路を journey-draft-generate.spec.ts で回帰確認済み。J4（expand キーボード判定）/ J5 の API エラー系は残タスク（[docs/ui-deep-test-plan.md](docs/ui-deep-test-plan.md) Phase D/E）
 
 ## 目的（ゴール）
 

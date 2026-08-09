@@ -3,12 +3,12 @@
 - **作成日**: 2026-04-20
 - **親ドキュメント**: [ui-review-strategy.md](ui-review-strategy.md) §3 Tier 2 / [ui-states.md](ui-states.md) / [ui-flow.md](ui-flow.md)
 - **対象**: Playwright + `@axe-core/playwright` による実 Chromium スモーク
-- **現状** (2026-04-20 更新): Phase A〜G を初版実装済み。unit 828 / E2E 89 すべて green。
-  - Phase A: [tests/e2e/fixtures/appStub.ts](../tests/e2e/fixtures/appStub.ts) + [src/app/app.ts](../src/app/app.ts) の `window.__E2E_PRELOADED_STATE__` hook、[app-smoke-of-smoke.spec.ts](../tests/e2e/app-smoke-of-smoke.spec.ts) 11 ケース
+- **現状** (2026-08-09 更新): Phase A〜G を初版実装済み。unit 1295 / E2E 106 すべて green。
+  - Phase A: [tests/e2e/fixtures/appStub.ts](../tests/e2e/fixtures/appStub.ts) + [src/app/app.ts](../src/app/app.ts) の `window.__E2E_PRELOADED_STATE__` hook、[app-smoke-of-smoke.spec.ts](../tests/e2e/app-smoke-of-smoke.spec.ts) 11 ケース。fetch インターセプタ（A#4）は [tests/e2e/fixtures/apiStubs.ts](../tests/e2e/fixtures/apiStubs.ts)（Sheets/Drive/NCBI/Gemini 共通スタブ）として実装済み
   - Phase B: `app-{home,protocol,blocks,seeds,draft,validate,expand,edit,export,done,history}.spec.ts` 計 37 ケース（含む a11y 11）
   - Phase C: [app-guards.spec.ts](../tests/e2e/app-guards.spec.ts) 6 ケース、[app-sidebar-visual.spec.ts](../tests/e2e/app-sidebar-visual.spec.ts) 4 ケース
-  - Phase D: `journey-docx-upload.spec.ts` (J3 UI-only) + `journey-history-switch.spec.ts` (J2) — J1/J4 は LLM stub 整備待ち
-  - Phase E: `journey-errors.spec.ts`（OAuth レイヤのみ）— Sheets 403 / NCBI 429 / LLM 500 は Phase A#4 fetch stub 拡充後
+  - Phase D: `journey-docx-upload.spec.ts` (J3 UI-only) + `journey-history-switch.spec.ts` (J2) に加え、`journey-draft-generate.spec.ts` / `journey-expand-boundary.spec.ts` を追加。J1 相当（draft 生成〜検証の実操作貫通）と J4 の margin 探索（境界事例取得ボタン起点部分）が実装済みになった。J4 のキーボード判定（i/e/m 連打）はまだ未着手
+  - Phase E: `journey-errors.spec.ts`（OAuth レイヤのみ）— Sheets 403 / NCBI 429 / LLM 500 は Phase A#4 fetch stub（apiStubs.ts）の整備により前提が外れ、着手可能になった
   - Phase F: `app-regression.spec.ts` で 11 ルート × `#app-content` 非空 + 3 status 非空 + long-title bounding box
   - Phase G: `options.spec.ts` 5 ケース（MVP 現実装向け）
   - **副作用**: axe が実バグを検出したため以下を修正: `blocksView.ts` / `editView.ts` / `seedsView.ts` に `aria-label`、`bootstrap.ts` のサイドバーに `aria-current="page"`、`options.css` に `.options__muted a { text-decoration: underline }`。
@@ -67,7 +67,7 @@ CLAUDE.md §目的 と [ui-flow.md §2](ui-flow.md) から逆算した 6 本。
    - `chrome.storage.local` の `currentProject` を同じ projectId でセット（hydrate との整合。`project` を state 側で `null` にして storage だけに積むのは可だが、先にレースが無いよう両方に置く）
    - seeds / formulaVersions / validationLogs 等 **store 定義に無い** データは、本体の service が管理する in-memory / 将来の Sheets キャッシュ側に合わせて拡張時に追記（現時点の state 契約だけで賄える範囲にとどめる）
 3. **`chrome.runtime.sendMessage` スタブ**: background へのメッセージは no-op にするか、シナリオ側で assertion 用に録音
-4. **`fetch` インターセプタ**: `page.route()` で以下を固定レスポンスに差し替え
+4. **`fetch` インターセプタ**: `page.route()` で以下を固定レスポンスに差し替え。**実装済み**: [tests/e2e/fixtures/apiStubs.ts](../tests/e2e/fixtures/apiStubs.ts) が `registerSheetsStub` / `registerDriveStub` / `registerNcbiStub` / `registerGeminiStub` として提供し、`journey-draft-generate.spec.ts` / `journey-expand-boundary.spec.ts` から利用している
    - `eutils.ncbi.nlm.nih.gov/*`（esearch / efetch）
    - `sheets.googleapis.com/*`（batchGet / values.append / batchUpdate）
    - `www.googleapis.com/drive/v3/*`（files.create / files.get）
@@ -124,10 +124,12 @@ CLAUDE.md §目的 と [ui-flow.md §2](ui-flow.md) から逆算した 6 本。
    - **方式 a**: `page.route('**/sheets.googleapis.com/**/values:append*', ...)` で 5 回の append リクエストを handler で録音し、body に `source=interactive` の行が 5 本入っていることを確認
    - **方式 b**: Phase A の E2E hook を経由して `deps.google.fetch` をテスト用 spy に差し替え、呼び出し回数と引数を assertion する
    - **注意**: `store.getState().seedPapers` を見る書き方は実装と乖離するので避ける
+5. **`journey-draft-generate.spec.ts`** (J1 相当・実装済み): `#/draft` の「生成する」を実操作で通し、ブロック設計 → MeSH → フリーワード → 行ごとヒット数 → 保存 → 捕捉率検証が一周することを確認する。[tests/e2e/fixtures/apiStubs.ts](../tests/e2e/fixtures/apiStubs.ts) の共通スタブを使用。J1 全体（新規作成→export 貫通）のうち draft 生成〜検証の主要経路のみを回帰確認しており、`journey-new-project.spec.ts`（項目 1）や export 以降は未着手のまま
+6. **`journey-expand-boundary.spec.ts`** (J4 の一部・実装済み): `#/expand` の「境界事例を取得」を実操作で通し、margin 探索（拡張式 NOT 現式 → esearch → efetch → AI 選定）が一周して候補と更新提案が並ぶこと、および候補への include 判定が SeedPapers へ登録されることを確認する。[tests/e2e/fixtures/apiStubs.ts](../tests/e2e/fixtures/apiStubs.ts) の共通スタブを使用。項目 4 のキーボード判定（i/e/m 連打）はこの spec の対象外で未着手のまま
 
 ### Phase E: エラー復帰の網（0.5 日）
 
-**`journey-errors.spec.ts`** (J5) で `page.route()` を使って API を 401/403/429/500 に差し替える。
+**`journey-errors.spec.ts`** (J5) で `page.route()` を使って API を 401/403/429/500 に差し替える。前提条件だった Phase A#4 の fetch stub 拡充は [tests/e2e/fixtures/apiStubs.ts](../tests/e2e/fixtures/apiStubs.ts) の整備により満たされたため、Sheets 403 / NCBI 429 / LLM 500 の異常系ケースは着手可能な状態になっている（未着手）。
 
 | 発生源 | 期待挙動 |
 |---|---|
