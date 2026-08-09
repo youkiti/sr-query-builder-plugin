@@ -10,6 +10,10 @@
  * `%21` になる。`page.route` のハンドラ側で decode してからタブ名を判定しないとマッチしない
  * （実際に踏んだ罠）。
  *
+ * append 先になるタブは、初期 `tabs` にヘッダ行を含めて渡しておくこと。`formulaRepository.ts`
+ * 等は `rows.slice(1)` でヘッダ行を読み飛ばす作りなので、ヘッダ無しタブに 1 行 append しただけ
+ * だとその行がヘッダ扱いで読み飛ばされて消える。
+ *
  * ## NCBI の応答形
  * esearch のレスポンス形は `{esearchresult: {count: "123", idlist: ["..."]}}`（count は文字列）。
  * efetch は PubMed XML。
@@ -188,16 +192,52 @@ const SKILL_MARKERS: ReadonlyArray<[GeminiSkillName, string]> = [
   ['pick-boundary-cases', 'picks'],
 ];
 
-function detectSkill(promptBody: string): GeminiSkillName | null {
+/**
+ * `route.request().postData()` が返す生の body（JSON.stringify 済み文字列）から、
+ * GeminiProvider が組み立てた `contents[].parts[].text` と
+ * `systemInstruction.parts[].text` を全部連結した「復号済みプロンプト全文」を作る。
+ *
+ * 生 body に対して素の部分文字列一致で skill 判別すると、(a) 自由文中の英単語
+ * （"additions" 等）と衝突しうる、(b) マーカーはプロンプト中に `"picks"` のように
+ * 引用符付きキーとして現れるが、生 body ではその引用符が `\"picks\"` にエスケープ
+ * されていて素の marker が一致しない、という 2 つの罠がある。JSON.parse して
+ * デコードしてから引用符付きで照合することでどちらも避けられる。
+ */
+function decodeGeminiPrompt(rawBody: string): string {
+  try {
+    const parsed = JSON.parse(rawBody) as {
+      contents?: Array<{ parts?: Array<{ text?: string }> }>;
+      systemInstruction?: { parts?: Array<{ text?: string }> };
+    };
+    const texts: string[] = [];
+    for (const content of parsed.contents ?? []) {
+      for (const part of content.parts ?? []) {
+        if (typeof part.text === 'string') texts.push(part.text);
+      }
+    }
+    for (const part of parsed.systemInstruction?.parts ?? []) {
+      if (typeof part.text === 'string') texts.push(part.text);
+    }
+    return texts.join('\n');
+  } catch {
+    // JSON.parse に失敗した場合（想定外の body 形）は生 body をそのまま返す。
+    // ここで素の marker（引用符なし）に判定を緩めると自由文との誤衝突が復活してしまうため、
+    // 呼び出し側（detectSkill）は失敗時も同じ `"marker"` 判定のまま通す＝「賭けに出て誤判定
+    // するくらいなら判別失敗として fail closed し、診断可能な 500 で落とす」方針を取る。
+    return rawBody;
+  }
+}
+
+function detectSkill(decodedPrompt: string): GeminiSkillName | null {
   for (const [skill, marker] of SKILL_MARKERS) {
-    if (promptBody.includes(marker)) return skill;
+    if (decodedPrompt.includes(`"${marker}"`)) return skill;
   }
   return null;
 }
 
 export interface GeminiStubOptions {
-  /** skill 名 → 返す JSON オブジェクト、またはプロンプト本文を受け取って JSON オブジェクトを返す関数 */
-  responses: Partial<Record<GeminiSkillName, unknown | ((promptBody: string) => unknown)>>;
+  /** skill 名 → 返す JSON オブジェクト、または復号済みプロンプト全文を受け取って JSON オブジェクトを返す関数 */
+  responses: Partial<Record<GeminiSkillName, unknown | ((decodedPrompt: string) => unknown)>>;
   /** usageMetadata。既定 { promptTokenCount: 300, candidatesTokenCount: 150 } */
   usage?: { promptTokenCount?: number; candidatesTokenCount?: number };
 }
@@ -209,23 +249,37 @@ export async function registerGeminiStub(page: Page, options: GeminiStubOptions)
   };
 
   await page.route('**/generativelanguage.googleapis.com/**', async (route) => {
-    const promptBody = route.request().postData() ?? '';
-    const skill = detectSkill(promptBody);
+    const rawBody = route.request().postData() ?? '';
+    const decodedPrompt = decodeGeminiPrompt(rawBody);
+    const skill = detectSkill(decodedPrompt);
     if (skill === null) {
-      throw new Error(
-        `registerGeminiStub: プロンプト本文から skill を判別できませんでした（判別キーが見つからない）。` +
-          ` body(先頭200文字)=${promptBody.slice(0, 200)}`
-      );
+      const message =
+        `registerGeminiStub: プロンプト本文から skill を判別できませんでした` +
+        `（判別キーが見つからない）。 prompt(先頭200文字)=${decodedPrompt.slice(0, 200)}`;
+      console.error(message);
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: { message } }),
+      });
+      return;
     }
     const responder = options.responses[skill];
     if (responder === undefined) {
-      throw new Error(
-        `registerGeminiStub: skill "${skill}" 用の応答が responses に登録されていません。`
-      );
+      const message =
+        `registerGeminiStub: skill "${skill}" 用の応答が responses に登録されていません。` +
+        ` prompt(先頭200文字)=${decodedPrompt.slice(0, 200)}`;
+      console.error(message);
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: { message } }),
+      });
+      return;
     }
     const json =
       typeof responder === 'function'
-        ? (responder as (promptBody: string) => unknown)(promptBody)
+        ? (responder as (decodedPrompt: string) => unknown)(decodedPrompt)
         : responder;
 
     await route.fulfill({
