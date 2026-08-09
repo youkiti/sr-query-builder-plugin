@@ -65,6 +65,8 @@ describe('startApp', () => {
       missedAnalysis: null,
       formulaEditDraft: null,
       blockImprovement: null,
+      formulaSave: null,
+      formulaEditNote: null,
     });
     startApp(doc, { ...noopHashOptions('#/home'), store });
     expect(doc.getElementById('app-status')?.textContent).toContain('My SR');
@@ -109,6 +111,8 @@ describe('startApp', () => {
       missedAnalysis: null,
       formulaEditDraft: null,
       blockImprovement: null,
+      formulaSave: null,
+      formulaEditNote: null,
     });
     startApp(doc, { ...noopHashOptions('#/home'), setHash, store });
     const protocolBtn = Array.from(
@@ -960,6 +964,194 @@ describe('startApp - wiring 層', () => {
     );
     expect(appendCalls).toHaveLength(1);
     expect(handle.store.getState().currentFormulaMarkdown).toContain('edited');
+  });
+
+  test('edit view 既定 onSave は store.formulaSave を saving → saved と遷移させ、確認メッセージが再描画後も残る（issue #42）', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+    });
+    fetchMock.mockResolvedValue(jsonResponse({}));
+    const handle = startApp(doc, {
+      getHash: () => '#/edit',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({
+      ...s,
+      protocolDraft: {
+        frameworkType: 'pico',
+        researchQuestion: 'RQ',
+        inclusionCriteria: '',
+        exclusionCriteria: '',
+        studyDesign: 'RCT',
+        sourceType: 'manual',
+        sourceFilename: null,
+        rawTextRef: null,
+        rawTextPreview: 'p',
+        rawTextInline: '本文',
+      },
+      currentFormulaVersionId: 'parent-v',
+      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 old\n```\n',
+    }));
+    doc.querySelector<HTMLButtonElement>('.edit__actions button')!.click();
+    // runSaveEditedFormula は最初の await 前に同期で saving へ遷移させる
+    expect(handle.store.getState().formulaSave).toEqual({
+      formulaVersionId: 'parent-v',
+      status: 'saving',
+      error: null,
+    });
+    expect(doc.querySelector('.edit__status')?.textContent).toBe('保存中…');
+    expect(doc.querySelector<HTMLButtonElement>('.edit__actions button')!.disabled).toBe(true);
+    for (let i = 0; i < 5; i += 1) {
+      await flush();
+    }
+    const saved = handle.store.getState().formulaSave;
+    expect(saved?.status).toBe('saved');
+    // 保存で採番された新しい版を持つので、保存完了の再描画後も stale にならず残る
+    expect(saved?.formulaVersionId).toBe(handle.store.getState().currentFormulaVersionId);
+    expect(doc.querySelector('.edit__status')?.textContent).toContain('保存しました');
+    expect(doc.querySelector('.edit__status')?.textContent).toContain(saved!.formulaVersionId);
+    expect(doc.querySelector('.edit__error')?.textContent).toBe('');
+  });
+
+  test('edit view 既定 onSave は失敗時に store.formulaSave を error にする', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+    });
+    const handle = startApp(doc, {
+      getHash: () => '#/edit',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({
+      ...s,
+      currentFormulaVersionId: 'parent-v',
+      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 old\n```\n',
+    }));
+    fetchMock.mockRejectedValue(new Error('ネットワーク断'));
+    doc.querySelector<HTMLButtonElement>('.edit__actions button')!.click();
+    for (let i = 0; i < 5; i += 1) {
+      await flush();
+    }
+    const save = handle.store.getState().formulaSave;
+    expect(save?.status).toBe('error');
+    expect(save?.formulaVersionId).toBe('parent-v');
+    expect(doc.querySelector('.edit__error')?.textContent).toContain('ネットワーク断');
+    expect(doc.querySelector('.edit__status')?.textContent).toBe('');
+    // 失敗後はもう一度押せる
+    expect(doc.querySelector<HTMLButtonElement>('.edit__actions button')!.disabled).toBe(false);
+  });
+
+  test('edit view 既定 onSave は Error 以外で失敗しても String 化して表示する', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+    });
+    const handle = startApp(doc, {
+      getHash: () => '#/edit',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({
+      ...s,
+      currentFormulaVersionId: 'parent-v',
+      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 old\n```\n',
+    }));
+    // googleFetch は reject をラップしないので、非 Error はそのまま catch まで届く
+    fetchMock.mockRejectedValue('rare');
+    doc.querySelector<HTMLButtonElement>('.edit__actions button')!.click();
+    for (let i = 0; i < 5; i += 1) {
+      await flush();
+    }
+    const save = handle.store.getState().formulaSave;
+    expect(save?.status).toBe('error');
+    expect(save?.error).toBe('rare');
+    expect(doc.querySelector('.edit__error')?.textContent).toBe('rare');
+  });
+
+  test('edit view 既定 onNoteChange が store.formulaEditNote を更新し、md 編集で保存ステータスが消える', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+    });
+    fetchMock.mockResolvedValue(jsonResponse({}));
+    const handle = startApp(doc, {
+      getHash: () => '#/edit',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({
+      ...s,
+      currentFormulaVersionId: 'v1',
+      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 old\n```\n',
+      formulaSave: { formulaVersionId: 'v1', status: 'saved', error: null },
+    }));
+    // 編集メモ: 打鍵（input）で store に載り、再描画後も入力欄に残る（PR #43 で change → input）
+    const noteInput = doc.querySelector<HTMLInputElement>('.edit__note-input')!;
+    noteInput.value = 'MeSH を追加';
+    noteInput.dispatchEvent(new Event('input'));
+    expect(handle.store.getState().formulaEditNote).toEqual({
+      formulaVersionId: 'v1',
+      note: 'MeSH を追加',
+    });
+    expect(doc.querySelector<HTMLInputElement>('.edit__note-input')!.value).toBe('MeSH を追加');
+
+    // md を編集すると直前の「保存しました」は現在の内容を説明しないので消える
+    doc
+      .querySelector<HTMLButtonElement>('.edit__block-row[data-block-id="1"] .edit__block-edit-toggle')!
+      .click();
+    const blockInput = doc.querySelector<HTMLTextAreaElement>('.edit__block-edit-input')!;
+    blockInput.value = 'edited';
+    doc.querySelector<HTMLButtonElement>('.edit__block-edit-save')!.click();
+    expect(handle.store.getState().formulaSave).toBeNull();
+    expect(doc.querySelector('.edit__status')?.textContent).toBe('');
+    // メモは版が変わっていないので残る
+    expect(doc.querySelector<HTMLInputElement>('.edit__note-input')!.value).toBe('MeSH を追加');
+  });
+
+  test('edit view 既定 onNoteChange は setStateSilently 経由なので打鍵が再描画を誘発しない（PR #43 の回帰対応）', async () => {
+    const doc = buildDocument();
+    const { runtime } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+    });
+    const handle = startApp(doc, {
+      getHash: () => '#/edit',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({
+      ...s,
+      currentFormulaVersionId: 'v1',
+      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 old\n```\n',
+    }));
+
+    // startApp 内部の render も含め、以後 setState（＝再描画を誘発する更新）が起きたかを
+    // この購読者で監視する。setStateSilently は購読者へ通知しないため、打鍵だけなら
+    // 呼ばれないはず。
+    const listener = jest.fn();
+    handle.store.subscribe(listener);
+
+    const noteInput = doc.querySelector<HTMLInputElement>('.edit__note-input')!;
+    noteInput.value = '打鍵中のメモ';
+    noteInput.dispatchEvent(new Event('input'));
+
+    expect(handle.store.getState().formulaEditNote).toEqual({
+      formulaVersionId: 'v1',
+      note: '打鍵中のメモ',
+    });
+    expect(listener).not.toHaveBeenCalled();
   });
 
   test('edit view 既定 onImproveBlock が improve-block skill を呼んで提案を返す', async () => {

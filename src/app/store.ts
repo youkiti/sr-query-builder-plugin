@@ -181,6 +181,49 @@ export interface BlockImprovementState {
   error: string | null;
 }
 
+/**
+ * #/edit の「新バージョンとして保存」の実行状態。
+ *
+ * 保存（saveEditedFormula）は完了時に `currentFormulaVersionId` / `currentFormulaMarkdown` の
+ * setState を起こし、それが全ビュー再描画を誘発する（editView は再描画のたびに
+ * `container.innerHTML = ''` で丸ごと作り直す）。確認メッセージ・エラーをローカル DOM に
+ * 書くとこの再描画で要素ごと消え、「押しても何も起きていない」ように見える（issue #42）。
+ * formulaEditDraft / blockImprovement と同じく store に保持して再描画に耐えるようにする。
+ *
+ * formulaVersionId が currentFormulaVersionId と一致するときだけ有効。
+ * 保持する版は status で異なる:
+ * - `saving` / `error`: 保存前（＝編集元）の版。保存中もエラー後も current は変わらないので一致する
+ * - `saved`: 保存で**採番された新しい版**。保存成功時に current がこの版へ移るので一致する。
+ *   `保存しました（version_id: …）` に出す ID もこの値そのもの
+ * 別バージョンを履歴から読み込み直すと一致しなくなり、stale として表示されなくなる。
+ */
+export interface FormulaSaveState {
+  formulaVersionId: string;
+  status: 'saving' | 'saved' | 'error';
+  /** status='error' のときのメッセージ。それ以外は null */
+  error: string | null;
+}
+
+/**
+ * #/edit の編集メモ（`input.edit__note-input`）。
+ *
+ * 保存ステータスと同じ理由で、ローカル DOM に置くと全ビュー再描画で入力内容が消える。
+ * 打鍵のたび（input イベント）に store.setStateSilently で書き込む。silent 更新は購読者へ
+ * 通知しない＝再描画を起こさないため、開いている鉛筆編集フォームや AI 指示欄を打鍵ごとに
+ * 壊すことなく、かつ他の再描画（保存・AI 改善等）が起きても入力内容が state から復元できる
+ * （旧実装は change イベント＝blur/Enter でだけ通常の setState を行っていたが、これだと
+ * 「メモを打った直後に隣接ボタンを押す」操作で押下の mousedown が change の再描画に巻き込まれ
+ * DOM から切り離され、1 回目のクリックが飲まれる回帰を生んだ。詳細は setStateSilently の
+ * doc コメントと issue #42 / その回帰の顛末を参照）。
+ *
+ * stale 判定は FormulaEditDraft と同じ。保存に成功すると版が変わって stale になるため、
+ * メモは自動的に空へ戻る（＝次の編集に前回のメモが残らない）。
+ */
+export interface FormulaEditNote {
+  formulaVersionId: string;
+  note: string;
+}
+
 export interface AppState {
   /** 現在のハッシュルート */
   route: RouteName;
@@ -221,6 +264,10 @@ export interface AppState {
   formulaEditDraft: FormulaEditDraft | null;
   /** #/edit のブロック単位 AI 改善の実行状態。未実行なら null */
   blockImprovement: BlockImprovementState | null;
+  /** #/edit の「新バージョンとして保存」の実行状態。未実行なら null */
+  formulaSave: FormulaSaveState | null;
+  /** #/edit の編集メモ。未入力なら null */
+  formulaEditNote: FormulaEditNote | null;
 }
 
 export const INITIAL_STATE: AppState = {
@@ -240,6 +287,8 @@ export const INITIAL_STATE: AppState = {
   missedAnalysis: null,
   formulaEditDraft: null,
   blockImprovement: null,
+  formulaSave: null,
+  formulaEditNote: null,
 };
 
 export type Updater = (prev: AppState) => AppState;
@@ -247,6 +296,25 @@ export type Updater = (prev: AppState) => AppState;
 export interface AppStore {
   getState(): AppState;
   setState(updater: Updater): void;
+  /**
+   * setState と同じく `updater(state)` の結果で state を差し替えるが、購読者（render）へは
+   * 通知しない＝再描画を起こさない。
+   *
+   * **使ってよい場面は限定的**: その state を描画に使っているのが単一ビューで、かつ
+   * 「次にそのビューが（他の理由で）再描画されたときに state から読み直せば十分」な、
+   * 入力途中の値の保持だけに限る。他のビュー・コンポーネントがこの state 変化を見て
+   * 何かをしなければならない場合は絶対に使わないこと。通知を飛ばすため、購読側は
+   * 明示的に読み直すまで変化に気づけず、「更新したのに画面が反映されない」不具合の
+   * 温床になる。
+   *
+   * 典型例: #/edit の編集メモ（`formulaEditNote`）。打鍵ごとに setState すると全ビュー
+   * 再描画（editView は `container.innerHTML = ''` で丸ごと作り直す）が毎回走り、
+   * 開いている鉛筆編集フォームや AI 指示欄を壊すだけでなく、押下寸前の別ボタンの
+   * mousedown がその再描画に巻き込まれて DOM から切り離され、click が合成されない
+   * （＝クリックが 1 回丸ごと無視される）副作用まで生む。メモは editView 自身だけが
+   * 表示し、次の再描画時に state から読み直せば足りるため、silent 更新で十分。
+   */
+  setStateSilently(updater: Updater): void;
   subscribe(listener: () => void): () => void;
 }
 
@@ -264,6 +332,13 @@ export function createStore(initial: AppState = INITIAL_STATE): AppStore {
       for (const listener of listeners) {
         listener();
       }
+    },
+    setStateSilently: (updater) => {
+      const next = updater(state);
+      if (next === state) {
+        return;
+      }
+      state = next;
     },
     subscribe: (listener) => {
       listeners.add(listener);

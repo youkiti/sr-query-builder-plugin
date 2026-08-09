@@ -10,13 +10,12 @@
  * `blockImprovement` / `formulaEditDraft` が store に載り、再描画に耐えるようになったため、
  * §4 が当初から想定していた「AI 改善を実演する」構成に戻してある。
  *
- * ## 「保存しました」は**まだ**画面に残らない
+ * ## 「保存しました」は issue #42 の修正で画面に残るようになった
  *
- * `p.edit__status` の「保存しました（version_id: …）」は #39 と同じ再描画で消える
- * （提案と編集中 md は store 化されたが、保存ステータスはローカル DOM のまま。実測で確認）。
- * **保存そのものは成功している**ので、このシーンは消える確認メッセージを待たず、
- * アプリ内遷移で履歴を開いて増えた行を証拠として見せる。完了判定にはステータス文言ではなく
- * 「編集メモが再描画で空になること」を使う。
+ * 以前は `p.edit__status` の「保存しました（version_id: …）」が保存完了の再描画で消えていた
+ * （提案と編集中 md は #39 で store 化されたが、保存ステータスはローカル DOM のままだった）。
+ * `formulaSave` / `formulaEditNote` の store 化で残るようになったので、完了判定には
+ * ステータス文言そのものを使う。証拠としての履歴（増えた行）はそのまま見せる。
  *
  * ## 「編集 → 再検証で 100%」はライブで実演できない（実装の制約。#39 とは別）
  *
@@ -140,12 +139,13 @@ export default {
         const saveVersion = ctx.page.locator('.edit__actions button');
         await hoverSlow(ctx.page, saveVersion, { durationMs: 700 });
         await saveVersion.click();
-        // 「保存しました」は再描画で消えるため、編集メモが空に戻ったことを完了判定に使う
-        await ctx.page.waitForFunction(
-            () => document.querySelector('input.edit__note-input')?.value === '',
-            undefined,
-            { timeout: 30000 }
-        ).catch(() => {});
+        // 「保存しました（version_id: …）」は store 保持なので再描画後も残る（#42）
+        const savedStatus = ctx.page.locator('p.edit__status');
+        await savedStatus
+            .filter({ hasText: '保存しました' })
+            .waitFor({ state: 'visible', timeout: 30000 })
+            .catch(() => {});
+        await hoverSlow(ctx.page, savedStatus, { durationMs: 700 });
         await ctx.sleep(500);
         // 保存の証拠は履歴に増えた行そのもの。アプリ内遷移（リロード無し）で開く
         await ctx.page.locator('#app-sidebar .app__nav-list button').filter({ hasText: '履歴' }).click();

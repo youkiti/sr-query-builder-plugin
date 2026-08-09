@@ -28,6 +28,17 @@ const BLOCK_IMPROVEMENT: NonNullable<AppState['blockImprovement']> = {
   error: null,
 };
 
+/**
+ * 保存完了ステータス（store.formulaSave）。
+ * issue #42: 保存完了の setState による全ビュー再描画でも確認メッセージが消えないことの回帰確認用。
+ * saved は「保存で採番された新しい版」を持つので、`currentFormulaVersionId` も揃えて与える。
+ */
+const SAVED_STATE: Partial<AppState> = {
+  ...FULL_APP_STATE,
+  currentFormulaVersionId: 'fv-20260420-02',
+  formulaSave: { formulaVersionId: 'fv-20260420-02', status: 'saved', error: null },
+};
+
 test.describe('app-edit (#/edit)', () => {
   test('formula 有り: ブロックに分解表示され、鉛筆編集と AI 改善 UI が出る', async ({ page }) => {
     await injectAppStub(page, fullStateScenario());
@@ -75,6 +86,60 @@ test.describe('app-edit (#/edit)', () => {
     // 改善中のブロックは「AI に改善させる」ボタン自体はまだ活性（ready 状態のため）だが、
     // 提案 UI が対象ブロックの行に紐づいて出ていることを確認する。
     await expect(firstRow.locator('.edit__block-improve')).toBeEnabled();
+  });
+
+  test('保存ステータスと編集メモは store から復元される（issue #42 回帰）', async ({ page }) => {
+    await injectAppStub(
+      page,
+      fullStateScenario({
+        preloadedState: {
+          ...SAVED_STATE,
+          formulaEditNote: { formulaVersionId: 'fv-20260420-02', note: '#2 に MeSH を追加' },
+        },
+      })
+    );
+    await page.goto(APP_URL);
+
+    await expect(page.locator('p.edit__status')).toHaveText(
+      '保存しました（version_id: fv-20260420-02）'
+    );
+    await expect(page.locator('p.edit__error')).toHaveText('');
+    await expect(page.locator('input.edit__note-input')).toHaveValue('#2 に MeSH を追加');
+  });
+
+  test('保存中は「保存中…」と保存ボタン disabled', async ({ page }) => {
+    await injectAppStub(
+      page,
+      fullStateScenario({
+        preloadedState: {
+          ...FULL_APP_STATE,
+          formulaSave: { formulaVersionId: 'fv-20260420-01', status: 'saving', error: null },
+        },
+      })
+    );
+    await page.goto(APP_URL);
+    await expect(page.locator('p.edit__status')).toHaveText('保存中…');
+    await expect(page.locator('.edit__actions button')).toBeDisabled();
+  });
+
+  test('保存失敗はエラー行に出て、もう一度押せる', async ({ page }) => {
+    await injectAppStub(
+      page,
+      fullStateScenario({
+        preloadedState: {
+          ...FULL_APP_STATE,
+          formulaSave: {
+            formulaVersionId: 'fv-20260420-01',
+            status: 'error',
+            error: 'Sheets への追記に失敗しました',
+          },
+        },
+      })
+    );
+    await page.goto(APP_URL);
+    await expect(page.locator('p.edit__error')).toHaveText('Sheets への追記に失敗しました');
+    await expect(page.locator('p.edit__status')).toHaveText('');
+    await expect(page.locator('.edit__actions button')).toBeEnabled();
   });
 
   test('a11y: axe violation zero', async ({ page }) => {

@@ -24,6 +24,8 @@ describe('createStore', () => {
       missedAnalysis: null,
       formulaEditDraft: null,
       blockImprovement: null,
+      formulaSave: null,
+      formulaEditNote: null,
     });
     expect(store.getState().route).toBe('protocol');
   });
@@ -63,5 +65,21 @@ describe('createStore', () => {
     store.setState((s) => ({ ...s, cumulativeCostUsd: 9 }));
     expect(a).toHaveBeenCalledTimes(1);
     expect(b).toHaveBeenCalledTimes(1);
+  });
+
+  test('setStateSilently は状態を更新するが、購読者を通知しない', () => {
+    const store = createStore();
+    const listener = jest.fn();
+    store.subscribe(listener);
+    store.setStateSilently((s) => ({ ...s, cumulativeCostUsd: 0.5 }));
+    expect(store.getState().cumulativeCostUsd).toBe(0.5);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  test('setStateSilently は updater が同じオブジェクトを返した場合は state 参照も変えない', () => {
+    const store = createStore();
+    const before = store.getState();
+    store.setStateSilently((s) => s);
+    expect(store.getState()).toBe(before);
   });
 });

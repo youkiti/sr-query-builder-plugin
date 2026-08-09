@@ -892,10 +892,13 @@ async function sceneEditModel(driver) {
   const saveBtn = await driver.findElement(By.css('.edit__actions button'));
   await saveBtn.click();
   log('  「新バージョンとして保存」実行中…');
+  // 実行中は `.edit__status` が「保存中…」になるため、部分一致の「保存」では完了前に
+  // 抜けてしまう。完了文言（「保存しました」）で待つこと（issue #42 で store 化され、
+  // この文言は再描画後も残るようになった）。
   await driver.wait(
     async () =>
       (await findVisible(driver, '.edit__error')) !== null ||
-      (await textOf(driver, '.edit__status')).includes('保存') ||
+      (await textOf(driver, '.edit__status')).includes('保存しました') ||
       !(await driver.getCurrentUrl()).includes('#/edit'),
     60000,
     '保存が完了しません',

@@ -68,48 +68,21 @@ describe('createEditView', () => {
     expect(container.querySelector('.edit__block-current')?.textContent).toBe('x');
   });
 
-  test('保存ボタン押下で onSave が現在の md とメモ付きで呼ばれ、status を更新', async () => {
-    const onSave = jest.fn().mockResolvedValue({ versionId: 'new-id', parentVersionId: 'v1' });
+  test('保存ボタン押下で onSave が現在の md とメモ（入力欄の現在値）付きで呼ばれる', async () => {
+    const onSave = jest.fn().mockResolvedValue(undefined);
     const view = createEditView({ onSave });
     const container = buildContainer();
     view(container, { state: stateReady, navigate: jest.fn() });
     const noteInput = container.querySelector<HTMLInputElement>('.edit__note-input')!;
+    // change 未発火（＝store 未反映）の打鍵でも、保存内容には含める
     noteInput.value = 'メモ';
     const saveBtn = container.querySelector<HTMLButtonElement>('.edit__actions button')!;
     saveBtn.click();
-    await flushAsync();
     await flushAsync();
     expect(onSave).toHaveBeenCalledWith({
       formulaMd: stateReady.currentFormulaMarkdown,
       note: 'メモ',
     });
-    expect(container.querySelector('.edit__status')?.textContent).toContain('new-id');
-    expect(saveBtn.disabled).toBe(false);
-  });
-
-  test('onSave が reject したらエラー表示', async () => {
-    const onSave = jest.fn().mockRejectedValue(new Error('boom'));
-    const view = createEditView({ onSave });
-    const container = buildContainer();
-    view(container, { state: stateReady, navigate: jest.fn() });
-    const saveBtn = container.querySelector<HTMLButtonElement>('.edit__actions button')!;
-    saveBtn.click();
-    await flushAsync();
-    await flushAsync();
-    expect(container.querySelector('.edit__error')?.textContent).toBe('boom');
-    expect(container.querySelector('.edit__status')?.textContent).toBe('');
-  });
-
-  test('Error 以外も String 化される', async () => {
-    const onSave = jest.fn().mockRejectedValue('rare');
-    const view = createEditView({ onSave });
-    const container = buildContainer();
-    view(container, { state: stateReady, navigate: jest.fn() });
-    const saveBtn = container.querySelector<HTMLButtonElement>('.edit__actions button')!;
-    saveBtn.click();
-    await flushAsync();
-    await flushAsync();
-    expect(container.querySelector('.edit__error')?.textContent).toBe('rare');
   });
 
   test('onSave 未指定でもクリックで例外にならない', () => {
@@ -142,6 +115,142 @@ describe('createEditView', () => {
     expect(container.querySelector('.edit__block-empty')?.textContent).toContain(
       'ブロックがありません'
     );
+  });
+});
+
+describe('createEditView - 保存ステータス / 編集メモ（issue #42）', () => {
+  test('formulaSave=saved を store から復元して「保存しました」を出す', () => {
+    const view = createEditView({ onSave: jest.fn() });
+    const container = buildContainer();
+    // 保存成功後の state（version は採番された新しい版へ移っている）
+    view(container, {
+      state: {
+        ...stateReady,
+        currentFormulaVersionId: 'v2',
+        formulaSave: { formulaVersionId: 'v2', status: 'saved', error: null },
+      },
+      navigate: jest.fn(),
+    });
+    expect(container.querySelector('.edit__status')?.textContent).toBe(
+      '保存しました（version_id: v2）'
+    );
+    expect(container.querySelector('.edit__error')?.textContent).toBe('');
+    // 再描画されても消えない（＝ issue #42 の回帰確認）
+    view(container, {
+      state: {
+        ...stateReady,
+        currentFormulaVersionId: 'v2',
+        formulaSave: { formulaVersionId: 'v2', status: 'saved', error: null },
+      },
+      navigate: jest.fn(),
+    });
+    expect(container.querySelector('.edit__status')?.textContent).toContain('v2');
+  });
+
+  test('formulaSave=saving は「保存中…」と保存ボタン disabled', () => {
+    const view = createEditView({ onSave: jest.fn() });
+    const container = buildContainer();
+    view(container, {
+      state: {
+        ...stateReady,
+        formulaSave: { formulaVersionId: 'v1', status: 'saving', error: null },
+      },
+      navigate: jest.fn(),
+    });
+    expect(container.querySelector('.edit__status')?.textContent).toBe('保存中…');
+    expect(container.querySelector<HTMLButtonElement>('.edit__actions button')!.disabled).toBe(
+      true
+    );
+  });
+
+  test('formulaSave=error はエラー行に出し、status は空にする', () => {
+    const view = createEditView({ onSave: jest.fn() });
+    const container = buildContainer();
+    view(container, {
+      state: {
+        ...stateReady,
+        formulaSave: { formulaVersionId: 'v1', status: 'error', error: 'boom' },
+      },
+      navigate: jest.fn(),
+    });
+    expect(container.querySelector('.edit__error')?.textContent).toBe('boom');
+    expect(container.querySelector('.edit__status')?.textContent).toBe('');
+    expect(container.querySelector<HTMLButtonElement>('.edit__actions button')!.disabled).toBe(
+      false
+    );
+  });
+
+  test('formulaSave=error でメッセージ欠落時は「不明なエラー」', () => {
+    const view = createEditView({ onSave: jest.fn() });
+    const container = buildContainer();
+    view(container, {
+      state: {
+        ...stateReady,
+        formulaSave: { formulaVersionId: 'v1', status: 'error', error: null },
+      },
+      navigate: jest.fn(),
+    });
+    expect(container.querySelector('.edit__error')?.textContent).toBe('不明なエラー');
+  });
+
+  test('別バージョンの formulaSave（stale）は表示しない', () => {
+    const view = createEditView({ onSave: jest.fn() });
+    const container = buildContainer();
+    view(container, {
+      state: {
+        ...stateReady,
+        formulaSave: { formulaVersionId: 'other', status: 'saved', error: null },
+      },
+      navigate: jest.fn(),
+    });
+    expect(container.querySelector('.edit__status')?.textContent).toBe('');
+    expect(container.querySelector('.edit__error')?.textContent).toBe('');
+  });
+
+  test('編集メモは formulaEditNote から復元され、stale なら空', () => {
+    const view = createEditView();
+    const container = buildContainer();
+    view(container, {
+      state: { ...stateReady, formulaEditNote: { formulaVersionId: 'v1', note: '前回のメモ' } },
+      navigate: jest.fn(),
+    });
+    expect(container.querySelector<HTMLInputElement>('.edit__note-input')!.value).toBe(
+      '前回のメモ'
+    );
+    // 保存後は版が変わり stale になるのでメモは残らない
+    view(container, {
+      state: {
+        ...stateReady,
+        currentFormulaVersionId: 'v2',
+        formulaEditNote: { formulaVersionId: 'v1', note: '前回のメモ' },
+      },
+      navigate: jest.fn(),
+    });
+    expect(container.querySelector<HTMLInputElement>('.edit__note-input')!.value).toBe('');
+  });
+
+  test('編集メモは打鍵（input）のたびに onNoteChange を呼ぶ（change には依存しない）', () => {
+    const onNoteChange = jest.fn();
+    const view = createEditView({ onNoteChange });
+    const container = buildContainer();
+    view(container, { state: stateReady, navigate: jest.fn() });
+    const noteInput = container.querySelector<HTMLInputElement>('.edit__note-input')!;
+    noteInput.value = '書きかけ';
+    // change だけでは呼ばれない（listener が input に切り替わったことの確認。PR #43 の回帰対応）
+    noteInput.dispatchEvent(new Event('change'));
+    expect(onNoteChange).not.toHaveBeenCalled();
+    noteInput.dispatchEvent(new Event('input'));
+    expect(onNoteChange).toHaveBeenCalledWith('書きかけ');
+  });
+
+  test('onNoteChange 未指定でも input で例外にならない', () => {
+    const view = createEditView();
+    const container = buildContainer();
+    view(container, { state: stateReady, navigate: jest.fn() });
+    const noteInput = container.querySelector<HTMLInputElement>('.edit__note-input')!;
+    expect(() =>
+      noteInput.dispatchEvent(new Event('input'))
+    ).not.toThrow();
   });
 });
 
