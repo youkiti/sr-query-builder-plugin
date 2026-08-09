@@ -426,14 +426,17 @@ function buildDefaultViewOptions(
       onClearImprovement: () => {
         store.setState((s) => ({ ...s, blockImprovement: null }));
       },
-      // 編集メモを store（formulaEditNote）へ反映する。確定時（change）にのみ呼ばれる。
+      // 編集メモを store（formulaEditNote）へ反映する。打鍵のたび（input）に呼ばれるが、
+      // setStateSilently（購読者に通知しない＝再描画を起こさない）で書き込むため、
+      // 毎回の全ビュー再描画は起きない（store.ts の FormulaEditNote / setStateSilently
+      // doc コメント参照。PR #43 の回帰対応）。
       onNoteChange: (note: string) => {
         const formulaVersionId = store.getState().currentFormulaVersionId;
         /* istanbul ignore if -- guards.ts の edit: needsFormula() により #/edit 到達時点で必ず非 null */
         if (formulaVersionId === null) {
           return;
         }
-        store.setState((s) => ({ ...s, formulaEditNote: { formulaVersionId, note } }));
+        store.setStateSilently((s) => ({ ...s, formulaEditNote: { formulaVersionId, note } }));
       },
     },
     expand: {

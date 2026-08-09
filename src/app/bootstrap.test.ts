@@ -1096,10 +1096,10 @@ describe('startApp - wiring 層', () => {
       currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 old\n```\n',
       formulaSave: { formulaVersionId: 'v1', status: 'saved', error: null },
     }));
-    // 編集メモ: 確定（change）で store に載り、再描画後も入力欄に残る
+    // 編集メモ: 打鍵（input）で store に載り、再描画後も入力欄に残る（PR #43 で change → input）
     const noteInput = doc.querySelector<HTMLInputElement>('.edit__note-input')!;
     noteInput.value = 'MeSH を追加';
-    noteInput.dispatchEvent(new Event('change'));
+    noteInput.dispatchEvent(new Event('input'));
     expect(handle.store.getState().formulaEditNote).toEqual({
       formulaVersionId: 'v1',
       note: 'MeSH を追加',
@@ -1117,6 +1117,41 @@ describe('startApp - wiring 層', () => {
     expect(doc.querySelector('.edit__status')?.textContent).toBe('');
     // メモは版が変わっていないので残る
     expect(doc.querySelector<HTMLInputElement>('.edit__note-input')!.value).toBe('MeSH を追加');
+  });
+
+  test('edit view 既定 onNoteChange は setStateSilently 経由なので打鍵が再描画を誘発しない（PR #43 の回帰対応）', async () => {
+    const doc = buildDocument();
+    const { runtime } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+    });
+    const handle = startApp(doc, {
+      getHash: () => '#/edit',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({
+      ...s,
+      currentFormulaVersionId: 'v1',
+      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 old\n```\n',
+    }));
+
+    // startApp 内部の render も含め、以後 setState（＝再描画を誘発する更新）が起きたかを
+    // この購読者で監視する。setStateSilently は購読者へ通知しないため、打鍵だけなら
+    // 呼ばれないはず。
+    const listener = jest.fn();
+    handle.store.subscribe(listener);
+
+    const noteInput = doc.querySelector<HTMLInputElement>('.edit__note-input')!;
+    noteInput.value = '打鍵中のメモ';
+    noteInput.dispatchEvent(new Event('input'));
+
+    expect(handle.store.getState().formulaEditNote).toEqual({
+      formulaVersionId: 'v1',
+      note: '打鍵中のメモ',
+    });
+    expect(listener).not.toHaveBeenCalled();
   });
 
   test('edit view 既定 onImproveBlock が improve-block skill を呼んで提案を返す', async () => {

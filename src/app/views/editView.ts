@@ -52,7 +52,11 @@ export interface EditViewCallbacks {
   onDraftChange?: (markdown: string) => void;
   /** ブロック単位 AI 改善の提案を破棄する（accept / reject の両方で呼ぶ） */
   onClearImprovement?: () => void;
-  /** 編集メモを store（formulaEditNote）へ反映する（確定時＝change イベントのみ） */
+  /**
+   * 編集メモを store（formulaEditNote）へ反映する（打鍵のたび＝input イベント）。
+   * store 側は setStateSilently で受けるため、この呼び出しは再描画を誘発しない
+   * （PR #43 の回帰対応。store.ts の FormulaEditNote doc コメント参照）。
+   */
   onNoteChange?: (note: string) => void;
 }
 
@@ -207,9 +211,12 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
     noteInput.className = 'edit__note-input';
     noteInput.placeholder = '変更理由・気づきなど（任意）';
     noteInput.value = resolveNote(ctx.state);
-    // 確定時（blur / Enter）だけ store へ送る。打鍵ごとに setState すると全ビュー再描画が
-    // 走り、開いている鉛筆編集フォームや AI 指示欄が毎回壊れてしまうため。
-    noteInput.addEventListener('change', () => {
+    // 打鍵のたび（input）に store へ送る。onNoteChange は setStateSilently で書き込むため
+    // 再描画は起きず、開いている鉛筆編集フォームや AI 指示欄を壊さない。
+    // （旧実装は change＝blur/Enter でだけ通常の setState を行っていたが、これだと
+    // メモ欄から直接ボタンを押したときの mousedown が change の再描画に巻き込まれて
+    // ボタンが DOM から切り離され、1 回目のクリックが飲まれる回帰を生んだ。PR #43 対応）
+    noteInput.addEventListener('input', () => {
       callbacks.onNoteChange?.(noteInput.value);
     });
     noteLabel.appendChild(noteInput);

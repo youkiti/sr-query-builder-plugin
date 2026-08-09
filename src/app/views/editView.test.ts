@@ -229,27 +229,27 @@ describe('createEditView - 保存ステータス / 編集メモ（issue #42）',
     expect(container.querySelector<HTMLInputElement>('.edit__note-input')!.value).toBe('');
   });
 
-  test('編集メモの確定（change）で onNoteChange が呼ばれる', () => {
+  test('編集メモは打鍵（input）のたびに onNoteChange を呼ぶ（change には依存しない）', () => {
     const onNoteChange = jest.fn();
     const view = createEditView({ onNoteChange });
     const container = buildContainer();
     view(container, { state: stateReady, navigate: jest.fn() });
     const noteInput = container.querySelector<HTMLInputElement>('.edit__note-input')!;
     noteInput.value = '書きかけ';
-    // input（打鍵）では store を更新しない（毎回の全ビュー再描画を避けるため）
-    noteInput.dispatchEvent(new Event('input'));
-    expect(onNoteChange).not.toHaveBeenCalled();
+    // change だけでは呼ばれない（listener が input に切り替わったことの確認。PR #43 の回帰対応）
     noteInput.dispatchEvent(new Event('change'));
+    expect(onNoteChange).not.toHaveBeenCalled();
+    noteInput.dispatchEvent(new Event('input'));
     expect(onNoteChange).toHaveBeenCalledWith('書きかけ');
   });
 
-  test('onNoteChange 未指定でも change で例外にならない', () => {
+  test('onNoteChange 未指定でも input で例外にならない', () => {
     const view = createEditView();
     const container = buildContainer();
     view(container, { state: stateReady, navigate: jest.fn() });
     const noteInput = container.querySelector<HTMLInputElement>('.edit__note-input')!;
     expect(() =>
-      noteInput.dispatchEvent(new Event('change'))
+      noteInput.dispatchEvent(new Event('input'))
     ).not.toThrow();
   });
 });
