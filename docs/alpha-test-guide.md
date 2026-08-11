@@ -1,5 +1,9 @@
 # SR Query Builder (dev) アルファテスト手順書
 
+> ⚠️ **本書は凍結された過去の記録です。** 本拡張は 2026-08-10 に Chrome ウェブストアで v0.2.0 として正式公開されました。これから使う方は下記ストアからインストールしてください。本書はストア公開より前のアルファ配布（zip をテスターへ手動配布する運用）向けの手順書であり、以降の内容は歴史的記録として残しています。
+>
+> **Chrome ウェブストア**: <https://chromewebstore.google.com/detail/sr-query-builder-plugin/bckokafmjighegpjiocopkagghppnjld>
+
 このドキュメントは、`SR Query Builder (dev)` のアルファテスト協力者向けです。
 配布 zip（`sr-query-builder-plugin-dev-v0.1.0.zip`）と一緒に共有しています。
 
