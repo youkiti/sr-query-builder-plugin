@@ -1,6 +1,8 @@
 # Chrome ウェブストア 提出物一式（docs/store/）
 
-Chrome Web Store 提出フェーズ1（manifest / アイコン配線 / 提出物ドキュメント整備）の成果物置き場。**2026-08-07 に v0.2.0 を提出し、審査結果を待っている**（まだ公開されていない）。
+Chrome Web Store 提出物ドキュメント（manifest / アイコン配線 / プライバシーポリシー / 掲載文言など）の置き場。当初はフェーズ1（初回提出）の成果物置き場として作られたが、**公開後は更新提出のたびに参照する運用ドキュメント**になっている。
+
+**v0.2.0 が 2026-08-10 に公開され、続いて v0.3.0 が審査を通過し、現在の配信版として公開中**。公開 URL: <https://chromewebstore.google.com/detail/sr-query-builder-plugin/bckokafmjighegpjiocopkagghppnjld>
 
 ## このフォルダの中身
 
@@ -45,9 +47,19 @@ Chrome ウェブストアの掲載に必要な画像。スクリーンショッ�
 - [x] スクリーンショット取得（[hosted/screenshots/](../../hosted/screenshots/) に 1280×800 の 5 枚。`npm run shots` で再生成できる。上記「必要な画像」参照）
 - [x] クリーンな Chrome プロファイルでの実 Google 認証つき dist smoke
 - [x] Chrome ウェブストア デベロッパーアカウントで提出（**2026-08-07 に v0.2.0 を提出**。`release/sr-query-builder-plugin-0.2.0.zip` を `key.pem` 同梱でアップロード。version バンプはしていない＝0.2.0 は本提出が初出）
-- [ ] 審査通過・一般公開（**審査待ち**）
-- [ ] 公開後: ストアに表示された拡張 ID が `bckokafmjighegpjiocopkagghppnjld` と一致することを確認する（一致していれば既存の OAuth client_id がそのまま使える）
-- [ ] 公開後: [hosted/index.html](../../hosted/index.html) のヒーロー CTA と「はじめかた」を、自前ビルド手順からストアのインストールリンク・手順へ差し替える（[hosted/README.md](../../hosted/README.md) の「更新時に守ること」参照）
+- [x] 審査通過・一般公開（**v0.2.0 が 2026-08-10 に公開**。続けて v0.3.0 も審査を通過し公開中）
+- [x] 公開後: ストアに表示された拡張 ID が `bckokafmjighegpjiocopkagghppnjld` と一致することを確認する（一致していれば既存の OAuth client_id がそのまま使える）→ **確認済み**。ストア URL がこの ID を含む
+- [x] 公開後: [hosted/index.html](../../hosted/index.html) のヒーロー CTA と「はじめかた」を、自前ビルド手順からストアのインストールリンク・手順へ差し替える（[hosted/README.md](../../hosted/README.md) の「更新時に守ること」参照）→ **別 PR `docs/public-pages-v030-published` で実施中**
+
+## v0.3.0 リリース記録
+
+- 提出用 zip: `release/sr-query-builder-plugin-0.3.0.zip`（`key.pem` は同梱していない。更新提出のため不要 — 拡張 ID はストアのアイテムに既に固定されている）
+- version バンプ commit: `663677a`
+- v0.2.0 からの差分（拡張本体に載るものだけ）:
+  - 新機能: `.docx` 形式の研究プロトコル取り込み（fflate ベース）
+  - 修正: `#/edit` の AI 改善提案が再描画で消える（issue #39）
+  - 修正: `#/edit` の保存ステータス・編集メモが再描画で消える（issue #42）
+  - 修正: 編集メモの打鍵で 1 回目のクリックが飲まれる回帰
 
 ## manifest レビュー結果
 

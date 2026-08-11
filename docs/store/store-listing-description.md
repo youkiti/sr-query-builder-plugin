@@ -1,5 +1,7 @@
 # ストア掲載「詳細な説明」原稿
 
+> ⚠️ **このファイルを更新したら、Chrome ウェブストア デベロッパーダッシュボードの「詳細な説明」欄も貼り替えること。** ダッシュボード側とは自動連携していないため、この原稿を直しただけでは実際の掲載内容に反映されない。
+
 Chrome ウェブストア デベロッパーダッシュボードの「掲載情報」→「詳細な説明」欄へそのまま貼り付ける原稿です。更新するときは、[hosted/index.html](../../hosted/index.html) / [hosted/help.html](../../hosted/help.html) / [src/_locales/ja/messages.json](../../src/_locales/ja/messages.json) と [src/_locales/en/messages.json](../../src/_locales/en/messages.json) の `extDescription` と矛盾しないよう整合を取ってください。
 
 ## 日本語（ja description フィールド用）
@@ -8,7 +10,7 @@ Chrome ウェブストア デベロッパーダッシュボードの「掲載情
 研究プロトコルから PubMed 検索式のドラフト作成・検証・各データベース向け変換までを支援する Chrome 拡張です。
 
 ■ご利用の流れ
-1. 研究プロトコル（リサーチクエスチョン・PICO 等の組入/除外基準）を手入力するか、Markdown（.md）ファイルから取り込みます。
+1. 研究プロトコル（リサーチクエスチョン・PICO 等の組入/除外基準）を手入力するか、Markdown（.md）／Word（.docx）ファイルから取り込みます。
 2. AI がプロトコルから 1〜5 個の検索式ブロック（PICO の各要素に固定されない汎用モデル）を抽出します。内容を確認し、必要であれば編集してから承認します。
 3. 該当することが分かっている論文があれば、PMID をシード論文として登録します（任意）。
 4. 生成 AI（既定は Gemini。OpenRouter 経由で他のモデルへ切り替えることも可能です）が、承認済みのブロックから PubMed 検索式のドラフトを作成します。
@@ -33,7 +35,7 @@ MIT ライセンスのオープンソースソフトウェアで、ソースコ�
 A Chrome extension that helps you draft, validate, and convert a PubMed search strategy from a research protocol.
 
 How it works
-1. Enter your research protocol (research question, PICO-style eligibility criteria, etc.) by hand, or import it from a Markdown (.md) file.
+1. Enter your research protocol (research question, PICO-style eligibility criteria, etc.) by hand, or import it from a Markdown (.md) or Word (.docx) file.
 2. AI extracts 1-5 search blocks from the protocol (a generic model, not fixed to PICO's elements). Review the terms, edit them if needed, and approve.
 3. If you already know of studies that should be included, register their PMIDs as seed papers (optional).
 4. Generative AI (Gemini by default; you can switch to other models via OpenRouter) drafts a PubMed search strategy from the approved blocks.
