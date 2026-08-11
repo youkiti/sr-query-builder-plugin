@@ -2,7 +2,7 @@
 <!-- SR Query Builder Plugin ランディングページ（GitHub Pages 配信）。
      正典はこのファイル（master の hosted/）。デプロイ手順は hosted/README.md を参照。
      ja / en は両方を持ち、表示は lang.js + CSS が片方だけに絞る（併記しない）。
-     version: 2026-08-09 -->
+     version: 2026-08-11 -->
 <html lang="ja">
   <head>
     <meta charset="utf-8" />
@@ -23,8 +23,8 @@
         <!-- 言語切替ボタンは lang.js が組み立てる（JS 無効時は空のまま = 両言語が並ぶ） -->
         <div class="lang-switch lang-switch--hero" data-lang-switch></div>
         <p class="hero-meta">
-          <span class="ja" lang="ja">最終更新: 2026-08-07 / 対象バージョン: v0.2.0</span>
-          <span class="en" lang="en">Last updated: 2026-08-07 / Covers v0.2.0</span>
+          <span class="ja" lang="ja">最終更新: 2026-08-11 / 対象バージョン: v0.3.0</span>
+          <span class="en" lang="en">Last updated: 2026-08-11 / Covers v0.3.0</span>
         </p>
         <h1>SR Query Builder Plugin</h1>
         <p class="subtitle">
@@ -36,13 +36,19 @@
           >
         </p>
         <div class="hero-buttons">
-          <a class="btn btn-primary" href="https://github.com/youkiti/sr-query-builder-plugin"
-            ><span class="ja" lang="ja">GitHub でソースを見る</span
-            ><span class="en" lang="en">View source on GitHub</span></a
+          <a
+            class="btn btn-primary"
+            href="https://chromewebstore.google.com/detail/sr-query-builder-plugin/bckokafmjighegpjiocopkagghppnjld"
+            ><span class="ja" lang="ja">Chrome ウェブストアでインストール</span
+            ><span class="en" lang="en">Install from Chrome Web Store</span></a
           >
           <a class="btn btn-secondary" href="help.html"
             ><span class="ja" lang="ja">使い方を見る</span
             ><span class="en" lang="en">Read the user guide</span></a
+          >
+          <a class="btn btn-secondary" href="https://github.com/youkiti/sr-query-builder-plugin"
+            ><span class="ja" lang="ja">GitHub でソースを見る</span
+            ><span class="en" lang="en">View source on GitHub</span></a
           >
         </div>
       </div>
@@ -89,18 +95,21 @@
           <ol class="steps">
             <li>
               <span class="ja" lang="ja"
-                >研究プロトコル（リサーチクエスチョン・PICO 等）を入力します（手入力 / <code>.md</code> ファイル）。</span
+                >研究プロトコル（リサーチクエスチョン・PICO 等）を入力します（手入力 / <code>.md</code> /
+                <code>.docx</code> ファイル）。</span
               >
               <span class="en" lang="en"
-                >Enter your research protocol (research question, PICO, …) by hand or import it from a <code>.md</code> file.</span
+                >Enter your research protocol (research question, PICO, …) by hand or import it from a
+                <code>.md</code> or <code>.docx</code> file.</span
               >
             </li>
             <li>
               <span class="ja" lang="ja"
-                >生成 AI（Gemini、BYOK）が、プロトコルから PubMed 検索式のドラフトを作成します。</span
+                >生成 AI（LLM プロバイダ。既定は Gemini、BYOK）が、プロトコルから PubMed 検索式のドラフトを作成します。</span
               >
               <span class="en" lang="en"
-                >Generative AI (Gemini, BYOK) drafts a PubMed search strategy from the protocol.</span
+                >Generative AI (your chosen LLM provider; Gemini by default, BYOK) drafts a PubMed search strategy
+                from the protocol.</span
               >
             </li>
             <li>
@@ -219,11 +228,11 @@
           <p>
             <span class="ja" lang="ja"
               >開発者が運用するサーバーは存在しません。データは、利用者自身の Google アカウントと、利用者が自分の
-              API キーで契約する Gemini API / NCBI API の間でのみ流通します。</span
+              API キーで契約する LLM プロバイダ（Gemini または OpenRouter。既定は Gemini） / NCBI API の間でのみ流通します。</span
             >
             <span class="en" lang="en"
               >There is no developer-operated server. Your data flows only between your own Google account and the
-              Gemini API / NCBI API you use with your own key.</span
+              LLM provider (Gemini or OpenRouter; Gemini is the default) / NCBI API you use with your own key.</span
             >
           </p>
           <div class="cards">
@@ -262,11 +271,13 @@
               </h3>
               <p>
                 <span class="ja" lang="ja"
-                  >検索式ドラフト生成は Gemini API のキー、NCBI API キーは検証時のレート制限緩和用（任意）です。キーはブラウザ内にのみ保存されます。</span
+                  >検索式ドラフト生成には選択した LLM プロバイダ（既定は Gemini。OpenRouter への切替も可）のキーが必須、NCBI
+                  API キーは検証時のレート制限緩和用（任意）です。キーはブラウザ内にのみ保存されます。</span
                 >
                 <span class="en" lang="en"
-                  >A Gemini API key drafts your search strategy; an NCBI API key (optional) eases rate limits during
-                  validation. Keys never leave your browser.</span
+                  >Drafting the search strategy requires a key for your selected LLM provider (Gemini by default;
+                  OpenRouter can be selected too); an NCBI API key (optional) eases rate limits during validation.
+                  Keys never leave your browser.</span
                 >
               </p>
             </div>
@@ -292,103 +303,156 @@
           </h2>
           <p>
             <span class="ja" lang="ja"
-              >本拡張は現時点で Chrome ウェブストア未公開です。GitHub からソースを取得し、自分でビルドして読み込みます。
-              Google ログインまで通すには、<strong>利用者自身の Google Cloud OAuth クライアント ID</strong>
-              を発行して設定する必要があります（後述）。</span
+              >本拡張は Chrome ウェブストアで公開されています。ストアからインストールし、API
+              キーを設定すれば、すぐに使い始められます。</span
             >
             <span class="en" lang="en"
-              >The extension is not yet published on the Chrome Web Store. Get the source from GitHub and build it
-              yourself. To get Google sign-in working, you’ll need to issue and configure
-              <strong>your own Google Cloud OAuth client ID</strong> (see below).</span
+              >The extension is published on the Chrome Web Store. Install it from the store, set your API keys, and
+              you’re ready to go.</span
             >
           </p>
           <ol>
             <li>
               <span class="ja" lang="ja"
-                ><a href="https://github.com/youkiti/sr-query-builder-plugin">GitHub リポジトリ</a>を取得し、
-                <code>npm install</code> を実行します。</span
+                ><a
+                  href="https://chromewebstore.google.com/detail/sr-query-builder-plugin/bckokafmjighegpjiocopkagghppnjld"
+                  >Chrome ウェブストア</a
+                >から本拡張をインストールします。</span
               >
               <span class="en" lang="en"
-                >Clone the <a href="https://github.com/youkiti/sr-query-builder-plugin">GitHub repository</a> and run
-                <code>npm install</code>.</span
+                >Install the extension from the
+                <a
+                  href="https://chromewebstore.google.com/detail/sr-query-builder-plugin/bckokafmjighegpjiocopkagghppnjld"
+                  >Chrome Web Store</a
+                >.</span
               >
             </li>
             <li>
               <span class="ja" lang="ja"
-                >Google Cloud Console で OAuth クライアント ID（種類: Chrome
-                拡張機能。コンソールの表記が「Chrome App」になっている場合もあります）を発行します。アプリケーション
-                ID には <code>bckokafmjighegpjiocopkagghppnjld</code> を指定してください。これは
-                <code>src/manifest.json</code> に固定の公開鍵（<code>key</code>）が含まれているため、誰の環境でビルドしてもこの値になります（手順4の
-                <code>npm run dev</code> はこの鍵を残したままビルドするので拡張 ID が固定されます。鍵を取り除くのは本番ビルドの
-                <code>npm run build</code> の方で、この手順では使いません）。OAuth 同意画面は要求スコープが非センシティブな
-                <code>drive.file</code> のみのため Google の追加審査は不要ですが、画面自体（アプリ名・サポートメール等）の設定は必要です。</span
+                >拡張アイコンを右クリック →「オプション」で設定画面を開き、ご自身の API キーを保存します（BYOK）。検索式ドラフトの生成には
+                LLM プロバイダの API キーが必須です（既定は Gemini。OpenRouter への切替も可）。NCBI API キーは任意です。</span
               >
               <span class="en" lang="en"
-                >In Google Cloud Console, issue an OAuth client ID of type “Chrome Extension” (some versions of the
-                console label this “Chrome App”), using <code>bckokafmjighegpjiocopkagghppnjld</code> as the
-                application ID. This value is fixed because <code>src/manifest.json</code> ships with a pinned
-                public key (<code>key</code>), so it’s the same regardless of who builds it (step 4’s
-                <code>npm run dev</code> keeps this key in the build, which is exactly why the extension ID stays
-                fixed — it’s the production build, <code>npm run build</code>, that strips the key, and this guide
-                doesn’t use that). The OAuth consent screen only needs to request the non-sensitive
-                <code>drive.file</code> scope, so no extra Google verification is required — but you do still need
-                to fill in the basics (app name, support email, etc.).</span
+                >Right-click the extension icon → “Options” to open the settings screen and save your own API keys
+                (BYOK). Drafting the search strategy requires an API key for the LLM provider (Gemini by default;
+                OpenRouter can be selected too). An NCBI API key is optional.</span
               >
             </li>
             <li>
               <span class="ja" lang="ja"
-                >リポジトリ直下に <code>.env</code> を作成し（<code>.env.example</code>
-                を参考に）、発行したクライアント ID を <code>OAUTH_CLIENT_ID</code>（または
-                <code>LOCAL_OAUTH_CLIENT_ID</code>）に設定します。</span
+                >拡張アイコンをクリックして Popup を開き、Google アカウントでログインしてプロジェクトを作成します。</span
               >
               <span class="en" lang="en"
-                >Create a <code>.env</code> at the repository root (see <code>.env.example</code>) and set the
-                client ID you issued as <code>OAUTH_CLIENT_ID</code> (or <code>LOCAL_OAUTH_CLIENT_ID</code>).</span
+                >Click the extension icon to open the Popup, sign in with your Google account, and create a
+                project.</span
               >
-            </li>
-            <li>
-              <span class="ja" lang="ja"
-                ><code>npm run dev</code> を実行して <code>dist/</code> を生成します（<strong
-                  >本番ビルドの <code>npm run build</code> は使わないでください</strong
-                >。<code>.env</code> に <code>OAUTH_CLIENT_ID</code> が無いとエラーで停止するうえ、manifest から
-                <code>key</code> を取り除くため拡張 ID が変わってしまい、手順2で発行した OAuth クライアント ID と一致しなくなります）。</span
-              >
-              <span class="en" lang="en"
-                >Run <code>npm run dev</code> to produce <code>dist/</code> (<strong
-                  >do not use the production build, <code>npm run build</code></strong
-                >: it fails without <code>OAUTH_CLIENT_ID</code> in <code>.env</code>, and it also strips
-                <code>key</code> from the manifest, which changes the extension ID so it no longer matches the OAuth
-                client ID you issued in step 2).</span
-              >
-            </li>
-            <li>
-              <span class="ja" lang="ja"
-                ><code>chrome://extensions</code> でデベロッパーモードを有効にし、「パッケージ化されていない拡張機能を読み込む」で
-                <code>dist/</code> を選びます。</span
-              >
-              <span class="en" lang="en"
-                >Enable developer mode at <code>chrome://extensions</code> and load <code>dist/</code> via “Load
-                unpacked”.</span
-              >
-            </li>
-            <li>
-              <span class="ja" lang="ja"
-                >拡張の Options 画面で、ご自身の Gemini API キー（必須）と NCBI API キー（任意）を保存します（BYOK）。</span
-              >
-              <span class="en" lang="en"
-                >Save your own Gemini API key (required) and NCBI API key (optional) in the extension options
-                (BYOK).</span
-              >
-            </li>
-            <li>
-              <span class="ja" lang="ja">Google アカウントでログインし、プロジェクトを作成します。</span>
-              <span class="en" lang="en">Sign in with Google and create a project.</span>
             </li>
           </ol>
           <p>
             <span class="ja" lang="ja">操作の詳細は<a href="help.html">使い方ガイド</a>を参照してください。</span>
             <span class="en" lang="en">See the <a href="help.html">user guide</a> for the full walkthrough.</span>
           </p>
+          <details class="faq">
+            <summary>
+              <span class="ja" lang="ja">開発者向け: ソースからビルドする</span>
+              <span class="en" lang="en">For developers: build from source</span>
+            </summary>
+            <p>
+              <span class="ja" lang="ja"
+                >GitHub からソースを取得して自分でビルドすることもできます。Google ログインまで通すには、<strong
+                  >利用者自身の Google Cloud OAuth クライアント ID</strong
+                >を発行して設定する必要があります。</span
+              >
+              <span class="en" lang="en"
+                >You can also get the source from GitHub and build it yourself. To get Google sign-in working,
+                you’ll need to issue and configure <strong>your own Google Cloud OAuth client ID</strong>.</span
+              >
+            </p>
+            <ol>
+              <li>
+                <span class="ja" lang="ja"
+                  ><a href="https://github.com/youkiti/sr-query-builder-plugin">GitHub リポジトリ</a>を取得し、
+                  <code>npm install</code> を実行します。</span
+                >
+                <span class="en" lang="en"
+                  >Clone the <a href="https://github.com/youkiti/sr-query-builder-plugin">GitHub repository</a> and
+                  run <code>npm install</code>.</span
+                >
+              </li>
+              <li>
+                <span class="ja" lang="ja"
+                  >Google Cloud Console で OAuth クライアント ID（種類: Chrome
+                  拡張機能。コンソールの表記が「Chrome App」になっている場合もあります）を発行します。アプリケーション
+                  ID には <code>bckokafmjighegpjiocopkagghppnjld</code> を指定してください。これは
+                  <code>src/manifest.json</code> に固定の公開鍵（<code>key</code>）が含まれているため、誰の環境でビルドしてもこの値になります（手順4の
+                  <code>npm run dev</code> はこの鍵を残したままビルドするので拡張 ID が固定されます。鍵を取り除くのは本番ビルドの
+                  <code>npm run build</code> の方で、この手順では使いません）。OAuth 同意画面は要求スコープが非センシティブな
+                  <code>drive.file</code> のみのため Google の追加審査は不要ですが、画面自体（アプリ名・サポートメール等）の設定は必要です。</span
+                >
+                <span class="en" lang="en"
+                  >In Google Cloud Console, issue an OAuth client ID of type “Chrome Extension” (some versions of the
+                  console label this “Chrome App”), using <code>bckokafmjighegpjiocopkagghppnjld</code> as the
+                  application ID. This value is fixed because <code>src/manifest.json</code> ships with a pinned
+                  public key (<code>key</code>), so it’s the same regardless of who builds it (step 4’s
+                  <code>npm run dev</code> keeps this key in the build, which is exactly why the extension ID stays
+                  fixed — it’s the production build, <code>npm run build</code>, that strips the key, and this guide
+                  doesn’t use that). The OAuth consent screen only needs to request the non-sensitive
+                  <code>drive.file</code> scope, so no extra Google verification is required — but you do still need
+                  to fill in the basics (app name, support email, etc.).</span
+                >
+              </li>
+              <li>
+                <span class="ja" lang="ja"
+                  >リポジトリ直下に <code>.env</code> を作成し（<code>.env.example</code>
+                  を参考に）、発行したクライアント ID を <code>OAUTH_CLIENT_ID</code>（または
+                  <code>LOCAL_OAUTH_CLIENT_ID</code>）に設定します。</span
+                >
+                <span class="en" lang="en"
+                  >Create a <code>.env</code> at the repository root (see <code>.env.example</code>) and set the
+                  client ID you issued as <code>OAUTH_CLIENT_ID</code> (or <code>LOCAL_OAUTH_CLIENT_ID</code>).</span
+                >
+              </li>
+              <li>
+                <span class="ja" lang="ja"
+                  ><code>npm run dev</code> を実行して <code>dist/</code> を生成します（<strong
+                    >本番ビルドの <code>npm run build</code> は使わないでください</strong
+                  >。<code>.env</code> に <code>OAUTH_CLIENT_ID</code> が無いとエラーで停止するうえ、manifest から
+                  <code>key</code> を取り除くため拡張 ID が変わってしまい、手順2で発行した OAuth クライアント ID と一致しなくなります）。</span
+                >
+                <span class="en" lang="en"
+                  >Run <code>npm run dev</code> to produce <code>dist/</code> (<strong
+                    >do not use the production build, <code>npm run build</code></strong
+                  >: it fails without <code>OAUTH_CLIENT_ID</code> in <code>.env</code>, and it also strips
+                  <code>key</code> from the manifest, which changes the extension ID so it no longer matches the
+                  OAuth client ID you issued in step 2).</span
+                >
+              </li>
+              <li>
+                <span class="ja" lang="ja"
+                  ><code>chrome://extensions</code> でデベロッパーモードを有効にし、「パッケージ化されていない拡張機能を読み込む」で
+                  <code>dist/</code> を選びます。</span
+                >
+                <span class="en" lang="en"
+                  >Enable developer mode at <code>chrome://extensions</code> and load <code>dist/</code> via “Load
+                  unpacked”.</span
+                >
+              </li>
+              <li>
+                <span class="ja" lang="ja"
+                  >拡張の Options 画面で、ご自身の LLM プロバイダの API キー（必須。既定は Gemini）と NCBI API
+                  キー（任意）を保存します（BYOK）。</span
+                >
+                <span class="en" lang="en"
+                  >Save your own API key for the LLM provider (required; Gemini by default) and NCBI API key
+                  (optional) in the extension options (BYOK).</span
+                >
+              </li>
+              <li>
+                <span class="ja" lang="ja">Google アカウントでログインし、プロジェクトを作成します。</span>
+                <span class="en" lang="en">Sign in with Google and create a project.</span>
+              </li>
+            </ol>
+          </details>
         </div>
       </section>
     </main>

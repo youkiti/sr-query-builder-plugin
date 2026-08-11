@@ -2,7 +2,7 @@
 <!-- 利用規約（GitHub Pages 配信）。正典はこのファイル（master の hosted/）。
      内容は本拡張の実態（MIT OSS・サーバーレス・BYOK・無保証）に即して書き下ろす。
      ja / en は両方を持ち、表示は lang.js + CSS が片方だけに絞る（併記しない）。
-     version: 2026-08-07 -->
+     version: 2026-08-11 -->
 <html lang="ja">
   <head>
     <meta charset="utf-8" />
@@ -53,11 +53,11 @@
         </h1>
         <p class="last-updated">
           <span class="ja" lang="ja"
-            >最終更新: 2026-08-07 / 対象バージョン: v0.2.0<br />
+            >最終更新: 2026-08-11 / 対象バージョン: v0.3.0<br />
             対象: Chrome 拡張機能「SR Query Builder Plugin」（sr-query-builder-plugin）</span
           >
           <span class="en" lang="en"
-            >Last updated: 2026-08-07 / Covers v0.2.0<br />
+            >Last updated: 2026-08-11 / Covers v0.3.0<br />
             Applies to the Chrome extension “SR Query Builder Plugin” (sr-query-builder-plugin)</span
           >
         </p>
@@ -101,12 +101,14 @@
             </li>
             <li>
               <span class="ja" lang="ja"
-                >本拡張の利用に対して開発者が課金することはありません。ただし、利用者が接続する Gemini API・NCBI
-                API の利用料金、Google アカウントの利用条件は、利用者と各サービス提供者との契約に基づきます。</span
+                >本拡張の利用に対して開発者が課金することはありません。ただし、利用者が接続する LLM
+                プロバイダ（Gemini・OpenRouter）・NCBI API の利用料金、Google
+                アカウントの利用条件は、利用者と各サービス提供者との契約に基づきます。</span
               >
               <span class="en" lang="en"
-                >The developer charges nothing for the extension. Fees for the Gemini API / NCBI API you connect to,
-                and the terms of your Google account, are matters between you and those providers.</span
+                >The developer charges nothing for the extension. Fees for the LLM provider (Gemini / OpenRouter) and
+                NCBI API you connect to, and the terms of your Google account, are matters between you and those
+                providers.</span
               >
             </li>
           </ul>
@@ -120,16 +122,17 @@
           <p>
             <span class="ja" lang="ja"
               >本拡張には開発者が運用するサーバーが存在しません。データは、利用者自身の Google Sheets / Drive と、利用者が自身の
-              API キーで契約する Gemini API、および NCBI E-utilities の間でのみ流通します（BYOK: Bring Your Own
-              Key）。開発者が利用者のデータを受信・保存・収集することはありません。詳細は<a href="privacy-policy.html"
+              API キーで契約する LLM プロバイダ（Gemini または OpenRouter。既定は Gemini）、および NCBI
+              E-utilities の間でのみ流通します（BYOK: Bring Your Own Key）。開発者が利用者のデータを受信・保存・収集することはありません。詳細は<a
+                href="privacy-policy.html"
                 >プライバシーポリシー</a
               >を参照してください。</span
             >
             <span class="en" lang="en"
               >The extension has no developer-operated server. Data flows only between your own Google Sheets / Drive,
-              the Gemini API you contract with using your own key, and NCBI E-utilities (BYOK: Bring Your Own Key).
-              The developer never receives, stores or collects your data. See the
-              <a href="privacy-policy.html">privacy policy</a> for details.</span
+              the LLM provider you contract with using your own key (Gemini or OpenRouter; Gemini is the default),
+              and NCBI E-utilities (BYOK: Bring Your Own Key). The developer never receives, stores or collects your
+              data. See the <a href="privacy-policy.html">privacy policy</a> for details.</span
             >
           </p>
           <p>
@@ -172,14 +175,15 @@
             </li>
             <li>
               <span class="ja" lang="ja"
-                >NCBI E-utilities へ送信する検索式・PMID の内容、および Gemini API・NCBI API の API
-                キーの管理は利用者の責任で行ってください。Gemini API へ送信される内容は、送信先プロバイダの利用規約・プライバシーポリシーに従って扱われます。機密性の高い研究プロトコルを扱う場合は、送信先の条件を事前に確認してください。</span
+                >NCBI E-utilities へ送信する検索式・PMID の内容、および選択した LLM プロバイダ（Gemini・OpenRouter）・NCBI
+                API の API キーの管理は利用者の責任で行ってください。LLM
+                プロバイダへ送信される内容は、送信先プロバイダの利用規約・プライバシーポリシーに従って扱われます。機密性の高い研究プロトコルを扱う場合は、送信先の条件を事前に確認してください。</span
               >
               <span class="en" lang="en"
                 >You are responsible for the content of the search strategies and PMIDs sent to NCBI E-utilities, and
-                for managing your Gemini API and NCBI API keys. Anything sent to the Gemini API is handled under that
-                provider’s own terms and privacy policy; check those terms before processing a sensitive research
-                protocol.</span
+                for managing the API keys for your selected LLM provider (Gemini or OpenRouter) and NCBI API.
+                Anything sent to the LLM provider is handled under that provider’s own terms and privacy policy;
+                check those terms before processing a sensitive research protocol.</span
               >
             </li>
           </ul>
@@ -193,11 +197,12 @@
           <p>
             <span class="ja" lang="ja"
               >本拡張を、法令に違反する目的、第三者の権利を侵害する目的、または接続先サービス（Google API・Gemini
-              API・NCBI API）の利用規約に違反する態様で利用しないでください。</span
+              API・OpenRouter API・NCBI API）の利用規約に違反する態様で利用しないでください。</span
             >
             <span class="en" lang="en"
               >Do not use the extension for unlawful purposes, in ways that infringe the rights of others, or in
-              breach of the terms of the services it connects to (Google APIs, the Gemini API and NCBI APIs).</span
+              breach of the terms of the services it connects to (Google APIs, the Gemini API, the OpenRouter API and
+              NCBI APIs).</span
             >
           </p>
         </section>
@@ -210,14 +215,15 @@
           <p>
             <span class="ja" lang="ja"
               >本拡張は MIT ライセンスに基づき<strong>「現状のまま」（AS IS）</strong>提供されます。開発者は、商品性・特定目的への適合性・非侵害を含むいかなる保証も行いません。検索式ドラフトの網羅性・正確性、検証結果（ヒット数・捕捉率・MeSH
-              抽出）の正確性、サービスの継続性、Google API・Gemini API・NCBI API の仕様変更に対する追随についても保証しません。</span
+              抽出）の正確性、サービスの継続性、Google API・Gemini API・OpenRouter API・NCBI API
+              の仕様変更に対する追随についても保証しません。</span
             >
             <span class="en" lang="en"
               >The extension is provided <strong>“AS IS”</strong> under the MIT licence, without warranty of any kind,
               including merchantability, fitness for a particular purpose and non-infringement. No guarantee is made
               as to the completeness or accuracy of the drafted search strategy, the accuracy of validation results
               (hit counts, capture rate, MeSH extraction), continued availability, or compatibility with future
-              changes to the Google, Gemini or NCBI APIs.</span
+              changes to the Google, Gemini, OpenRouter or NCBI APIs.</span
             >
           </p>
           <p>
@@ -240,12 +246,13 @@
           </h2>
           <p>
             <span class="ja" lang="ja"
-              >本拡張は Google API（Sheets / Drive / OAuth）、Gemini API、および NCBI
+              >本拡張は Google API（Sheets / Drive / OAuth）、LLM プロバイダの API（Gemini・OpenRouter）、および NCBI
               E-utilities を利用します。これらのサービスの提供条件・可用性・料金は各提供者が定めるものであり、開発者は関与しません。</span
             >
             <span class="en" lang="en"
-              >The extension uses Google APIs (Sheets, Drive, OAuth), the Gemini API, and NCBI E-utilities. The terms,
-              availability and pricing of those services are set by their providers, not by the developer.</span
+              >The extension uses Google APIs (Sheets, Drive, OAuth), LLM provider APIs (Gemini and OpenRouter), and
+              NCBI E-utilities. The terms, availability and pricing of those services are set by their providers, not
+              by the developer.</span
             >
           </p>
         </section>

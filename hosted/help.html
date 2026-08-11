@@ -3,7 +3,7 @@
      正典はこのファイル（master の hosted/）。デプロイ手順は hosted/README.md を参照。
      内容はワークフローレベルに留める（画面細部はアプリ内のリード文が担う）。
      文言は ja / en を両方持ち、表示は lang.js + CSS が片方だけに絞る（併記しない）。
-     version: 2026-08-09 -->
+     version: 2026-08-11 -->
 <html lang="ja">
   <head>
     <meta charset="utf-8" />
@@ -53,8 +53,8 @@
           <span class="en" lang="en">User guide</span>
         </h1>
         <p class="last-updated">
-          <span class="ja" lang="ja">最終更新: 2026-08-07 / 対象バージョン: v0.2.0</span>
-          <span class="en" lang="en">Last updated: 2026-08-07 / Covers v0.2.0</span>
+          <span class="ja" lang="ja">最終更新: 2026-08-11 / 対象バージョン: v0.3.0</span>
+          <span class="en" lang="en">Last updated: 2026-08-11 / Covers v0.3.0</span>
         </p>
 
         <nav class="toc" aria-label="目次" data-en-aria-label="Table of contents">
@@ -63,6 +63,12 @@
             <span class="en" lang="en">Contents</span>
           </h2>
           <ol>
+            <li>
+              <a href="#install"
+                ><span class="ja" lang="ja">インストール</span
+                ><span class="en" lang="en">Installation</span></a
+              >
+            </li>
             <li>
               <a href="#setup"
                 ><span class="ja" lang="ja">初期設定（API キーの登録）</span
@@ -187,10 +193,34 @@
           </p>
         </section>
 
+        <section id="install">
+          <h2>
+            <span class="ja" lang="ja">1. インストール</span>
+            <span class="en" lang="en">1. Installation</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja"
+              ><a
+                href="https://chromewebstore.google.com/detail/sr-query-builder-plugin/bckokafmjighegpjiocopkagghppnjld"
+                >Chrome ウェブストア</a
+              >から本拡張を追加します。インストール後、拡張アイコンを右クリックして「オプション」を選ぶと、API
+              キーなどを設定する画面が開きます（設定手順は次の節を参照）。</span
+            >
+            <span class="en" lang="en"
+              >Add the extension from the
+              <a
+                href="https://chromewebstore.google.com/detail/sr-query-builder-plugin/bckokafmjighegpjiocopkagghppnjld"
+                >Chrome Web Store</a
+              >. After installing, right-click the extension icon and choose “Options” to open the settings screen
+              (see the next section for what to configure there).</span
+            >
+          </p>
+        </section>
+
         <section id="setup">
           <h2>
-            <span class="ja" lang="ja">1. 初期設定（API キーの登録）</span>
-            <span class="en" lang="en">1. Setup: register your API keys</span>
+            <span class="ja" lang="ja">2. 初期設定（API キーの登録）</span>
+            <span class="en" lang="en">2. Setup: register your API keys</span>
           </h2>
           <p>
             <span class="ja" lang="ja"
@@ -211,16 +241,17 @@
           <div class="note">
             <p>
               <span class="ja" lang="ja"
-                >研究プロトコルの本文が外部へ送信されるのは、Gemini API へのドラフト生成リクエストと、NCBI
-                E-utilities への検索式検証リクエストのときだけです。開発者が運用するサーバーは存在しません（<a
+                >研究プロトコルの本文が外部へ送信されるのは、選択した LLM プロバイダ（既定は Gemini。OpenRouter
+                も選択可）へのドラフト生成リクエストと、NCBI E-utilities
+                への検索式検証リクエストのときだけです。開発者が運用するサーバーは存在しません（<a
                   href="privacy-policy.html"
                   >プライバシーポリシー</a
                 >）。</span
               >
               <span class="en" lang="en"
-                >Your protocol text leaves your browser only in drafting requests to the Gemini API and validation
-                requests to NCBI E-utilities. There is no developer-operated server (see the
-                <a href="privacy-policy.html">privacy policy</a>).</span
+                >Your protocol text leaves your browser only in drafting requests to your selected LLM provider
+                (Gemini by default; OpenRouter can also be selected) and validation requests to NCBI E-utilities.
+                There is no developer-operated server (see the <a href="privacy-policy.html">privacy policy</a>).</span
               >
             </p>
           </div>
@@ -228,8 +259,8 @@
 
         <section id="project">
           <h2>
-            <span class="ja" lang="ja">2. プロジェクトを作る</span>
-            <span class="en" lang="en">2. Create a project</span>
+            <span class="ja" lang="ja">3. プロジェクトを作る</span>
+            <span class="en" lang="en">3. Create a project</span>
           </h2>
           <p>
             <span class="ja" lang="ja"
@@ -248,40 +279,29 @@
 
         <section id="protocol">
           <h2>
-            <span class="ja" lang="ja">3. #/protocol 研究プロトコルを入力する</span>
-            <span class="en" lang="en">3. #/protocol — Enter the research protocol</span>
+            <span class="ja" lang="ja">4. #/protocol 研究プロトコルを入力する</span>
+            <span class="en" lang="en">4. #/protocol — Enter the research protocol</span>
           </h2>
           <p>
             <span class="ja" lang="ja"
               >リサーチクエスチョン・フレームワーク種別（PICO / PECO / PCC / SPIDER / custom）・組入 / 除外基準を、手入力するか
-              <code>.md</code> ファイルから取り込みます。保存は常に新しい版として追記され、過去の版は残ります。入力直後には、シード論文（すでに知っている採用予定の論文）があれば
+              <code>.md</code> または <code>.docx</code>
+              ファイルから取り込みます。保存は常に新しい版として追記され、過去の版は残ります。入力直後には、シード論文（すでに知っている採用予定の論文）があれば
               PMID を登録するよう案内されます。</span
             >
             <span class="en" lang="en"
               >Enter your research question, framework type (PICO / PECO / PCC / SPIDER / custom) and eligibility
-              criteria by hand, or import them from a <code>.md</code> file. Every save is appended as a new version;
-              earlier versions are kept. Right after saving, you are prompted to register any seed papers (studies
-              you already know should be included) by PMID.</span
+              criteria by hand, or import them from a <code>.md</code> or <code>.docx</code> file. Every save is
+              appended as a new version; earlier versions are kept. Right after saving, you are prompted to register
+              any seed papers (studies you already know should be included) by PMID.</span
             >
           </p>
-          <div class="note">
-            <p>
-              <span class="ja" lang="ja"
-                ><code>.docx</code> ファイルからの取り込みは現時点で未対応です。<code>.md</code>
-                または手入力を利用してください。</span
-              >
-              <span class="en" lang="en"
-                >Importing from <code>.docx</code> is not supported yet. Use a <code>.md</code> file or enter the
-                protocol by hand.</span
-              >
-            </p>
-          </div>
         </section>
 
         <section id="blocks">
           <h2>
-            <span class="ja" lang="ja">4. #/blocks 検索式ブロックを承認する</span>
-            <span class="en" lang="en">4. #/blocks — Approve the search blocks</span>
+            <span class="ja" lang="ja">5. #/blocks 検索式ブロックを承認する</span>
+            <span class="en" lang="en">5. #/blocks — Approve the search blocks</span>
           </h2>
           <p>
             <span class="ja" lang="ja"
@@ -297,8 +317,8 @@
 
         <section id="seeds">
           <h2>
-            <span class="ja" lang="ja">5. #/seeds シード論文を登録する</span>
-            <span class="en" lang="en">5. #/seeds — Register seed papers</span>
+            <span class="ja" lang="ja">6. #/seeds シード論文を登録する</span>
+            <span class="en" lang="en">6. #/seeds — Register seed papers</span>
           </h2>
           <p>
             <span class="ja" lang="ja"
@@ -315,8 +335,8 @@
 
         <section id="draft">
           <h2>
-            <span class="ja" lang="ja">6. #/draft 検索式ドラフトの生成と検証</span>
-            <span class="en" lang="en">6. #/draft — Draft and validate the search strategy</span>
+            <span class="ja" lang="ja">7. #/draft 検索式ドラフトの生成と検証</span>
+            <span class="en" lang="en">7. #/draft — Draft and validate the search strategy</span>
           </h2>
           <p>
             <span class="ja" lang="ja"
@@ -334,8 +354,8 @@
 
         <section id="expand">
           <h2>
-            <span class="ja" lang="ja">7. #/expand 対話的シード拡張（実験的機能）</span>
-            <span class="en" lang="en">7. #/expand — Interactive seed expansion (experimental)</span>
+            <span class="ja" lang="ja">8. #/expand 対話的シード拡張（実験的機能）</span>
+            <span class="en" lang="en">8. #/expand — Interactive seed expansion (experimental)</span>
           </h2>
           <div class="note">
             <p>
@@ -371,8 +391,8 @@
 
         <section id="edit">
           <h2>
-            <span class="ja" lang="ja">8. #/edit 検索式を編集する</span>
-            <span class="en" lang="en">8. #/edit — Edit the search strategy</span>
+            <span class="ja" lang="ja">9. #/edit 検索式を編集する</span>
+            <span class="en" lang="en">9. #/edit — Edit the search strategy</span>
           </h2>
           <p>
             <span class="ja" lang="ja"
@@ -391,8 +411,8 @@
 
         <section id="export">
           <h2>
-            <span class="ja" lang="ja">9. #/export 各データベースへ変換・エクスポートする</span>
-            <span class="en" lang="en">9. #/export — Convert and export for each database</span>
+            <span class="ja" lang="ja">10. #/export 各データベースへ変換・エクスポートする</span>
+            <span class="en" lang="en">10. #/export — Convert and export for each database</span>
           </h2>
           <p>
             <span class="ja" lang="ja"
@@ -414,8 +434,8 @@
 
         <section id="done">
           <h2>
-            <span class="ja" lang="ja">10. #/done 完了画面</span>
-            <span class="en" lang="en">10. #/done — Finish screen</span>
+            <span class="ja" lang="ja">11. #/done 完了画面</span>
+            <span class="en" lang="en">11. #/done — Finish screen</span>
           </h2>
           <p>
             <span class="ja" lang="ja"
@@ -438,8 +458,8 @@
 
         <section id="history">
           <h2>
-            <span class="ja" lang="ja">11. #/history バージョン履歴</span>
-            <span class="en" lang="en">11. #/history — Version history</span>
+            <span class="ja" lang="ja">12. #/history バージョン履歴</span>
+            <span class="en" lang="en">12. #/history — Version history</span>
           </h2>
           <p>
             <span class="ja" lang="ja"
@@ -460,8 +480,8 @@
 
         <section id="troubleshooting">
           <h2>
-            <span class="ja" lang="ja">12. トラブルシューティング</span>
-            <span class="en" lang="en">12. Troubleshooting</span>
+            <span class="ja" lang="ja">13. トラブルシューティング</span>
+            <span class="en" lang="en">13. Troubleshooting</span>
           </h2>
 
           <h3>
@@ -525,8 +545,8 @@
 
         <section id="faq">
           <h2>
-            <span class="ja" lang="ja">13. よくある質問</span>
-            <span class="en" lang="en">13. FAQ</span>
+            <span class="ja" lang="ja">14. よくある質問</span>
+            <span class="en" lang="en">14. FAQ</span>
           </h2>
 
           <details class="faq">
@@ -594,9 +614,13 @@
             </summary>
             <p>
               <span class="ja" lang="ja"
-                >現時点では未対応です。<code>.md</code> ファイルからの取り込み、または手入力をご利用ください。</span
+                >はい、対応しています。<a href="#protocol">#/protocol</a> で <code>.docx</code> または
+                <code>.md</code> ファイルから取り込むか、手入力でも入力できます。</span
               >
-              <span class="en" lang="en">Not yet. Please use a <code>.md</code> file or enter the protocol by hand.</span>
+              <span class="en" lang="en"
+                >Yes. On <a href="#protocol">#/protocol</a> you can import from a <code>.docx</code> or
+                <code>.md</code> file, or enter the protocol by hand.</span
+              >
             </p>
           </details>
 
