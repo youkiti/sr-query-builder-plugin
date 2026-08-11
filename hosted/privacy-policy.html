@@ -3,7 +3,7 @@
      内容の正典は docs/store/privacy-policy.md。本ファイルはその HTML 転記 + 英訳であり、
      **更新時は必ず両方を直す**（hosted/README.md「公開ページ」参照）。
      ja / en は両方を持ち、表示は lang.js + CSS が片方だけに絞る（併記しない）。
-     version: 2026-08-07 -->
+     version: 2026-08-11 -->
 <html lang="ja">
   <head>
     <meta charset="utf-8" />
@@ -11,8 +11,8 @@
     <title data-en="Privacy Policy — SR Query Builder Plugin">プライバシーポリシー — SR Query Builder Plugin</title>
     <meta
       name="description"
-      content="SR Query Builder Plugin のプライバシーポリシー。開発者サーバーは存在せず、データは利用者の Google アカウントと BYOK の Gemini API / NCBI API の間でのみ流通します。"
-      data-en-content="Privacy policy for SR Query Builder Plugin: there is no developer-operated server; data flows only between the user’s own Google account and the BYOK Gemini API / NCBI API."
+      content="SR Query Builder Plugin のプライバシーポリシー。開発者サーバーは存在せず、データは利用者の Google アカウントと BYOK の LLM API（Gemini / OpenRouter）・NCBI API の間でのみ流通します。"
+      data-en-content="Privacy policy for SR Query Builder Plugin: there is no developer-operated server; data flows only between the user’s own Google account and the BYOK LLM API (Gemini / OpenRouter) and NCBI API."
     />
     <link rel="stylesheet" href="style.css" />
     <!-- 表示言語（ja / en）の解決と切替。初期描画前に確定させるため head で同期読み込みする -->
@@ -56,7 +56,7 @@
         </h1>
         <p class="last-updated">
           <span class="ja" lang="ja"
-            >最終更新: 2026-08-07<br />
+            >最終更新: 2026-08-11 / 対象バージョン: v0.3.0<br />
             対象: Chrome 拡張機能「SR Query Builder」（sr-query-builder-plugin）<br />
             配布元: 本拡張は MIT ライセンス（<a
               href="https://github.com/youkiti/sr-query-builder-plugin/blob/master/LICENSE"
@@ -64,7 +64,7 @@
             >）の OSS です。</span
           >
           <span class="en" lang="en"
-            >Last updated: 2026-08-07<br />
+            >Last updated: 2026-08-11 / Covers v0.3.0<br />
             Applies to: the Chrome extension “SR Query Builder” (sr-query-builder-plugin)<br />
             Distribution: this extension is open-source software under the
             <a href="https://github.com/youkiti/sr-query-builder-plugin/blob/master/LICENSE">MIT licence</a>.</span
@@ -116,12 +116,12 @@
             </li>
             <li>
               <span class="ja" lang="ja"
-                >利用者が自分の API キー（BYOK: Bring Your Own Key）で契約する LLM API（Gemini API）および NCBI
-                E-utilities</span
+                >利用者が自分の API キー（BYOK: Bring Your Own Key）で契約する LLM API（Gemini または OpenRouter。既定は
+                Gemini）および NCBI E-utilities</span
               >
               <span class="en" lang="en"
-                >The LLM API the user contracts with using their own key (BYOK: Gemini API), and NCBI
-                E-utilities</span
+                >The LLM API the user contracts with using their own key (BYOK: Gemini or OpenRouter; Gemini is the
+                default), and NCBI E-utilities</span
               >
             </li>
           </ol>
@@ -192,8 +192,13 @@
                     <span class="en" lang="en">Full protocol text, search block definitions, search draft, and similar content</span>
                   </td>
                   <td>
-                    <span class="ja" lang="ja">利用者が設定した Gemini API（BYOK）</span>
-                    <span class="en" lang="en">The Gemini API configured by the user (BYOK)</span>
+                    <span class="ja" lang="ja"
+                      >利用者が選択した LLM プロバイダ（Gemini または OpenRouter。既定は Gemini）の API（BYOK）</span
+                    >
+                    <span class="en" lang="en"
+                      >The LLM provider the user selected (Gemini or OpenRouter; Gemini is the default), via its API
+                      (BYOK)</span
+                    >
                   </td>
                   <td>
                     <span class="ja" lang="ja"
@@ -236,8 +241,8 @@
                 </tr>
                 <tr>
                   <td>
-                    <span class="ja" lang="ja">Gemini API キー・NCBI API キー</span>
-                    <span class="en" lang="en">Gemini API key and NCBI API key</span>
+                    <span class="ja" lang="ja">LLM プロバイダ（Gemini / OpenRouter）の API キー・NCBI API キー</span>
+                    <span class="en" lang="en">LLM provider (Gemini / OpenRouter) API key and NCBI API key</span>
                   </td>
                   <td>
                     <span class="ja" lang="ja">利用者のブラウザ内（<code>chrome.storage</code>）</span>
@@ -316,17 +321,19 @@
           <ul>
             <li>
               <span class="ja" lang="ja"
-                ><strong>Gemini API</strong>: 検索式のドラフト生成や検証結果の解釈補助を実行すると、研究プロトコルの本文・検索式ブロック定義・検索式ドラフトなどが、利用者が設定した
-                Gemini API キー（BYOK）を用いて Google の Gemini API へ送信されます。送信先によるデータの取り扱いは、Google
-                のプライバシーポリシー・利用規約に従います。本拡張はプロバイダを仲介せず、利用者のブラウザから直接 API
-                を呼び出します。</span
+                ><strong>LLM プロバイダ（Gemini または OpenRouter。既定は Gemini）</strong>:
+                検索式のドラフト生成や検証結果の解釈補助を実行すると、研究プロトコルの本文・検索式ブロック定義・検索式ドラフトなどが、利用者が選択した
+                LLM プロバイダの API キー（BYOK）を用いて、そのプロバイダ（Google の Gemini API、または
+                OpenRouter）へ送信されます。送信先によるデータの取り扱いは、各プロバイダ自身のプライバシーポリシー・利用規約に従います。本拡張はプロバイダを仲介せず、利用者のブラウザから直接
+                API を呼び出します。</span
               >
               <span class="en" lang="en"
-                ><strong>Gemini API</strong>: running search-strategy drafting or getting help interpreting
-                validation results sends the protocol text, search block definitions and search draft to Google’s
-                Gemini API, using the Gemini API key the user configured (BYOK). How that destination handles the
-                data is governed by Google’s own privacy policy and terms. The extension does not proxy the request:
-                the call is made directly from the user’s browser.</span
+                ><strong>LLM provider (Gemini or OpenRouter; Gemini is the default)</strong>: running search-strategy
+                drafting or getting help interpreting validation results sends the protocol text, search block
+                definitions and search draft to the LLM provider the user selected — Google’s Gemini API, or
+                OpenRouter — using that provider’s API key (BYOK). How that destination handles the data is governed
+                by that provider’s own privacy policy and terms. The extension does not proxy the request: the call
+                is made directly from the user’s browser.</span
               >
             </li>
             <li>
@@ -364,14 +371,14 @@
             </li>
             <li>
               <span class="ja" lang="ja"
-                >本拡張をアンインストールすると、<code>chrome.storage</code> 内の設定（Gemini / NCBI の API
-                キー、認証状態等）は Chrome によって削除されます。Google Drive / Sheets
+                >本拡張をアンインストールすると、<code>chrome.storage</code> 内の設定（LLM プロバイダ（Gemini /
+                OpenRouter）・NCBI の API キー、認証状態等）は Chrome によって削除されます。Google Drive / Sheets
                 上のプロジェクトデータは利用者の資産としてそのまま残ります。</span
               >
               <span class="en" lang="en"
-                >Uninstalling the extension makes Chrome delete its <code>chrome.storage</code> settings (Gemini /
-                NCBI API keys, sign-in state, etc.). Project data in Google Drive / Sheets remains, as it belongs to
-                the user.</span
+                >Uninstalling the extension makes Chrome delete its <code>chrome.storage</code> settings (LLM
+                provider (Gemini / OpenRouter) and NCBI API keys, sign-in state, etc.). Project data in Google Drive
+                / Sheets remains, as it belongs to the user.</span
               >
             </li>
           </ul>

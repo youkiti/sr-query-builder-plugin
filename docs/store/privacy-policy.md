@@ -1,6 +1,7 @@
 # プライバシーポリシー — SR Query Builder（sr-query-builder-plugin）
 
-- **最終更新**: 2026-08-07
+- **最終更新**: 2026-08-11
+- **対象バージョン**: v0.3.0
 - **対象**: Chrome 拡張機能「SR Query Builder」（sr-query-builder-plugin）
 - **配布元**: 本拡張は MIT ライセンス（[LICENSE](../../LICENSE)）の OSS です。
 
@@ -12,7 +13,7 @@
 
 1. **利用者のブラウザ**（本拡張の実行環境。`chrome.storage` を含む）
 2. **利用者の Google アカウント**（Google Sheets = プロジェクト DB、Google Drive = LLM API ログなどの実体保管）
-3. **利用者が自分の API キー（BYOK: Bring Your Own Key）で契約する LLM API（Gemini API）および NCBI E-utilities**
+3. **利用者が自分の API キー（BYOK: Bring Your Own Key）で契約する LLM API（Gemini または OpenRouter。既定は Gemini）および NCBI E-utilities**
 
 ## 取り扱うデータと送信先
 
@@ -20,10 +21,10 @@
 |---|---|---|
 | 研究プロトコル（RQ・PICO 等）・検索式ブロック定義・シード論文（PMID）・検索式ドラフト・検証結果・LLM API ログ | 利用者の Google Sheets（プロジェクトのスプレッドシート内の各タブ） | プロジェクト DB。監査ログ・バージョニング目的 |
 | LLM API ログのフル payload | 利用者の Google Drive（プロジェクトの Drive フォルダ配下 `logs/llm/*.json`） | Sheets のセル文字数制限を超える内容の退避 |
-| 研究プロトコル本文・検索式ブロック定義・検索式ドラフトなど | 利用者が設定した Gemini API（BYOK） | AI による検索式ドラフト生成・MeSH 提案・シノニム展開等。本文が外部へ送信されるのはこの経路と NCBI E-utilities のみ |
+| 研究プロトコル本文・検索式ブロック定義・検索式ドラフトなど | 利用者が選択した LLM プロバイダ（Gemini または OpenRouter。既定は Gemini）の API（BYOK） | AI による検索式ドラフト生成・MeSH 提案・シノニム展開等。本文が外部へ送信されるのはこの経路と NCBI E-utilities のみ |
 | 検索式・PMID | NCBI E-utilities（`eutils.ncbi.nlm.nih.gov`） | ヒット数検証・MeSH 用語の取得・シード論文の捕捉率計算 |
 | Google OAuth トークン | 利用者のブラウザ内（`chrome.storage`） | Google API 認証。開発者へは送信されません |
-| Gemini API キー・NCBI API キー | 利用者のブラウザ内（`chrome.storage`） | 各 API の認証（BYOK）。開発者へは送信されません |
+| LLM プロバイダ（Gemini / OpenRouter）の API キー・NCBI API キー | 利用者のブラウザ内（`chrome.storage`） | 各 API の認証（BYOK）。開発者へは送信されません |
 
 ## Google ユーザーデータへのアクセス範囲
 
@@ -37,13 +38,13 @@
 
 ## LLM API・NCBI API への送信について
 
-- **Gemini API**: 検索式のドラフト生成や検証結果の解釈補助を実行すると、研究プロトコルの本文・検索式ブロック定義・検索式ドラフトなどが、利用者が設定した Gemini API キー（BYOK）を用いて Google の Gemini API へ送信されます。送信先によるデータの取り扱いは、Google のプライバシーポリシー・利用規約に従います。本拡張はプロバイダを仲介せず、利用者のブラウザから直接 API を呼び出します。
+- **LLM プロバイダ（Gemini または OpenRouter。既定は Gemini）**: 検索式のドラフト生成や検証結果の解釈補助を実行すると、研究プロトコルの本文・検索式ブロック定義・検索式ドラフトなどが、利用者が選択した LLM プロバイダの API キー（BYOK）を用いて、そのプロバイダ（Google の Gemini API、または OpenRouter）へ送信されます。送信先によるデータの取り扱いは、各プロバイダ自身のプライバシーポリシー・利用規約に従います。本拡張はプロバイダを仲介せず、利用者のブラウザから直接 API を呼び出します。
 - **NCBI E-utilities**: 検索式の検証（ブロックごとのヒット数、シード論文捕捉率、MeSH 用語抽出）のため、検索式や PMID を NCBI の E-utilities（`eutils.ncbi.nlm.nih.gov`）へ送信します。NCBI API キーは任意で BYOK として設定でき、レート制限緩和のために使用します。
 
 ## データの保存・削除
 
 - すべてのデータは利用者自身の Google アカウント（Sheets / Drive）とブラウザローカルストレージに保存されます。削除は、利用者が Google Drive / Sheets 上のファイルを削除し、拡張を削除（またはブラウザのストレージをクリア）することで完結します。
-- 本拡張をアンインストールすると、`chrome.storage` 内の設定（Gemini / NCBI の API キー、認証状態等）は Chrome によって削除されます。Google Drive / Sheets 上のプロジェクトデータは利用者の資産としてそのまま残ります。
+- 本拡張をアンインストールすると、`chrome.storage` 内の設定（LLM プロバイダ（Gemini / OpenRouter）・NCBI の API キー、認証状態等）は Chrome によって削除されます。Google Drive / Sheets 上のプロジェクトデータは利用者の資産としてそのまま残ります。
 
 ## 第三者提供・データ販売
 
