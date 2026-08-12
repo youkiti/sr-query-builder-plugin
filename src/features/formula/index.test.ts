@@ -12,4 +12,9 @@ describe('features/formula index 再エクスポート', () => {
     expect(typeof mod.IMPROVE_BLOCK_SYSTEM_PROMPT).toBe('string');
     expect(typeof mod.IMPROVE_BLOCK_USER_PROMPT_TEMPLATE).toBe('string');
   });
+
+  test('過大ヒット時のフィルタ追記 API が揃っている', () => {
+    expect(typeof mod.appendExcessFilterBlocks).toBe('function');
+    expect(typeof mod.AppendExcessFiltersError).toBe('function');
+  });
 });
