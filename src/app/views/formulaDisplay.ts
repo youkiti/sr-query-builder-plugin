@@ -7,6 +7,9 @@
  * 描画するための分解ロジックを提供する（描画自体は draftView 側）。
  */
 
+/** NCBI MeSH ブラウザの検索 URL。seedsView と同じ宛先（クリックで別タブに開く） */
+export const MESH_BROWSER_BASE = 'https://www.ncbi.nlm.nih.gov/mesh/?term=';
+
 export type TermKind = 'mesh' | 'freeword' | 'plain';
 
 /** 検索式 1 ブロックを表示用に分割した 1 セグメント */
@@ -92,4 +95,134 @@ function findTermStart(slice: string): number {
     start = match.index + match[0].length;
   }
   return start;
+}
+
+/**
+ * MeSH セグメント（`"Heart Failure"[Mesh]` / `Asthma[mh]` 等）から、MeSH ブラウザ検索に
+ * 使う用語だけを取り出す。末尾のフィールドタグ・前後の引用符・末尾ワイルドカードを落とす。
+ */
+export function extractMeshTerm(segmentText: string): string {
+  return segmentText
+    .replace(/\[[^\]]*\]\s*$/, '') // 末尾の [tag]
+    .trim()
+    .replace(/^"+|"+$/g, '') // 前後の引用符
+    .replace(/\*+$/, '') // 末尾ワイルドカード
+    .trim();
+}
+
+/**
+ * 検索式を operand（句）単位で編集するための共通トークン。ブロック編集
+ * （editableBlock.ts）・MeSH 編集（meshExpressionEdit.ts / operandEdit.ts）が
+ * 式を「句 + 演算子・括弧（glue）」に分解して足し引きするのに使う。
+ *
+ * status は句の差分表示（before/after 比較）に使う想定のフィールド。
+ * tokenizeOperands 自体は付与しない（差分表示のロジックはこのモジュールには未移植）。
+ */
+export interface DiffToken {
+  text: string;
+  /** true なら 1 つの被演算子（語/句）。false なら演算子・括弧などの地のテキスト */
+  isOperand: boolean;
+  status?: 'same' | 'removed' | 'added';
+}
+
+/** 行頭が最上位のブール演算子か判定（後ろが空白・開き括弧・終端のときだけ演算子とみなす） */
+const DIFF_OPERATOR_PATTERN = /^(OR|AND|NOT)(?=\s|\(|$)/i;
+
+/** 式全体が 1 組の括弧で包まれているか（`(A OR B)` の外側括弧を glue に寄せるため） */
+function isWrappedByOuterParens(s: string): boolean {
+  if (!s.startsWith('(') || !s.endsWith(')')) {
+    return false;
+  }
+  let depth = 0;
+  let inQuote = false;
+  for (let i = 0; i < s.length; i += 1) {
+    const ch = s[i];
+    if (ch === '"') {
+      inQuote = !inQuote;
+    } else if (!inQuote && ch === '(') {
+      depth += 1;
+    } else if (!inQuote && ch === ')') {
+      depth -= 1;
+      // 末尾より手前で depth が 0 に戻る＝外側括弧は全体を包んでいない
+      if (depth === 0 && i < s.length - 1) {
+        return false;
+      }
+    }
+  }
+  return depth === 0;
+}
+
+/**
+ * 式を「最上位のブール演算子で区切った句（operand）」と「演算子・括弧（glue）」の列に分解する。
+ * 括弧の深さと引用符の内側を尊重し、ネストした群（`(x OR y)`）は 1 つの operand として保つ。
+ */
+export function tokenizeOperands(expr: string): DiffToken[] {
+  const tokens: DiffToken[] = [];
+  const trimmed = expr.trim();
+  if (trimmed === '') {
+    return tokens;
+  }
+  const hasOuter = isWrappedByOuterParens(trimmed);
+  const inner = hasOuter ? trimmed.slice(1, -1) : trimmed;
+  if (hasOuter) {
+    tokens.push({ text: '(', isOperand: false });
+  }
+  let depth = 0;
+  let inQuote = false;
+  let buf = '';
+  const flushOperand = (): void => {
+    const term = buf.trim();
+    if (term !== '') {
+      tokens.push({ text: term, isOperand: true });
+    }
+    buf = '';
+  };
+  let i = 0;
+  while (i < inner.length) {
+    const ch = inner[i] ?? '';
+    if (ch === '"') {
+      inQuote = !inQuote;
+      buf += ch;
+      i += 1;
+      continue;
+    }
+    if (!inQuote && ch === '(') {
+      depth += 1;
+      buf += ch;
+      i += 1;
+      continue;
+    }
+    if (!inQuote && ch === ')') {
+      depth -= 1;
+      buf += ch;
+      i += 1;
+      continue;
+    }
+    if (!inQuote && depth === 0) {
+      const prevWs = i === 0 || /\s/.test(inner[i - 1] ?? ' ');
+      const match = prevWs ? DIFF_OPERATOR_PATTERN.exec(inner.slice(i)) : null;
+      if (match) {
+        flushOperand();
+        tokens.push({ text: ` ${(match[1] ?? '').toUpperCase()} `, isOperand: false });
+        i += match[0].length;
+        // 演算子直後の空白は glue 側に含めた扱いにし、operand の先頭からは外す
+        while (i < inner.length && /\s/.test(inner[i] ?? '')) {
+          i += 1;
+        }
+        continue;
+      }
+    }
+    buf += ch;
+    i += 1;
+  }
+  flushOperand();
+  if (hasOuter) {
+    tokens.push({ text: ')', isOperand: false });
+  }
+  return tokens;
+}
+
+/** 句の同一判定キー（空白の差・大文字小文字を無視） */
+export function normalizeOperand(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().toLowerCase();
 }
