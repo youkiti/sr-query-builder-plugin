@@ -1,0 +1,130 @@
+/*
+ * ブロック編集 UI 部品（editableBlock.ts）のスタイル。
+ * 「ブロック式そのものを編集面にするチップ列」だけを扱う。#/edit の骨格（カード・
+ * トグル・詳細編集等）は edit.css 側の担当なので、ここには含めない。
+ */
+
+/* チップ列。演算子・括弧は地のテキストで残り、語はチップになる */
+.edit__block-chips {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-sm);
+  line-height: 2;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  overflow-wrap: break-word;
+}
+
+/* 1 operand のチップ（語 + ✕）。draft__term の色分けを土台に枠を付ける */
+.edit__chip:not([hidden]) {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 0 1px 0 3px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+.edit__chip:hover,
+.edit__chip:focus-within {
+  border-color: var(--color-border);
+}
+
+/* チップ内の語。フリーワードはボタン（クリックで編集）、MeSH はリンク */
+.edit__chip-term {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.edit__chip-term--editable {
+  text-decoration: underline;
+  text-decoration-style: dotted;
+}
+
+.edit__chip-term--editable:hover,
+.edit__chip-term--editable:focus-visible {
+  text-decoration-style: solid;
+}
+
+.edit__chip-term--static {
+  cursor: default;
+}
+
+/* ✕ 削除ボタン。平常は控えめ、hover/focus で目立たせる */
+.edit__chip-remove {
+  font: inherit;
+  line-height: 1;
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  padding: 0 2px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.edit__chip-remove:hover,
+.edit__chip-remove:focus-visible {
+  color: var(--color-danger);
+  background: rgba(201, 54, 47, 0.12);
+}
+
+/* 語のその場編集 input（タグは保持するので語だけ） */
+.edit__chip-input {
+  font: inherit;
+  padding: 0 2px;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  min-width: 6ch;
+}
+
+/* 「＋ 語を追加」 */
+.edit__chip-add {
+  margin-left: var(--space-1);
+}
+
+.edit__chip-add-btn {
+  font: inherit;
+  font-size: var(--font-size-sm);
+  color: var(--color-primary);
+  background: none;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-1);
+  cursor: pointer;
+}
+
+.edit__chip-add-btn:hover,
+.edit__chip-add-btn:focus-visible {
+  background: rgba(42, 99, 214, 0.08);
+}
+
+.edit__chip-add-input {
+  font: inherit;
+  padding: 0 2px;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  min-width: 8ch;
+}
+
+/* input + 静的タグ接尾辞のラッパー（語編集・語追加で共通） */
+.edit__chip-edit:not([hidden]) {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+
+/* 「[tiab] は自動で付く（打たなくてよい）」を可視化する編集不可の接尾辞 */
+.edit__chip-tag-suffix {
+  font: inherit;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  user-select: none;
+  pointer-events: none;
+  white-space: nowrap;
+}
