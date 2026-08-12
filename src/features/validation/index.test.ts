@@ -10,5 +10,8 @@ describe('features/validation index 再エクスポート', () => {
     expect(typeof mod.appendValidationLog).toBe('function');
     expect(typeof mod.buildMeshHierarchy).toBe('function');
     expect(typeof mod.toMermaidFlowchart).toBe('function');
+    expect(typeof mod.buildBlockMeshTree).toBe('function');
+    expect(typeof mod.meshCategoryName).toBe('function');
+    expect(typeof mod.analyzeFreewordDelta).toBe('function');
   });
 });
