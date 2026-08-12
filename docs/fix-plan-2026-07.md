@@ -5,22 +5,22 @@
 > 1. **フェーズ 1・2 の「完了」は移植元ブランチ上での完了であり、`master` には未反映です。** 本文中の「✅ 完了」表記は `feat/excess-filter-and-revalidate` ブランチの状態を指しており、`master` の現状を表しません。
 > 2. 未マージの 22 commit を GitHub issue 経由でクラウド並列実装に切り分けて `master` へ移植する計画が進行中で、この文書は各 issue から参照される仕様書として使われます。
 > 3. 移植元ブランチと該当コミット: ブランチ `feat/excess-filter-and-revalidate`。フェーズ 1 = コミット `5a8a524`（`fix: フェーズ1「エラーの可視化」を実装（fix-plan-2026-07）`）、フェーズ 2 = コミット `04216df`（`feat: フェーズ2「安全装置の配線」を実装（fix-plan-2026-07）`）。
-> 4. **本文中の一部の相対リンクは `master` では壊れています**（移植元ブランチにのみ存在するファイルを指しているため）。残っているのは `[src/features/formula/appendExcessFilters.ts](../src/features/formula/appendExcessFilters.ts)`（フェーズ 2-1 の実装メモ）で、A2（#51）の移植時点で解決します。`[src/features/validation/freewordDelta.ts](../src/features/validation/freewordDelta.ts)`（フェーズ 4-1）は A3（#52）の移植で解決済みです。他の相対リンク（`../src/...` 配下の既存ファイル、`../search-formula-developper/...` のサブモジュール参照、同一ディレクトリの `requirements.md` / `architecture.md`）は取り込み時点で `master` 上の実ファイルと突き合わせ済みです。
+> 4. **本文中の相対リンクはすべて `master` 上の実ファイルを指しています**（取り込み時点では移植元ブランチにのみ存在するファイルを指す壊れたリンクが 2 つありましたが、`[src/features/validation/freewordDelta.ts](../src/features/validation/freewordDelta.ts)` は A3（#52）、`[src/features/formula/appendExcessFilters.ts](../src/features/formula/appendExcessFilters.ts)` は A2（#51）の移植で解消しました）。
 > 5. **`master` への移植状況**（2026-08-12 現在）。本文の「✅ 完了」とは別物なので、`master` の現状はこの表を見てください。issue をクローズしたときにこの表も更新すること。
 >
 > | Wave | issue | 内容（対応する本文の節） | `master` の状態 |
 > |---|---|---|---|
 > | A1 | #50 | NCBI in-band エラー検出（1-1） | ✅ PR #61 |
-> | A2 | #51 | `appendExcessFilters`（2-1 の純関数部分） | ⬜ 未着手 |
+> | A2 | #51 | `appendExcessFilters`（2-1 の純関数部分） | ✅ PR #69（**純関数のみ**。draft への配線は B2） |
 > | A3 | #52 | MeSH 階層・フリーワード増分の解析（4-1 の前提） | ✅ PR #62（**ロジック層のみ**。UI 接続は B3） |
 > | A4 | #53 | `pickSeedCandidates` skill | ⬜ 未着手 |
 > | A5 | #54 | ブロック編集 UI 部品 3 点 | ✅ PR #63（**部品のみ**。`editView` 接続は B3） |
 > | A6 | #55 | `#/export` の検証警告バナー（2-3） | ⬜ 未着手 |
 > | B1 | #56 | フェーズ 1 の配線（1-2 / 1-3） | ✅ PR #68 |
-> | B2 | #57 | フェーズ 2 の配線（2-1 / 2-2） | ⬜ 未着手（依存: #51。#56 は完了） |
+> | B2 | #57 | フェーズ 2 の配線（2-1 / 2-2） | ⬜ 未着手（**前提 #50 / #51 / #56 はすべて完了 = 着手可**） |
 > | B3 | #58 | `blockInspector` 追加 + `#/edit` 再構成 | ⬜ 未着手（依存: #57。移植の最終タスク） |
 >
-> Wave 1（A*）は `master` から直接分岐して並列実装可、Wave 2（B*）は `bootstrap.ts` / `store.ts` を触るため直列マージ。**クリティカルパスは #51 → #57 → #58**（#56 は完了）です。
+> Wave 1（A*）は `master` から直接分岐して並列実装可、Wave 2（B*）は `bootstrap.ts` / `store.ts` を触るため直列マージ。**次に着手すべきは #57 → #58**（クリティカルパス。前提の #50 / #51 / #56 は完了済み）。残る Wave 1 の #53 / #55 は独立なのでいつでも並列に挿せます。
 
 # 修正計画（2026-07 レビュー起点）
 
