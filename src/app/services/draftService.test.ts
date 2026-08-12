@@ -49,6 +49,8 @@ function makeState(): AppState {
     blockImprovement: null,
     formulaSave: null,
     formulaEditNote: null,
+    blocksDraftSavedAt: null,
+    hydrateError: null,
   };
 }
 

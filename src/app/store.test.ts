@@ -26,6 +26,8 @@ describe('createStore', () => {
       blockImprovement: null,
       formulaSave: null,
       formulaEditNote: null,
+      blocksDraftSavedAt: null,
+      hydrateError: null,
     });
     expect(store.getState().route).toBe('protocol');
   });
