@@ -507,8 +507,8 @@ LLM は検索式生成時に、プロトコルに書かれていないフィル�
 
 ## 5. 機能要件（MVP 後 / P1 以降）
 
-- ブロック重複分析（`check_block_overlap.py` 移植）: 各 OR 要素の寄与度を可視化
-- MeSH 用語単発チェック（`check_mesh.py` / `check_mesh_overlap.py`）
+- ブロック重複分析（`check_block_overlap.py` 移植）: 各 OR 要素の寄与度を可視化（ロジック層は移植済み・UI 未接続。[src/features/validation/freewordDelta.ts](src/features/validation/freewordDelta.ts)）
+- MeSH 用語単発チェック（`check_mesh.py` / `check_mesh_overlap.py`）（ロジック層は移植済み・UI 未接続。[src/features/validation/blockMeshTree.ts](src/features/validation/blockMeshTree.ts) + [src/lib/ncbi/meshRdf.ts](src/lib/ncbi/meshRdf.ts)）
 - 他 LLM プロバイダ（OpenAI / Claude / OpenRouter）
 - 検索式バージョン間 diff ビュー
 - Ovid → PubMed 変換（P2）

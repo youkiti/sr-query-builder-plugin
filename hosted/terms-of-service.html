@@ -2,7 +2,7 @@
 <!-- 利用規約（GitHub Pages 配信）。正典はこのファイル（master の hosted/）。
      内容は本拡張の実態（MIT OSS・サーバーレス・BYOK・無保証）に即して書き下ろす。
      ja / en は両方を持ち、表示は lang.js + CSS が片方だけに絞る（併記しない）。
-     version: 2026-08-11 -->
+     version: 2026-08-12 -->
 <html lang="ja">
   <head>
     <meta charset="utf-8" />
@@ -53,11 +53,11 @@
         </h1>
         <p class="last-updated">
           <span class="ja" lang="ja"
-            >最終更新: 2026-08-11 / 対象バージョン: v0.3.0<br />
+            >最終更新: 2026-08-12 / 対象バージョン: v0.3.0<br />
             対象: Chrome 拡張機能「SR Query Builder Plugin」（sr-query-builder-plugin）</span
           >
           <span class="en" lang="en"
-            >Last updated: 2026-08-11 / Covers v0.3.0<br />
+            >Last updated: 2026-08-12 / Covers v0.3.0<br />
             Applies to the Chrome extension “SR Query Builder Plugin” (sr-query-builder-plugin)</span
           >
         </p>
@@ -122,8 +122,9 @@
           <p>
             <span class="ja" lang="ja"
               >本拡張には開発者が運用するサーバーが存在しません。データは、利用者自身の Google Sheets / Drive と、利用者が自身の
-              API キーで契約する LLM プロバイダ（Gemini または OpenRouter。既定は Gemini）、および NCBI
-              E-utilities の間でのみ流通します（BYOK: Bring Your Own Key）。開発者が利用者のデータを受信・保存・収集することはありません。詳細は<a
+              API キーで契約する LLM プロバイダ（Gemini または OpenRouter。既定は Gemini）、NCBI
+              E-utilities、および NLM MeSH RDF（MeSH 階層情報の取得。認証不要の公開エンドポイント）の間でのみ流通します（BYOK: Bring Your Own
+              Key）。開発者が利用者のデータを受信・保存・収集することはありません。詳細は<a
                 href="privacy-policy.html"
                 >プライバシーポリシー</a
               >を参照してください。</span
@@ -131,8 +132,19 @@
             <span class="en" lang="en"
               >The extension has no developer-operated server. Data flows only between your own Google Sheets / Drive,
               the LLM provider you contract with using your own key (Gemini or OpenRouter; Gemini is the default),
-              and NCBI E-utilities (BYOK: Bring Your Own Key). The developer never receives, stores or collects your
+              NCBI E-utilities, and NLM MeSH RDF (used to fetch MeSH hierarchy data; a public endpoint that needs no
+              authentication) (BYOK: Bring Your Own Key). The developer never receives, stores or collects your
               data. See the <a href="privacy-policy.html">privacy policy</a> for details.</span
+            >
+          </p>
+          <p>
+            <span class="ja" lang="ja"
+              >NLM MeSH RDF への通信は次回の拡張機能更新から適用されます（現在配信中のバージョン v0.3.0
+              はこの通信を行いません）。</span
+            >
+            <span class="en" lang="en"
+              >Communication with NLM MeSH RDF takes effect from the next extension update (the version currently
+              distributed, v0.3.0, does not perform this communication).</span
             >
           </p>
           <p>
@@ -246,13 +258,13 @@
           </h2>
           <p>
             <span class="ja" lang="ja"
-              >本拡張は Google API（Sheets / Drive / OAuth）、LLM プロバイダの API（Gemini・OpenRouter）、および NCBI
-              E-utilities を利用します。これらのサービスの提供条件・可用性・料金は各提供者が定めるものであり、開発者は関与しません。</span
+              >本拡張は Google API（Sheets / Drive / OAuth）、LLM プロバイダの API（Gemini・OpenRouter）、NCBI
+              E-utilities、および NLM MeSH RDF を利用します。これらのサービスの提供条件・可用性・料金は各提供者が定めるものであり、開発者は関与しません。</span
             >
             <span class="en" lang="en"
-              >The extension uses Google APIs (Sheets, Drive, OAuth), LLM provider APIs (Gemini and OpenRouter), and
-              NCBI E-utilities. The terms, availability and pricing of those services are set by their providers, not
-              by the developer.</span
+              >The extension uses Google APIs (Sheets, Drive, OAuth), LLM provider APIs (Gemini and OpenRouter), NCBI
+              E-utilities, and NLM MeSH RDF. The terms, availability and pricing of those services are set by their
+              providers, not by the developer.</span
             >
           </p>
         </section>

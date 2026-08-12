@@ -91,13 +91,12 @@
           <p>
             <span class="ja" lang="ja"
               ><strong>本拡張の開発者が運用するサーバーは存在しません。</strong>
-              利用者のデータが開発者側に送信・保存・収集されることは一切ありません。データはすべて、利用者自身が契約・所有する以下の
-              3 者の間でのみ流通します。</span
+              利用者のデータが開発者側に送信・保存・収集されることは一切ありません。データはすべて、以下の
+              各主体との間でのみ流通します。</span
             >
             <span class="en" lang="en"
               ><strong>There is no developer-operated server.</strong> No user data is ever transmitted to, stored by
-              or collected by the developer. All data flows only between the following three parties, all of which
-              the user owns or contracts with directly.</span
+              or collected by the developer. All data flows only between the following parties.</span
             >
           </p>
           <ol>
@@ -204,11 +203,13 @@
                   <td>
                     <span class="ja" lang="ja"
                       >AI による検索式ドラフト生成・MeSH 提案・シノニム展開等。本文が外部へ送信されるのはこの経路と
-                      NCBI E-utilities のみ</span
+                      NCBI E-utilities のみです（NLM MeSH RDF へは研究プロトコル本文を送信せず、descriptor
+                      名・tree number のみを送信します）</span
                     >
                     <span class="en" lang="en"
                       >AI-drafted search strategy, MeSH suggestions, synonym expansion, etc. This and NCBI
-                      E-utilities are the only routes by which text leaves the browser</span
+                      E-utilities are the only routes by which text leaves the browser (NLM MeSH RDF never receives
+                      the protocol text itself — only descriptor names and tree numbers)</span
                     >
                   </td>
                 </tr>
@@ -240,10 +241,14 @@
                     >
                   </td>
                   <td>
-                    <span class="ja" lang="ja">MeSH 階層（親子関係）の解析。ブロック内の用語重複・カテゴリ分散の検出</span>
+                    <span class="ja" lang="ja"
+                      >MeSH 階層（親子関係）の解析。ブロック内の用語重複・カテゴリ分散の検出（次回の拡張機能更新から適用。現在配信中の
+                      v0.3.0 はこの通信を行いません）</span
+                    >
                     <span class="en" lang="en"
                       >Analyzing the MeSH hierarchy (parent/child relationships); detecting term overlap and category
-                      spread within a block</span
+                      spread within a block (takes effect from the next extension update; the version currently
+                      distributed, v0.3.0, does not perform this communication)</span
                     >
                   </td>
                 </tr>

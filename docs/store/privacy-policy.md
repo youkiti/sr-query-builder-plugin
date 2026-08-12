@@ -9,7 +9,7 @@
 
 ## 要点
 
-**本拡張の開発者が運用するサーバーは存在しません。** 利用者のデータが開発者側に送信・保存・収集されることは一切ありません。データはすべて、利用者自身が契約・所有する以下の 3 者の間でのみ流通します。
+**本拡張の開発者が運用するサーバーは存在しません。** 利用者のデータが開発者側に送信・保存・収集されることは一切ありません。データはすべて、以下の各主体との間でのみ流通します。
 
 1. **利用者のブラウザ**（本拡張の実行環境。`chrome.storage` を含む）
 2. **利用者の Google アカウント**（Google Sheets = プロジェクト DB、Google Drive = LLM API ログなどの実体保管）
@@ -21,9 +21,9 @@
 |---|---|---|
 | 研究プロトコル（RQ・PICO 等）・検索式ブロック定義・シード論文（PMID）・検索式ドラフト・検証結果・LLM API ログ | 利用者の Google Sheets（プロジェクトのスプレッドシート内の各タブ） | プロジェクト DB。監査ログ・バージョニング目的 |
 | LLM API ログのフル payload | 利用者の Google Drive（プロジェクトの Drive フォルダ配下 `logs/llm/*.json`） | Sheets のセル文字数制限を超える内容の退避 |
-| 研究プロトコル本文・検索式ブロック定義・検索式ドラフトなど | 利用者が選択した LLM プロバイダ（Gemini または OpenRouter。既定は Gemini）の API（BYOK） | AI による検索式ドラフト生成・MeSH 提案・シノニム展開等。本文が外部へ送信されるのはこの経路と NCBI E-utilities のみ |
+| 研究プロトコル本文・検索式ブロック定義・検索式ドラフトなど | 利用者が選択した LLM プロバイダ（Gemini または OpenRouter。既定は Gemini）の API（BYOK） | AI による検索式ドラフト生成・MeSH 提案・シノニム展開等。本文が外部へ送信されるのはこの経路と NCBI E-utilities のみ（NLM MeSH RDF へは研究プロトコル本文を送信せず、descriptor 名・tree number のみを送信します） |
 | 検索式・PMID | NCBI E-utilities（`eutils.ncbi.nlm.nih.gov`） | ヒット数検証・MeSH 用語の取得・シード論文の捕捉率計算 |
-| ブロック内の MeSH 用語（descriptor 名・tree number） | NLM MeSH RDF（`id.nlm.nih.gov` の SPARQL エンドポイント） | MeSH 階層（親子関係）の解析。ブロック内の用語重複・カテゴリ分散の検出 |
+| ブロック内の MeSH 用語（descriptor 名・tree number） | NLM MeSH RDF（`id.nlm.nih.gov` の SPARQL エンドポイント） | MeSH 階層（親子関係）の解析。ブロック内の用語重複・カテゴリ分散の検出（次回の拡張機能更新から適用。現在配信中の v0.3.0 はこの通信を行いません） |
 | Google OAuth トークン | 利用者のブラウザ内（`chrome.storage`） | Google API 認証。開発者へは送信されません |
 | LLM プロバイダ（Gemini / OpenRouter）の API キー・NCBI API キー | 利用者のブラウザ内（`chrome.storage`） | 各 API の認証（BYOK）。開発者へは送信されません |
 
