@@ -38,6 +38,19 @@ describe('renderProtocolView (callback 無し)', () => {
     expect(fileSection?.hasAttribute('hidden')).toBe(true);
   });
 
+  test('hydrateError があればエラーバナーを出す', () => {
+    const container = buildContainer();
+    renderProtocolView(container, {
+      state: { ...stateWithProject, hydrateError: 'HTTP 500' },
+      navigate: jest.fn(),
+    });
+    const banner = container.querySelector('.view__hydrate-error');
+    expect(banner).not.toBeNull();
+    expect(banner?.textContent).toContain('読み込みに失敗しました');
+    // callback 無しでは再試行ボタンは出さない
+    expect(container.querySelector('.view__hydrate-error-retry')).toBeNull();
+  });
+
   test('manual ラジオが既定で checked', () => {
     const container = buildContainer();
     renderProtocolView(container, { state: stateWithProject, navigate: jest.fn() });

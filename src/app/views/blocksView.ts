@@ -72,6 +72,11 @@ export function createBlocksView(
     const draft = ensureDraft(store);
 
     container.appendChild(buildLede(container.ownerDocument));
+    if (ctx.state.blocksDraftSavedAt !== null) {
+      container.appendChild(
+        buildUnapprovedDraftNotice(container.ownerDocument, ctx.state.blocksDraftSavedAt)
+      );
+    }
     container.appendChild(buildStepper(container.ownerDocument));
     container.appendChild(
       buildProtocolReference(container.ownerDocument, ctx.state.protocolDraft)
@@ -103,6 +108,22 @@ function buildLede(doc: Document): HTMLElement {
   p.textContent =
     'プロトコルから抽出された検索ブロック（PICO などの概念グループ）を確認してください。内容を承認するとシード論文の登録へ進み、その後 AI が PubMed 検索式のドラフトを生成します。';
   return p;
+}
+
+/**
+ * 「下書きとして保存」済み（未承認）の編集があることを知らせるバナー。
+ * chrome.storage のバックアップから復元した直後と、保存直後の両方で表示される。
+ */
+function buildUnapprovedDraftNotice(doc: Document, savedAt: string): HTMLElement {
+  const notice = doc.createElement('div');
+  notice.className = 'blocks__draft-notice';
+  notice.setAttribute('role', 'status');
+  const savedDate = new Date(savedAt);
+  const savedLabel = Number.isNaN(savedDate.getTime())
+    ? savedAt
+    : savedDate.toLocaleString('ja-JP');
+  notice.textContent = `未承認の下書きがあります（保存: ${savedLabel}）。「承認してシード論文へ」を押すまで Sheets には反映されません。`;
+  return notice;
 }
 
 function buildStepper(doc: Document): HTMLElement {
