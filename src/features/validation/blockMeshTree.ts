@@ -41,8 +41,17 @@ export interface BlockMeshTreeResult {
   nodes: MeshHierarchyNode[];
   /** descriptor → 注釈 */
   termMeta: Map<string, BlockMeshTermMeta>;
-  /** ブロック用語が乗っているカテゴリ letter（A, C, F …）の昇順ユニーク一覧 */
+  /**
+   * ブロック用語が乗っているカテゴリ letter（A, C, F …）の昇順ユニーク一覧（和集合）。
+   * 情報表示用。カテゴリ分散（ずれ）の判定には `coherent` を使うこと。和集合だけで判定すると、
+   * 複数カテゴリに正規に載る descriptor（MeSH では普通）が 1 語あるだけで分散と誤判定してしまう。
+   */
   categories: string[];
+  /**
+   * ブロック用語が「同じ枝に固まっているか」の判定。resolved な用語が 1 件以下なら true。
+   * 複数件のときは、全用語の tree number 先頭 letter 集合に共通する letter が 1 つでもあれば true。
+   */
+  coherent: boolean;
   /** tree number が解決できなかった descriptor（ツリーに出せない用語） */
   unresolved: string[];
 }
@@ -125,8 +134,36 @@ export function buildBlockMeshTree(terms: readonly BlockMeshTermInput[]): BlockM
     }
   }
   const categories = Array.from(categorySet).sort();
+  const coherent = computeCoherent(resolved);
 
-  return { nodes, termMeta, categories, unresolved };
+  return { nodes, termMeta, categories, coherent, unresolved };
+}
+
+/**
+ * ブロック用語が「同じ枝に固まっているか」を判定する。
+ * resolved な用語が 1 件以下なら判定不能につき true（分散していると言えない）。
+ * 複数件のときは、各用語の tree number 先頭 letter 集合の共通部分（積集合）が
+ * 空でなければ true（= 全用語に共通するカテゴリが少なくとも 1 つある）。
+ */
+function computeCoherent(resolved: readonly BlockMeshTermInput[]): boolean {
+  if (resolved.length <= 1) {
+    return true;
+  }
+  const letterSets = resolved.map(
+    (term) => new Set(term.treeNumbers.map((tn) => tn.charAt(0)).filter((letter) => letter !== ''))
+  );
+  const [first, ...rest] = letterSets;
+  if (!first) {
+    return true;
+  }
+  let common = first;
+  for (const letters of rest) {
+    common = new Set([...common].filter((letter) => letters.has(letter)));
+    if (common.size === 0) {
+      return false;
+    }
+  }
+  return common.size > 0;
 }
 
 /**

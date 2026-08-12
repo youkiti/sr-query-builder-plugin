@@ -66,6 +66,41 @@ describe('buildBlockMeshTree', () => {
   });
 });
 
+describe('buildBlockMeshTree.coherent', () => {
+  test('C と F の両カテゴリに載る 1 語のみなら coherent は true（categories は分散して見える）', () => {
+    // 1 descriptor が複数カテゴリに正規に載るのは MeSH では普通のこと（分散ではない）
+    const res = buildBlockMeshTree([
+      t('Anxiety Disorders', true, ['C10.597.606.150', 'F03.080.100']),
+    ]);
+    expect(res.categories).toEqual(['C', 'F']);
+    expect(res.coherent).toBe(true);
+  });
+
+  test('C のみの語と F のみの語では coherent は false', () => {
+    const res = buildBlockMeshTree([
+      t('Asthma', true, ['C08.127.108']),
+      t('Anxiety', true, ['F03.080.725']),
+    ]);
+    expect(res.categories).toEqual(['C', 'F']);
+    expect(res.coherent).toBe(false);
+  });
+
+  test('全語が C を共有していれば（片方が C と F にまたがっていても）coherent は true', () => {
+    const res = buildBlockMeshTree([
+      t('Asthma', true, ['C08.127.108']),
+      // Anxiety Disorders は C と F の両方に載るが、C を共有しているので分散扱いにしない
+      t('Anxiety Disorders', true, ['C10.597.606.150', 'F03.080.100']),
+    ]);
+    expect(res.categories).toEqual(['C', 'F']);
+    expect(res.coherent).toBe(true);
+  });
+
+  test('resolved が 1 件以下なら coherent は true', () => {
+    expect(buildBlockMeshTree([]).coherent).toBe(true);
+    expect(buildBlockMeshTree([t('Asthma', true, ['C08.127.108'])]).coherent).toBe(true);
+  });
+});
+
 describe('meshCategoryName', () => {
   test('既知カテゴリは日本語ラベル', () => {
     expect(meshCategoryName('C')).toBe('疾患');

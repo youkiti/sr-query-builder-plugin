@@ -50,8 +50,11 @@ export class EutilsError extends Error {
   }
 }
 
-/** `retryWithBackoff` の `shouldRetry`: permanent な EutilsError だけリトライ対象から外す。 */
-function shouldRetryEutils(err: unknown): boolean {
+/**
+ * `retryWithBackoff` の `shouldRetry`: permanent な EutilsError だけリトライ対象から外す。
+ * meshRdf.ts の SPARQL 呼び出しからも再利用する（issue #52 レビュー指摘）。
+ */
+export function shouldRetryEutils(err: unknown): boolean {
   return !(err instanceof EutilsError && err.permanent);
 }
 

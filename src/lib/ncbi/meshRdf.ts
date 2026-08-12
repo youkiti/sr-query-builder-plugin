@@ -1,5 +1,5 @@
 import type { EutilsDeps } from './eutils';
-import { EutilsError } from './eutils';
+import { EutilsError, shouldRetryEutils } from './eutils';
 import { retryWithBackoff } from './rateLimit';
 
 /**
@@ -11,10 +11,14 @@ import { retryWithBackoff } from './rateLimit';
  * ができない。これらは公式リンクトデータ（<https://id.nlm.nih.gov/mesh/sparql>）が必要。
  *
  * CORS: 当エンドポイントは `Access-Control-Allow-Origin: *` を返すため、拡張機能の
- * コンテキストから直接 fetch できる（host_permissions に `https://id.nlm.nih.gov/*` を要追加）。
+ * コンテキストから直接 fetch できる（host_permissions に `https://id.nlm.nih.gov/*` を追加済み）。
  *
  * `EutilsDeps` を流用するが、SPARQL には tool/api_key/email は不要なので
  * `fetch` / `sleep` / `maxRetries` のみを使う。
+ *
+ * 注意: カテゴリ letter 単体（例 `C`）は tree number ではないため本モジュールでは解決できない
+ * （`TREE_NUMBER_RE` は数字を必須とする）。ルートノードの表示名は本モジュールを経由せず、
+ * blockMeshTree の `meshCategoryName` が局所解決する。
  */
 
 const SPARQL_URL = 'https://id.nlm.nih.gov/mesh/sparql';
@@ -27,6 +31,12 @@ const PREFIXES = [
 
 /** MeSH tree number の形（例: `M01.526.485.810.910`）。先頭 1 文字 + 数字・ドット。 */
 const TREE_NUMBER_RE = /^[A-Z][0-9]+(\.[0-9]+)*$/;
+
+/**
+ * `fetchMeshLabels` の VALUES 句 1 回あたりの最大件数。単一 GET の VALUES 句は実測で
+ * 約 400 件から HTTP 400（URL 長超過）になるため、これを大きく下回る 100 件で分割する。
+ */
+const LABELS_CHUNK_SIZE = 100;
 
 /** ツリー上の 1 ノード（tree number + descriptor UI + 表示ラベル）。 */
 export interface MeshTreeNode {
@@ -69,11 +79,14 @@ async function runSparql(query: string, deps: EutilsDeps): Promise<SparqlJson> {
     async () => {
       const res = await deps.fetch(url);
       if (!res.ok) {
-        throw new EutilsError(`mesh sparql failed: HTTP ${res.status}`, res.status);
+        // 4xx（429 を除く）は構文エラー・URL 長超過等の恒久エラー。リトライしても解消しないため
+        // permanent フラグを立てて `shouldRetryEutils` にリトライ対象から外させる。
+        const permanent = res.status >= 400 && res.status < 500 && res.status !== 429;
+        throw new EutilsError(`mesh sparql failed: HTTP ${res.status}`, res.status, permanent);
       }
       return (await res.json()) as SparqlJson;
     },
-    { sleep: deps.sleep, maxRetries: deps.maxRetries ?? 5 }
+    { sleep: deps.sleep, maxRetries: deps.maxRetries ?? 5, shouldRetry: shouldRetryEutils }
   );
 }
 
@@ -85,13 +98,15 @@ export async function fetchMeshChildren(
   treeNumber: string,
   deps: EutilsDeps
 ): Promise<MeshTreeNode[]> {
-  if (!isValidTreeNumber(treeNumber)) {
+  const trimmed = treeNumber.trim();
+  if (!isValidTreeNumber(trimmed)) {
     return [];
   }
   const query = `${PREFIXES}
 SELECT ?childTN ?desc ?label (EXISTS { ?gc meshv:parentTreeNumber ?childTN } AS ?hasKids) WHERE {
-  ?childTN meshv:parentTreeNumber mesh:${treeNumber} .
+  ?childTN meshv:parentTreeNumber mesh:${trimmed} .
   ?desc meshv:treeNumber ?childTN .
+  ?desc a meshv:TopicalDescriptor .
   ?desc rdfs:label ?label .
 }`;
   const json = await runSparql(query, deps);
@@ -101,6 +116,8 @@ SELECT ?childTN ?desc ?label (EXISTS { ?gc meshv:parentTreeNumber ?childTN } AS 
 /**
  * 複数 tree number → ノード（descriptor UI + label）のバッチ逆引き。
  * 祖先ノードの名前表示に使う。不正な tree number は除外し、全滅なら fetch しない。
+ * `LABELS_CHUNK_SIZE` 件ずつに分割し、チャンクごとに直列で呼んで結果をマージする
+ * （単一 VALUES 句の GET は実測で約 400 件から HTTP 400 になるため）。
  */
 export async function fetchMeshLabels(
   treeNumbers: readonly string[],
@@ -111,18 +128,22 @@ export async function fetchMeshLabels(
   if (valid.length === 0) {
     return result;
   }
-  const values = valid.map((t) => `mesh:${t}`).join(' ');
-  const query = `${PREFIXES}
+  for (let i = 0; i < valid.length; i += LABELS_CHUNK_SIZE) {
+    const chunk = valid.slice(i, i + LABELS_CHUNK_SIZE);
+    const values = chunk.map((t) => `mesh:${t}`).join(' ');
+    const query = `${PREFIXES}
 SELECT ?tn ?desc ?label WHERE {
   VALUES ?tn { ${values} }
   ?desc meshv:treeNumber ?tn .
+  ?desc a meshv:TopicalDescriptor .
   ?desc rdfs:label ?label .
 }`;
-  const json = await runSparql(query, deps);
-  for (const node of parseTreeNodes(json, 'tn')) {
-    // 同一 tree number は 1 descriptor。最初の 1 件を採用する。
-    if (!result.has(node.treeNumber)) {
-      result.set(node.treeNumber, node);
+    const json = await runSparql(query, deps);
+    for (const node of parseTreeNodes(json, 'tn')) {
+      // 同一 tree number は 1 descriptor。最初の 1 件を採用する。
+      if (!result.has(node.treeNumber)) {
+        result.set(node.treeNumber, node);
+      }
     }
   }
   return result;

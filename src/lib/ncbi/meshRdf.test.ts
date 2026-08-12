@@ -1,3 +1,4 @@
+import { EutilsError } from './eutils';
 import { fetchMeshChildren, fetchMeshLabels, type SparqlJson } from './meshRdf';
 
 function jsonResponse(body: unknown): Response {
@@ -49,6 +50,8 @@ describe('fetchMeshChildren', () => {
       expect(decodeURIComponent(url)).toContain('mesh:M01.526.485.810.910');
       // クエリに hasChildren 判定の EXISTS が含まれる
       expect(decodeURIComponent(url)).toContain('EXISTS');
+      // TopicalDescriptor 型制約が入っている（Y 系 qualifier 等の除外）
+      expect(decodeURIComponent(url)).toContain('meshv:TopicalDescriptor');
       return jsonResponse(
         sparql([
           { tn: 'M01.526.485.810.910.750', desc: 'D000069471', label: 'Neurosurgeons', hasKids: '0' },
@@ -126,6 +129,68 @@ describe('fetchMeshChildren', () => {
       })
     ).rejects.toThrow('mesh sparql failed');
   });
+
+  test('HTTP 400 は恒久エラー扱いで fetch 1 回のみ・リトライしない', async () => {
+    const fetch = jest.fn(async () => errorResponse(400));
+    const sleep = jest.fn().mockResolvedValue(undefined);
+    const promise = fetchMeshChildren('C08', {
+      fetch: fetch as unknown as typeof globalThis.fetch,
+      maxRetries: 5,
+      sleep,
+    });
+    await expect(promise).rejects.toBeInstanceOf(EutilsError);
+    await expect(promise).rejects.toMatchObject({ permanent: true });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  test('HTTP 429 はリトライされる', async () => {
+    let calls = 0;
+    const fetch = jest.fn(async () => {
+      calls += 1;
+      if (calls < 3) {
+        return errorResponse(429);
+      }
+      return jsonResponse(sparql([{ tn: 'C08.1', desc: 'D1', label: 'X' }]));
+    });
+    const result = await fetchMeshChildren('C08', {
+      fetch: fetch as unknown as typeof globalThis.fetch,
+      maxRetries: 5,
+      sleep: async () => undefined,
+    });
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(result).toHaveLength(1);
+  });
+
+  test('HTTP 500 はリトライされる', async () => {
+    let calls = 0;
+    const fetch = jest.fn(async () => {
+      calls += 1;
+      if (calls < 2) {
+        return errorResponse(500);
+      }
+      return jsonResponse(sparql([{ tn: 'C08.1', desc: 'D1', label: 'X' }]));
+    });
+    const result = await fetchMeshChildren('C08', {
+      fetch: fetch as unknown as typeof globalThis.fetch,
+      maxRetries: 5,
+      sleep: async () => undefined,
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(result).toHaveLength(1);
+  });
+
+  test('前後に空白が付いた tree number でも trim して fetch する', async () => {
+    const fetch = jest.fn(async (url: string) => {
+      expect(decodeURIComponent(url)).toContain('mesh:C08.127.108');
+      return jsonResponse(sparql([{ tn: 'C08.127.108.1', desc: 'D1', label: 'X' }]));
+    });
+    const result = await fetchMeshChildren('  C08.127.108  ', {
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(result).toHaveLength(1);
+  });
 });
 
 describe('fetchMeshLabels', () => {
@@ -136,6 +201,8 @@ describe('fetchMeshLabels', () => {
       expect(decoded).toContain('VALUES ?tn');
       expect(decoded).toContain('mesh:M01.526.485.810');
       expect(decoded).toContain('mesh:M01.526.485');
+      // TopicalDescriptor 型制約が入っている
+      expect(decoded).toContain('meshv:TopicalDescriptor');
       return jsonResponse(
         sparql(
           [
@@ -173,5 +240,28 @@ describe('fetchMeshLabels', () => {
       fetch: fetch as unknown as typeof globalThis.fetch,
     });
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test('150 件渡すと fetch が 2 回（100 件 + 50 件）呼ばれ両チャンクの結果がマージされる', async () => {
+    const treeNumbers = Array.from({ length: 150 }, (_, i) => `C08.${String(i + 1).padStart(3, '0')}`);
+    const fetch = jest.fn(async (url: string) => {
+      const decoded = decodeURIComponent(url).replace(/\+/g, ' ');
+      // どのチャンクかを、含まれる tree number から判定して対応する行だけ返す
+      // （VALUES 句は `{ mesh:X mesh:Y ... }` の形で必ず末尾にも空白が付くため、`mesh:X ` で判定できる）
+      const chunkTreeNumbers = treeNumbers.filter((tn) => decoded.includes(`mesh:${tn} `));
+      return jsonResponse(
+        sparql(
+          chunkTreeNumbers.map((tn, i) => ({ tn, desc: `D${i}`, label: `Label ${tn}` })),
+          'tn'
+        )
+      );
+    });
+    const result = await fetchMeshLabels(treeNumbers, {
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(result.size).toBe(150);
+    expect(result.get('C08.001')?.label).toBe('Label C08.001');
+    expect(result.get('C08.150')?.label).toBe('Label C08.150');
   });
 });
