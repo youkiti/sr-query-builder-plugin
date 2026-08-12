@@ -50,6 +50,8 @@ export default {
 };
 ```
 
+**複数の worktree で並行作業するとき、E2E を同時に走らせてはいけない**: [playwright.config.ts](playwright.config.ts) は `webServer` を `localhost:4400`（`E2E_PORT` 未設定時）に立て、`reuseExistingServer: !process.env.CI` を指定している。したがって **2 つ目の worktree で `npm run test:e2e` を始めると、1 つ目が立てたサーバを「既にレディ」とみなして再利用し、別 worktree の `dist/` を配信したままテストが走る**（`tools/playwright-server.js` は起動時の作業ディレクトリ配下の `dist/` を配信する）。自分の変更が反映されていない画面を検証することになり、**しかも普通に green になるので気づけない**。並行させるなら worktree ごとに別ポートを渡す（`E2E_PORT=4401 npm run test:e2e`）。ポートを分けないなら、E2E を回す worktree を 1 つに決めて他では実行しないこと。
+
 **操作解説動画（`video/`）**: YouTube 公開用の解説動画を Playwright 収録 + VOICEVOX 音声合成 + ffmpeg 合成で作るパイプライン。正典は [video/REQUIREMENTS.md](video/REQUIREMENTS.md)（PR 分割・受け入れ基準・QA/QC チェックリスト）、実行手順と過去に踏んだ失敗の再発防止メモは [video/README.md](video/README.md)。収録は dev ビルド（`dist/`）を読み込むので事前に `npm run dev` が要る。Chrome 拡張の録画には仮想ディスプレイが必要なため、Linux では `xvfb-run -a -s "-screen 0 1920x1080x24" node video/scripts/record.mjs` のように xvfb 経由で実行する。
 
 **全 14 章を収録・QA 済みで、YouTube に一般公開済み**（<https://youtu.be/RqUFlmncuIE>。`hosted/index.html` / `hosted/help.html` に埋め込み済み）。収録はデモビルド（`npm run build:demo` → `dist-demo/`）を読み込む（`resolveExtensionDir()` が `dist-demo/` → `dist/` の順で解決する）。章ごとの初期状態は `?demoSeed=<プリセット名>`、進捗表示を映すための人工レイテンシは `?demoLatency=<係数>` で URL から渡す（`src/demo/`。係数の実測表は [video/REQUIREMENTS.md](video/REQUIREMENTS.md) §6-4）。**原稿 → TTS → 収録の順を守ること**（シーンが `loadCueDurations()` で音声の実尺を読んで画面を追従させるため）。
