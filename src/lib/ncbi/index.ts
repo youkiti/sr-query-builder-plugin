@@ -16,6 +16,12 @@ export {
   parseMeshSummaryJson,
   type MeshEsummaryJson,
 } from './mesh';
+export {
+  fetchMeshChildren,
+  fetchMeshLabels,
+  type MeshTreeNode,
+  type SparqlJson,
+} from './meshRdf';
 export { buildPubmedSearchUrl } from './pubmedUrl';
 export {
   exponentialBackoff,

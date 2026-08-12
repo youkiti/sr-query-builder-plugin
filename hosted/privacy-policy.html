@@ -3,7 +3,7 @@
      内容の正典は docs/store/privacy-policy.md。本ファイルはその HTML 転記 + 英訳であり、
      **更新時は必ず両方を直す**（hosted/README.md「公開ページ」参照）。
      ja / en は両方を持ち、表示は lang.js + CSS が片方だけに絞る（併記しない）。
-     version: 2026-08-11 -->
+     version: 2026-08-12 -->
 <html lang="ja">
   <head>
     <meta charset="utf-8" />
@@ -56,7 +56,7 @@
         </h1>
         <p class="last-updated">
           <span class="ja" lang="ja"
-            >最終更新: 2026-08-11 / 対象バージョン: v0.3.0<br />
+            >最終更新: 2026-08-12 / 対象バージョン: v0.3.0<br />
             対象: Chrome 拡張機能「SR Query Builder」（sr-query-builder-plugin）<br />
             配布元: 本拡張は MIT ライセンス（<a
               href="https://github.com/youkiti/sr-query-builder-plugin/blob/master/LICENSE"
@@ -64,7 +64,7 @@
             >）の OSS です。</span
           >
           <span class="en" lang="en"
-            >Last updated: 2026-08-11 / Covers v0.3.0<br />
+            >Last updated: 2026-08-12 / Covers v0.3.0<br />
             Applies to: the Chrome extension “SR Query Builder” (sr-query-builder-plugin)<br />
             Distribution: this extension is open-source software under the
             <a href="https://github.com/youkiti/sr-query-builder-plugin/blob/master/LICENSE">MIT licence</a>.</span
@@ -117,11 +117,12 @@
             <li>
               <span class="ja" lang="ja"
                 >利用者が自分の API キー（BYOK: Bring Your Own Key）で契約する LLM API（Gemini または OpenRouter。既定は
-                Gemini）および NCBI E-utilities</span
+                Gemini）、NCBI E-utilities、および NLM MeSH RDF（MeSH 階層情報の取得。API キー不要の公開エンドポイント）</span
               >
               <span class="en" lang="en"
                 >The LLM API the user contracts with using their own key (BYOK: Gemini or OpenRouter; Gemini is the
-                default), and NCBI E-utilities</span
+                default), NCBI E-utilities, and NLM MeSH RDF (used to fetch MeSH hierarchy data; a public endpoint
+                that needs no API key)</span
               >
             </li>
           </ol>
@@ -223,6 +224,27 @@
                   <td>
                     <span class="ja" lang="ja">ヒット数検証・MeSH 用語の取得・シード論文の捕捉率計算</span>
                     <span class="en" lang="en">Hit-count validation, retrieving MeSH terms, computing seed-paper capture rate</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <span class="ja" lang="ja">ブロック内の MeSH 用語（descriptor 名・tree number）</span>
+                    <span class="en" lang="en">MeSH terms within a search block (descriptor name and tree number)</span>
+                  </td>
+                  <td>
+                    <span class="ja" lang="ja"
+                      >NLM MeSH RDF（<code>id.nlm.nih.gov</code> の SPARQL エンドポイント）</span
+                    >
+                    <span class="en" lang="en"
+                      >NLM MeSH RDF (the SPARQL endpoint at <code>id.nlm.nih.gov</code>)</span
+                    >
+                  </td>
+                  <td>
+                    <span class="ja" lang="ja">MeSH 階層（親子関係）の解析。ブロック内の用語重複・カテゴリ分散の検出</span>
+                    <span class="en" lang="en"
+                      >Analyzing the MeSH hierarchy (parent/child relationships); detecting term overlap and category
+                      spread within a block</span
+                    >
                   </td>
                 </tr>
                 <tr>
@@ -347,6 +369,21 @@
                 capture rate, MeSH term extraction), the search strategy and PMIDs are sent to NCBI’s E-utilities
                 (<code>eutils.ncbi.nlm.nih.gov</code>). An NCBI API key can optionally be configured as BYOK to ease
                 rate limits.</span
+              >
+            </li>
+            <li>
+              <span class="ja" lang="ja"
+                ><strong>NLM MeSH RDF（SPARQL エンドポイント）</strong>:
+                ブロック内の MeSH 用語について、MeSH ツリー上の親子関係（祖先・子ノードの名称）を取得するため、descriptor
+                名や tree number を NLM の MeSH RDF エンドポイント（<code>id.nlm.nih.gov/mesh/sparql</code>）へ SPARQL
+                クエリとして送信します。PMID や研究プロトコルの本文は送信されません。認証や API キーは不要です。</span
+              >
+              <span class="en" lang="en"
+                ><strong>NLM MeSH RDF (SPARQL endpoint)</strong>: to fetch the parent/child relationships of MeSH
+                terms within a search block (the names of ancestor and child nodes), descriptor names and tree
+                numbers are sent as a SPARQL query to NLM’s MeSH RDF endpoint
+                (<code>id.nlm.nih.gov/mesh/sparql</code>). PMIDs and protocol text are never sent this way. No
+                authentication or API key is required.</span
               >
             </li>
           </ul>

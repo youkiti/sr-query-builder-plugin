@@ -12,5 +12,7 @@ describe('lib/ncbi index 再エクスポート', () => {
     expect(typeof mod.EutilsError).toBe('function');
     expect(typeof mod.fetchMeshTreeNumbers).toBe('function');
     expect(typeof mod.parseMeshSummaryJson).toBe('function');
+    expect(typeof mod.fetchMeshChildren).toBe('function');
+    expect(typeof mod.fetchMeshLabels).toBe('function');
   });
 });

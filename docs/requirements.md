@@ -81,6 +81,7 @@ https://www.googleapis.com/auth/drive.file          # Sheets 読み書き + LLM 
   - `https://www.googleapis.com/*`
   - `https://eutils.ncbi.nlm.nih.gov/*`（NCBI E-utilities）
   - `https://generativelanguage.googleapis.com/*`（Gemini API、将来拡張時に追加）
+  - `https://id.nlm.nih.gov/*`（NLM MeSH RDF / SPARQL。MeSH 階層の取得）
 - `oauth2.client_id` / `scopes`（上記 2.1）
 - `action.default_popup`: `popup.html`（プロジェクト選択＋メインビュー起動）
 - メインビューは `dist/app.html` に配置し、`chrome.tabs.create` で開く（Side Panel API は使わない）

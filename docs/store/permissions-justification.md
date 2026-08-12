@@ -1,6 +1,6 @@
 # 権限の使用理由説明（Chrome ウェブストア審査フォーム用）
 
-- **最終更新**: 2026-08-07
+- **最終更新**: 2026-08-12
 - **用途**: Chrome ウェブストアのアイテム登録時、各権限に求められる「使用理由（justification）」欄へそのまま貼り付けるための原稿。日本語と英語を併記します。
 - **正典**: 権限の一覧は [src/manifest.json](../../src/manifest.json)、データフローは [privacy-policy.md](privacy-policy.md) を参照。
 
@@ -41,6 +41,11 @@
 
 - **JA**: ユーザーが設定した Gemini API キー（BYOK）で、検索式ドラフトの生成・MeSH 提案・シノニム展開・検証結果の解釈補助などのリクエストを送信するために使用します。
 - **EN**: Used to send requests (search-strategy draft generation, MeSH suggestions, synonym expansion, validation-result interpretation assistance) to the Gemini API with the user's own API key (BYOK).
+
+### `https://id.nlm.nih.gov/*`
+
+- **JA**: NLM の MeSH RDF（SPARQL エンドポイント、`id.nlm.nih.gov/mesh/sparql`）を用いて、検索式ブロック内の MeSH 用語が MeSH ツリー上のどの親子関係にあるか（祖先・子ノードの名称）を取得するために使用します。NCBI E-utilities（`db=mesh`）は descriptor から tree number への解決はできますが、tree number から descriptor 名への逆引き（祖先ノードの名称表示）や、ある tree number の子ノード列挙はできないため、この情報を得るには本エンドポイントが別途必要です。認証や API キーは不要な公開エンドポイントで、送信するのは descriptor 名・tree number のみであり、PMID や研究プロトコルの本文は送信されません。
+- **EN**: Used to call NLM's MeSH RDF SPARQL endpoint (`id.nlm.nih.gov/mesh/sparql`) to look up where a MeSH term used in a search block sits in the MeSH tree's parent/child hierarchy (the names of its ancestor and child nodes). NCBI E-utilities (`db=mesh`) can resolve a descriptor to its tree number, but cannot resolve a tree number back to a descriptor name (to display ancestor nodes) or enumerate a tree number's child nodes; this endpoint is required for that. It is a public endpoint that needs no authentication or API key; only descriptor names and tree numbers are sent, never PMIDs or protocol text.
 
 ## OAuth スコープ（審査の Google 用データアクセス欄）
 
