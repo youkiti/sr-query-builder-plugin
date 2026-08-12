@@ -97,7 +97,10 @@ module.exports = (env, argv) => {
           { from: 'src/popup/popup.html', to: 'popup/popup.html' },
           { from: 'src/popup/popup.css', to: 'popup/popup.css' },
           { from: 'src/app/app.html', to: 'app/app.html' },
-          { from: 'src/app/app.css', to: 'app/app.css' },
+          // ビュー単位に分割した CSS 群をディレクトリごとコピーする。ファイル単位ではなく
+          // ディレクトリ単位にしているのは、今後 CSS ファイルが増減しても webpack.config.js
+          // を編集せずに済むようにするため（並列作業でのこのファイルの衝突を避ける狙い）。
+          { from: 'src/app/styles', to: 'app/styles' },
           { from: 'src/options/options.html', to: 'options/options.html' },
           { from: 'src/options/options.css', to: 'options/options.css' },
           { from: 'src/styles', to: 'styles' },

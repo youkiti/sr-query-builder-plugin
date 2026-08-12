@@ -1,0 +1,86 @@
+# 本体実装のテスト CI。typecheck / lint / unit test / dev ビルド / E2E を回す。
+#
+# これまで .github/workflows/ にあったのは公開ページのデプロイ用 deploy-pages.yml だけで、
+# 実装の検証はローカル実行に依存していた。並列 PR の green 判定を機械化するために追加する。
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+# 同じブランチ/PR で新しい push があったら古い実行は止める（無駄な同時実行を避ける）
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# GITHUB_TOKEN の権限はチェックアウトに必要な read のみ
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # submodule（tiab-review-plugin / search-formula-developper）は参照実装で、
+      # src/ と tests/ のどこからも参照されていないため取得しない
+      - name: リポジトリを取得する
+        uses: actions/checkout@v4
+
+      - name: Node.js をセットアップする
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: 依存関係をインストールする
+        run: npm ci
+
+      - name: 型チェック
+        run: npm run typecheck
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: Stylelint
+        run: npm run lint:css
+
+      - name: 単体テスト
+        run: npm test
+
+      - name: 開発ビルド
+        run: npm run dev
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: リポジトリを取得する
+        uses: actions/checkout@v4
+
+      - name: Node.js をセットアップする
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: 依存関係をインストールする
+        run: npm ci
+
+      - name: Playwright ブラウザをインストールする
+        run: npx playwright install --with-deps chromium
+
+      - name: E2E テスト
+        # webServer.command が npm run dev を自分で走らせるため、事前ビルドは不要
+        run: npm run test:e2e
+
+      - name: E2E失敗時の成果物をアップロードする
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results
+          path: test-results/
+          retention-days: 7
+          if-no-files-found: ignore
