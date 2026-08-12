@@ -1,0 +1,152 @@
+/* #/expand（境界事例の対話的探索・検索式の更新提案）画面のスタイル。 */
+
+/* /expand 画面: キーボード操作の対象を視覚化 */
+.expand__candidates {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  outline: none;
+}
+
+.expand__candidate {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-3);
+  background: var(--color-bg);
+}
+
+.expand__candidate--focused {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(42, 99, 214, 0.2);
+}
+
+.expand__candidate--decided {
+  background: var(--color-bg-muted);
+  opacity: 0.85;
+}
+
+/* アブストラクト本文はフォーカス中のカードだけ展開する（候補は数件・本文は長いため）。
+   要素は常時 DOM にあり、表示切り替えはフォーカスクラスで行う。 */
+.expand__candidate-abstract {
+  display: none;
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+}
+
+.expand__candidate--focused .expand__candidate-abstract {
+  display: block;
+}
+
+.expand__candidate-abstract-label {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-1);
+}
+
+.expand__candidate-abstract-body {
+  margin: 0;
+  color: var(--color-text);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  line-height: 1.55;
+}
+
+.expand__candidate-abstract-body--empty {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.expand__shortcuts {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  margin: 0 0 var(--space-3);
+}
+
+/* 取得の進捗トラッカー。チップ／バーは draft__ の視覚プリミティブを再利用するため、
+   ここではコンテナ枠のみ定義する（.draft__tracker と同じ見た目）。 */
+.expand__tracker {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-muted);
+}
+
+.expand__status {
+  margin: var(--space-2) 0 0;
+}
+
+.expand__error {
+  color: var(--color-danger);
+}
+
+.expand__error:empty {
+  display: none;
+}
+
+.expand__round {
+  margin-top: var(--space-5);
+}
+
+.expand__round-summary {
+  border-left: 4px solid var(--color-success);
+  padding-left: var(--space-3);
+}
+
+.expand__round-error {
+  color: var(--color-danger);
+}
+
+/* 実験的機能（dev）であることを目立たせる注意バナー。 */
+.expand__dev {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-warning, #b8860b);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-bg, #fff8e1);
+  color: var(--color-warning-text, #6d4c00);
+  font-size: var(--font-size-sm);
+}
+
+/* 検索式の更新提案ブロック。 */
+.expand__proposals {
+  margin-top: var(--space-4);
+  border-left: 4px solid var(--color-accent, #2e7d32);
+  padding-left: var(--space-3);
+}
+
+.expand__proposals-note {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  margin: 0 0 var(--space-2);
+}
+
+.expand__proposal {
+  margin-bottom: var(--space-3);
+}
+
+.expand__proposal-head {
+  margin: 0 0 var(--space-1);
+  font-weight: 600;
+}
+
+.expand__proposal-terms {
+  margin: 0;
+  padding-left: var(--space-4);
+}
+
+.expand__proposal-terms code {
+  font-family: var(--font-mono, monospace);
+  background: var(--color-bg-muted, #f5f5f5);
+  padding: 0 var(--space-1);
+  border-radius: 3px;
+}
+
+.expand__proposal-term-meta {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+

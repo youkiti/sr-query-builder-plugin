@@ -1,0 +1,142 @@
+/* app シェル（ヘッダー / サイドバー / ナビゲーション / コンテンツ枠）のスタイル。
+   全画面共通の外枠を定義する。 */
+
+.app__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg);
+}
+
+.app__header-brand {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.app__title {
+  margin: 0;
+  font-size: var(--font-size-xl);
+}
+
+.app__build-date {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.app__title-link {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.app__title-link:hover,
+.app__title-link:focus-visible {
+  color: var(--color-primary);
+}
+
+.app__header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.app__settings-btn {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.app__settings-btn:hover {
+  background: var(--color-bg-muted);
+}
+
+.app__header-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+}
+
+.app__status {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.app__context {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.app__context:empty {
+  display: none;
+}
+
+.app__main {
+  display: flex;
+  min-height: calc(100vh - 60px);
+}
+
+.app__sidebar {
+  width: 240px;
+  padding: var(--space-4);
+  border-right: 1px solid var(--color-border);
+  background: var(--color-bg-muted);
+}
+
+.app__nav-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.app__nav-list li {
+  margin-bottom: var(--space-2);
+}
+
+.app__nav-list button {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  color: var(--color-text);
+}
+
+.app__nav-list button:hover:not(.is-disabled) {
+  background: var(--color-bg);
+}
+
+.app__nav-list button.is-active {
+  background: var(--color-bg);
+  border-color: var(--color-border);
+  font-weight: 600;
+}
+
+.app__nav-list button.is-disabled {
+  color: var(--color-text-muted);
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.app__content {
+  flex: 1;
+  padding: var(--space-5);
+}
+

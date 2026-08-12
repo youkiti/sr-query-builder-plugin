@@ -61,7 +61,18 @@ src/
 ├── app/                           # メインビュー（chrome.tabs.create で開くフルページ）
 │   ├── app.html
 │   ├── app.ts                     # エントリ。ハッシュルーティングの起動のみ
-│   ├── app.css
+│   ├── styles/                    # ビュー単位に分割した CSS（app.html が <link> で個別に読み込む）
+│   │   ├── shell.css               # ヘッダー / サイドバー / ナビゲーション等の共通外枠
+│   │   ├── home.css
+│   │   ├── protocol.css
+│   │   ├── expand.css
+│   │   ├── validate.css
+│   │   ├── blocks.css
+│   │   ├── draft.css
+│   │   ├── edit.css
+│   │   ├── seeds.css
+│   │   ├── settings.css
+│   │   └── export.css
 │   ├── router.ts                  # #/home 等を各 view に振り分ける
 │   ├── views/                     # 画面ごとの純粋な render 関数
 │   │   ├── homeView.ts

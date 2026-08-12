@@ -12,6 +12,9 @@ Thumbs.db
 # Logs
 *.log
 
+# stylelint の出力を誤ってコミットしないようにする（過去に stylelint-out.txt が混入した事故の再発防止）
+stylelint-out.txt
+
 # Node / ビルド
 node_modules/
 dist/

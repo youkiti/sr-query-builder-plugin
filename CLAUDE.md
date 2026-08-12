@@ -31,9 +31,11 @@ npm run video:tts    # ナレーション音声合成（video/narration/ → vid
 npm run video:assemble # 合成（build/ 一式 → final.mp4 / chapters.txt / 字幕 / 説明文）
 ```
 
+**CI**: [.github/workflows/ci.yml](.github/workflows/ci.yml) を追加。`pull_request` と `master` への `push` で発火し、`verify` ジョブ（typecheck → lint → lint:css → test → dev ビルド）と `e2e` ジョブ（Playwright Chromium 導入 → test:e2e）を並列実行する。本番ビルド（`npm run build`）は `.env` の `OAUTH_CLIENT_ID` を要求するため CI では回さない。E2E 失敗時は `test-results/`（trace・スクリーンショット）が artifact として 7 日間保持される。
+
 単一テストの実行: `npx jest src/app/views/blocksView.test.ts`、E2E 単体: `npx playwright test tests/e2e/app-blocks.spec.ts`。
 
-**既知の失敗（Linux のみ）**: `tests/playwright-server.test.ts` の `safeJoin › rejects traversal into sibling paths that only share the same prefix` は Linux で必ず落ちる。POSIX の `path` はバックスラッシュをパス区切りとして扱わないため、テストが与える Windows 形式の traversal パスがそもそも別セグメントに分解されないことによるもので、Windows では通る。**本体の不具合ではないので、Linux で `npm test` を回したときはこの 1 件だけが失敗している状態が正常**。他に失敗が出ていたらそれは自分の変更が原因。
+**Linux でも `npm test` は全通過する**（2026-08 の CI 整備で対応済み）。`tests/playwright-server.test.ts` の `safeJoin` テストのうち、Windows 形式（バックスラッシュ区切り）の traversal パスを検証する assertion は `process.platform === 'win32'` で条件分岐した別テストに切り出してあり、Linux では自動的にスキップされる（POSIX の `path` はバックスラッシュをパス区切りとして扱わないため、この assertion は Windows 上でしか意味のある検証にならない。`safeJoin` 本体は変更していない）。スラッシュ区切りの traversal 検証（`/../dist-evil/file.txt`）は全プラットフォームで維持している。
 
 **カバレッジ閾値は実際には発火していない**: [jest.config.ts](jest.config.ts) は `coverageThreshold` に global 100%（branches / functions / lines / statements）を宣言しているが、`npm test` は `--coverage` を付けないため**この閾値は通常のテスト実行では一度も評価されない**。`npx jest --coverage` を実行すると実測は 95% 前後（2026-08 時点で stmts 95.3% / branches 91.3%）で、閾値割れとして赤くなる。ビュー層には構造的に到達不可能な catch 節（例: [src/app/views/editView.ts](src/app/views/editView.ts) の `applyBlockImprovement` の失敗経路）が元から残っており、**これは自分の変更が壊したものではない**。カバレッジを気にするときは「global 100% を満たすこと」ではなく「自分が足した分岐にテストが付いていること」を基準にすること。
 
@@ -97,7 +99,7 @@ npm run pack:release                     # 既存 dist-release/ だけをパッ�
 - **CI チェックは 2026-08-09 から発火する**: `release.ps1` は `.github/workflows/` にファイルが 1 つでもあれば `gh run list` で `origin/master` の HEAD に対する run を見る。公開ページのデプロイ workflow（`deploy-pages.yml`）を追加したため、オートスキップ（`CI 未配置のためスキップ`）は終了した。実務上の挙動は次のとおり:
   - version バンプ commit は `hosted/**` に触らないので `deploy-pages` は発火しない → 直前の master HEAD に run が無ければ `CI run が見つかりません` の**警告のみ**で先へ進む
   - `hosted/**` を変えた直後にリリースすると、デプロイ実行中は「CI がまだ実行中です」で停止する（`-Force` / `-SkipCiCheck` で回避可）。デプロイ完了を待つのが本筋
-  - **`deploy-pages` が green でもテストが通ったことは意味しない**（テストの CI はまだ無い。「未実装・既知のギャップ」参照）。リリース前の検証はローカルで `typecheck → test → test:e2e → lint → build` を回すこと
+  - version バンプ commit はテストにも触れないため `ci.yml`（`typecheck` / `lint` / `lint:css` / `test` / `dev` / `test:e2e`）も同様に発火しない。**`deploy-pages` や `ci.yml` の run 有無だけでテストが通ったことは保証されない**（このスクリプトが見るのは「直前の master HEAD に対する run の有無」であって、リリース対象のコミット自体を CI にかけているわけではない）。リリース前の検証はローカルで `typecheck → test → test:e2e → lint → build` を回すこと
 
 ## 公開ページ（GitHub Pages / `hosted/`）
 
@@ -124,6 +126,7 @@ src/
 │   ├── guards.ts   # 前提条件ガード（プロトコル未入力なら #/blocks へ入れない等）
 │   ├── bootstrap.ts# DI 配線（views × services × navigate）
 │   ├── services/   # 画面とドメインロジックの仲介（protocolService / blocksService / ...）
+│   ├── styles/     # ビュー単位に分割した CSS（app.html が <link> で個別に読み込む）
 │   └── views/      # 各ルートの描画関数（DOM 直組み。RenderView 型）
 ├── features/       # ドメインロジック（protocol / seeds / formula / validation / conversion / project）
 ├── lib/            # 横断ライブラリ（google: OAuth+Sheets+Drive / llm: LLMProvider 抽象+Gemini / ncbi: E-utilities / combination-expression / search-formula-md）
@@ -133,6 +136,7 @@ src/
 └── manifest.json   # Manifest V3
 ```
 
+- CSS: メインビューのスタイルは [src/app/styles/](src/app/styles/) にビュー単位で分割してある（`shell.css` が共通の外枠、以降は `#/draft` → `draft.css` のようにルートと 1:1）。**新しいスタイルは対応するビューのファイルへ書くこと。** 単一の `app.css` から分割したのは、複数の作業が並行するときに同じファイルの末尾へ追記し合って衝突するのを避けるため。ファイルを新設したら `app.html` に `<link>` を足す（webpack はディレクトリごとコピーするので `webpack.config.js` の編集は不要）。読み込み順＝カスケード順なので、`app.html` の `<link>` の並びを入れ替えないこと
 - 状態管理: [store.ts](src/app/store.ts) の `AppState` が単一の真実。`protocolDraft` / `blocksDraft` 等は in-memory のみで、リロードで消える（Sheets が永続層）
 - E2E hook: [app.ts](src/app/app.ts) は `window.__E2E_PRELOADED_STATE__` があればストアのシードに使う（テスト用 seam。本番動作には影響しない）
 - テスト戦略は [docs/ui-review-strategy.md](docs/ui-review-strategy.md)（Tier 0〜3）と [docs/ui-deep-test-plan.md](docs/ui-deep-test-plan.md) を参照。E2E は LLM / Google / NCBI をすべて `page.route()` + chrome stub でモックする
@@ -142,7 +146,6 @@ src/
 
 - **P1 ロジック未移植**: `check_block_overlap` / `check_mesh` / `check_mesh_overlap`（ブロック重複・MeSH 分析）
 - **OpenAI / Anthropic Claude への直接連携は未実装**: 実装済みなのは Gemini と OpenRouter の 2 プロバイダ（`src/lib/llm/GeminiProvider.ts` / `OpenRouterProvider.ts`。既定モデルは `gemini-3.5-flash`）。Options 画面で OpenRouter の API キーとカスタムモデル ID（最大 20 件）を追加登録できるため OpenRouter 経由で多くのモデルに到達できるが、OpenAI / Anthropic の API を直接叩く `LLMProvider` 実装は無い（`LlmProviderId` 型に `openai` / `anthropic` の値はあるが対応実装が無い）
-- **テストの CI が無い**（`.github/workflows/` にあるのは公開ページのデプロイ用 [deploy-pages.yml](.github/workflows/deploy-pages.yml) だけ。`typecheck` / `test` / `test:e2e` / `lint` / `dev` を回す workflow は未配置で、検証はローカル実行に依存している）
 - E2E ジャーニー J1（新規作成→export 貫通）は draft 生成〜検証の主要経路を journey-draft-generate.spec.ts で回帰確認済み。J4（expand キーボード判定）/ J5 の API エラー系は残タスク（[docs/ui-deep-test-plan.md](docs/ui-deep-test-plan.md) Phase D/E）
 
 ## 目的（ゴール）

@@ -1,0 +1,42 @@
+/* #/home（プロジェクト概要）画面のスタイル。 */
+
+.home__summary {
+  color: var(--color-text-muted);
+  margin: var(--space-2) 0 var(--space-4);
+}
+
+.home__actions {
+  margin: var(--space-4) 0 0;
+}
+
+.home__switch-project {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.home__switch-project:hover {
+  background: var(--color-bg-muted);
+}
+
+.home__status {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.home__status dt {
+  font-weight: 600;
+}
+
+.home__status dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
