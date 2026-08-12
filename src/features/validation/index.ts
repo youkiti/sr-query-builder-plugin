@@ -16,4 +16,19 @@ export {
   toMermaidFlowchart,
   type MeshHierarchyNode,
 } from './buildMeshHierarchy';
+export {
+  buildBlockMeshTree,
+  meshCategoryName,
+  type MeshTreeEntry,
+  type BlockMeshTermInput,
+  type BlockMeshTermMeta,
+  type BlockMeshTreeResult,
+} from './blockMeshTree';
+export {
+  analyzeFreewordDelta,
+  type FreewordTermInput,
+  type FreewordDeltaRow,
+  type FreewordDeltaResult,
+  type FreewordDeltaStatus,
+} from './freewordDelta';
 export { appendValidationLog } from './validationRepository';

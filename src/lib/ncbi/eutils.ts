@@ -36,10 +36,74 @@ function appendCommonParams(params: URLSearchParams, deps: EutilsDeps): void {
 
 export class EutilsError extends Error {
   readonly status: number;
-  constructor(message: string, status: number) {
+  /**
+   * リトライしても解消しない恒久エラー（構文エラー・不明タグ等の in-band エラー）なら true。
+   * `esearch` は `retryWithBackoff` の `shouldRetry` にこのフラグを見せて、
+   * リトライ対象から除外する（issue #50）。
+   */
+  readonly permanent: boolean;
+  constructor(message: string, status: number, permanent = false) {
     super(message);
     this.name = 'EutilsError';
     this.status = status;
+    this.permanent = permanent;
+  }
+}
+
+/**
+ * `retryWithBackoff` の `shouldRetry`: permanent な EutilsError だけリトライ対象から外す。
+ * meshRdf.ts の SPARQL 呼び出しからも再利用する（issue #52 レビュー指摘）。
+ */
+export function shouldRetryEutils(err: unknown): boolean {
+  return !(err instanceof EutilsError && err.permanent);
+}
+
+/**
+ * esearch の JSON レスポンス。NCBI は構文エラー・不明タグ等があっても HTTP 200 を返し、
+ * エラーをレスポンス本文に埋め込む（in-band エラー）。`count` だけでなくこれらも見て、
+ * 「構文エラー」と「0 件ヒット」を区別する（issue #50）。
+ */
+interface EsearchResponseJson {
+  esearchresult?: {
+    count?: string;
+    idlist?: string[];
+    /** 例: `Empty term and query_key - nothing todo` */
+    ERROR?: string;
+    errorlist?: {
+      /** クォート句が見つからなかった（例: タグの綴り間違い） */
+      phrasesnotfound?: string[];
+      /** 存在しないフィールドタグ（例: `[tiabb]`） */
+      fieldsnotfound?: string[];
+    };
+    /** stopword 無視等、検索は続行される軽微な警告。エラー扱いしない */
+    warninglist?: {
+      phrasesignored?: string[];
+      quotedphrasesnotfound?: string[];
+      outputmessages?: string[];
+    };
+  };
+  /** トップレベルの error（rate limit 超過時の "API rate limit exceeded" 等）。一時エラー扱い */
+  error?: string;
+}
+
+/**
+ * esearch レスポンスの in-band エラー（`ERROR` / `errorlist`）を検査し、
+ * あれば permanent な EutilsError を throw する。warninglist は正常系の揺らぎなので無視する。
+ */
+function assertNoInbandError(json: EsearchResponseJson): void {
+  const result = json.esearchresult;
+  const fieldsNotFound = result?.errorlist?.fieldsnotfound ?? [];
+  const phrasesNotFound = result?.errorlist?.phrasesnotfound ?? [];
+  if (fieldsNotFound.length > 0) {
+    const fields = fieldsNotFound.map((f) => `[${f}]`).join(', ');
+    throw new EutilsError(`構文エラー: 不明なフィールドタグ ${fields}`, 200, true);
+  }
+  if (phrasesNotFound.length > 0) {
+    const phrases = phrasesNotFound.map((p) => `"${p}"`).join(', ');
+    throw new EutilsError(`構文エラー: phrase not found ${phrases}`, 200, true);
+  }
+  if (result?.ERROR) {
+    throw new EutilsError(`esearch エラー: ${result.ERROR}`, 200, true);
   }
 }
 
@@ -81,9 +145,15 @@ export async function esearch(
       if (!res.ok) {
         throw new EutilsError(`esearch failed: HTTP ${res.status}`, res.status);
       }
-      return (await res.json()) as { esearchresult?: { count?: string; idlist?: string[] } };
+      const body = (await res.json()) as EsearchResponseJson;
+      if (body.error) {
+        // HTTP 200 で返るトップレベル error（rate limit 超過等）。一時エラーなのでリトライ対象
+        throw new EutilsError(`esearch エラー: ${body.error}`, res.status);
+      }
+      assertNoInbandError(body);
+      return body;
     },
-    { sleep: deps.sleep, maxRetries: deps.maxRetries ?? 5 }
+    { sleep: deps.sleep, maxRetries: deps.maxRetries ?? 5, shouldRetry: shouldRetryEutils }
   );
 
   const result = json.esearchresult;

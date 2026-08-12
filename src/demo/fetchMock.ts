@@ -26,6 +26,7 @@
  */
 
 import { handleEutilsRequest } from './eutilsMock';
+import { jsonResponse } from './fakeResponse';
 import { handleGeminiGenerateContent } from './llmFixtures';
 import { handleDriveRequest, handleSheetsRequest } from './sheetStore';
 
@@ -83,6 +84,12 @@ export async function demoFetch(input: RequestInfo | URL, init?: RequestInit): P
   if (url.startsWith('https://eutils.ncbi.nlm.nih.gov/entrez/eutils')) {
     await sleep(LATENCY_MS.eutils * latencyFactor);
     return handleEutilsRequest(url);
+  }
+  if (url.startsWith('https://id.nlm.nih.gov/mesh/sparql')) {
+    // MeSH ツリー UI（#58）接続時に本実装へ差し替えるプレースホルダ。現状 UI からは呼ばれない。
+    // 専用の LATENCY_MS キーが無いため NCBI E-utilities 相当のレイテンシを流用する。
+    await sleep(LATENCY_MS.eutils * latencyFactor);
+    return jsonResponse({ head: { vars: [] }, results: { bindings: [] } });
   }
   if (url.startsWith('https://generativelanguage.googleapis.com/v1beta/models')) {
     await sleep(LATENCY_MS.llm * latencyFactor);

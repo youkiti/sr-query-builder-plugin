@@ -132,7 +132,8 @@ src/
 │   │   ├── checkSearchLines.ts
 │   │   ├── checkFinalQuery.ts
 │   │   ├── extractMesh.ts
-│   │   └── checkBlockOverlap.ts   # P1
+│   │   ├── blockMeshTree.ts       # check_mesh / check_mesh_overlap 相当（UI 未接続）
+│   │   └── freewordDelta.ts       # check_block_overlap 相当（UI 未接続）
 │   ├── conversion/
 │   │   ├── toCentral.ts
 │   │   ├── toDialog.ts
@@ -148,7 +149,8 @@ src/
 │   ├── ncbi/
 │   │   ├── eutils.ts              # esearch / efetch / esummary
 │   │   ├── pubmedUrl.ts
-│   │   └── rateLimit.ts
+│   │   ├── rateLimit.ts
+│   │   └── meshRdf.ts             # NLM MeSH RDF（SPARQL）クライアント。tree number の逆引きと子ノード列挙
 │   ├── llm/
 │   │   ├── LLMProvider.ts         # interface
 │   │   ├── GeminiProvider.ts      # MVP 実装

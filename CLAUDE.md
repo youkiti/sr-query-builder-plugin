@@ -50,6 +50,18 @@ export default {
 };
 ```
 
+**複数の worktree で並行作業するとき、E2E を同時に走らせてはいけない**: [playwright.config.ts](playwright.config.ts) は `webServer` を `localhost:4400`（`E2E_PORT` 未設定時）に立て、`reuseExistingServer: !process.env.CI` を指定している。したがって **2 つ目の worktree で `npm run test:e2e` を始めると、1 つ目が立てたサーバを「既にレディ」とみなして再利用し、別 worktree の `dist/` を配信したままテストが走る**（`tools/playwright-server.js` は起動時の作業ディレクトリ配下の `dist/` を配信する）。自分の変更が反映されていない画面を検証することになり、**しかも普通に green になるので気づけない**。並行させるなら worktree ごとに別ポートを渡す（`E2E_PORT=4401 npm run test:e2e`）。ポートを分けないなら、E2E を回す worktree を 1 つに決めて他では実行しないこと。
+
+**Claude Code cloud（claude.ai/code のクラウドセッション）で作業するとき**: クラウドは Ubuntu 24.04 のサンドボックス（root 実行）。`npm test` / `npm run typecheck` / `npm run lint` / dev ビルドは Linux 対応済みなのでそのまま通る。**依存インストールは環境設定の「Setup script」ではなく、リポジトリ内の SessionStart フック [.claude/hooks/session-start.sh](.claude/hooks/session-start.sh) が担う**（[.claude/settings.json](.claude/settings.json) に登録済み。マージ後は以後の全セッションで自動的に走る）。
+
+- **Setup script に `npm ci` を置いてはいけない**: Setup script は Claude Code の起動前・VM のプロビジョニング段階で走るため、リポジトリのチェックアウトが揃っている保証がない。実際に Setup script を `npm ci && npx playwright install --with-deps chromium` にしていた時期は、`npm error code EUSAGE / The npm ci command can only install with an existing package-lock.json` でセッション作成そのものが失敗した（2026-08-12。`package-lock.json` はリポジトリにコミット済みで、単に「まだそこに無い」状態で走っていた）。公式ドキュメントも役割を「**Setup script** = VM 側のツールチェーン（`apt install` 等） / **SessionStart フック** = `npm install` のようなプロジェクト設定」と分けている。**環境の Setup script は空にしておく**（VM 側に足したいものがあるときだけ、非必須コマンドに `|| true` を付けて書く。非ゼロ終了はセッション作成失敗になる）
+- フックは `CLAUDE_CODE_REMOTE=true` のときだけ動く（手元の Windows セッションでは no-op）。冪等で、`node_modules/.bin/{jest,tsc,webpack}` が揃っていれば何もしない（`resume` / `clear` でも呼ばれる）
+- `npm ci` ではなく `npm install` を使う: 既存の `node_modules`（環境キャッシュのスナップショット）を再利用でき、`package.json` と lock が一時的にずれていてもセッションが死なない
+- E2E 用の Chromium もフックが `playwright install chromium` で取得する（**取得失敗は非致命**。unit テスト / lint / ビルドは影響を受けない）。既定環境（Trusted ネットワーク）では実測で取得できて `npx playwright test` が通る（2026-08-12 実測。`/opt/pw-browsers` のプリインストールは chromium-1194 だが `@playwright/test` 1.59 は 1217 を要求するので、この取得が無いと `Executable doesn't exist` で落ちる）。ネットワークが None 等で取得できない環境では、ひとつ上の「リモート / web セッションで E2E を回すとき」の回避策（`executablePath` 直指定）に落とす
+- Network allowlist は claude.ai の環境設定 UI 専用で、リポジトリ内からは制御できない（Playwright のブラウザ CDN は `cdn.playwright.dev` / `playwright.azureedge.net` / `playwright.download.prss.microsoft.com`）
+- サブモジュール 2 つ（tiab-review-plugin / search-formula-developper。いずれも public）は jest / Playwright / webpack のどれからも参照されないため clone 後の init は不要（参照実装を読むときだけ `git submodule update --init <path>`）
+- クラウドへ引き継がれるのはリポジトリ内の `CLAUDE.md` / `.claude/` / `.mcp.json` のみで、`~/.claude/` 配下の個人設定・スキル・メモリは引き継がれない
+
 **操作解説動画（`video/`）**: YouTube 公開用の解説動画を Playwright 収録 + VOICEVOX 音声合成 + ffmpeg 合成で作るパイプライン。正典は [video/REQUIREMENTS.md](video/REQUIREMENTS.md)（PR 分割・受け入れ基準・QA/QC チェックリスト）、実行手順と過去に踏んだ失敗の再発防止メモは [video/README.md](video/README.md)。収録は dev ビルド（`dist/`）を読み込むので事前に `npm run dev` が要る。Chrome 拡張の録画には仮想ディスプレイが必要なため、Linux では `xvfb-run -a -s "-screen 0 1920x1080x24" node video/scripts/record.mjs` のように xvfb 経由で実行する。
 
 **全 14 章を収録・QA 済みで、YouTube に一般公開済み**（<https://youtu.be/RqUFlmncuIE>。`hosted/index.html` / `hosted/help.html` に埋め込み済み）。収録はデモビルド（`npm run build:demo` → `dist-demo/`）を読み込む（`resolveExtensionDir()` が `dist-demo/` → `dist/` の順で解決する）。章ごとの初期状態は `?demoSeed=<プリセット名>`、進捗表示を映すための人工レイテンシは `?demoLatency=<係数>` で URL から渡す（`src/demo/`。係数の実測表は [video/REQUIREMENTS.md](video/REQUIREMENTS.md) §6-4）。**原稿 → TTS → 収録の順を守ること**（シーンが `loadCueDurations()` で音声の実尺を読んで画面を追従させるため）。
@@ -144,7 +156,7 @@ src/
 
 ## 未実装・既知のギャップ
 
-- **P1 ロジック未移植**: `check_block_overlap` / `check_mesh` / `check_mesh_overlap`（ブロック重複・MeSH 分析）
+- **P1 ロジック層は移植済み・UI 未接続**: `check_mesh` / `check_mesh_overlap` 相当（[src/features/validation/blockMeshTree.ts](src/features/validation/blockMeshTree.ts) + [src/lib/ncbi/meshRdf.ts](src/lib/ncbi/meshRdf.ts)）と `check_block_overlap` 相当の寄与度分析（[src/features/validation/freewordDelta.ts](src/features/validation/freewordDelta.ts)）は TypeScript へ移植済みだが、画面への接続（#58）と NCBI 側のレート制御（#59）が残タスク
 - **OpenAI / Anthropic Claude への直接連携は未実装**: 実装済みなのは Gemini と OpenRouter の 2 プロバイダ（`src/lib/llm/GeminiProvider.ts` / `OpenRouterProvider.ts`。既定モデルは `gemini-3.5-flash`）。Options 画面で OpenRouter の API キーとカスタムモデル ID（最大 20 件）を追加登録できるため OpenRouter 経由で多くのモデルに到達できるが、OpenAI / Anthropic の API を直接叩く `LLMProvider` 実装は無い（`LlmProviderId` 型に `openai` / `anthropic` の値はあるが対応実装が無い）
 - E2E ジャーニー J1（新規作成→export 貫通）は draft 生成〜検証の主要経路を journey-draft-generate.spec.ts で回帰確認済み。J4（expand キーボード判定）/ J5 の API エラー系は残タスク（[docs/ui-deep-test-plan.md](docs/ui-deep-test-plan.md) Phase D/E）
 

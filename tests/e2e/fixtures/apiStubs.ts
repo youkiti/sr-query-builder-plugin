@@ -171,6 +171,25 @@ export async function registerNcbiStub(page: Page, options: NcbiStubOptions = {}
 }
 
 // ---------------------------------------------------------------------------
+// MeSH RDF (SPARQL)
+// ---------------------------------------------------------------------------
+
+/**
+ * `https://id.nlm.nih.gov/mesh/sparql` 宛（MeSH ツリー UI が使う `fetchMeshChildren` /
+ * `fetchMeshLabels`）を空の SPARQL JSON で返すだけ。現状 UI からは呼ばれないが、
+ * ルートが無いと将来 UI 接続時（#58）に E2E が実エンドポイントへ抜けるため先に登録しておく。
+ */
+export async function registerMeshRdfStub(page: Page): Promise<void> {
+  await page.route('**/id.nlm.nih.gov/**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ head: { vars: [] }, results: { bindings: [] } }),
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Gemini (LLM)
 // ---------------------------------------------------------------------------
 
