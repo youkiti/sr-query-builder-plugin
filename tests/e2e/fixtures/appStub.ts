@@ -11,6 +11,7 @@
  */
 
 import type { Page, Route } from '@playwright/test';
+import { hasSheetsStub } from './apiStubs';
 import type { AppState } from '../../../src/app/store';
 import type { CurrentProjectEntry } from '../../../src/features/project';
 
@@ -176,6 +177,22 @@ export async function injectAppStub(page: Page, scenario: AppScenario = {}): Pro
       preloadedState,
     }
   );
+
+  // hydrateCurrentProject が currentProject 設定時に Sheets を読む経路のデフォルトモック
+  // （空プロジェクト相当の `{ values: [] }` を返す）。実ネットワークへ出さず、
+  // hydrateError（fix-plan 1-3）を誤発火させないため。Playwright の route は後勝ちなので、
+  // scenario.routes / この後に張る spec 側の page.route で個別に上書きできる。
+  // registerSheetsStub（apiStubs.ts）を先に呼んでいる spec では、そちらの状態付きスタブを
+  // 覆ってしまわないようデフォルトモックを張らない。
+  if (!hasSheetsStub(page)) {
+    await page.route('**/sheets.googleapis.com/**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ values: [] }),
+      });
+    });
+  }
 
   // route モックは init script のあとに設定（page 単位で有効）
   for (const r of scenario.routes ?? []) {

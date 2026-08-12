@@ -1,14 +1,17 @@
 import { ROUTE_LABELS } from '../router';
 import { formatFormulaVersionShort } from './formatHelpers';
+import { buildHydrateErrorBanner } from './hydrateErrorBanner';
 import type { RenderView } from './types';
 
 /**
  * ホーム画面のコールバック。
  * - `onOpenPopup`: 別プロジェクトを選ぶために popup.html を新規タブで開く。
  *   Chrome 拡張コンテキスト外（テスト）では省略可で、ボタン自体は描画される。
+ * - `onRetryHydrate`: 起動時 hydrate（Sheets 読み込み）失敗バナーの「再試行」。
  */
 export interface HomeViewCallbacks {
   onOpenPopup?: () => void;
+  onRetryHydrate?: () => void;
 }
 
 /**
@@ -27,6 +30,12 @@ export function createHomeView(callbacks: HomeViewCallbacks = {}): RenderView {
     const heading = doc.createElement('h2');
     heading.textContent = ROUTE_LABELS.home;
     container.appendChild(heading);
+
+    if (ctx.state.hydrateError !== null) {
+      container.appendChild(
+        buildHydrateErrorBanner(doc, ctx.state.hydrateError, callbacks.onRetryHydrate)
+      );
+    }
 
     const projectInfo = doc.createElement('p');
     if (ctx.state.project) {

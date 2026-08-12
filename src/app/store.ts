@@ -268,6 +268,18 @@ export interface AppState {
   formulaSave: FormulaSaveState | null;
   /** #/edit の編集メモ。未入力なら null */
   formulaEditNote: FormulaEditNote | null;
+  /**
+   * ブロック下書きバックアップ（chrome.storage.local）の保存時刻（ISO 8601）。
+   * non-null なら「承認前の下書きが保存されている」= blocksView が未承認バナーを出す。
+   * 保存（onSaveDraft）/ 起動時 hydrate の復元でセットし、承認・プロトコル再解析でクリアする。
+   */
+  blocksDraftSavedAt: string | null;
+  /**
+   * 起動時 hydrate（Sheets からの状態復元）の失敗メッセージ。
+   * non-null のとき home / protocol にエラーバナー（再試行付き）を表示する。
+   * Sheets の一時障害が「空プロジェクト」に見える事故を防ぐ（fix-plan 1-3）。
+   */
+  hydrateError: string | null;
 }
 
 export const INITIAL_STATE: AppState = {
@@ -289,6 +301,8 @@ export const INITIAL_STATE: AppState = {
   blockImprovement: null,
   formulaSave: null,
   formulaEditNote: null,
+  blocksDraftSavedAt: null,
+  hydrateError: null,
 };
 
 export type Updater = (prev: AppState) => AppState;

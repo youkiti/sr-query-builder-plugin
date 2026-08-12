@@ -60,6 +60,24 @@ export interface SheetsStubOptions {
   appendDelayMs?: number;
 }
 
+/**
+ * registerSheetsStub を仕込んだ page の集合。
+ *
+ * appStub（injectAppStub）は hydrate を実ネットワークへ出さないために Sheets の
+ * デフォルトモックを張るが、`page.route` は**後に登録したハンドラが優先**されるため、
+ * `registerSheetsStub` → `injectAppStub` の順で呼ぶ spec ではデフォルトモックが
+ * 状態付きスタブを覆ってしまう（append の記録・遅延・500 失敗がすべて効かなくなる）。
+ * そこで「この page には専用スタブがある」ことをこの集合で共有し、appStub 側は
+ * デフォルトモックの登録を見送る。逆順（injectAppStub → registerSheetsStub）は
+ * 後勝ちの規則でそのまま専用スタブが優先されるので、どちらの順でも成立する。
+ */
+const pagesWithSheetsStub = new WeakSet<Page>();
+
+/** この page に registerSheetsStub 済みの Sheets スタブがあるか（appStub が参照する） */
+export function hasSheetsStub(page: Page): boolean {
+  return pagesWithSheetsStub.has(page);
+}
+
 /** 戻り値の SheetsFake.tabs は append で追記された行を含めて可変（テスト側から検査できる） */
 export async function registerSheetsStub(
   page: Page,
@@ -72,6 +90,7 @@ export async function registerSheetsStub(
   };
   const failAppendTabs = new Set(options.failAppendTabs ?? []);
   const appendDelayMs = options.appendDelayMs ?? 0;
+  pagesWithSheetsStub.add(page);
 
   await page.route('**/sheets.googleapis.com/**', async (route) => {
     // range は `Tab!A1:Z` / `Tab!A1` を encodeURIComponent したもの（`!` が %21）なので
