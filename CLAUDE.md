@@ -156,7 +156,7 @@ src/
 
 ## 未実装・既知のギャップ
 
-- **P1 ロジック層は移植済み・UI 未接続**: `check_mesh` / `check_mesh_overlap` 相当（[src/features/validation/blockMeshTree.ts](src/features/validation/blockMeshTree.ts) + [src/lib/ncbi/meshRdf.ts](src/lib/ncbi/meshRdf.ts)）と `check_block_overlap` 相当の寄与度分析（[src/features/validation/freewordDelta.ts](src/features/validation/freewordDelta.ts)）は TypeScript へ移植済みだが、画面への接続（#58）と NCBI 側のレート制御（#59）が残タスク
+- **P1 ロジック層は移植済み・UI 未接続**: `check_mesh` / `check_mesh_overlap` 相当（[src/features/validation/blockMeshTree.ts](src/features/validation/blockMeshTree.ts) + [src/lib/ncbi/meshRdf.ts](src/lib/ncbi/meshRdf.ts)）と `check_block_overlap` 相当の寄与度分析（[src/features/validation/freewordDelta.ts](src/features/validation/freewordDelta.ts)）は TypeScript へ移植済みだが、画面への接続（#58）と NCBI 側のレート制御（#59）が残タスク。**ブロック編集 UI 部品 3 点**（[src/app/views/editableBlock.ts](src/app/views/editableBlock.ts) / [meshExpressionEdit.ts](src/app/views/meshExpressionEdit.ts) / [operandEdit.ts](src/app/views/operandEdit.ts)）も同様に移植済みだが、どのビューからも参照されていない（`editView` への組み込みは #58）。移植計画全体の進捗表は [docs/fix-plan-2026-07.md](docs/fix-plan-2026-07.md) 冒頭の注記にある
 - **OpenAI / Anthropic Claude への直接連携は未実装**: 実装済みなのは Gemini と OpenRouter の 2 プロバイダ（`src/lib/llm/GeminiProvider.ts` / `OpenRouterProvider.ts`。既定モデルは `gemini-3.5-flash`）。Options 画面で OpenRouter の API キーとカスタムモデル ID（最大 20 件）を追加登録できるため OpenRouter 経由で多くのモデルに到達できるが、OpenAI / Anthropic の API を直接叩く `LLMProvider` 実装は無い（`LlmProviderId` 型に `openai` / `anthropic` の値はあるが対応実装が無い）
 - E2E ジャーニー J1（新規作成→export 貫通）は draft 生成〜検証の主要経路を journey-draft-generate.spec.ts で回帰確認済み。J4（expand キーボード判定）/ J5 の API エラー系は残タスク（[docs/ui-deep-test-plan.md](docs/ui-deep-test-plan.md) Phase D/E）
 
