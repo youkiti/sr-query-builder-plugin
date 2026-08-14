@@ -69,7 +69,14 @@ export const sharedEutilsRateLimiters = {
   withApiKey: new TokenBucket({ ratePerSecond: NCBI_RATE_LIMIT_WITH_API_KEY }),
 };
 
-function resolveRateLimiter(deps: EutilsDeps): RateLimiter {
+/**
+ * `deps.rateLimiter` があればそれを、無ければ `apiKey` の有無で `sharedEutilsRateLimiters` の
+ * 該当バケットを返す。`mesh.ts` も `eutils.ncbi.nlm.nih.gov` を叩く（同じ 3/10 req/s の枠を
+ * 共有する）ため export し、キー有無→バケットのマッピングの出所をここ 1 箇所に保つ
+ * （issue #58 chunk 3a フォローアップ。バケット自体は新規に作らず、ここの単一インスタンスを
+ * 再利用することで `esearch`/`efetchArticles` と枠を分裂させない）。
+ */
+export function resolveRateLimiter(deps: EutilsDeps): RateLimiter {
   if (deps.rateLimiter) {
     return deps.rateLimiter;
   }

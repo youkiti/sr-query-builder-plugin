@@ -1,4 +1,15 @@
 import { fetchMeshTreeNumbers, parseMeshSummaryJson } from './mesh';
+import { sharedEutilsRateLimiters } from './eutils';
+import type { RateLimiter } from './rateLimit';
+
+// テストごとに満タンへ戻す。issue #59 のトークンバケットはプロセス共有（モジュールスコープの
+// シングルトン）で、mesh.ts は eutils.ts と同じバケットを再利用する（issue #58 chunk 3a
+// フォローアップ）。リセットしないと直前のテストで消費したトークンが持ち越され、実タイマーでの
+// 待機が発生してテストが不安定になる（eutils.test.ts の同種の注記を参照）。
+beforeEach(() => {
+  sharedEutilsRateLimiters.withoutApiKey.reset();
+  sharedEutilsRateLimiters.withApiKey.reset();
+});
 
 function jsonResponse(body: unknown): Response {
   return {
@@ -230,5 +241,90 @@ describe('fetchMeshTreeNumbers', () => {
       fetch: fetch as unknown as typeof globalThis.fetch,
     });
     expect(result.size).toBe(0);
+  });
+});
+
+describe('レートリミッタ（issue #58 chunk 3a フォローアップ）', () => {
+  // mesh.ts は eutils.ts と同じホスト（eutils.ncbi.nlm.nih.gov）を叩くため、NCBI 側では
+  // 同じ 3/10 req/s の枠を共有している。esearch 側だけをペーシングしても、mesh.ts が
+  // 無防備に飛ばせば同じ枠を一緒に超過してしまうため、esearch(db=mesh) と esummary の
+  // どちらも fetch 前に acquire() を通ることを固定する。
+
+  test('esearch(db=mesh) は fetch 前に rateLimiter.acquire() を呼ぶ', async () => {
+    const calls: string[] = [];
+    const fetch = jest.fn(async () => {
+      calls.push('fetch');
+      return jsonResponse({ esearchresult: { idlist: ['1001'] } });
+    });
+    const rateLimiter: RateLimiter = {
+      acquire: jest.fn(async () => {
+        calls.push('acquire');
+      }),
+    };
+    await fetchMeshTreeNumbers(['Asthma'], {
+      fetch: fetch as unknown as typeof globalThis.fetch,
+      rateLimiter,
+    });
+    // esearch → esummary の 2 回とも acquire が fetch の直前に挟まる。
+    expect(calls).toEqual(['acquire', 'fetch', 'acquire', 'fetch']);
+  });
+
+  test('descriptor の数だけ esearch 側の acquire() が呼ばれる（N descriptor → N 回）', async () => {
+    const fetch = jest.fn(async (url: string) => {
+      if (url.includes('esearch.fcgi')) {
+        return jsonResponse({ esearchresult: { idlist: ['1'] } });
+      }
+      return jsonResponse(SUMMARY_ASTHMA);
+    });
+    const acquire = jest.fn().mockResolvedValue(undefined);
+    await fetchMeshTreeNumbers(['Asthma', 'Bronchitis', 'Pneumonia'], {
+      fetch: fetch as unknown as typeof globalThis.fetch,
+      rateLimiter: { acquire },
+    });
+    // esearch 3 回（distinct descriptor ごとに逐次）+ esummary 1 回（バッチ）= 4 回。
+    expect(acquire).toHaveBeenCalledTimes(4);
+  });
+
+  test('deps.rateLimiter を渡すと、共有バケットではなくそちらが使われる', async () => {
+    const fetch = jest.fn(async (url: string) => {
+      if (url.includes('esearch.fcgi')) {
+        return jsonResponse({ esearchresult: { idlist: ['1'] } });
+      }
+      return jsonResponse(SUMMARY_ASTHMA);
+    });
+    const acquire = jest.fn().mockResolvedValue(undefined);
+    const withoutApiKeySpy = jest.spyOn(sharedEutilsRateLimiters.withoutApiKey, 'acquire');
+    await fetchMeshTreeNumbers(['Asthma'], {
+      fetch: fetch as unknown as typeof globalThis.fetch,
+      rateLimiter: { acquire },
+    });
+    expect(acquire).toHaveBeenCalledTimes(2);
+    expect(withoutApiKeySpy).not.toHaveBeenCalled();
+    withoutApiKeySpy.mockRestore();
+  });
+
+  test('apiKey 無しは esearch と同じ共有 withoutApiKey バケットを、apiKey 有りは withApiKey バケットを使う（枠を分裂させない）', async () => {
+    const fetch = jest.fn(async (url: string) => {
+      if (url.includes('esearch.fcgi')) {
+        return jsonResponse({ esearchresult: { idlist: ['1'] } });
+      }
+      return jsonResponse(SUMMARY_ASTHMA);
+    });
+    const withoutApiKeySpy = jest.spyOn(sharedEutilsRateLimiters.withoutApiKey, 'acquire');
+    const withApiKeySpy = jest.spyOn(sharedEutilsRateLimiters.withApiKey, 'acquire');
+
+    await fetchMeshTreeNumbers(['Asthma'], { fetch: fetch as unknown as typeof globalThis.fetch });
+    expect(withoutApiKeySpy).toHaveBeenCalledTimes(2); // esearch + esummary
+    expect(withApiKeySpy).not.toHaveBeenCalled();
+
+    await fetchMeshTreeNumbers(['Asthma'], {
+      fetch: fetch as unknown as typeof globalThis.fetch,
+      apiKey: 'secret',
+    });
+    expect(withApiKeySpy).toHaveBeenCalledTimes(2);
+    expect(withoutApiKeySpy).toHaveBeenCalledTimes(2); // 増えていない
+
+    withoutApiKeySpy.mockRestore();
+    withApiKeySpy.mockRestore();
   });
 });

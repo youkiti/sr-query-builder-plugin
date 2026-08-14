@@ -1,5 +1,5 @@
 import type { EutilsDeps } from './eutils';
-import { EutilsError } from './eutils';
+import { EutilsError, resolveRateLimiter } from './eutils';
 import { retryWithBackoff } from './rateLimit';
 
 /**
@@ -15,6 +15,14 @@ import { retryWithBackoff } from './rateLimit';
  * 注意: `efetch db=mesh` は `retmode=xml` を指定しても常に text/plain（ASCII MeSH
  * レコード）を返し XML パースが無言で失敗する。tree number を構造化取得できるのは
  * `esummary db=mesh&retmode=json` の `ds_idxlinks[].treenum` 経由のみ。
+ *
+ * レート制御（issue #59 / #58 chunk 3a フォローアップ）: ここは `eutils.ts` の `esearch` /
+ * `efetchArticles` とまったく同じホスト（`eutils.ncbi.nlm.nih.gov`）を叩くため、NCBI 側では
+ * 同じ 3（キー無し）/10（キー有り）req/s の枠を共有している。`resolveRateLimiter` を
+ * `eutils.ts` から再利用して発行前に `acquire()` することで、`sharedEutilsRateLimiters` の
+ * 同じバケットを消費させる（新規バケットを作ると枠が分裂し、`esearch` 側が守っていたはずの
+ * 上限を `mesh.ts` 分だけ超過してしまう。ブロック・インスペクタの MeSH ツリー取得は
+ * distinct descriptor ごとに逐次 esearch するため、この経路が最もバーストしやすい）。
  */
 
 const BASE_URL = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils';
@@ -42,8 +50,12 @@ async function resolveMeshUid(descriptor: string, deps: EutilsDeps): Promise<str
   });
   appendCommonParams(params, deps);
   const url = `${BASE_URL}/esearch.fcgi?${params.toString()}`;
+  const rateLimiter = resolveRateLimiter(deps);
   const json = await retryWithBackoff(
     async () => {
+      // esearch.ts と同じく、リトライ時も含め実際に HTTP リクエストを発行する直前に
+      // 毎回トークンを取る（issue #59 と同じ流儀）。
+      await rateLimiter.acquire();
       const res = await deps.fetch(url);
       if (!res.ok) {
         throw new EutilsError(`mesh esearch failed: HTTP ${res.status}`, res.status);
@@ -94,8 +106,10 @@ export async function fetchMeshTreeNumbers(
   });
   appendCommonParams(params, deps);
   const url = `${BASE_URL}/esummary.fcgi?${params.toString()}`;
+  const rateLimiter = resolveRateLimiter(deps);
   const json = await retryWithBackoff(
     async () => {
+      await rateLimiter.acquire();
       const res = await deps.fetch(url);
       if (!res.ok) {
         throw new EutilsError(`mesh esummary failed: HTTP ${res.status}`, res.status);
