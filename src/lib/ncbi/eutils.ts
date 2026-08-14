@@ -1,11 +1,12 @@
-import { retryWithBackoff } from './rateLimit';
+import { retryWithBackoff, TokenBucket, type RateLimiter } from './rateLimit';
 
 /**
  * NCBI E-utilities の薄いラッパ。
  *
  * - `fetch` は必ず注入（ブラウザの `fetch` / `jsdom` のモックどちらでも使える）
  * - `apiKey` があれば NCBI の 10 req/s 枠、無ければ 3 req/s 枠になる
- * - ネットワーク障害は指数バックオフで最大 5 回リトライ
+ * - 発行前にトークンバケットで枠を守り（issue #59）、ネットワーク障害は指数バックオフで
+ *   最大 5 回リトライする
  */
 export interface EutilsDeps {
   fetch: typeof fetch;
@@ -19,10 +20,61 @@ export interface EutilsDeps {
   sleep?: (ms: number) => Promise<void>;
   /** 最大リトライ回数。既定 5 */
   maxRetries?: number;
+  /**
+   * 発行前トークンバケット（issue #59）。省略時はプロセス共有の既定インスタンス
+   * （`sharedEutilsRateLimiters`。`apiKey` の有無で 3 req/s ／ 10 req/s を切り替える）を使う。
+   * `EutilsDeps` は呼び出し側（サービス）ごとに組み立てられるため、バケットを deps 側の
+   * 既定値として持たせると枠が分裂してしまう。ここへ独自実装を渡せばテストや将来の用途で
+   * 丸ごと差し替えられる。
+   */
+  rateLimiter?: RateLimiter;
 }
 
 const BASE_URL = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils';
 const DEFAULT_TOOL = 'sr-query-builder-plugin';
+
+/** NCBI E-utilities のレート上限（req/s）。API キー無しは 3、あり は 10。
+ * https://www.ncbi.nlm.nih.gov/books/NBK25497/#chapter2.Usage_Guidelines_and_Requiremen */
+export const NCBI_RATE_LIMIT_WITHOUT_API_KEY = 3;
+export const NCBI_RATE_LIMIT_WITH_API_KEY = 10;
+
+/**
+ * プロセス内で共有する既定のレートリミッタ（issue #59）。
+ * モジュールスコープの単一インスタンスなので、`EutilsDeps` を複数箇所（サービスごと）で
+ * 組み立てても枠は分裂せず 1 プロセス全体で共有される。API キーの有無で 2 段のバケットを
+ * 使い分ける（同じプロセス内でキー有り／無しの呼び出しが混在しても、それぞれの枠を守る）。
+ *
+ * `capacity` は指定しない（`TokenBucket` の既定で `ratePerSecond` と同値になる = 無バースト）。
+ * 受け入れ条件は「任意の 1 秒窓で 3 req/s ／ 10 req/s を超えないこと」であり、`capacity` を
+ * `ratePerSecond` より大きくすると、その差分だけ待ち時間ゼロで即時発火できてしまい、
+ * この条件を破る（例: capacity=50 なら最初の 1 秒間に最大 53 リクエストが飛び得る）。
+ * Python 版 `check_block_overlap.py` の `_respect_rate_limit` も同様に無バースト（直前
+ * リクエストからの最小間隔のみを守るペーシング）であり、それと揃えた形。
+ *
+ * この無バースト設定は、状態を持ち越すモジュールスコープの共有バケットを実時間を進めない
+ * テスト（`flush()` が微小な macrotask を数回回すだけで `setTimeout` の完了を待たない等）で
+ * 使うと、待機が解決せず「呼び出しが起きていない」ように見える。プロダクションでは実時間が
+ * 経過するため問題にならない。テスト側の対処は、そのテストが何を検証しているかで使い分ける。
+ *
+ * - レート制御そのものを検証するテスト（`eutils.test.ts`）: `beforeEach` で
+ *   `sharedEutilsRateLimiters.*.reset()` を呼び、テスト間の累積消費を持ち越さない。
+ * - 配線を検証する統合テスト（`src/app/bootstrap.test.ts`）: `reset()` では足りない。
+ *   1 回の操作が capacity を超える複数リクエストを瞬時に必要とするため、満タンに戻しても
+ *   そのテスト内で枯渇する。`acquire()` 自体を `jest.spyOn` でスタブして待機を無効化する
+ *   （検証対象は配線であってレート制御ではなく、そちらは本ファイルと `rateLimit.test.ts`
+ *   が担当するため、二重に検証する必要がない）。
+ */
+export const sharedEutilsRateLimiters = {
+  withoutApiKey: new TokenBucket({ ratePerSecond: NCBI_RATE_LIMIT_WITHOUT_API_KEY }),
+  withApiKey: new TokenBucket({ ratePerSecond: NCBI_RATE_LIMIT_WITH_API_KEY }),
+};
+
+function resolveRateLimiter(deps: EutilsDeps): RateLimiter {
+  if (deps.rateLimiter) {
+    return deps.rateLimiter;
+  }
+  return deps.apiKey ? sharedEutilsRateLimiters.withApiKey : sharedEutilsRateLimiters.withoutApiKey;
+}
 
 function appendCommonParams(params: URLSearchParams, deps: EutilsDeps): void {
   params.set('tool', deps.tool ?? DEFAULT_TOOL);
@@ -138,9 +190,14 @@ export async function esearch(
   });
   appendCommonParams(params, deps);
   const url = `${BASE_URL}/esearch.fcgi?${params.toString()}`;
+  const rateLimiter = resolveRateLimiter(deps);
 
   const json = await retryWithBackoff(
     async () => {
+      // リトライ時も含め、実際に HTTP リクエストを発行する直前に毎回トークンを取る。
+      // バックオフの待機（既定 1 秒〜）はトークンの補充時間（3〜10 req/s なら数百 ms）より
+      // 通常長いため、リトライ時に acquire() が実際に待つことは稀で、二重待機にはならない。
+      await rateLimiter.acquire();
       const res = await deps.fetch(url);
       if (!res.ok) {
         throw new EutilsError(`esearch failed: HTTP ${res.status}`, res.status);
@@ -211,9 +268,11 @@ export async function efetchArticles(
   });
   appendCommonParams(params, deps);
   const url = `${BASE_URL}/efetch.fcgi?${params.toString()}`;
+  const rateLimiter = resolveRateLimiter(deps);
 
   const xml = await retryWithBackoff(
     async () => {
+      await rateLimiter.acquire();
       const res = await deps.fetch(url);
       if (!res.ok) {
         throw new EutilsError(`efetch failed: HTTP ${res.status}`, res.status);

@@ -15,4 +15,12 @@ describe('lib/ncbi index 再エクスポート', () => {
     expect(typeof mod.fetchMeshChildren).toBe('function');
     expect(typeof mod.fetchMeshLabels).toBe('function');
   });
+
+  test('レートリミッタ関連 API が揃っている（issue #59）', () => {
+    expect(typeof mod.TokenBucket).toBe('function');
+    expect(typeof mod.sharedEutilsRateLimiters.withoutApiKey.acquire).toBe('function');
+    expect(typeof mod.sharedEutilsRateLimiters.withApiKey.acquire).toBe('function');
+    expect(mod.NCBI_RATE_LIMIT_WITHOUT_API_KEY).toBe(3);
+    expect(mod.NCBI_RATE_LIMIT_WITH_API_KEY).toBe(10);
+  });
 });

@@ -4,6 +4,9 @@ export {
   parsePubmedXml,
   resolvePmidByDoi,
   EutilsError,
+  sharedEutilsRateLimiters,
+  NCBI_RATE_LIMIT_WITHOUT_API_KEY,
+  NCBI_RATE_LIMIT_WITH_API_KEY,
   type EfetchArticle,
   type MeshHeadingDetail,
   type MeshQualifierDetail,
@@ -26,6 +29,9 @@ export { buildPubmedSearchUrl } from './pubmedUrl';
 export {
   exponentialBackoff,
   retryWithBackoff,
+  TokenBucket,
   type BackoffOptions,
   type RetryOptions,
+  type RateLimiter,
+  type TokenBucketOptions,
 } from './rateLimit';
