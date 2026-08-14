@@ -45,6 +45,7 @@ function makeState(): AppState {
     expandRun: null,
     validationResult: null,
     missedAnalysis: null,
+    excessFilterProposal: null,
     formulaEditDraft: null,
     blockImprovement: null,
     formulaSave: null,
