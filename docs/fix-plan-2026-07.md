@@ -13,14 +13,16 @@
 > | A1 | #50 | NCBI in-band エラー検出（1-1） | ✅ PR #61 |
 > | A2 | #51 | `appendExcessFilters`（2-1 の純関数部分） | ✅ PR #69（**純関数のみ**。draft への配線は B2） |
 > | A3 | #52 | MeSH 階層・フリーワード増分の解析（4-1 の前提） | ✅ PR #62（**ロジック層のみ**。UI 接続は B3） |
-> | A4 | #53 | `pickSeedCandidates` skill | ⬜ 未着手 |
+> | A4 | #53 | `pickSeedCandidates` skill | ✅ PR #72 |
 > | A5 | #54 | ブロック編集 UI 部品 3 点 | ✅ PR #63（**部品のみ**。`editView` 接続は B3） |
-> | A6 | #55 | `#/export` の検証警告バナー（2-3） | ⬜ 未着手 |
+> | A6 | #55 | `#/export` の検証警告バナー（2-3） | ✅ PR #70 |
 > | B1 | #56 | フェーズ 1 の配線（1-2 / 1-3） | ✅ PR #68 |
-> | B2 | #57 | フェーズ 2 の配線（2-1 / 2-2） | ⬜ 未着手（**前提 #50 / #51 / #56 はすべて完了 = 着手可**） |
-> | B3 | #58 | `blockInspector` 追加 + `#/edit` 再構成 | ⬜ 未着手（依存: #57。移植の最終タスク） |
+> | B2 | #57 | フェーズ 2 の配線（2-1 / 2-2） | ✅ PR #71（**2-2 の「検証のみ再実行」は検証失敗時のみの導線**。汎用の再検証入口は issue #40 で別途対応） |
+> | B3 | #58 | `blockInspector` 追加 + `#/edit` 再構成 | 🔶 着手中（chunk 1 = `blockInspector` 単体の移植のみ完了。`editView` 再構成は未了） |
 >
-> Wave 1（A*）は `master` から直接分岐して並列実装可、Wave 2（B*）は `bootstrap.ts` / `store.ts` を触るため直列マージ。**次に着手すべきは #57 → #58**（クリティカルパス。前提の #50 / #51 / #56 は完了済み）。残る Wave 1 の #53 / #55 は独立なのでいつでも並列に挿せます。
+> Wave 1（A*）は `master` から直接分岐して並列実装可、Wave 2（B*）は `bootstrap.ts` / `store.ts` を触るため直列マージ。**残るは B3（#58）のみ**で、これが移植の最終タスクです。B3 は 1 PR に収めると 3,000 行を超えるため 3 分割で進めており、chunk 1（`blockInspector` 単体）→ chunk 2（`formulaDisplay` / `improveBlock`）→ chunk 3（`editView` / `editService` の再構成と `blockInspector` の配線）の順です。
+>
+> **issue #58 本文の「`blockInspector` を新しいルートとして `router.ts` に登録する」という記述は誤りです。** 移植元の実装（`d445c4e`）を読むと、`blockInspector` はルートではなく、`#/edit` でブロックの編集パネル / AI 改善パネルを開いたときにそのブロック直下へ展開する**コンポーネント**です。したがって `router.ts` / `guards.ts` への登録は不要で、「新ルートの axe violation ゼロ」という受け入れ条件も `#/edit` の a11y 検証に読み替える必要があります。
 
 # 修正計画（2026-07 レビュー起点）
 
