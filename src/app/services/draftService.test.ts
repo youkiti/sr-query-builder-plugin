@@ -41,6 +41,7 @@ function makeState(): AppState {
     currentFormulaVersionId: null,
     currentFormulaMarkdown: null,
     currentFormulaModel: null,
+    currentFormulaCreatedBy: null,
     draftRun: null,
     expandRun: null,
     validationResult: null,
@@ -165,10 +166,13 @@ describe('generateDraft', () => {
     // 生成に使ったモデル ID が model 列に記録される
     expect(map['model']).toBe('gemini-test');
 
-    // store に currentFormulaVersionId / markdown / model が入る
+    // store に currentFormulaVersionId / markdown / model / createdBy が入る
     expect(store.getState().currentFormulaVersionId).toBe('new-version-id');
     expect(store.getState().currentFormulaMarkdown).toContain('## PubMed/MEDLINE');
     expect(store.getState().currentFormulaModel).toBe('gemini-test');
+    // 生成完了時は常に 'ai_draft'（issue #40: 手編集版の破棄確認を draftView が
+    // この値で判定するため）
+    expect(store.getState().currentFormulaCreatedBy).toBe('ai_draft');
 
     // onProgress の呼び出し順（step 列挙）
     const steps = progress.map((p) => p.step);

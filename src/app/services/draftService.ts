@@ -254,6 +254,7 @@ export async function generateDraft(deps: DraftServiceDeps): Promise<DraftResult
     currentFormulaVersionId: versionId,
     currentFormulaMarkdown: assembled.markdown,
     currentFormulaModel: model,
+    currentFormulaCreatedBy: 'ai_draft',
   }));
 
   notifyProgress({ step: 'done', blockCount });

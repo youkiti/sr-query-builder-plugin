@@ -71,6 +71,7 @@ function makeState(overrides: Partial<AppState> = {}): AppState {
     currentFormulaMarkdown:
       '## PubMed/MEDLINE\n\n```\n#1 asthma[tiab]\n#2 children[tiab]\n#3 #1 AND #2\n```\n',
     currentFormulaModel: null,
+    currentFormulaCreatedBy: null,
     draftRun: null,
     expandRun: null,
     validationResult: null,
