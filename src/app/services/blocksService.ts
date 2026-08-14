@@ -73,6 +73,7 @@ export async function approveBlocks(deps: BlocksServiceDeps): Promise<ApprovedPr
     currentFormulaMarkdown: null,
     validationResult: null,
     missedAnalysis: null,
+    excessFilterProposal: null,
   }));
   return { version, protocol, blocks };
 }

@@ -1,5 +1,11 @@
-import { INITIAL_STATE, type AppState, type BlocksDraft, type DraftRunState } from '../store';
-import { createDraftView, currentStepIndex, formatDraftProgress } from './draftView';
+import {
+  INITIAL_STATE,
+  type AppState,
+  type BlocksDraft,
+  type DraftRunState,
+  type ExcessFilterProposalEntry,
+} from '../store';
+import { createDraftView, currentStepIndex, formatDraftProgress, readStoredProposal } from './draftView';
 import type { DraftProgress, ValidationSummary } from '@/app/services';
 
 function validationSummary(): ValidationSummary {
@@ -368,6 +374,240 @@ describe('createDraftView', () => {
     const container = buildContainer();
     view(container, { state: stateReady(), navigate: jest.fn() });
     expect(() => container.querySelector('button')!.click()).not.toThrow();
+  });
+});
+
+describe('検証のみ再実行（fix-plan 2-2）', () => {
+  const MD = '## PubMed/MEDLINE\n\n```\n#1 x\n```\n';
+
+  function validatingErrorState(extra: Partial<AppState> = {}): AppState {
+    return stateReady({
+      currentFormulaMarkdown: MD,
+      currentFormulaVersionId: 'fv-1',
+      draftRun: {
+        status: 'error',
+        phase: 'validating',
+        progressLabel: '',
+        startedAtMs: Date.now(),
+        error: 'NCBI 503',
+        blockHits: [],
+      },
+      ...extra,
+    });
+  }
+
+  test('検証フェーズ失敗 + 式ありで「検証のみ再実行」ボタンが出る', () => {
+    const view = createDraftView();
+    const container = buildContainer();
+    view(container, { state: validatingErrorState(), navigate: jest.fn() });
+    const btn = container.querySelector('.draft__revalidate');
+    expect(btn).not.toBeNull();
+    expect(btn?.textContent).toContain('検証のみ再実行');
+  });
+
+  test('クリックで onRevalidate が呼ばれ、直後はローカル無効化される', () => {
+    const onRevalidate = jest.fn().mockResolvedValue(undefined);
+    const view = createDraftView({ onRevalidate });
+    const container = buildContainer();
+    view(container, { state: validatingErrorState(), navigate: jest.fn() });
+    const btn = container.querySelector<HTMLButtonElement>('.draft__revalidate')!;
+    btn.click();
+    expect(onRevalidate).toHaveBeenCalledTimes(1);
+    expect(btn.disabled).toBe(true);
+    btn.click();
+    expect(onRevalidate).toHaveBeenCalledTimes(1);
+  });
+
+  test('生成フェーズの失敗では再実行ボタンを出さない（式が無い/古いため）', () => {
+    const view = createDraftView();
+    const container = buildContainer();
+    view(container, {
+      state: validatingErrorState({
+        draftRun: {
+          status: 'error',
+          phase: 'generating',
+          progressLabel: '',
+          startedAtMs: Date.now(),
+          error: 'LLM 503',
+          blockHits: [],
+        },
+      }),
+      navigate: jest.fn(),
+    });
+    expect(container.querySelector('.draft__revalidate')).toBeNull();
+  });
+
+  test('式が無ければ検証フェーズ失敗でも再実行ボタンを出さない', () => {
+    const view = createDraftView();
+    const container = buildContainer();
+    view(container, {
+      state: validatingErrorState({ currentFormulaMarkdown: null }),
+      navigate: jest.fn(),
+    });
+    expect(container.querySelector('.draft__revalidate')).toBeNull();
+  });
+
+  test('onRevalidate 未指定でもクリックで例外にならない', () => {
+    const view = createDraftView();
+    const container = buildContainer();
+    view(container, { state: validatingErrorState(), navigate: jest.fn() });
+    expect(() =>
+      container.querySelector<HTMLButtonElement>('.draft__revalidate')!.click()
+    ).not.toThrow();
+  });
+});
+
+describe('過大ヒットフィルタ承認（fix-plan 2-1）', () => {
+  function proposal(extra: Partial<ExcessFilterProposalEntry> = {}): ExcessFilterProposalEntry {
+    return {
+      formulaVersionId: 'fv-1',
+      totalHits: 12345,
+      candidates: [
+        { label: '英語論文に限定', expression: 'english[la]', rationale: '非英語論文を除外するリスクあり' },
+        { label: 'ヒトに限定', expression: 'humans[mh]', rationale: '未インデックス論文を除外するリスクあり' },
+      ],
+      error: null,
+      ...extra,
+    };
+  }
+
+  function stateWithProposal(extra: Partial<AppState> = {}): AppState {
+    return stateReady({
+      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 x\n```\n',
+      currentFormulaVersionId: 'fv-1',
+      excessFilterProposal: proposal(),
+      ...extra,
+    });
+  }
+
+  test('提案があれば警告見出し・候補一覧・承認/見送りボタンを表示する', () => {
+    const view = createDraftView();
+    const container = buildContainer();
+    view(container, { state: stateWithProposal(), navigate: jest.fn() });
+    const section = container.querySelector('.draft__excess');
+    expect(section).not.toBeNull();
+    expect(section?.querySelector('h3')?.textContent).toContain('12,345 件');
+    expect(section?.querySelector('h3')?.textContent).toContain('10,000 件');
+    expect(section?.querySelectorAll('.draft__excess-item')).toHaveLength(2);
+    expect(section?.textContent).toContain('english[la]');
+    expect(section?.textContent).toContain('非英語論文を除外するリスク');
+    expect(section?.querySelector('.draft__excess-apply')).not.toBeNull();
+    expect(section?.querySelector('.draft__excess-dismiss')).not.toBeNull();
+  });
+
+  test('チェックするまで承認ボタンは無効、チェックした候補だけ onApplyExcessFilters に渡る', () => {
+    const onApplyExcessFilters = jest.fn().mockResolvedValue(undefined);
+    const view = createDraftView({ onApplyExcessFilters });
+    const container = buildContainer();
+    view(container, { state: stateWithProposal(), navigate: jest.fn() });
+    const applyBtn = container.querySelector<HTMLButtonElement>('.draft__excess-apply')!;
+    expect(applyBtn.disabled).toBe(true);
+    applyBtn.click();
+    expect(onApplyExcessFilters).not.toHaveBeenCalled();
+
+    const checks = container.querySelectorAll<HTMLInputElement>('.draft__excess-check');
+    checks[1]!.checked = true;
+    checks[1]!.dispatchEvent(new Event('change'));
+    expect(applyBtn.disabled).toBe(false);
+
+    applyBtn.click();
+    expect(onApplyExcessFilters).toHaveBeenCalledWith([
+      expect.objectContaining({ label: 'ヒトに限定', expression: 'humans[mh]' }),
+    ]);
+    // 実行中はボタンが無効化される
+    expect(applyBtn.disabled).toBe(true);
+  });
+
+  test('onApplyExcessFilters が reject したらエラー表示してボタンを戻す', async () => {
+    const onApplyExcessFilters = jest.fn().mockRejectedValue(new Error('結合行が見つかりません'));
+    const view = createDraftView({ onApplyExcessFilters });
+    const container = buildContainer();
+    view(container, { state: stateWithProposal(), navigate: jest.fn() });
+    const check = container.querySelector<HTMLInputElement>('.draft__excess-check')!;
+    check.checked = true;
+    check.dispatchEvent(new Event('change'));
+    const applyBtn = container.querySelector<HTMLButtonElement>('.draft__excess-apply')!;
+    applyBtn.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(container.querySelector('.draft__excess-error')?.textContent).toContain(
+      '結合行が見つかりません'
+    );
+    expect(applyBtn.disabled).toBe(false);
+  });
+
+  test('「見送る」で onDismissExcessFilters が呼ばれる', () => {
+    const onDismissExcessFilters = jest.fn();
+    const view = createDraftView({ onDismissExcessFilters });
+    const container = buildContainer();
+    view(container, { state: stateWithProposal(), navigate: jest.fn() });
+    container.querySelector<HTMLButtonElement>('.draft__excess-dismiss')!.click();
+    expect(onDismissExcessFilters).toHaveBeenCalledTimes(1);
+  });
+
+  test('別バージョンの提案（stale）は表示しない', () => {
+    const view = createDraftView();
+    const container = buildContainer();
+    view(container, {
+      state: stateWithProposal({ currentFormulaVersionId: 'fv-2' }),
+      navigate: jest.fn(),
+    });
+    expect(container.querySelector('.draft__excess')).toBeNull();
+  });
+
+  test('実行中は提案セクションを表示しない', () => {
+    const view = createDraftView();
+    const container = buildContainer();
+    view(container, {
+      state: stateWithProposal({ draftRun: runningState() }),
+      navigate: jest.fn(),
+    });
+    expect(container.querySelector('.draft__excess')).toBeNull();
+  });
+
+  test('候補取得エラーは警告 + エラー文言のみ（承認ボタン無し）', () => {
+    const view = createDraftView();
+    const container = buildContainer();
+    view(container, {
+      state: stateWithProposal({
+        excessFilterProposal: proposal({ candidates: [], error: 'LLM 503' }),
+      }),
+      navigate: jest.fn(),
+    });
+    const section = container.querySelector('.draft__excess');
+    expect(section?.querySelector('.draft__excess-error')?.textContent).toContain('LLM 503');
+    expect(section?.querySelector('.draft__excess-apply')).toBeNull();
+    expect(section?.querySelector('.draft__excess-dismiss')).not.toBeNull();
+  });
+
+  test('候補 0 件（エラー無し）は手動絞り込みの案内を出す', () => {
+    const view = createDraftView();
+    const container = buildContainer();
+    view(container, {
+      state: stateWithProposal({
+        excessFilterProposal: proposal({ candidates: [] }),
+      }),
+      navigate: jest.fn(),
+    });
+    expect(container.querySelector('.draft__excess-empty')?.textContent).toContain('#/edit');
+  });
+});
+
+describe('readStoredProposal', () => {
+  test('バージョン一致時のみ提案を返す', () => {
+    const entry: ExcessFilterProposalEntry = {
+      formulaVersionId: 'fv-1',
+      totalHits: 20000,
+      candidates: [],
+      error: null,
+    };
+    expect(
+      readStoredProposal({ ...INITIAL_STATE, currentFormulaVersionId: 'fv-1', excessFilterProposal: entry })
+    ).toBe(entry);
+    expect(
+      readStoredProposal({ ...INITIAL_STATE, currentFormulaVersionId: 'fv-2', excessFilterProposal: entry })
+    ).toBeNull();
+    expect(readStoredProposal({ ...INITIAL_STATE, excessFilterProposal: entry })).toBeNull();
+    expect(readStoredProposal({ ...INITIAL_STATE, currentFormulaVersionId: 'fv-1' })).toBeNull();
   });
 });
 
