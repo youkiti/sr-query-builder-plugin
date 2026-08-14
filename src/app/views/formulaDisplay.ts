@@ -86,31 +86,22 @@ export function tokenizeExpression(expr: string): ExprSegment[] {
   return segments;
 }
 
-/** slice 内で最後に現れる（引用符の外の）演算子・括弧の直後（＝語の開始位置）を返す */
-function findTermStart(slice: string): number {
-  let start = 0;
-  let match: RegExpExecArray | null;
-  BOUNDARY_PATTERN.lastIndex = 0;
-  while ((match = BOUNDARY_PATTERN.exec(slice)) !== null) {
-    // 引用符の内側にある AND/OR/NOT（例: `"Oral and Maxillofacial Surgeons"`）は
-    // ブール演算子ではなく語の一部なので、境界として扱わない。
-    if (isInsideQuotes(slice, match.index)) {
-      continue;
-    }
-    start = match.index + match[0].length;
+/**
+ * MeSH / フリーワードの色分け凡例。draft / edit 双方で同じ見た目を使うための共通ヘルパー。
+ */
+export function buildLegend(doc: Document): HTMLElement {
+  const legend = doc.createElement('div');
+  legend.className = 'draft__legend';
+  for (const [kind, label] of [
+    ['mesh', 'MeSH'],
+    ['freeword', 'フリーワード'],
+  ] as const) {
+    const item = doc.createElement('span');
+    item.className = `draft__legend-item draft__term--${kind}`;
+    item.textContent = label;
+    legend.appendChild(item);
   }
-  return start;
-}
-
-/** s の index 位置が引用符（"）の内側か（先頭から数えた " の数が奇数なら内側）。 */
-function isInsideQuotes(s: string, index: number): boolean {
-  let quotes = 0;
-  for (let i = 0; i < index; i += 1) {
-    if (s[i] === '"') {
-      quotes += 1;
-    }
-  }
-  return quotes % 2 === 1;
+  return legend;
 }
 
 /**
@@ -127,18 +118,55 @@ export function extractMeshTerm(segmentText: string): string {
 }
 
 /**
- * 検索式を operand（句）単位で編集するための共通トークン。ブロック編集
- * （editableBlock.ts）・MeSH 編集（meshExpressionEdit.ts / operandEdit.ts）が
- * 式を「句 + 演算子・括弧（glue）」に分解して足し引きするのに使う。
+ * tokenizeExpression の結果を parent へ DOM 描画する共通ヘルパー。
+ * - MeSH セグメントは NCBI MeSH ブラウザへのリンク（別タブ）にする
+ * - フリーワードは色分け span、演算子・括弧は地のテキスト
  *
- * status は句の差分表示（before/after 比較）に使う想定のフィールド。
- * tokenizeOperands 自体は付与しない（差分表示のロジックはこのモジュールには未移植）。
+ * 連結したテキスト内容は expr と一致するため、textContent ベースのテストやコピーは壊れない。
+ */
+export function renderExpressionInto(parent: HTMLElement, expr: string): void {
+  const doc = parent.ownerDocument;
+  for (const segment of tokenizeExpression(expr)) {
+    if (segment.kind === 'plain') {
+      parent.appendChild(doc.createTextNode(segment.text));
+    } else if (segment.kind === 'mesh') {
+      const a = doc.createElement('a');
+      a.className = 'draft__term draft__term--mesh';
+      a.href = `${MESH_BROWSER_BASE}${encodeURIComponent(extractMeshTerm(segment.text))}`;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.title = 'MeSH ブラウザで開く';
+      a.textContent = segment.text;
+      parent.appendChild(a);
+    } else {
+      const span = doc.createElement('span');
+      span.className = `draft__term draft__term--${segment.kind}`;
+      span.textContent = segment.text;
+      parent.appendChild(span);
+    }
+  }
+}
+
+/**
+ * 検索式の差分表示用トークン。式を「OR/AND/NOT の最上位区切り」で句（operand）に割り、
+ * 演算子・括弧は glue として残す。status は diffExpressions が付ける。
  */
 export interface DiffToken {
   text: string;
   /** true なら 1 つの被演算子（語/句）。false なら演算子・括弧などの地のテキスト */
   isOperand: boolean;
+  /** diffExpressions で付与。同一 / 削除 / 追加 */
   status?: 'same' | 'removed' | 'added';
+}
+
+/** before/after の式を句単位で比較した結果 */
+export interface ExpressionDiff {
+  beforeTokens: DiffToken[];
+  afterTokens: DiffToken[];
+  /** before にあって after に無い句（削除された語） */
+  removed: string[];
+  /** after にあって before に無い句（追加された語） */
+  added: string[];
 }
 
 /** 行頭が最上位のブール演算子か判定（後ろが空白・開き括弧・終端のときだけ演算子とみなす） */
@@ -241,4 +269,142 @@ export function tokenizeOperands(expr: string): DiffToken[] {
 /** 句の同一判定キー（空白の差・大文字小文字を無視） */
 export function normalizeOperand(text: string): string {
   return text.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/**
+ * before / after の検索式を句単位で比較する。順序非依存の集合差で「削除/追加された語」を求め、
+ * 各句に status（same/removed/added）を付けて返す。語順や記法だけの違いは increment 0 になる。
+ */
+export function diffExpressions(before: string, after: string): ExpressionDiff {
+  const beforeTokens = tokenizeOperands(before);
+  const afterTokens = tokenizeOperands(after);
+  const beforeKeys = new Set(
+    beforeTokens.filter((t) => t.isOperand).map((t) => normalizeOperand(t.text))
+  );
+  const afterKeys = new Set(
+    afterTokens.filter((t) => t.isOperand).map((t) => normalizeOperand(t.text))
+  );
+  const removed: string[] = [];
+  const added: string[] = [];
+  for (const token of beforeTokens) {
+    if (!token.isOperand) {
+      continue;
+    }
+    if (afterKeys.has(normalizeOperand(token.text))) {
+      token.status = 'same';
+    } else {
+      token.status = 'removed';
+      removed.push(token.text);
+    }
+  }
+  for (const token of afterTokens) {
+    if (!token.isOperand) {
+      continue;
+    }
+    if (beforeKeys.has(normalizeOperand(token.text))) {
+      token.status = 'same';
+    } else {
+      token.status = 'added';
+      added.push(token.text);
+    }
+  }
+  return { beforeTokens, afterTokens, removed, added };
+}
+
+/**
+ * diffExpressions のトークン列を parent へ描画する。operand は status 別の要素
+ * （removed=<del> / added=<ins> / same=<span>）で包み、中身は renderExpressionInto で
+ * MeSH リンク・色分けを保つ。glue（演算子・括弧）は地のテキスト。
+ */
+export function renderDiffSideInto(parent: HTMLElement, tokens: DiffToken[]): void {
+  const doc = parent.ownerDocument;
+  for (const token of tokens) {
+    if (!token.isOperand) {
+      parent.appendChild(doc.createTextNode(token.text));
+      continue;
+    }
+    const status = token.status ?? 'same';
+    const el =
+      status === 'removed'
+        ? doc.createElement('del')
+        : status === 'added'
+          ? doc.createElement('ins')
+          : doc.createElement('span');
+    el.className = `formula-diff__term formula-diff__term--${status}`;
+    renderExpressionInto(el, token.text);
+    parent.appendChild(el);
+  }
+}
+
+/** ブロック式から取り出した「単体で件数計測できるキーワード」。 */
+export interface KeywordQuery {
+  /** 表示用ラベル（MeSH descriptor or フリーワードのテキスト） */
+  display: string;
+  /** 単体 esearch にかけるクエリ。ブロック・インスペクタと同じ文字列にしてキャッシュを共有する */
+  query: string;
+  kind: 'mesh' | 'freeword';
+}
+
+/**
+ * ブロック式を「単体ヒット数を測れるキーワード」へ分解する。MeSH は descriptor を
+ * `"X"[Mesh]`（explode）/ `"X"[Mesh:NoExp]`（noexp）に、フリーワードはタグ込みのテキストを
+ * そのままクエリにする。MeSH は descriptor、フリーワードは query で重複除去する。
+ *
+ * クエリ文字列は blockInspector の個別件数計測と一致させてあるので、同じヒット数キャッシュを共有し、
+ * 「編集画面に入ったときに計測した実数」をそのまま AI 文脈に流用できる。
+ */
+export function deriveKeywordQueries(expression: string): KeywordQuery[] {
+  const meshByDescriptor = new Map<string, KeywordQuery>();
+  const freewordByQuery = new Map<string, KeywordQuery>();
+  for (const segment of tokenizeExpression(expression)) {
+    if (segment.kind === 'mesh') {
+      const descriptor = extractMeshTerm(segment.text);
+      if (descriptor === '') {
+        continue;
+      }
+      const tag = segment.text.match(/\[([^\]]+)\]\s*$/)?.[1] ?? '';
+      const explode = !/:\s*noexp/i.test(tag);
+      const query = explode ? `"${descriptor}"[Mesh]` : `"${descriptor}"[Mesh:NoExp]`;
+      const existing = meshByDescriptor.get(descriptor);
+      if (!existing) {
+        meshByDescriptor.set(descriptor, { display: descriptor, query, kind: 'mesh' });
+      } else if (explode && existing.query.endsWith('[Mesh:NoExp]')) {
+        // 同じ descriptor が explode/noexp 両方で出たら explode を優先（インスペクタと同じ寄せ方）
+        existing.query = query;
+      }
+    } else if (segment.kind === 'freeword') {
+      const query = segment.text.trim();
+      if (query !== '' && !freewordByQuery.has(query)) {
+        freewordByQuery.set(query, { display: query, query, kind: 'freeword' });
+      }
+    }
+  }
+  return [...meshByDescriptor.values(), ...freewordByQuery.values()];
+}
+
+/** slice 内で最後に現れる（引用符の外の）演算子・括弧の直後（＝語の開始位置）を返す */
+function findTermStart(slice: string): number {
+  let start = 0;
+  let match: RegExpExecArray | null;
+  BOUNDARY_PATTERN.lastIndex = 0;
+  while ((match = BOUNDARY_PATTERN.exec(slice)) !== null) {
+    // 引用符の内側にある AND/OR/NOT（例: `"Oral and Maxillofacial Surgeons"`）は
+    // ブール演算子ではなく語の一部なので、境界として扱わない。
+    if (isInsideQuotes(slice, match.index)) {
+      continue;
+    }
+    start = match.index + match[0].length;
+  }
+  return start;
+}
+
+/** s の index 位置が引用符（"）の内側か（先頭から数えた " の数が奇数なら内側）。 */
+function isInsideQuotes(s: string, index: number): boolean {
+  let quotes = 0;
+  for (let i = 0; i < index; i += 1) {
+    if (s[i] === '"') {
+      quotes += 1;
+    }
+  }
+  return quotes % 2 === 1;
 }

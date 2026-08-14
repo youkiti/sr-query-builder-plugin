@@ -100,7 +100,13 @@ describe('improveBlockExpression', () => {
         researchQuestion: 'RQ',
         userInstruction: '同義語をもっと増やして',
         seedPapers: [
-          { pmid: '111', title: 'Seed A', decision: 'include' },
+          {
+            pmid: '111',
+            title: 'Seed A',
+            decision: 'include',
+            meshHeadings: ['Asthma', 'Respiratory Sounds'],
+            abstract: 'Wheezing is a hallmark of asthma.',
+          },
           { pmid: '222', title: 'Seed B', decision: '(未判定)' },
         ],
         validation: {
@@ -115,6 +121,9 @@ describe('improveBlockExpression', () => {
     expect(userMsg).toContain('同義語をもっと増やして');
     expect(userMsg).toContain('PMID 111 [include]: Seed A');
     expect(userMsg).toContain('PMID 222 [(未判定)]: Seed B');
+    // MeSH・抄録のある seed では同じ項目内に添えられる
+    expect(userMsg).toContain('MeSH: Asthma; Respiratory Sounds');
+    expect(userMsg).toContain('抄録: Wheezing is a hallmark of asthma.');
     expect(userMsg).toContain('捕捉率: 50%');
     expect(userMsg).toContain('取りこぼし PMID: 222');
   });
@@ -137,5 +146,105 @@ describe('improveBlockExpression', () => {
     expect(userMsg).toContain('(特になし／おまかせで改善してよい)');
     expect(userMsg).toContain('(なし)');
     expect(userMsg).toContain('(未検証)');
+  });
+
+  test('現在のヒット数が桁区切りでプロンプトに載る', async () => {
+    const { provider: p, calls } = provider(JSON.stringify({}));
+    await improveBlockExpression(
+      {
+        currentExpression: 'asthma[tiab]',
+        currentHits: 12345,
+        blockLabel: 'Population',
+        blockDescription: '喘息',
+        researchQuestion: 'RQ',
+        userInstruction: '',
+      },
+      p
+    );
+    const userMsg = calls[0]!.find((m) => m.role === 'user')?.content ?? '';
+    expect(userMsg).toContain('現在のヒット数（PubMed esearch）: 12,345 件');
+  });
+
+  test('currentHits 未指定・null なら (未計測)', async () => {
+    const { provider: p, calls } = provider(JSON.stringify({}));
+    await improveBlockExpression(
+      {
+        currentExpression: 'x',
+        currentHits: null,
+        blockLabel: 'L',
+        blockDescription: 'D',
+        researchQuestion: 'RQ',
+        userInstruction: '',
+      },
+      p
+    );
+    const userMsg = calls[0]!.find((m) => m.role === 'user')?.content ?? '';
+    expect(userMsg).toContain('現在のヒット数（PubMed esearch）: (未計測)');
+  });
+
+  test('キーワード別ヒット数が箇条書きで載り、0 件は注記される', async () => {
+    const { provider: p, calls } = provider(JSON.stringify({}));
+    await improveBlockExpression(
+      {
+        currentExpression: 'asthma[tiab]',
+        keywordHits: [
+          { term: 'Asthma', kind: 'mesh', hits: 120000 },
+          { term: 'wheeze[tiab]', kind: 'freeword', hits: 0 },
+          { term: 'foo[tiab]', kind: 'freeword', hits: null },
+        ],
+        blockLabel: 'Population',
+        blockDescription: '喘息',
+        researchQuestion: 'RQ',
+        userInstruction: '',
+      },
+      p
+    );
+    const userMsg = calls[0]!.find((m) => m.role === 'user')?.content ?? '';
+    expect(userMsg).toContain('キーワード別ヒット数（単体）:');
+    expect(userMsg).toContain('- Asthma [MeSH]: 120,000 件');
+    expect(userMsg).toContain('- wheeze[tiab] [tiab]: 0 件 ⚠ 0件（綴り/語形を確認）');
+    expect(userMsg).toContain('- foo[tiab] [tiab]: (未計測)');
+  });
+
+  test('フリーワードは Δ・削除候補/低収量・OR 合計まで載る', async () => {
+    const { provider: p, calls } = provider(JSON.stringify({}));
+    await improveBlockExpression(
+      {
+        currentExpression: '(surgeon*[tiab] OR neurosurgeon*[tiab] OR general surgeon*[tiab])',
+        keywordHits: [
+          { term: 'surgeon*[tiab]', kind: 'freeword', hits: 298342, delta: 298342, status: 'normal' },
+          { term: 'neurosurgeon*[tiab]', kind: 'freeword', hits: 15305, delta: 12237, status: 'normal' },
+          { term: 'general surgeon*[tiab]', kind: 'freeword', hits: 5036, delta: 0, status: 'redundant' },
+          { term: 'surgical fellow*[tiab]', kind: 'freeword', hits: 254, delta: 110, status: 'lowYield' },
+        ],
+        freewordDedupTotal: 314637,
+        blockLabel: 'Population',
+        blockDescription: '外科医',
+        researchQuestion: 'RQ',
+        userInstruction: '',
+      },
+      p
+    );
+    const userMsg = calls[0]!.find((m) => m.role === 'user')?.content ?? '';
+    expect(userMsg).toContain('- surgeon*[tiab] [tiab]: 298,342 件・純増Δ +298,342');
+    expect(userMsg).toContain('- general surgeon*[tiab] [tiab]: 5,036 件・純増Δ +0 ⚠ 他語に内包＝削除候補');
+    expect(userMsg).toContain('- surgical fellow*[tiab] [tiab]: 254 件・純増Δ +110 △ ほぼ寄与なし');
+    expect(userMsg).toContain('（フリーワード OR 合計・重複除去後: 314,637 件）');
+  });
+
+  test('keywordHits が無ければ (未計測)', async () => {
+    const { provider: p, calls } = provider(JSON.stringify({}));
+    await improveBlockExpression(
+      {
+        currentExpression: 'x',
+        blockLabel: 'L',
+        blockDescription: 'D',
+        researchQuestion: 'RQ',
+        userInstruction: '',
+      },
+      p
+    );
+    const userMsg = calls[0]!.find((m) => m.role === 'user')?.content ?? '';
+    expect(userMsg).toContain('キーワード別ヒット数（単体）:\n(未計測)');
   });
 });
