@@ -177,8 +177,14 @@ export function createExpandView(callbacks: ExpandViewCallbacks = {}): RenderVie
     }
     if (run?.status === 'ready' && run.result) {
       const result = run.result;
+      if (result.mode === 'inside') {
+        // 「式の外側」を期待しているユーザーに、今回は初期シード作りだと先に伝える。
+        container.insertBefore(renderInsideBanner(doc), actions);
+      }
       if (result.candidates.length === 0) {
         status.textContent = emptyResultText(result);
+      } else if (result.mode === 'inside') {
+        status.textContent = `${result.candidates.length} 件の初期シード候補（有効 seed 0 件のため、式の内側 ${result.originalHits} 件から代表例 ${result.evaluatedCount} 件を評価）`;
       } else {
         status.textContent = `${result.candidates.length} 件の境界事例（現式 ${result.originalHits} 件 → 拡張式 ${result.broadenedHits} 件 / 外側 ${result.marginHits} 件から評価 ${result.evaluatedCount} 件）`;
       }
@@ -255,7 +261,14 @@ function setupCandidates(
         abstract: c.abstract,
         meshHeadings: c.meshHeadings,
       }));
-    runRoundComplete(doc, round, callbacks.onRoundComplete, includedPapers, result.additions);
+    runRoundComplete(
+      doc,
+      round,
+      callbacks.onRoundComplete,
+      includedPapers,
+      result.additions,
+      result.mode
+    );
   };
 
   list.addEventListener('keydown', (event) => {
@@ -304,8 +317,46 @@ function setupCandidates(
 // チップ／プログレスバーは draft 画面（生成・検証）と見た目を揃えるため、draft__ の
 // 視覚プリミティブ（.draft__step / .draft__progressbar / .draft__substeps）を再利用する。
 
-/** 取得パイプラインのステップ（順序固定）。1 回の取得でこの 6 段階を踏む */
-const FETCH_STEPS = ['protocol', 'broaden', 'esearch', 'dedup', 'efetch', 'pick-boundary'] as const;
+/**
+ * 取得パイプラインのステップ（順序固定）。margin モードはこの 6 段階、inside モードは
+ * broaden を踏まない 5 段階を踏む。'esearch' 等の生の名前を margin / inside で共有しない
+ * のは、expandService.ts 側で述べたとおり実行中の 1 ステップだけからモードを判定できる
+ * ようにするため（inside モードでは broaden チップを一切出してはいけない）。
+ */
+const MARGIN_FETCH_STEPS = [
+  'protocol',
+  'broaden',
+  'esearch',
+  'dedup',
+  'efetch',
+  'pick-boundary',
+] as const;
+
+/** inside モード（有効 seed 0 件の初期シードブートストラップ）のステップ。式を広げないので broaden が無い */
+const INSIDE_FETCH_STEPS = [
+  'protocol',
+  'inside-esearch',
+  'inside-dedup',
+  'inside-efetch',
+  'pick-seed',
+] as const;
+
+/** inside モード固有のステップ集合（判定用）。'protocol' はモード分岐前の共通ステップなので含めない */
+const INSIDE_ONLY_STEPS = new Set<ExpandFetchStep>([
+  'inside-esearch',
+  'inside-dedup',
+  'inside-efetch',
+  'pick-seed',
+]);
+
+/**
+ * 現在の step からトラッカーに表示するステップ一覧を選ぶ。
+ * 'protocol' はモード分岐前の共通ステップなので margin の 6 段階をデフォルトにする
+ * （margin モードが従来からの既定挙動であり、'protocol' の間はまだモードが確定していない）。
+ */
+function fetchStepsFor(step: ExpandFetchStep): readonly ExpandFetchStep[] {
+  return INSIDE_ONLY_STEPS.has(step) ? INSIDE_FETCH_STEPS : MARGIN_FETCH_STEPS;
+}
 
 /** チップに出す短いラベル */
 const FETCH_STEP_LABELS: Record<ExpandFetchStep, string> = {
@@ -315,11 +366,15 @@ const FETCH_STEP_LABELS: Record<ExpandFetchStep, string> = {
   dedup: '重複除去',
   efetch: '候補論文の取得',
   'pick-boundary': 'AI 選定',
+  'inside-esearch': '内側を検索',
+  'inside-dedup': '重複除去',
+  'inside-efetch': '候補論文の取得',
+  'pick-seed': 'AI 選定',
 };
 
 /**
  * ステータス 1 行表示用の進行中ラベル（〜中）。'done' は取得完了直後の経過表示にだけ使う
- * （通常は実行中＝5 段階のいずれかなので 'done' は出ない）。
+ * （通常は実行中＝いずれかの段階なので 'done' は出ない）。
  */
 const FETCH_STEP_ACTIVE_LABELS: Record<ExpandFetchStep | 'done', string> = {
   protocol: 'プロトコルを取得中',
@@ -328,6 +383,10 @@ const FETCH_STEP_ACTIVE_LABELS: Record<ExpandFetchStep | 'done', string> = {
   dedup: '既存 seed と重複を除去中',
   efetch: '候補論文のメタデータを取得中',
   'pick-boundary': 'AI が境界事例を選定中',
+  'inside-esearch': '現検索式（内側）を検索中',
+  'inside-dedup': '既存 seed と重複を除去中',
+  'inside-efetch': '候補論文のメタデータを取得中',
+  'pick-seed': 'AI が初期シード候補を選定中',
   done: '完了',
 };
 
@@ -357,9 +416,12 @@ function renderStepChip(doc: Document, label: string, state: StepState): HTMLEle
 }
 
 function renderFetchTracker(doc: Document, run: ExpandRunState): HTMLElement {
-  const total = FETCH_STEPS.length;
-  // 実行中の step は必ず 5 段階のいずれかなので indexOf は 0..4。'done' は実行中には来ない。
-  const current = (FETCH_STEPS as readonly string[]).indexOf(run.step);
+  // renderFetchTracker は running 中にしか呼ばれないので run.step は必ず ExpandFetchStep
+  // （'done' ではない）。fetchStepsFor がモード（margin / inside）に応じたステップ一覧を選ぶ。
+  const step = run.step as ExpandFetchStep;
+  const steps = fetchStepsFor(step);
+  const total = steps.length;
+  const current = (steps as readonly string[]).indexOf(step);
 
   const section = doc.createElement('section');
   section.className = 'expand__tracker';
@@ -379,11 +441,11 @@ function renderFetchTracker(doc: Document, run: ExpandRunState): HTMLElement {
   header.appendChild(counter);
   section.appendChild(header);
 
-  // 下段: 5 段階のステッパー
+  // 下段: ステッパー（margin は 6 段階、inside は 5 段階）
   const subWrap = doc.createElement('div');
   subWrap.className = 'draft__substeps';
-  FETCH_STEPS.forEach((step, i) => {
-    subWrap.appendChild(renderStepChip(doc, FETCH_STEP_LABELS[step], stepStateFor(i, current)));
+  steps.forEach((s, i) => {
+    subWrap.appendChild(renderStepChip(doc, FETCH_STEP_LABELS[s], stepStateFor(i, current)));
   });
   section.appendChild(subWrap);
 
@@ -599,10 +661,12 @@ function runRoundComplete(
   round: HTMLElement,
   onRoundComplete: ExpandViewCallbacks['onRoundComplete'],
   includedPapers: IncludedPaper[],
-  additions: BoundaryCasesResult['additions']
+  additions: BoundaryCasesResult['additions'],
+  mode: BoundaryCasesResult['mode']
 ): void {
   round.innerHTML = '';
   // 再検証（捕捉率）とは独立に、include した「式の外側」論文から更新提案を組み立てる。
+  // inside モードは additions=[] なので提案は出ない（式の内側で初期 seed を作る作業のため）。
   const proposals = buildUpdateProposals(includedPapers, additions);
   if (!onRoundComplete) {
     const note = doc.createElement('p');
@@ -610,6 +674,9 @@ function runRoundComplete(
     note.textContent =
       'ラウンド完了。/validate を開いて捕捉率を再確認してください（自動再検証は無効）。';
     round.appendChild(note);
+    if (mode === 'inside') {
+      round.appendChild(buildInsideRoundNote(doc, includedPapers.length));
+    }
     if (proposals.length > 0) {
       round.appendChild(buildProposals(doc, proposals));
     }
@@ -624,6 +691,9 @@ function runRoundComplete(
     .then((summary) => {
       round.innerHTML = '';
       round.appendChild(buildRoundSummary(doc, summary));
+      if (mode === 'inside') {
+        round.appendChild(buildInsideRoundNote(doc, includedPapers.length));
+      }
       if (proposals.length > 0) {
         round.appendChild(buildProposals(doc, proposals));
       }
@@ -683,8 +753,38 @@ function buildProposals(doc: Document, proposals: UpdateProposal[]): HTMLElement
   return wrap;
 }
 
-/** 候補 0 件のときのステータス文（理由を分けて伝える）。 */
+/**
+ * inside モード（有効 seed 0 件）であることを冒頭で知らせるバナー。
+ * 「式の外側探索」を期待しているユーザーに、今回は初期シード作りだと伝える。
+ */
+function renderInsideBanner(doc: Document): HTMLElement {
+  const banner = doc.createElement('p');
+  banner.className = 'expand__inside-banner';
+  banner.setAttribute('role', 'note');
+  banner.textContent =
+    '有効なシード論文がまだ 0 件のため、今回は式の「内側」から組入基準に該当しそうな代表例を提示します。include した論文が初期シードになります（この段階では捕捉率は 100% が正常）。シードができたら、もう一度実行すると式の外側の取りこぼし探索に切り替わります。';
+  return banner;
+}
+
+/** inside モードのラウンド完了時に添える補足（捕捉率 100% は想定どおりであること）。 */
+function buildInsideRoundNote(doc: Document, includedCount: number): HTMLElement {
+  const note = doc.createElement('p');
+  note.className = 'expand__round-note';
+  note.textContent =
+    includedCount > 0
+      ? `初期シードを ${includedCount} 件登録しました。これらは式の内側なので捕捉率 100% は想定どおりです。次回の実行から式の外側（取りこぼし）探索に切り替わります。`
+      : 'include 判定が無かったため初期シードは追加されていません。条件を見直すか、別の候補で再実行してください。';
+  return note;
+}
+
+/** 候補 0 件のときのステータス文（理由・モードを分けて伝える）。 */
 function emptyResultText(result: BoundaryCasesResult): string {
+  if (result.mode === 'inside') {
+    if (result.originalHits === 0) {
+      return '現検索式のヒットが 0 件のため、内側から初期シード候補を出せませんでした（式を /draft で見直してください）。';
+    }
+    return `式の内側 ${result.originalHits} 件はすべて既存 seed と重複しており、新たな初期シード候補がありませんでした。`;
+  }
   if (result.additions.length === 0) {
     return '拡張語が提案されなかったため、式の外側を探索できませんでした（式が網羅的か、拡張が弱い可能性）。';
   }

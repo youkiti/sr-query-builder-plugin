@@ -234,7 +234,7 @@ https://www.googleapis.com/auth/drive.file          # Sheets 読み書き + LLM 
 | timestamp | iso8601 | ✓ | |
 | provider | enum | ✓ | `gemini` / `openai` / `anthropic` / `openrouter` |
 | model | string | ✓ | モデル名（例: `gemini-2.5-pro`） |
-| purpose | enum | ✓ | `draft_block` / `suggest_mesh` / `expand_freeword` / `design_filter` / `pick_boundary` / `interpret_result` / `extract_protocol` / `other` |
+| purpose | enum | ✓ | `draft_block` / `suggest_mesh` / `expand_freeword` / `design_filter` / `pick_boundary` / `pick_seed` / `interpret_result` / `extract_protocol` / `other` |
 | prompt_ref | string(url) | ✓ | Drive に保存した full prompt JSON の URL |
 | response_ref | string(url) | ✓ | Drive に保存した full response JSON の URL |
 | prompt_summary | string | | 先頭 500 文字の抜粋（セル内表示用） |
@@ -474,6 +474,8 @@ LLM は検索式生成時に、プロトコルに書かれていないフィル�
   - 採用は自動では行わない。ユーザーが `#/draft` で式を編集して取り込む。
 - ユーザーは「もう 1 ラウンド」か「検索式の修正に戻る」を選べる。
 - **AI の役割と LLMApiLog**: 拡張語提案は `purpose=expand_recall`、境界事例選定は `purpose=pick_boundary` で記録する。
+
+**初期シードのブートストラップ（inside モード）**: 上記の margin 方式は「既にシードがあり、取りこぼしを顕在化させたい」局面で意味を持つが、**有効 seed（`isSeedEligibleForValidation`）が 1 件も無い段階では捕捉率の基準そのものが無く、外側を探しても判断材料にならない**。そこで有効 seed 0 件のときは式を広げず、**現式の内側**（現式ヒット集合）から「組入基準に明確に合致しそうな代表例」を AI（`pick-seed-candidates` skill。`pick-boundary-cases` と対になる skill で、迷う境界事例ではなく核となる代表例を選ぶ）が数件選ぶ `inside` モードに分岐する。include すれば初期シード集合が育ち、次回以降は margin モードへ自動的に戻る。inside モードでは `expand_recall` / `pick_boundary` は呼ばず、AI 選定は `purpose=pick_seed` で記録する。margin 特有の値（`marginHits` / 更新提案）は inside モードでは意味を持たないため画面には出さない。
 
 ### 4.6 検索式検証（CLI 移植機能、P0）
 

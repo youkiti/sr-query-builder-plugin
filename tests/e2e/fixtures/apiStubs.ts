@@ -27,6 +27,10 @@
  * skill の判別キー（プロンプトに載るスキーマのキー名）: block-designer=`concept_summary` /
  * mesh-suggester=`tag_syntax` / freeword-designer=`freewords` / improve-block=`proposed_expression` /
  * expand-query-for-recall=`additions` / pick-boundary-cases=`picks`。
+ * pick-boundary-cases と pick-seed-candidates は応答スキーマが同じ（どちらも `picks`）ため、
+ * pick-seed-candidates は `reason` フィールドのプレースホルダ文言（
+ * `<なぜ組入基準に該当しそうか（日本語）>`）を判別キーにして先に判定する
+ * （`SKILL_MARKERS` の並び順で pick-boundary-cases より前に置くこと）。
  *
  * ## LLM を呼ぶフローの前提
  * LLM を呼ぶフローには `injectAppStub` の `extraStorage` に `'apiKeys.gemini'` を積む必要がある。
@@ -218,15 +222,23 @@ export type GeminiSkillName =
   | 'freeword-designer'
   | 'improve-block'
   | 'expand-query-for-recall'
+  | 'pick-seed-candidates'
   | 'pick-boundary-cases';
 
-/** skill 名 → プロンプト本文に載るスキーマの判別キー。上から順に判定する。 */
+/**
+ * skill 名 → プロンプト本文に載るスキーマの判別キー。上から順に判定する（最初にマッチした
+ * ものを採用）。pick-seed-candidates は pick-boundary-cases と応答スキーマが同じ
+ * （どちらも `"picks"`）ため、`"picks"` だけでは判別できない。そこで pick-seed-candidates
+ * 固有の `reason` プレースホルダ文言を判別キーにし、`pick-boundary-cases` より前に置くことで
+ * 「seed 側の文言を含まない = boundary 側」に絞り込む。
+ */
 const SKILL_MARKERS: ReadonlyArray<[GeminiSkillName, string]> = [
   ['block-designer', 'concept_summary'],
   ['mesh-suggester', 'tag_syntax'],
   ['freeword-designer', 'freewords'],
   ['improve-block', 'proposed_expression'],
   ['expand-query-for-recall', 'additions'],
+  ['pick-seed-candidates', '<なぜ組入基準に該当しそうか（日本語）>'],
   ['pick-boundary-cases', 'picks'],
 ];
 

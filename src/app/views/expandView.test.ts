@@ -18,6 +18,7 @@ const stateReady: AppState = {
 
 function sampleResult(overrides: Partial<BoundaryCasesResult> = {}): BoundaryCasesResult {
   return {
+    mode: 'margin',
     candidates: [
       {
         pmid: '111',
@@ -209,6 +210,35 @@ describe('createExpandView', () => {
       expect(status.textContent).toContain('秒');
       expect(status.textContent).not.toContain('分');
     });
+
+    test('inside モードは 5 段階のチップを描画し、broaden を含まない', () => {
+      const view = createExpandView();
+      const container = buildContainer();
+      // inside-dedup（index 2）実行中: protocol/inside-esearch=done, inside-dedup=active, 残り2つ=pending
+      view(container, { state: runningState('inside-dedup'), navigate: jest.fn() });
+      const tracker = container.querySelector('.expand__tracker');
+      expect(tracker).not.toBeNull();
+      const chips = container.querySelectorAll('.draft__step');
+      expect(chips).toHaveLength(5);
+      // 「拡張語の提案」（broaden のラベル）はどのチップにも出ない
+      expect(tracker?.textContent).not.toContain('拡張語の提案');
+      expect(chips[0]?.classList.contains('draft__step--done')).toBe(true);
+      expect(chips[1]?.classList.contains('draft__step--done')).toBe(true);
+      expect(chips[2]?.classList.contains('draft__step--active')).toBe(true);
+      expect(chips[3]?.classList.contains('draft__step--pending')).toBe(true);
+      expect(chips[4]?.classList.contains('draft__step--pending')).toBe(true);
+      const bar = container.querySelector<HTMLProgressElement>('.draft__progressbar')!;
+      expect(bar.max).toBe(5);
+      expect(container.querySelector('.draft__step-counter')?.textContent).toBe('ステップ 3 / 5');
+    });
+
+    test('inside モードの AI 選定ステップは専用ラベルを表示する', () => {
+      const view = createExpandView();
+      const container = buildContainer();
+      view(container, { state: runningState('pick-seed', 0), navigate: jest.fn() });
+      const status = container.querySelector('.expand__status')!;
+      expect(status.textContent).toContain('AI が初期シード候補を選定中');
+    });
   });
 
   describe('経過時間の自動更新ティッカー', () => {
@@ -278,6 +308,42 @@ describe('createExpandView', () => {
       expect(items[1]?.querySelector('.expand__candidate-reason')?.textContent).toContain('(無し)');
       // 各候補には 3 つの判定ボタン
       expect(items[0]?.querySelectorAll('button')).toHaveLength(3);
+    });
+
+    test('inside モードは初期シードバナーと内側ステータスを表示する', () => {
+      const view = createExpandView();
+      const container = buildContainer();
+      view(container, {
+        state: readyState(sampleResult({ mode: 'inside', marginHits: 0, additions: [] })),
+        navigate: jest.fn(),
+      });
+      expect(container.querySelector('.expand__inside-banner')).not.toBeNull();
+      const status = container.querySelector('.expand__status')?.textContent ?? '';
+      expect(status).toContain('初期シード候補');
+      expect(status).toContain('式の内側 500 件');
+      // 候補自体は通常どおり描画される
+      expect(container.querySelectorAll('.expand__candidate')).toHaveLength(2);
+    });
+
+    test('margin モードでは初期シードバナーを表示しない', () => {
+      const view = createExpandView();
+      const container = buildContainer();
+      view(container, { state: readyState(), navigate: jest.fn() });
+      expect(container.querySelector('.expand__inside-banner')).toBeNull();
+    });
+
+    test('inside モードで候補 0 件のときは内側用の空メッセージを出す', () => {
+      const view = createExpandView();
+      const container = buildContainer();
+      view(container, {
+        state: readyState(
+          sampleResult({ mode: 'inside', candidates: [], marginHits: 0, evaluatedCount: 0, additions: [] })
+        ),
+        navigate: jest.fn(),
+      });
+      expect(container.querySelector('.expand__status')?.textContent).toContain(
+        'すべて既存 seed と重複'
+      );
     });
 
     test('各候補にアブストラクト本文を描画し、無い場合はプレースホルダを出す', () => {
@@ -817,6 +883,55 @@ describe('createExpandView', () => {
       await flushAsync();
       await flushAsync();
       expect(container.querySelector('.expand__round-summary')?.textContent).toContain('計算不能');
+    });
+
+    test('inside モードのラウンド完了は初期シードの補足を表示する', async () => {
+      const onDecide = jest.fn().mockResolvedValue({ seed: {} });
+      const onRoundComplete = jest.fn().mockResolvedValue(buildValidationSummary());
+      const view = createExpandView({ onDecide, onRoundComplete });
+      const container = buildContainer();
+      view(container, {
+        state: readyState(
+          sampleResult({
+            mode: 'inside',
+            additions: [],
+            candidates: sampleResult().candidates.slice(0, 1),
+          })
+        ),
+        navigate: jest.fn(),
+      });
+      const list = container.querySelector<HTMLElement>('.expand__candidates')!;
+      pressKey(list, 'i');
+      await flushAsync();
+      await flushAsync();
+      const note = container.querySelector('.expand__round-note');
+      expect(note?.textContent).toContain('初期シードを 1 件登録しました');
+      // inside は additions=[] なので更新提案は出ない
+      expect(container.querySelector('.expand__proposals')).toBeNull();
+    });
+
+    test('inside モードで onRoundComplete が無いとき（自動再検証無効）も初期シードの補足を表示する', async () => {
+      const onDecide = jest.fn().mockResolvedValue({ seed: {} });
+      const view = createExpandView({ onDecide });
+      const container = buildContainer();
+      view(container, {
+        state: readyState(
+          sampleResult({
+            mode: 'inside',
+            additions: [],
+            candidates: sampleResult().candidates.slice(0, 1),
+          })
+        ),
+        navigate: jest.fn(),
+      });
+      const list = container.querySelector<HTMLElement>('.expand__candidates')!;
+      pressKey(list, 'e');
+      await flushAsync();
+      await flushAsync();
+      // 無効化案内（/validate）と inside 補足の 2 つの .expand__round-note が並ぶ
+      const notes = container.querySelectorAll('.expand__round-note');
+      expect(notes).toHaveLength(2);
+      expect(notes[1]?.textContent).toContain('include 判定が無かった');
     });
 
     test('取得中（running）へ再描画すると候補・ラウンド表示がクリアされる', async () => {
