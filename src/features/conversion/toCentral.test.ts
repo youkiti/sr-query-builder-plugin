@@ -109,4 +109,41 @@ describe('convertToCentral', () => {
     );
     expect(result.convertedFormula).toBe('#1 [mh "A"]\n#2 #1 AND other:ti');
   });
+
+  describe('近接演算子の変換', () => {
+    test('[tiab:~N] を NEAR/N + :ti,ab,kw に変換する', () => {
+      const result = convertToCentral(
+        makeFormula([{ id: '1', expression: '"tremor therapy"[tiab:~2]' }])
+      );
+      expect(result.convertedFormula).toBe('#1 ("tremor" NEAR/2 "therapy"):ti,ab,kw');
+    });
+
+    test('[Title:~0] を NEXT + :ti に変換する（隣接）', () => {
+      const result = convertToCentral(
+        makeFormula([{ id: '1', expression: '"deep brain"[Title:~0]' }])
+      );
+      expect(result.convertedFormula).toBe('#1 ("deep" NEXT "brain"):ti');
+    });
+
+    test('[ad:~N] は NEAR/N のみでフィールド修飾子を付けない（CENTRAL に対応フィールドが無い）', () => {
+      const result = convertToCentral(
+        makeFormula([{ id: '1', expression: '"hospital university"[ad:~5]' }])
+      );
+      expect(result.convertedFormula).toBe('#1 ("hospital" NEAR/5 "university")');
+    });
+
+    test('3 語以上は AND 結合にフォールバックする', () => {
+      const result = convertToCentral(
+        makeFormula([{ id: '1', expression: '"a b c"[tiab:~2]' }])
+      );
+      expect(result.convertedFormula).toBe('#1 ("a" AND "b" AND "c"):ti,ab,kw');
+    });
+
+    test('近接演算子は警告を出さない（実変換に置き換わっている）', () => {
+      const result = convertToCentral(
+        makeFormula([{ id: '1', expression: '"tremor therapy"[tiab:~2]' }])
+      );
+      expect(result.warnings).toEqual([]);
+    });
+  });
 });
