@@ -172,6 +172,20 @@
   overflow-x: auto;
 }
 
+/* MeSH リンク（formulaDisplay.ts の renderExpressionInto が出す a.draft__term--mesh）は、
+   OR/AND のような地のテキストとすぐ隣り合う（axe: link-in-text-block）。globals.css の
+   `a { text-decoration: none; }` によりリンクだと分かるのが色だけになってしまい、
+   MeSH の文字色 (#1f6b3a) は周囲の地のテキスト色 (--color-text) との対比が 3:1 未満
+   （実測 2.65:1）で WCAG 1.4.1 を割り込む。色を変えずに下線という色以外の手がかりを
+   常時付けて解消する（draft.css の draft__term--mesh 自体は draftView と共有のため
+   変更しない。#/edit 側で使われる 3 箇所——読み取り表示・AI 差分の Before/After——だけを
+   ここで上書きする。チップの MeSH リンクは edit__chip-term--mesh 側で同様に扱う）。 */
+.edit__block-current a.draft__term--mesh,
+.edit__block-diff-before a.draft__term--mesh,
+.edit__block-diff-after a.draft__term--mesh {
+  text-decoration: underline;
+}
+
 .edit__block-proposal:empty {
   display: none;
 }
@@ -263,5 +277,55 @@
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
   font-style: italic;
+}
+
+/* チップ編集の空文字ガード用エラー（issue #58 chunk 3b）。
+   removeOperandAt / setOperandTerm の結果、ブロックが空文字になる操作を拒否したときに出す
+   （空のブロック行は formula_md の再パースを壊すため commitExpression が弾く）。 */
+.edit__block-chips-error {
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+  margin: var(--space-1) 0 0;
+}
+
+.edit__block-chips-error:empty {
+  display: none;
+}
+
+/* クイック整理（重複する語を整理 / MeSH を先頭に並べ替え）。チップ編集面の下に並ぶ小さな操作。 */
+.edit__block-quicktools {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.edit__block-quicktool {
+  font-size: var(--font-size-sm);
+  padding: 2px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+}
+
+.edit__block-quicktool:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* 「詳細編集（生テキスト）」: チップで編集できない複合句・一括書き換え用の逃げ道
+   （editableBlock.ts の同名コメント参照）。チップと同時に常時表示する（折りたたみにしない
+   理由は editView.ts の renderEditPanel doc コメント参照。issue #42 の実操作 E2E との互換性）。 */
+.edit__block-rawedit {
+  margin-top: var(--space-2);
+}
+
+.edit__block-rawedit-label {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.edit__block-rawedit .edit__block-edit-form {
+  margin-top: var(--space-2);
 }
 

@@ -989,3 +989,318 @@ describe('createEditView - ブロック・インスペクタの配線（issue #5
     expect(overlap).not.toContain('#3');
   });
 });
+
+const CHIP_MD = [
+  '## PubMed/MEDLINE',
+  '',
+  '```',
+  '#1 asthma[tiab] OR "Asthma"[Mesh]',
+  '#2 children[tiab]',
+  '#3 #1 AND #2',
+  '```',
+  '',
+].join('\n');
+
+const stateReadyChips: AppState = {
+  ...stateReady,
+  currentFormulaMarkdown: CHIP_MD,
+};
+
+describe('createEditView - チップ編集（issue #58 chunk 3b）', () => {
+  test('鉛筆を開くと句単位のチップが表示される（MeSH はリンク、フリーワードは編集ボタン）', () => {
+    const view = createEditView();
+    const container = buildContainer();
+    view(container, { state: stateReadyChips, navigate: jest.fn() });
+    const row = blockRow(container, '1');
+    row.querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!.click();
+    expect(row.querySelector('.edit__block-chips')).toBeTruthy();
+    expect(row.querySelector('.edit__chip--mesh a.edit__chip-term--mesh')).toBeTruthy();
+    expect(row.querySelector('.edit__chip--freeword .edit__chip-term--editable')?.textContent).toBe(
+      'asthma[tiab]'
+    );
+    // 読み取り表示（.edit__block-current）は編集面が開いている間隠れる
+    expect((row.querySelector('.edit__block-current') as HTMLElement).style.display).toBe('none');
+  });
+
+  test('チップの × で句を削除すると onDraftChange が更新後の md で呼ばれる（他ブロックは維持）', () => {
+    const onDraftChange = jest.fn();
+    const view = createEditView({ onDraftChange });
+    const container = buildContainer();
+    view(container, { state: stateReadyChips, navigate: jest.fn() });
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!.click();
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__chip-remove')!.click();
+    expect(onDraftChange).toHaveBeenCalledTimes(1);
+    expect(onDraftChange.mock.calls[0]![0]).toContain('#1 "Asthma"[Mesh]');
+    expect(onDraftChange.mock.calls[0]![0]).toContain('#2 children[tiab]');
+  });
+
+  test('フリーワードチップの語編集（Enter）で onDraftChange が更新後の md で呼ばれる', () => {
+    const onDraftChange = jest.fn();
+    const view = createEditView({ onDraftChange });
+    const container = buildContainer();
+    view(container, { state: stateReadyChips, navigate: jest.fn() });
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!.click();
+    const termBtn = blockRow(container, '1').querySelector<HTMLButtonElement>(
+      '.edit__chip-term--editable'
+    )!;
+    termBtn.click();
+    const input = blockRow(container, '1').querySelector<HTMLInputElement>('.edit__chip-input')!;
+    input.value = 'asthma*';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(onDraftChange).toHaveBeenCalledTimes(1);
+    expect(onDraftChange.mock.calls[0]![0]).toContain('#1 asthma*[tiab] OR "Asthma"[Mesh]');
+  });
+
+  test('「＋ 語を追加」で onDraftChange が更新後の md で呼ばれる', () => {
+    const onDraftChange = jest.fn();
+    const view = createEditView({ onDraftChange });
+    const container = buildContainer();
+    view(container, { state: stateReadyChips, navigate: jest.fn() });
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!.click();
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__chip-add-btn')!.click();
+    const input = blockRow(container, '1').querySelector<HTMLInputElement>(
+      '.edit__chip-add-input'
+    )!;
+    input.value = 'wheeze';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(onDraftChange).toHaveBeenCalledTimes(1);
+    expect(onDraftChange.mock.calls[0]![0]).toContain('wheeze[tiab]');
+  });
+
+  test('最後の 1 語を削除すると拒否され、onDraftChange は呼ばれない（ブロックが空になるため）', () => {
+    const onDraftChange = jest.fn();
+    const view = createEditView({ onDraftChange });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() }); // #1 は 'asthma[tiab]' の 1 語のみ
+    const row = blockRow(container, '1');
+    row.querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!.click();
+    row.querySelector<HTMLButtonElement>('.edit__chip-remove')!.click();
+    expect(onDraftChange).not.toHaveBeenCalled();
+    expect(row.querySelector('.edit__block-chips-error')?.textContent).toContain(
+      '空にすることはできません'
+    );
+    // チップ自体は消えていない（コミットされず、元の式のまま）
+    expect(row.querySelector('.edit__chip-remove')).toBeTruthy();
+  });
+
+  // buildContainer() は document.implementation.createHTMLDocument() で作った、window
+  // （ブラウジングコンテキスト）を持たない独立ドキュメントを使う。jsdom はこの種の
+  // ドキュメントで .focus() を呼んでも activeElement を更新しない（このファイルの他の
+  // どのテストも document.activeElement を検証していないのはこの制約のため）。
+  // そのため、実際に focus されたかどうかは HTMLElement.prototype.focus をスパイして
+  // 「どの要素に対して呼ばれたか」で検証する（本物のブラウザ / Playwright では
+  // activeElement は正しく更新される）。
+  test('フォーカス復元: 語編集の確定後は同じ語のチップへフォーカスが戻る（フォールバック経路）', () => {
+    const focusSpy = jest.spyOn(HTMLElement.prototype, 'focus');
+    const view = createEditView();
+    const container = buildContainer();
+    view(container, { state: stateReadyChips, navigate: jest.fn() });
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!.click();
+    const termBtn = blockRow(container, '1').querySelector<HTMLButtonElement>(
+      '.edit__chip-term--editable'
+    )!;
+    termBtn.click();
+    const input = blockRow(container, '1').querySelector<HTMLInputElement>('.edit__chip-input')!;
+    input.value = 'asthma*';
+    focusSpy.mockClear(); // ここまでの focus() 呼び出し（chip 編集開始時の input.focus() 等）を除外
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    const newRow = blockRow(container, '1');
+    const restoredChip = Array.from(newRow.querySelectorAll<HTMLElement>('.edit__chip')).find(
+      (c) => c.getAttribute('data-operand-term') === 'asthma*'
+    );
+    const restoredTarget = restoredChip?.querySelector('.edit__chip-term--editable');
+    expect(focusSpy).toHaveBeenCalledWith();
+    expect(focusSpy.mock.instances).toContain(restoredTarget);
+    focusSpy.mockRestore();
+  });
+
+  test('フォーカス復元: 削除後は「＋ 語を追加」ボタンへフォーカスが戻る（フォールバック経路）', () => {
+    const focusSpy = jest.spyOn(HTMLElement.prototype, 'focus');
+    const view = createEditView();
+    const container = buildContainer();
+    view(container, { state: stateReadyChips, navigate: jest.fn() });
+    const row = blockRow(container, '1');
+    row.querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!.click();
+    focusSpy.mockClear();
+    row.querySelector<HTMLButtonElement>('.edit__chip-remove')!.click();
+    const newRow = blockRow(container, '1');
+    expect(focusSpy.mock.instances).toContain(newRow.querySelector('.edit__chip-add-btn'));
+    focusSpy.mockRestore();
+  });
+});
+
+describe('createEditView - クイック整理（重複整理 / MeSH 先頭。issue #58 chunk 3b）', () => {
+  test('重複が無ければ「重複を整理」は disabled', () => {
+    const view = createEditView();
+    const container = buildContainer();
+    view(container, { state: stateReadyChips, navigate: jest.fn() });
+    const row = blockRow(container, '1');
+    row.querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!.click();
+    const dedupeBtn = Array.from(row.querySelectorAll<HTMLButtonElement>('.edit__block-quicktool')).find(
+      (b) => b.textContent === '重複する語を整理'
+    )!;
+    expect(dedupeBtn.disabled).toBe(true);
+  });
+
+  test('重複がある式では「重複を整理」が有効で、クリックで dedupeOperands の結果が commit される', () => {
+    const onDraftChange = jest.fn();
+    const view = createEditView({ onDraftChange });
+    const container = buildContainer();
+    const md = [
+      '## PubMed/MEDLINE',
+      '',
+      '```',
+      '#1 asthma[tiab] OR asthma[tiab]',
+      '```',
+      '',
+    ].join('\n');
+    view(container, { state: { ...stateReady, currentFormulaMarkdown: md }, navigate: jest.fn() });
+    const row = blockRow(container, '1');
+    row.querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!.click();
+    const dedupeBtn = Array.from(row.querySelectorAll<HTMLButtonElement>('.edit__block-quicktool')).find(
+      (b) => b.textContent === '重複する語を整理'
+    )!;
+    expect(dedupeBtn.disabled).toBe(false);
+    dedupeBtn.click();
+    expect(onDraftChange).toHaveBeenCalledTimes(1);
+    expect(onDraftChange.mock.calls[0]![0]).toContain('#1 asthma[tiab]');
+    expect(onDraftChange.mock.calls[0]![0]).not.toContain('asthma[tiab] OR asthma[tiab]');
+  });
+
+  test('MeSH が先頭でなければ「MeSH を先頭に並べ替え」が有効で、クリックで並べ替わる', () => {
+    const onDraftChange = jest.fn();
+    const view = createEditView({ onDraftChange });
+    const container = buildContainer();
+    view(container, { state: stateReadyChips, navigate: jest.fn() }); // 'asthma[tiab] OR "Asthma"[Mesh]'
+    const row = blockRow(container, '1');
+    row.querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!.click();
+    const sortBtn = Array.from(row.querySelectorAll<HTMLButtonElement>('.edit__block-quicktool')).find(
+      (b) => b.textContent === 'MeSH を先頭に並べ替え'
+    )!;
+    expect(sortBtn.disabled).toBe(false);
+    sortBtn.click();
+    expect(onDraftChange).toHaveBeenCalledTimes(1);
+    expect(onDraftChange.mock.calls[0]![0]).toContain('#1 "Asthma"[Mesh] OR asthma[tiab]');
+  });
+
+  test('MeSH が既に先頭なら「MeSH を先頭に並べ替え」は disabled', () => {
+    const view = createEditView();
+    const container = buildContainer();
+    const md = [
+      '## PubMed/MEDLINE',
+      '',
+      '```',
+      '#1 "Asthma"[Mesh] OR asthma[tiab]',
+      '```',
+      '',
+    ].join('\n');
+    view(container, { state: { ...stateReady, currentFormulaMarkdown: md }, navigate: jest.fn() });
+    const row = blockRow(container, '1');
+    row.querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!.click();
+    const sortBtn = Array.from(row.querySelectorAll<HTMLButtonElement>('.edit__block-quicktool')).find(
+      (b) => b.textContent === 'MeSH を先頭に並べ替え'
+    )!;
+    expect(sortBtn.disabled).toBe(true);
+  });
+});
+
+describe('createEditView - 詳細編集（生テキスト）はチップと併存する（issue #58 chunk 3b）', () => {
+  test('鉛筆を開くと「詳細編集（生テキスト）」がチップと同時に（折りたたまず）表示される', () => {
+    // 追加の開閉操作を挟まないのは、issue #42 の実操作 E2E 回帰確認
+    // （tests/e2e/journey-edit-save.spec.ts）が鉛筆クリック直後に .edit__block-edit-input へ
+    // 直接 fill() する前提のため（renderEditPanel の doc コメント参照）。
+    const view = createEditView();
+    const container = buildContainer();
+    view(container, { state: stateReadyChips, navigate: jest.fn() });
+    const row = blockRow(container, '1');
+    row.querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!.click();
+    expect(row.querySelector('.edit__block-rawedit')).toBeTruthy();
+    expect(row.querySelector('.edit__block-edit-input')).toBeTruthy();
+    expect(row.querySelector('.edit__block-chips')).toBeTruthy();
+  });
+
+  test('詳細編集で保存すると、再構築後のチップにも反映され、鉛筆編集面は開いたままになる（フォールバック経路）', () => {
+    // onDraftChange 未指定＝フォールバックのローカル rerenderBlocks を使う。onDraftChange を
+    // 渡すと（bootstrap 配線と違い）ただの jest.fn() は再描画を誘発しないため、ここでは
+    // フォールバック経路で「setMd 後に本当に DOM が作り直されるか」を検証する。
+    const view = createEditView();
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    const row = blockRow(container, '1');
+    row.querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!.click();
+    const input = row.querySelector<HTMLTextAreaElement>('.edit__block-edit-input')!;
+    input.value = 'asthma[tiab] OR wheeze[tiab]';
+    row.querySelector<HTMLButtonElement>('.edit__block-edit-save')!.click();
+    const newRow = blockRow(container, '1');
+    // 鉛筆編集面（チップ）が閉じずに開いたまま、新しい内容で再構築されている
+    expect(newRow.querySelectorAll('.edit__chip')).toHaveLength(2);
+    expect(newRow.querySelector('.edit__block-current')?.getAttribute('style')).toContain('none');
+  });
+});
+
+describe('createEditView - AI 改善提案は句単位で色分けされる（issue #58 chunk 3b）', () => {
+  test('削除された句に formula-diff__term--removed、追加された句に --added が付く', () => {
+    const view = createEditView({ onImproveBlock: jest.fn() });
+    const container = buildContainer();
+    view(container, {
+      state: {
+        ...stateReadyFull,
+        blockImprovement: {
+          formulaVersionId: 'v1',
+          blockId: '1',
+          status: 'ready',
+          result: {
+            blockId: '1',
+            currentExpression: 'asthma[tiab]',
+            proposedExpression: '"Asthma"[Mesh] OR asthma[tiab]',
+            rationale: 'MeSH 追加',
+          },
+          error: null,
+        },
+      },
+      navigate: jest.fn(),
+    });
+    const row = blockRow(container, '1');
+    // 'asthma[tiab]' は before/after 両方にあるので same、'"Asthma"[Mesh]' は after にしか無いので added
+    expect(row.querySelector('.edit__block-diff-before .formula-diff__term--same')).toBeTruthy();
+    expect(row.querySelector('.edit__block-diff-after .formula-diff__term--added')).toBeTruthy();
+    expect(row.querySelector('.edit__block-diff-before .formula-diff__term--removed')).toBeNull();
+    // textContent は元の式と一致する（色分けで内容が変わらないことの確認）
+    expect(row.querySelector('.edit__block-diff-before pre')?.textContent).toBe('asthma[tiab]');
+    expect(row.querySelector('.edit__block-diff-after pre')?.textContent).toBe(
+      '"Asthma"[Mesh] OR asthma[tiab]'
+    );
+  });
+});
+
+describe('createEditView - ブロック・インスペクタから式を変更できる（onApplyExpression 配線。issue #58 chunk 3b）', () => {
+  test('Δ 表の × 削除で onDraftChange が更新後の md で呼ばれる', async () => {
+    const onCountHits = jest.fn((q: string) => {
+      if (q === 'surgeon*[tiab]') return Promise.resolve(300);
+      if (q === 'neurosurgeon*[tiab]') return Promise.resolve(15);
+      return Promise.resolve(310);
+    });
+    const onDraftChange = jest.fn();
+    const view = createEditView({ onCountHits, onDraftChange });
+    const container = buildContainer();
+    const md = [
+      '## PubMed/MEDLINE',
+      '',
+      '```',
+      '#1 surgeon*[tiab] OR neurosurgeon*[tiab]',
+      '```',
+      '',
+    ].join('\n');
+    view(container, { state: { ...stateReady, currentFormulaMarkdown: md }, navigate: jest.fn() });
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!.click();
+    await flushAsync();
+    await flushAsync();
+    // Δ 表は個別ヒット数の降順（surgeon* 300 → neurosurgeon* 15）なので、最初の × は surgeon* の行。
+    const removeBtn = blockRow(container, '1').querySelector<HTMLButtonElement>(
+      '.bins__delta-remove'
+    )!;
+    removeBtn.click();
+    expect(onDraftChange).toHaveBeenCalledTimes(1);
+    expect(onDraftChange.mock.calls[0]![0]).toContain('#1 neurosurgeon*[tiab]');
+  });
+});

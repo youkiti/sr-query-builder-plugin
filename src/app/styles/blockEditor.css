@@ -52,6 +52,13 @@
   text-decoration-style: solid;
 }
 
+/* MeSH リンクは OR/AND のような地のテキストとチップ内で隣り合うため、色だけでリンクと
+   分かる状態を避けて下線を常時付ける（axe: link-in-text-block。edit.css の
+   .edit__block-current a.draft__term--mesh 等と同じ理由）。 */
+.edit__chip-term--mesh {
+  text-decoration: underline;
+}
+
 .edit__chip-term--static {
   cursor: default;
 }
