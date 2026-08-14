@@ -1,5 +1,6 @@
 import type { PubmedFormula } from '@/lib/search-formula-md';
 import type { ConversionResult } from './types';
+import { detectResidualFieldTagBrackets, stripKnownPubmedFieldTags } from './pubmedFieldTags';
 
 /**
  * PubMed 検索式を ICTRP（WHO International Clinical Trials Registry Platform）向けに変換する。
@@ -40,8 +41,21 @@ function convertIctrpExpression(src: string): { expression: string; warnings: st
     });
   }
 
-  // フィールドタグ除去
-  out = out.replace(/\s*\[[A-Za-z][A-Za-z0-9:_ -]*\]/gi, '');
+  // フィールドタグ除去。既知タグのみを対象にし、見た目が似ているだけの
+  // 未知のブラケット表記まで誤って削除しないようにする。
+  out = stripKnownPubmedFieldTags(out);
+
+  // 既知タグ除去後もブラケット表記が残っていれば、取りこぼしたタグとして警告する。
+  // PubMed 検索式の文法上 `[...]` はフィールドタグにしか使われないため、
+  // ここに残るものは「ホワイトリストに無かった実在タグ」か「未知の表記」のどちらか。
+  // 黙って削除も黙って残しもせず、目視で気づけるようにする（issue #60 のレビュー指摘）。
+  const residualTags = detectResidualFieldTagBrackets(out);
+  if (residualTags.length > 0) {
+    warnings.push(
+      `変換できなかったフィールドタグが残っています: ${residualTags.join(', ')}。手動で確認してください`
+    );
+  }
+
   // ワイルドカード除去
   if (/\*/.test(out)) {
     warnings.push('ワイルドカード `*` は ICTRP で未対応のため削除しました');

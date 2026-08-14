@@ -41,4 +41,40 @@ describe('convertToIctrp', () => {
     const result = convertToIctrp(makeFormula([{ id: '1', expression: 'aspirin[tiab]' }]));
     expect(result.warnings.every((w) => !w.includes('ワイルドカード'))).toBe(true);
   });
+
+  test('未知のブラケット表記は既知タグではないため削除しないが、警告は出す（黙って残さない）', () => {
+    const result = convertToIctrp(
+      makeFormula([{ id: '1', expression: 'foo[Not-A-Tag] OR bar[tiab]' }])
+    );
+    expect(result.convertedFormula).toContain('foo[Not-A-Tag]');
+    expect(result.convertedFormula).toContain('bar');
+    expect(result.convertedFormula).not.toContain('[tiab]');
+    const residualWarning = result.warnings.find((w) => w.includes('変換できなかったフィールドタグ'));
+    expect(residualWarning).toBeDefined();
+    expect(residualWarning).toContain('[Not-A-Tag]');
+  });
+
+  test('[Mesh:NoExp] のような修飾つきタグも既知タグとして削除する（警告なし）', () => {
+    const result = convertToIctrp(makeFormula([{ id: '1', expression: '"Aspirin"[Mesh:NoExp]' }]));
+    expect(result.convertedFormula).toBe('#1 "Aspirin"');
+    expect(result.warnings.some((w) => w.includes('変換できなかったフィールドタグ'))).toBe(false);
+  });
+
+  describe('実在する PubMed タグの網羅（issue #60 レビュー指摘）', () => {
+    test.each([
+      ['medline[sb]', 'medline', 'sb'],
+      ['aspirin[nm]', 'aspirin', 'nm'],
+      ['smith j[au]', 'smith j', 'au'],
+      ['lancet[ta]', 'lancet', 'ta'],
+      ['cancer[All Fields]', 'cancer', 'All Fields'],
+      ['2020[pdat]', '2020', 'pdat'],
+      ['therapy[Text Word]', 'therapy', 'Text Word'],
+      ['x[Supplementary Concept]', 'x', 'Supplementary Concept'],
+    ])('%s は既知タグとして削除され、警告も出ない', (expression, expectedTerm, tag) => {
+      const result = convertToIctrp(makeFormula([{ id: '1', expression }]));
+      expect(result.convertedFormula).toBe(`#1 ${expectedTerm}`);
+      expect(result.convertedFormula).not.toContain(`[${tag}]`);
+      expect(result.warnings.some((w) => w.includes('変換できなかったフィールドタグ'))).toBe(false);
+    });
+  });
 });
