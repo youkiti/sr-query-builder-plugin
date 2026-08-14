@@ -599,6 +599,40 @@ describe('requestBlockImprovement - シード / 検証文脈', () => {
     expect(result.proposedExpression).toBe('x');
     expect(calls[0]).toContain('(なし)');
   });
+
+  test('インスペクタが計測した currentHits / keywordHits / freewordDedupTotal が improve-block のプロンプトに転記される（issue #58 chunk 3c: 渡し手の検証）', async () => {
+    const store = createStore(makeState({ currentFormulaMarkdown: VALID_MD }));
+    const { factory, calls } = capturingFactory();
+    await requestBlockImprovement(
+      {
+        blockId: '1',
+        currentHits: 12345,
+        keywordHits: [
+          { term: 'Asthma', kind: 'mesh', hits: 50000 },
+          { term: 'asthma*[tiab]', kind: 'freeword', hits: 300, delta: 300, status: 'normal' },
+          { term: 'wheeze[tiab]', kind: 'freeword', hits: 10, delta: 0, status: 'redundant' },
+        ],
+        freewordDedupTotal: 310,
+      },
+      { store, google: emptySeedsGoogle(), llmFactory: factory }
+    );
+    expect(calls[0]).toContain('現在のヒット数（PubMed esearch）: 12,345 件');
+    expect(calls[0]).toContain('- Asthma [MeSH]: 50,000 件');
+    expect(calls[0]).toContain('- asthma*[tiab] [tiab]: 300 件・純増Δ +300');
+    expect(calls[0]).toContain('- wheeze[tiab] [tiab]: 10 件・純増Δ +0 ⚠ 他語に内包＝削除候補');
+    expect(calls[0]).toContain('（フリーワード OR 合計・重複除去後: 310 件）');
+  });
+
+  test('currentHits / keywordHits / freewordDedupTotal が未指定なら従来どおり (未計測)', async () => {
+    const store = createStore(makeState({ currentFormulaMarkdown: VALID_MD }));
+    const { factory, calls } = capturingFactory();
+    await requestBlockImprovement(
+      { blockId: '1' },
+      { store, google: emptySeedsGoogle(), llmFactory: factory }
+    );
+    expect(calls[0]).toContain('現在のヒット数（PubMed esearch）: (未計測)');
+    expect(calls[0]).toContain('キーワード別ヒット数（単体）:\n(未計測)');
+  });
 });
 
 describe('getBlockImprovementContext', () => {

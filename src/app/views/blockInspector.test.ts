@@ -1,4 +1,9 @@
-import { buildBlockInspector, extractBlockTerms, type BlockInspectorParams } from './blockInspector';
+import {
+  buildBlockInspector,
+  collectMeasuredContext,
+  extractBlockTerms,
+  type BlockInspectorParams,
+} from './blockInspector';
 import type { MeshTreeEntry } from '@/features/validation';
 
 function buildDoc(): Document {
@@ -496,5 +501,85 @@ describe('buildBlockInspector', () => {
     expect(originRow.querySelector('.bins__row-toggle')?.textContent).toBe('▾');
     const names = Array.from(el.querySelectorAll('.bins__row-name')).map((n) => n.textContent);
     expect(names).toContain('Neurosurgeons');
+  });
+});
+
+describe('collectMeasuredContext（issue #58 chunk 3c: 計測済みヒット数を AI 改善へ渡す）', () => {
+  test('MeSH: hitsSnapshot に計測済みの語だけ拾い、未計測の語は含めない', () => {
+    const hitsSnapshot = new Map<string, number>([['"Asthma"[Mesh]', 50000]]);
+    const result = collectMeasuredContext('"Asthma"[Mesh] OR "Pneumonia"[Mesh]', { hitsSnapshot });
+    expect(result.keywordHits).toEqual([{ term: 'Asthma', kind: 'mesh', hits: 50000 }]);
+    // フリーワードが無いので合計は null
+    expect(result.freewordDedupTotal).toBeNull();
+  });
+
+  test('snapshot が省略・空なら何も含めない（NCBI を新規に叩かない）', () => {
+    const result = collectMeasuredContext('"Asthma"[Mesh] OR asthma[tiab]', {});
+    expect(result.keywordHits).toEqual([]);
+    expect(result.freewordDedupTotal).toBeNull();
+  });
+
+  test('フリーワード: freewordDeltaSnapshot に解決済みの結果があれば個別ヒット・Δ・区分・合計を展開する', async () => {
+    const doc = buildDoc();
+    const onCountHits = jest.fn((q: string) => {
+      if (q === 'surgeon*[tiab]') return Promise.resolve(300);
+      if (q === 'neurosurgeon*[tiab]') return Promise.resolve(15);
+      return Promise.resolve(310); // 累積 OR
+    });
+    const params = baseParams({
+      expression: 'surgeon*[tiab] OR neurosurgeon*[tiab]',
+      onCountHits,
+      hitsSnapshot: new Map(),
+      freewordDeltaSnapshot: new Map(),
+    });
+    buildBlockInspector(doc, params);
+    await flushAsync();
+    const result = collectMeasuredContext(params.expression, params);
+    expect(result.freewordDedupTotal).toBe(310);
+    expect(result.keywordHits).toEqual([
+      { term: 'surgeon*[tiab]', kind: 'freeword', hits: 300, delta: 300, status: 'normal' },
+      { term: 'neurosurgeon*[tiab]', kind: 'freeword', hits: 15, delta: 10, status: 'normal' },
+    ]);
+  });
+
+  test('個別ヒット取得に失敗した語（individualError）は hits/delta/status を null にする', async () => {
+    const doc = buildDoc();
+    const onCountHits = jest.fn((q: string) =>
+      q === 'ok[tiab]' ? Promise.resolve(100) : Promise.reject(new Error('boom'))
+    );
+    const params = baseParams({
+      expression: 'ok[tiab] OR bad[tiab]',
+      onCountHits,
+      hitsSnapshot: new Map(),
+      freewordDeltaSnapshot: new Map(),
+    });
+    buildBlockInspector(doc, params);
+    await flushAsync();
+    const result = collectMeasuredContext(params.expression, params);
+    const badRow = result.keywordHits.find((k) => k.term === 'bad[tiab]');
+    expect(badRow).toEqual({
+      term: 'bad[tiab]',
+      kind: 'freeword',
+      hits: null,
+      delta: null,
+      status: null,
+    });
+  });
+
+  test('式の語集合が計測時と異なれば（別の語構成）拾わない（Δ 計算は式全体単位のため）', async () => {
+    const doc = buildDoc();
+    const onCountHits = jest.fn().mockResolvedValue(10);
+    const params = baseParams({
+      expression: 'surgeon*[tiab] OR neurosurgeon*[tiab]',
+      onCountHits,
+      hitsSnapshot: new Map(),
+      freewordDeltaSnapshot: new Map(),
+    });
+    buildBlockInspector(doc, params);
+    await flushAsync();
+    // 編集で語が変わった後の式（インスペクタはまだ古い語集合のキーでしか解決していない）。
+    const result = collectMeasuredContext('surgeon*[tiab] OR fellow*[tiab]', params);
+    expect(result.keywordHits).toEqual([]);
+    expect(result.freewordDedupTotal).toBeNull();
   });
 });

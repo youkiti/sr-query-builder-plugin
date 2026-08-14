@@ -1304,3 +1304,70 @@ describe('createEditView - ブロック・インスペクタから式を変更�
     expect(onDraftChange.mock.calls[0]![0]).toContain('#1 neurosurgeon*[tiab]');
   });
 });
+
+describe('createEditView - AI 改善へインスペクタの計測済みヒット数を渡す（issue #58 chunk 3c）', () => {
+  test('インスペクタが計測済みなら、submit で onImproveBlock に keywordHits / freewordDedupTotal が載る', async () => {
+    const onCountHits = jest.fn((q: string) => {
+      if (q === 'surgeon*[tiab]') return Promise.resolve(300);
+      if (q === 'neurosurgeon*[tiab]') return Promise.resolve(15);
+      return Promise.resolve(310);
+    });
+    const onImproveBlock = jest.fn().mockResolvedValue(undefined);
+    const view = createEditView({ onCountHits, onImproveBlock });
+    const container = buildContainer();
+    const md = [
+      '## PubMed/MEDLINE',
+      '',
+      '```',
+      '#1 surgeon*[tiab] OR neurosurgeon*[tiab]',
+      '```',
+      '',
+    ].join('\n');
+    view(container, { state: { ...stateReady, currentFormulaMarkdown: md }, navigate: jest.fn() });
+    // 「AI に改善させる」を開くとインスペクタも展開し、フリーワード Δ の計測が走る。
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
+    await flushAsync();
+    await flushAsync();
+    const row = blockRow(container, '1');
+    row.querySelector<HTMLTextAreaElement>('.edit__block-ai-instruction')!.value = '見直して';
+    row.querySelector<HTMLButtonElement>('.edit__block-ai-submit')!.click();
+    expect(onImproveBlock).toHaveBeenCalledWith({
+      blockId: '1',
+      instruction: '見直して',
+      keywordHits: [
+        { term: 'surgeon*[tiab]', kind: 'freeword', hits: 300, delta: 300, status: 'normal' },
+        { term: 'neurosurgeon*[tiab]', kind: 'freeword', hits: 15, delta: 10, status: 'normal' },
+      ],
+      freewordDedupTotal: 310,
+    });
+  });
+
+  test('インスペクタ未展開（onCountHits 未指定）なら計測値は載らない（回帰: 既存契約を壊さない）', () => {
+    const onImproveBlock = jest.fn().mockResolvedValue(undefined);
+    const view = createEditView({ onImproveBlock });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    const row = blockRow(container, '1');
+    row.querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
+    row.querySelector<HTMLTextAreaElement>('.edit__block-ai-instruction')!.value = '見直して';
+    row.querySelector<HTMLButtonElement>('.edit__block-ai-submit')!.click();
+    expect(onImproveBlock).toHaveBeenCalledWith({ blockId: '1', instruction: '見直して' });
+    const call = onImproveBlock.mock.calls[0]![0] as Record<string, unknown>;
+    expect('keywordHits' in call).toBe(false);
+    expect('freewordDedupTotal' in call).toBe(false);
+  });
+
+  test('計測が未解決（Δ 計算がまだ完了していない）うちに submit すると計測値は載らない', () => {
+    const onCountHits = jest.fn().mockReturnValue(new Promise<number>(() => undefined));
+    const onImproveBlock = jest.fn().mockResolvedValue(undefined);
+    const view = createEditView({ onCountHits, onImproveBlock });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() }); // block '1' = 'x'（フリーワード）
+    const row = blockRow(container, '1');
+    row.querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
+    // await flushAsync() を挟まず、Δ 計算が pending のうちに送信する。
+    row.querySelector<HTMLTextAreaElement>('.edit__block-ai-instruction')!.value = '見直して';
+    row.querySelector<HTMLButtonElement>('.edit__block-ai-submit')!.click();
+    expect(onImproveBlock).toHaveBeenCalledWith({ blockId: '1', instruction: '見直して' });
+  });
+});
