@@ -260,3 +260,6 @@ MIT ライセンスの OSS Chrome 拡張 **sr-query-builder-plugin**。ユーザ
 6. **自動化の限界**: ツール実行が複数回失敗したら執拗に再試行せず、状況を報告する。
 7. **テスト通過後の dev ビルド検証**: 実装変更のテスト (`npm test`) が通ったら、作業完了を報告する前に必ず `npm run dev` を実行して webpack が成功することを確認する。型チェック・単体テストだけでは webpack の解決エラー（import パス・asset 参照など）を拾いきれないため。本番ビルド (`npm run build`) は `.env` の `OAUTH_CLIENT_ID` を要求するので、ローカル検証では dev ビルドを基準にする。ビルドが壊れた状態で「完了」報告をしない。
 8. **UI 変更時は E2E も回す**: 画面・CSS・ルーティングに触れたら `npm run test:e2e` まで通す（axe の a11y 検証を含む）。
+   - **ただし axe の `color-contrast` ルールは E2E の全 17 箇所で無効化してある**（`tests/e2e/*.spec.ts` の `new AxeBuilder({ page }).disableRules(['color-contrast'])`）。`tokens.css` のコントラスト初期値が MVP の範囲外という判断による意図的な設定で、[popup.spec.ts](tests/e2e/popup.spec.ts) にその旨のコメントがある。
+   - 結果として、**「axe violation ゼロ」は新しく足した配色の妥当性を一切保証しない**。新規スタイルで文字色と背景色を同時に指定したら、コントラスト比は自分で確認すること（通常サイズ文字は WCAG AA で 4.5:1 以上、大きい文字は 3:1 以上）。
+   - 実例: `--color-warning`（`#c57d1b`）を警告バナーの淡い背景（`#fdf3e3`）に載せると **3.02:1** で基準未満になる。文章体の通知（[blocks.css](src/app/styles/blocks.css) の `.blocks__draft-notice` 等）が文字色を指定せず既定の `--color-text` に委ねているのはこのため（同じ背景で 15.77:1）。警告であることはボーダーと文頭の記号で示す。
