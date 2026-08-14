@@ -1,10 +1,23 @@
 import {
   EutilsError,
+  NCBI_RATE_LIMIT_WITHOUT_API_KEY,
+  NCBI_RATE_LIMIT_WITH_API_KEY,
   efetchArticles,
   esearch,
   parsePubmedXml,
   resolvePmidByDoi,
+  sharedEutilsRateLimiters,
 } from './eutils';
+import { TokenBucket, type RateLimiter } from './rateLimit';
+
+// テストごとに満タンへ戻す。issue #59 のトークンバケットはプロセス共有（モジュールスコープの
+// シングルトン）なので、リセットしないと直前のテストで消費したトークンが持ち越されて
+// 実タイマーでの待機が発生してしまう（本ファイルは 1 テストあたり高々数回しか fetch しないが、
+// 積算するとバケット容量を超える）。
+beforeEach(() => {
+  sharedEutilsRateLimiters.withoutApiKey.reset();
+  sharedEutilsRateLimiters.withApiKey.reset();
+});
 
 function makeJsonResponse(body: unknown, init: { status?: number } = {}): Response {
   const status = init.status ?? 200;
@@ -348,6 +361,120 @@ describe('resolvePmidByDoi', () => {
       );
     await expect(resolvePmidByDoi('x', { fetch })).resolves.toBeNull();
     await expect(resolvePmidByDoi('y', { fetch })).resolves.toBeNull();
+  });
+});
+
+describe('レートリミッタ（issue #59）', () => {
+  test('NCBI のレート定数は仕様どおり（キー無し 3 req/s、キー有り 10 req/s）', () => {
+    expect(NCBI_RATE_LIMIT_WITHOUT_API_KEY).toBe(3);
+    expect(NCBI_RATE_LIMIT_WITH_API_KEY).toBe(10);
+  });
+
+  test('esearch は fetch 前に rateLimiter.acquire() を呼ぶ', async () => {
+    const calls: string[] = [];
+    const fetch = jest.fn(async () => {
+      calls.push('fetch');
+      return makeJsonResponse({ esearchresult: { count: '0', idlist: [] } });
+    });
+    const rateLimiter: RateLimiter = {
+      acquire: jest.fn(async () => {
+        calls.push('acquire');
+      }),
+    };
+    await esearch('x', { fetch, rateLimiter });
+    expect(calls).toEqual(['acquire', 'fetch']);
+  });
+
+  test('efetchArticles は fetch 前に rateLimiter.acquire() を呼ぶ', async () => {
+    const calls: string[] = [];
+    const fetch = jest.fn(async () => {
+      calls.push('fetch');
+      return makeXmlResponse('<?xml version="1.0"?><PubmedArticleSet></PubmedArticleSet>');
+    });
+    const rateLimiter: RateLimiter = {
+      acquire: jest.fn(async () => {
+        calls.push('acquire');
+      }),
+    };
+    await efetchArticles(['1'], { fetch, rateLimiter });
+    expect(calls).toEqual(['acquire', 'fetch']);
+  });
+
+  test('efetchArticles は pmids が空なら acquire() すら呼ばない（HTTP リクエストが無いため）', async () => {
+    const rateLimiter: RateLimiter = { acquire: jest.fn().mockResolvedValue(undefined) };
+    await efetchArticles([], { fetch: jest.fn(), rateLimiter });
+    expect(rateLimiter.acquire).not.toHaveBeenCalled();
+  });
+
+  test('deps.rateLimiter を渡すと、共有バケットではなくそちらが使われる', async () => {
+    const fetch = jest
+      .fn()
+      .mockResolvedValue(makeJsonResponse({ esearchresult: { count: '0', idlist: [] } }));
+    const acquire = jest.fn().mockResolvedValue(undefined);
+    const withoutApiKeySpy = jest.spyOn(sharedEutilsRateLimiters.withoutApiKey, 'acquire');
+    await esearch('x', { fetch, rateLimiter: { acquire } });
+    expect(acquire).toHaveBeenCalledTimes(1);
+    expect(withoutApiKeySpy).not.toHaveBeenCalled();
+    withoutApiKeySpy.mockRestore();
+  });
+
+  test('apiKey 無しは共有 withoutApiKey バケットを、apiKey 有りは共有 withApiKey バケットを使う', async () => {
+    const fetch = jest
+      .fn()
+      .mockResolvedValue(makeJsonResponse({ esearchresult: { count: '0', idlist: [] } }));
+    const withoutApiKeySpy = jest.spyOn(sharedEutilsRateLimiters.withoutApiKey, 'acquire');
+    const withApiKeySpy = jest.spyOn(sharedEutilsRateLimiters.withApiKey, 'acquire');
+
+    await esearch('x', { fetch });
+    expect(withoutApiKeySpy).toHaveBeenCalledTimes(1);
+    expect(withApiKeySpy).not.toHaveBeenCalled();
+
+    await esearch('x', { fetch, apiKey: 'secret' });
+    expect(withApiKeySpy).toHaveBeenCalledTimes(1);
+    expect(withoutApiKeySpy).toHaveBeenCalledTimes(1); // 増えていない
+
+    withoutApiKeySpy.mockRestore();
+    withApiKeySpy.mockRestore();
+  });
+
+  test('リトライの度に acquire() を呼び直す（発行される HTTP リクエストの数だけ枠を消費する）', async () => {
+    const acquire = jest.fn().mockResolvedValue(undefined);
+    const fetch = jest
+      .fn()
+      .mockResolvedValueOnce(makeErrorResponse(503))
+      .mockResolvedValueOnce(makeJsonResponse({ esearchresult: { count: '1', idlist: ['9'] } }));
+    const sleep = jest.fn().mockResolvedValue(undefined);
+    const result = await esearch('x', {
+      fetch,
+      sleep,
+      rateLimiter: { acquire },
+      maxRetries: 3,
+    });
+    expect(result.pmids).toEqual(['9']);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(acquire).toHaveBeenCalledTimes(2);
+  });
+
+  test('容量を超えるバーストは不足分だけ待たされ、レート（3 req/s）を超えて fetch されない', async () => {
+    // 実タイマーは使わず、now / sleep を注入した TokenBucket で決定的に検証する
+    // （sleep は「時間を進める」だけの偽実装で、実際には待たない）。
+    let clockMs = 0;
+    const sleep = jest.fn(async (ms: number) => {
+      clockMs += ms;
+    });
+    const rateLimiter = new TokenBucket({ ratePerSecond: 3, now: () => clockMs, sleep });
+    const fetch = jest
+      .fn()
+      .mockResolvedValue(makeJsonResponse({ esearchresult: { count: '0', idlist: [] } }));
+
+    for (let i = 0; i < 4; i += 1) {
+      await esearch('x', { fetch, rateLimiter });
+    }
+
+    expect(fetch).toHaveBeenCalledTimes(4);
+    // capacity=3 の初期バーストは待たず、4 回目だけ不足分（1/3 秒）だけ待つ
+    expect(sleep).toHaveBeenCalledTimes(1);
+    expect(sleep.mock.calls[0]?.[0]).toBeCloseTo(1000 / 3, 5);
   });
 });
 

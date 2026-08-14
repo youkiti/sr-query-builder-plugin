@@ -6,6 +6,7 @@ import {
 } from './bootstrap';
 import { createStore, INITIAL_STATE } from './store';
 import { SHEET_HEADERS } from '@/domain/sheetsSchema';
+import { sharedEutilsRateLimiters } from '@/lib/ncbi';
 
 function buildDocument(): Document {
   const doc = document.implementation.createHTMLDocument('test');
@@ -283,6 +284,21 @@ describe('startApp', () => {
 });
 
 describe('startApp - wiring 層', () => {
+  // bootstrap.test.ts は startApp() 経由で実物の esearch/efetch を叩く統合テストで、
+  // 1 回の操作が複数リクエストを瞬時に必要とする。共有トークンバケット（issue #59）は
+  // モジュールスコープで実タイマーを使うため、flush()（実時間を進めない）ではスロットリング
+  // の待機が解決せず「呼び出しが起きていない」ように見えてしまう。
+  // ここで検証したいのは配線であってレート制御ではない（レート制御自体は
+  // rateLimit.test.ts / eutils.test.ts が担当する）ので、待機を無効化する。
+  beforeEach(() => {
+    jest.spyOn(sharedEutilsRateLimiters.withoutApiKey, 'acquire').mockResolvedValue(undefined);
+    jest.spyOn(sharedEutilsRateLimiters.withApiKey, 'acquire').mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   function jsonResponse(body: unknown): Response {
     return {
       ok: true,
