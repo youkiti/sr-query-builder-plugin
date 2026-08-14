@@ -94,6 +94,7 @@ export {
   type BoundaryCaseView,
   type BoundaryCasesResult,
   type ExpandFetchStep,
+  type ExpandMode,
   type ExpandServiceDeps,
   type RecordDecisionInput,
   type RecordDecisionResult,
