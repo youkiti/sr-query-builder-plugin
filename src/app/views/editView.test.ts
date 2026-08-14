@@ -787,3 +787,205 @@ describe('createEditView - AI に渡す内容を見る（文脈開示）', () =>
     );
   });
 });
+
+describe('createEditView - ブロック・インスペクタの配線（issue #58 chunk 3a）', () => {
+  test('計測 callback 未指定なら鉛筆を開いてもインスペクタは出ない', () => {
+    const view = createEditView();
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    const row = blockRow(container, '1');
+    row.querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!.click();
+    expect(row.querySelector('.edit__block-inspector .bins')).toBeNull();
+  });
+
+  test('鉛筆クリックでそのブロックの下にインスペクタが展開し、再クリックで閉じる', () => {
+    const onCountHits = jest.fn().mockResolvedValue(10);
+    const view = createEditView({ onCountHits });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    const row = blockRow(container, '1');
+    expect(row.querySelector('.edit__block-inspector .bins')).toBeNull();
+    const toggle = row.querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!;
+    toggle.click();
+    expect(row.querySelector('.edit__block-inspector .bins')).toBeTruthy();
+    // インスペクタ用スロットは行内の最後の子（編集フォーム・AI パネルより下）
+    expect(row.lastElementChild?.className).toBe('edit__block-inspector');
+    toggle.click();
+    expect(row.querySelector('.edit__block-inspector .bins')).toBeNull();
+  });
+
+  test('AI 改善ボタンでもインスペクタが展開する（未送信の指示入力中でも）', () => {
+    const onCountHits = jest.fn().mockResolvedValue(1);
+    const view = createEditView({ onCountHits, onImproveBlock: jest.fn() });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    const row = blockRow(container, '1');
+    const btn = row.querySelector<HTMLButtonElement>('.edit__block-improve')!;
+    btn.click();
+    expect(row.querySelector('.edit__block-inspector .bins')).toBeTruthy();
+    btn.click();
+    expect(row.querySelector('.edit__block-inspector .bins')).toBeNull();
+  });
+
+  test('AI プロンプトフォームのキャンセルでもインスペクタが閉じる', () => {
+    const onCountHits = jest.fn().mockResolvedValue(1);
+    const view = createEditView({ onCountHits, onImproveBlock: jest.fn() });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    const row = blockRow(container, '1');
+    row.querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
+    expect(row.querySelector('.edit__block-inspector .bins')).toBeTruthy();
+    row.querySelector<HTMLButtonElement>('.edit__block-ai-cancel')!.click();
+    expect(row.querySelector('.edit__block-inspector .bins')).toBeNull();
+  });
+
+  test('回帰: ready 提案をトグルで閉じるとき、openBlocks の削除は onClearImprovement の同期再描画より前でなければならない（順序が入れ替わると検出する）', () => {
+    // onClearImprovement は bootstrap では store.setState を呼び、store.setState はリスナへ
+    // 同期的に通知する（store.ts の createStore 参照）ため、editView の全ビュー再描画が
+    // onClearImprovement() の呼び出し「中」に起きる。ここでは同じ挙動を手元で再現する：
+    // 呼ばれた瞬間に（呼び出し元へ制御が戻るより前に）view() を再実行し、新しい行を作る。
+    //
+    // openBlocks に blockId を「AI 改善ボタン（鉛筆ではなく）で開いたことにより」乗せておく
+    // 点が重要: state.blockImprovement だけが理由でインスペクタが開いているケース（クリック
+    // 一切なし）だと、`isInspectorOpen` は improvement!==null の分岐だけで真になり、
+    // openBlocks の中身は最初から空のまま＝削除の順序を変えても結果が変わらず、
+    // このテストが「順序を戻したら落ちる」性質を持たなくなってしまう。
+    const container = buildContainer();
+    const onCountHits = jest.fn().mockResolvedValue(1);
+    let latestState: AppState = { ...stateReadyFull, blockImprovement: null };
+    const onImproveBlock = jest.fn().mockResolvedValue(undefined);
+    const onClearImprovement = jest.fn(() => {
+      latestState = { ...latestState, blockImprovement: null };
+      view(container, { state: latestState, navigate: jest.fn() });
+    });
+    const view = createEditView({ onCountHits, onImproveBlock, onClearImprovement });
+    view(container, { state: latestState, navigate: jest.fn() });
+
+    // 1. 「AI に改善させる」でプロンプトフォームを開く（未送信）→ openBlocks に '1' が乗る。
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
+    expect(blockRow(container, '1').querySelector('.edit__block-inspector .bins')).toBeTruthy();
+
+    // 2. LLM 完了で store.blockImprovement が ready になった想定の再描画。
+    //    inspector（openBlocks を含む）は createEditView インスタンスの外側クロージャに
+    //    あるので、この再描画をまたいでも '1' は残ったまま。
+    latestState = {
+      ...latestState,
+      blockImprovement: {
+        formulaVersionId: 'v1',
+        blockId: '1',
+        status: 'ready',
+        result: {
+          blockId: '1',
+          currentExpression: 'asthma[tiab]',
+          proposedExpression: '"Asthma"[Mesh]',
+          rationale: 'r',
+        },
+        error: null,
+      },
+    };
+    view(container, { state: latestState, navigate: jest.fn() });
+    expect(blockRow(container, '1').querySelector('.edit__block-inspector .bins')).toBeTruthy();
+
+    // 3. 「AI に改善させる」の再クリック（ready パネルを閉じるトグル分岐）が
+    //    onClearImprovement 経由で同期的に行を作り直す。鉛筆は一度も開いていないので
+    //    editSlot は常に空 = openBlocks からの削除条件は満たされている。
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
+
+    expect(onClearImprovement).toHaveBeenCalledTimes(1);
+    // openBlocks の削除が onClearImprovement() より後回しだと、同期再描画で作られる
+    // 新しい行はまだ '1' が残った openBlocks を読み、インスペクタが閉じない。
+    expect(blockRow(container, '1').querySelector('.edit__block-inspector .bins')).toBeNull();
+  });
+
+  test('store.blockImprovement が非 null（running/ready/error）ならクリックなしでもインスペクタが出る', () => {
+    const onCountHits = jest.fn().mockResolvedValue(1);
+    const view = createEditView({ onCountHits });
+    const container = buildContainer();
+    view(container, {
+      state: {
+        ...stateReadyFull,
+        blockImprovement: {
+          formulaVersionId: 'v1',
+          blockId: '1',
+          status: 'running',
+          result: null,
+          error: null,
+        },
+      },
+      navigate: jest.fn(),
+    });
+    expect(blockRow(container, '1').querySelector('.edit__block-inspector .bins')).toBeTruthy();
+    // 別ブロックには波及しない
+    expect(blockRow(container, '2').querySelector('.edit__block-inspector .bins')).toBeNull();
+  });
+
+  test('回帰: 鉛筆で開いたインスペクタは無関係な再描画（他ブロックの AI 改善開始）をまたいで残る', () => {
+    // editView は再描画のたびに container.innerHTML='' で丸ごと作り直すため、開閉状態を
+    // ローカル変数だけに持つと issue #39 / #42 と同型の回帰（無関係な setState で消える）になる。
+    const onCountHits = jest.fn().mockResolvedValue(1);
+    const view = createEditView({ onCountHits });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!.click();
+    expect(blockRow(container, '1').querySelector('.edit__block-inspector .bins')).toBeTruthy();
+
+    // 無関係な再描画（例: ブロック #2 の AI 改善が running になった）を模擬する。
+    view(container, {
+      state: {
+        ...stateReadyFull,
+        blockImprovement: {
+          formulaVersionId: 'v1',
+          blockId: '2',
+          status: 'running',
+          result: null,
+          error: null,
+        },
+      },
+      navigate: jest.fn(),
+    });
+    expect(blockRow(container, '1').querySelector('.edit__block-inspector .bins')).toBeTruthy();
+  });
+
+  test('ヒット数キャッシュは再描画をまたいで共有される（同じ式を再 esearch しない）', async () => {
+    const onCountHits = jest.fn().mockResolvedValue(42);
+    const view = createEditView({ onCountHits });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    const toggle = blockRow(container, '1').querySelector<HTMLButtonElement>(
+      '.edit__block-edit-toggle'
+    )!;
+    toggle.click();
+    await flushAsync();
+    const callsAfterFirstOpen = onCountHits.mock.calls.length;
+    expect(callsAfterFirstOpen).toBeGreaterThan(0);
+
+    // 閉じて再度開く（同じ createEditView インスタンス＝同じキャッシュを共有する）。
+    toggle.click();
+    toggle.click();
+    await flushAsync();
+    expect(onCountHits.mock.calls.length).toBe(callsAfterFirstOpen);
+  });
+
+  test('siblings は結合行を除いた他ブロックから組み立てられる（他ブロックとの重複セクション）', async () => {
+    const onCountHits = jest.fn().mockResolvedValue(1);
+    const view = createEditView({ onCountHits });
+    const container = buildContainer();
+    const md = [
+      '## PubMed/MEDLINE',
+      '',
+      '```',
+      '#1 asthma[tiab]',
+      '#2 asthma[tiab]',
+      '#3 #1 AND #2',
+      '```',
+      '',
+    ].join('\n');
+    view(container, { state: { ...stateReady, currentFormulaMarkdown: md }, navigate: jest.fn() });
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!.click();
+    await flushAsync();
+    const overlap = blockRow(container, '1').querySelector('.bins__overlap-line')?.textContent;
+    // #2 と同じフリーワードを共有しているので重複行に出る。結合行 #3 は比較対象に含まない。
+    expect(overlap).toContain('#2');
+    expect(overlap).not.toContain('#3');
+  });
+});

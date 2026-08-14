@@ -1534,6 +1534,41 @@ describe('startApp - wiring 層', () => {
     expect(handle.store.getState().blockImprovement).toBeNull();
   });
 
+  test('edit view 既定インスペクタ callback（onCountHits）は既存の esearch 経路（db=pubmed）を叩く（issue #58 chunk 3a）', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+    });
+    fetchMock.mockResolvedValue(jsonResponse({ esearchresult: { count: '5', idlist: [] } }));
+    const handle = startApp(doc, {
+      getHash: () => '#/edit',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({
+      ...s,
+      currentFormulaVersionId: 'v1',
+      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 asthma[tiab]\n```\n',
+    }));
+    // 鉛筆を開くとブロック・インスペクタが展開し、フリーワード Δ 計算が onCountHits
+    // （bootstrap 既定実装 = esearch）を呼ぶ。
+    doc.querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!.click();
+    for (let i = 0; i < 5; i += 1) {
+      await flush();
+    }
+    const esearchCalls = fetchMock.mock.calls
+      .map(([url]) => String(url))
+      .filter((u) => u.includes('esearch.fcgi') && u.includes('db=pubmed'));
+    expect(esearchCalls.length).toBeGreaterThan(0);
+    expect(esearchCalls[0]).toContain('term=asthma');
+    expect(doc.querySelector('.bins__delta-row')).toBeTruthy();
+    expect(doc.querySelector('.bins__count--done, .bins__delta-individual')?.textContent).toContain(
+      '5 件'
+    );
+  });
+
   test('expand view 既定 onFetch が esearch→efetch→skill を呼び、onDecide が SeedPapers に追記する', async () => {
     const doc = buildDocument();
     const { runtime, fetchMock } = makeRuntime({

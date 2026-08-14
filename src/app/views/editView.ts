@@ -6,8 +6,9 @@ import {
   type SaveEditedFormulaInput,
 } from '@/app/services';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
+import { buildBlockInspector, type BlockInspectorDeps, type SiblingBlock } from './blockInspector';
 import { ROUTE_LABELS } from '../router';
-import type { AppState, BlockImprovementState, FormulaSaveState } from '../store';
+import type { AppState, BlocksDraft, BlockImprovementState, FormulaSaveState } from '../store';
 import type { RenderView } from './types';
 
 /**
@@ -34,7 +35,11 @@ import type { RenderView } from './types';
  * サービス呼び出しは bootstrap 側で editService の各関数を callback として渡す。
  */
 
-export interface EditViewCallbacks {
+export interface EditViewCallbacks
+  extends Pick<
+    BlockInspectorDeps,
+    'onCountHits' | 'onFetchMeshTrees' | 'onFetchMeshChildren' | 'onFetchMeshLabels'
+  > {
   /**
    * 編集中の md を新バージョンとして保存する。
    * 進捗・確認メッセージ・エラーは返り値ではなく store.formulaSave 経由で view に届く
@@ -115,7 +120,82 @@ function resolveNote(state: AppState): string {
   return note.note;
 }
 
+/**
+ * ブロック・インスペクタ（blockInspector.ts）の計測結果キャッシュ + 開閉状態。
+ *
+ * `createEditView` は bootstrap 側で 1 回だけ呼ばれ、返り値の `RenderView` が再描画のたびに
+ * 呼び出される（editView は再描画のたびに `container.innerHTML = ''` で丸ごと作り直す）。
+ * この型の値は `createEditView` の戻り値を作る前（＝返り値のクロージャの外側）に生成して
+ * 保持することで、再描画をまたいで生存させる。そうしないと:
+ * - `caches` 側: 同じ式を再描画のたびに esearch / MeSH RDF へ問い合わせ直してしまう
+ *   （blockInspector.ts の `BlockInspectorDeps` 各 doc コメント参照）
+ * - `openBlocks` 側: 「どのブロックのインスペクタを開いたか」が LLM コスト集計
+ *   （cumulativeCostUsd）等、他ブロックの操作起点の setState による全ビュー再描画で
+ *   閉じてしまう（issue #39 / #42 と同じ構造の回帰。issue #58 chunk 3a）
+ */
+interface EditInspectorRuntime {
+  caches: Pick<
+    BlockInspectorDeps,
+    | 'hitsCache'
+    | 'freewordDeltaCache'
+    | 'meshTreeCache'
+    | 'meshChildrenCache'
+    | 'meshLabelCache'
+    | 'meshExpandedState'
+  >;
+  /**
+   * 鉛筆インライン編集 または AI 指示入力フォーム（未送信）を開いたブロック ID の集合。
+   * AI 改善の結果（running/ready/error）は store.blockImprovement 由来で毎描画ごとに
+   * 判定できるためここには含めない（`isInspectorOpen` 参照）。
+   */
+  openBlocks: Set<string>;
+}
+
+function createInspectorRuntime(): EditInspectorRuntime {
+  return {
+    caches: {
+      hitsCache: new Map(),
+      freewordDeltaCache: new Map(),
+      meshTreeCache: new Map(),
+      meshChildrenCache: new Map(),
+      meshLabelCache: new Map(),
+      meshExpandedState: new Map(),
+    },
+    openBlocks: new Set(),
+  };
+}
+
+/** このブロックのインスペクタを表示すべきか（明示的に開いた、または AI 改善結果を表示中）。 */
+function isInspectorOpen(
+  inspector: EditInspectorRuntime,
+  blockId: string,
+  improvement: BlockImprovementState | null
+): boolean {
+  return inspector.openBlocks.has(blockId) || improvement !== null;
+}
+
+/**
+ * ブロック ID（`"1"`, `"2"`, …）から blocksDraft 上のラベルを解決する。
+ * draftView.ts の `renderLiveBlockHits`（blocksDraft.blocks[index] ↔ `#${index + 1}`）と
+ * 同じ「1 始まりの通し番号 = blocksDraft の並び順」という規約に合わせている。
+ * 数値でない ID（フィルタ・結合行）や対応する定義が無ければ null（インスペクタは ID のみ表示）。
+ *
+ * この規約は blocksDraft の並び順と formula の #ID 発番がずれると崩れる heuristic（例えば
+ * 手編集でブロックを挿入・並べ替えた場合）だが、影響は「他ブロックとの重複」セクションの
+ * 表示ラベルだけで、比較対象そのもの（siblings の選定）には影響しない。表示上の見栄えの
+ * リスクとして許容している（issue #58 chunk 3a）。
+ */
+function resolveBlockLabel(blocksDraft: BlocksDraft | null, blockId: string): string | null {
+  const index = Number.parseInt(blockId, 10);
+  if (!Number.isFinite(index) || index < 1) {
+    return null;
+  }
+  const label = blocksDraft?.blocks[index - 1]?.blockLabel?.trim();
+  return label && label !== '' ? label : null;
+}
+
 export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
+  const inspector = createInspectorRuntime();
   return (container, ctx) => {
     container.innerHTML = '';
     const doc = container.ownerDocument;
@@ -248,7 +328,7 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
     container.appendChild(errorBox);
 
     function rerenderBlocks(): void {
-      renderBlockList(doc, blocksList, editor, internalCallbacks, improvement);
+      renderBlockList(doc, blocksList, editor, internalCallbacks, improvement, ctx.state.blocksDraft, inspector);
     }
     rerenderBlocks();
 
@@ -286,7 +366,9 @@ function renderBlockList(
   ul: HTMLElement,
   editor: FormulaEditor,
   callbacks: EditViewCallbacks,
-  improvement: BlockImprovementState | null
+  improvement: BlockImprovementState | null,
+  blocksDraft: BlocksDraft | null,
+  inspector: EditInspectorRuntime
 ): void {
   ul.innerHTML = '';
   let formula;
@@ -306,7 +388,13 @@ function renderBlockList(
     ul.appendChild(empty);
     return;
   }
+  // インスペクタの「他ブロックとの重複」セクション向け。結合行（他ブロック ID を参照する行）は
+  // 検索の実体を持たないので概念ブロックの比較対象から除く（requirements: ブロック編集インスペクタ）。
+  const conceptBlocks = formula.blocks.filter((b) => !b.isCombination);
   for (const block of formula.blocks) {
+    const siblings: SiblingBlock[] = conceptBlocks
+      .filter((b) => b.id !== block.id)
+      .map((b) => ({ id: b.id, label: resolveBlockLabel(blocksDraft, b.id), expression: b.expression }));
     ul.appendChild(
       buildBlockRow(
         doc,
@@ -314,7 +402,9 @@ function renderBlockList(
         block.expression,
         editor,
         callbacks,
-        improvement !== null && improvement.blockId === block.id ? improvement : null
+        improvement !== null && improvement.blockId === block.id ? improvement : null,
+        siblings,
+        inspector
       )
     );
   }
@@ -326,7 +416,9 @@ function buildBlockRow(
   expression: string,
   editor: FormulaEditor,
   callbacks: EditViewCallbacks,
-  improvement: BlockImprovementState | null
+  improvement: BlockImprovementState | null,
+  siblings: SiblingBlock[],
+  inspector: EditInspectorRuntime
 ): HTMLElement {
   const li = doc.createElement('li');
   li.className = 'edit__block-row';
@@ -378,13 +470,64 @@ function buildBlockRow(
     renderImprovementState(doc, aiSlot, improvement, editor, callbacks, blockId);
   }
 
+  // ブロック・インスペクタ（requirements: 検索式編集の MeSH/フリーワード可視化）用スロット。
+  // 鉛筆編集または AI 改善パネルを開いたときだけ、このブロックの下に展開する（issue #58 chunk 3a）。
+  const inspectorSlot = doc.createElement('div');
+  inspectorSlot.className = 'edit__block-inspector';
+  li.appendChild(inspectorSlot);
+
+  /**
+   * inspector.openBlocks / store.blockImprovement の現在値に基づいてインスペクタを描画し直す。
+   * 「開くべきか」の判定に editSlot / aiSlot の DOM を見ないのは、この関数は行の初回構築時
+   * （まだ何もクリックしていない時点）にも呼ぶため。編集フォーム自体は再描画をまたいで
+   * 復元しない仕様（本 issue のスコープ外）なので、初回はキャッシュされた開閉状態
+   * （inspector.openBlocks）と store 由来の improvement だけで判定する。
+   */
+  function syncInspector(): void {
+    inspectorSlot.innerHTML = '';
+    if (!isInspectorOpen(inspector, blockId, improvement)) {
+      return;
+    }
+    const el = buildBlockInspector(doc, {
+      blockId,
+      expression,
+      siblings,
+      onCountHits: callbacks.onCountHits,
+      onFetchMeshTrees: callbacks.onFetchMeshTrees,
+      onFetchMeshChildren: callbacks.onFetchMeshChildren,
+      onFetchMeshLabels: callbacks.onFetchMeshLabels,
+      ...inspector.caches,
+    });
+    if (el) {
+      inspectorSlot.appendChild(el);
+    }
+  }
+  syncInspector();
+
+  /**
+   * 鉛筆編集 / AI フォームの一方を閉じた直後に呼ぶ。もう一方（同じ行内の editSlot / aiSlot）が
+   * まだ開いていればインスペクタは出したままにし、両方閉じていればブロック ID を
+   * openBlocks から外す（次回以降の再描画で自動的に開き直さないようにする）。
+   */
+  function closeInspectorIfBothClosed(): void {
+    if (editSlot.childElementCount === 0 && aiSlot.childElementCount === 0) {
+      inspector.openBlocks.delete(blockId);
+    }
+    syncInspector();
+  }
+
   editToggle.addEventListener('click', () => {
     if (editSlot.childElementCount > 0) {
       // 既に開いていればトグルで閉じる
       closeInlineEdit(editSlot, currentPre, editToggle);
+      closeInspectorIfBothClosed();
       return;
     }
-    openInlineEdit(doc, editSlot, currentPre, editToggle, blockId, expression, editor);
+    openInlineEdit(doc, editSlot, currentPre, editToggle, blockId, expression, editor, () =>
+      closeInspectorIfBothClosed()
+    );
+    inspector.openBlocks.add(blockId);
+    syncInspector();
   });
 
   improveBtn.addEventListener('click', () => {
@@ -394,6 +537,13 @@ function buildBlockRow(
     if (aiSlot.childElementCount > 0) {
       // 既に開いていればトグルで閉じる。
       aiSlot.innerHTML = '';
+      // openBlocks の更新は、この下の onClearImprovement()（store 配線ありなら同期的に
+      // 全ビュー再描画を起こし、この行を含む DOM 全体が作り直される）より前に済ませる。
+      // 後回しにすると、再描画で作り直された新しい行がまだ更新前の openBlocks を読んで
+      // しまい、閉じたはずのインスペクタが再構築後の行に残ってしまう。
+      if (editSlot.childElementCount === 0) {
+        inspector.openBlocks.delete(blockId);
+      }
       if (improvement) {
         // store 由来の提案パネル（ready/error）を閉じる場合は恒久的に引っ込める
         // （呼ばなければ次の再描画で同じ内容が復元されてしまう）。
@@ -402,6 +552,10 @@ function buildBlockRow(
         // 巻き込む全ビュー再描画を誘発しないため）。
         callbacks.onClearImprovement?.();
       }
+      // store 未配線（フォールバック）時は上の呼び出しで再描画が起きないため、
+      // この行自身を明示的に同期する（配線ありのときは既に破棄された行への呼び出しに
+      // なるだけで無害）。
+      syncInspector();
       return;
     }
     openAiPromptForm(
@@ -410,8 +564,14 @@ function buildBlockRow(
       blockId,
       expression,
       callbacks.onImproveBlock,
-      callbacks.onGetImproveContext
+      callbacks.onGetImproveContext,
+      () => {
+        // 「キャンセル」（未送信のまま閉じる）は上の分岐を通らないので個別に処理する。
+        closeInspectorIfBothClosed();
+      }
     );
+    inspector.openBlocks.add(blockId);
+    syncInspector();
   });
 
   return li;
@@ -425,7 +585,8 @@ function openInlineEdit(
   editToggle: HTMLButtonElement,
   blockId: string,
   expression: string,
-  editor: FormulaEditor
+  editor: FormulaEditor,
+  onClosed: () => void
 ): void {
   currentPre.style.display = 'none';
   editToggle.setAttribute('aria-expanded', 'true');
@@ -479,6 +640,7 @@ function openInlineEdit(
 
   cancelBtn.addEventListener('click', () => {
     closeInlineEdit(slot, currentPre, editToggle);
+    onClosed();
   });
 }
 
@@ -504,7 +666,8 @@ function openAiPromptForm(
   blockId: string,
   expression: string,
   onImproveBlock: NonNullable<EditViewCallbacks['onImproveBlock']>,
-  onGetImproveContext: EditViewCallbacks['onGetImproveContext']
+  onGetImproveContext: EditViewCallbacks['onGetImproveContext'],
+  onClosed: () => void
 ): void {
   slot.innerHTML = '';
   const form = doc.createElement('div');
@@ -561,6 +724,7 @@ function openAiPromptForm(
 
   cancelBtn.addEventListener('click', () => {
     slot.innerHTML = '';
+    onClosed();
   });
 
   submitBtn.addEventListener('click', () => {
@@ -760,6 +924,13 @@ function renderProposal(
   feedback.setAttribute('aria-live', 'polite');
   slot.appendChild(feedback);
 
+  // accept / reject のどちらも inspector.openBlocks は意図的に触らない。「開いたことがある
+  // ブロックのインスペクタは、明示的な鉛筆/AI ボタンのトグル close 以外では閉じない」という
+  // 単純な規則のままにしておくと、提案の accept/reject 直後も（editSlot が閉じていれば）
+  // インスペクタが開いたまま残ることがある。accept 後に更新済み式の計測値をすぐ見られる
+  // 利点があり、受け入れ条件にも含まれないため許容している。もし閉じる方向で touch するなら
+  // syncInspector 呼び出しの位置（onClearImprovement の同期再描画より前か後か）に注意
+  // すること（このファイル内の改善ボタン toggle-close 分岐と同じ罠がある）。
   acceptBtn.addEventListener('click', () => {
     try {
       const next = applyBlockImprovement(editor.getMd(), blockId, result.proposedExpression);
