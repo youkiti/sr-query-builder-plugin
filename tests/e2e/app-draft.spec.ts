@@ -25,7 +25,7 @@ test.describe('app-draft (#/draft)', () => {
     await page.goto(APP_URL);
 
     // currentFormulaVersionId が null かつ blocks 承認済みなので /draft は通る
-    const btn = page.locator('.draft__actions button');
+    const btn = page.locator('.draft__generate');
     await expect(btn).toHaveText(/生成して検証する/);
     // 既存 formula の <pre> は出ない
     await expect(page.locator('.draft__formula')).toHaveCount(0);
@@ -35,7 +35,7 @@ test.describe('app-draft (#/draft)', () => {
     await injectAppStub(page, fullStateScenario());
     await page.goto(APP_URL);
 
-    const btn = page.locator('.draft__actions button');
+    const btn = page.locator('.draft__generate');
     await expect(btn).toHaveText(/再生成して再検証する/);
     await expect(page.locator('.draft__formula')).toBeVisible();
     await expect(page.locator('.draft__formula')).toContainText('ARDS');
@@ -60,7 +60,7 @@ test.describe('app-draft (#/draft)', () => {
     );
     await page.goto(APP_URL);
 
-    const btn = page.locator('.draft__actions button');
+    const btn = page.locator('.draft__generate');
     await expect(btn).toBeDisabled();
     await expect(btn).toHaveText('実行中…');
     const status = page.locator('.draft__status');
@@ -97,13 +97,72 @@ test.describe('app-draft (#/draft)', () => {
     await expect(errorBox).toContainText('生成に失敗しました');
     await expect(errorBox).toContainText('HTTP 503');
     // 失敗後は再試行できる
-    await expect(page.locator('.draft__actions button')).toBeEnabled();
+    await expect(page.locator('.draft__generate')).toBeEnabled();
   });
 
   test('a11y: axe violation zero', async ({ page }) => {
     await injectAppStub(page, fullStateScenario());
     await page.goto(APP_URL);
-    await expect(page.locator('.draft__actions button')).toBeVisible();
+    await expect(page.locator('.draft__generate')).toBeVisible();
+    const result = await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze();
+    expect(result.violations, JSON.stringify(result.violations, null, 2)).toEqual([]);
+  });
+});
+
+test.describe('#/draft 再検証・破棄確認の入口（issue #40）', () => {
+  test('検証成功後（エラー無し）でも「検証のみ再実行」ボタンが常に出る（症状 A）', async ({ page }) => {
+    await injectAppStub(page, fullStateScenario());
+    await page.goto(APP_URL);
+
+    await expect(page.locator('.draft__generate')).toBeVisible();
+    await expect(page.locator('.draft__revalidate')).toBeVisible();
+  });
+
+  test('手編集版（user_edit）で再生成を押すと破棄確認が出て、「やめる」で式は変わらない（症状 B）', async ({
+    page,
+  }) => {
+    await injectAppStub(
+      page,
+      fullStateScenario({
+        preloadedState: { ...FULL_APP_STATE, currentFormulaCreatedBy: 'user_edit' },
+      })
+    );
+    await page.goto(APP_URL);
+
+    const confirm = page.locator('.draft__discard-confirm');
+    await expect(confirm).toBeHidden();
+    await page.locator('.draft__generate').click();
+    await expect(confirm).toBeVisible();
+    await expect(confirm).toContainText('破棄');
+    await expect(confirm).toContainText(String(FULL_APP_STATE.currentFormulaVersionId));
+    // 経路を特定しない文言であること（#/edit を名指ししない。レビュー指摘対応）
+    await expect(confirm).not.toContainText('#/edit');
+    // window.confirm が提供していたフォーカス移動を自前で用意している
+    // （レビュー指摘対応: キーボード / スクリーンリーダー利用者への通知手段）
+    await expect(confirm.locator('.draft__discard-confirm-btn')).toBeFocused();
+
+    await confirm.locator('.draft__discard-cancel').click();
+    await expect(confirm).toBeHidden();
+    // 「やめる」は開いたきっかけの生成ボタンへフォーカスを戻す（レビュー指摘対応:
+    // 戻さないとフォーカスが行き場を失って body に落ち、キーボード利用者が
+    // 文書先頭へ飛ばされる）
+    await expect(page.locator('.draft__generate')).toBeFocused();
+    // キャンセルなので式は変わっていない（バージョン表示がそのまま残る）
+    await expect(page.locator('.draft__info')).toContainText(
+      String(FULL_APP_STATE.currentFormulaVersionId)
+    );
+  });
+
+  test('a11y: 破棄確認 UI 表示中も axe violation zero', async ({ page }) => {
+    await injectAppStub(
+      page,
+      fullStateScenario({
+        preloadedState: { ...FULL_APP_STATE, currentFormulaCreatedBy: 'user_edit' },
+      })
+    );
+    await page.goto(APP_URL);
+    await page.locator('.draft__generate').click();
+    await expect(page.locator('.draft__discard-confirm')).toBeVisible();
     const result = await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze();
     expect(result.violations, JSON.stringify(result.violations, null, 2)).toEqual([]);
   });
