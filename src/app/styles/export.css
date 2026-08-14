@@ -1,5 +1,20 @@
 /* #/export（検索式エクスポート・Methods 文案）画面のスタイル。 */
 
+/* 未検証 / 捕捉率不足の警告バナー（fix-plan 2-3）。blocks__draft-notice と同じ
+   「警告色ボーダー + 淡い背景」トーンに揃える。ハードブロックはしないので注意喚起のみ。
+   文字色は既定（--color-text）のままにする: --color-warning (#c57d1b) をこの背景
+   (#fdf3e3) に載せるとコントラスト比 3.02:1 で、通常サイズ文字の WCAG AA 基準
+   4.5:1 を下回るため。既定色なら 15.77:1。警告であることはボーダーと文頭の ⚠ で示す。 */
+.export__validation-warning {
+  margin: 0 0 var(--space-4) 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-warning);
+  border-left: 4px solid var(--color-warning);
+  border-radius: var(--radius-sm);
+  background: #fdf3e3;
+  font-size: var(--font-size-sm);
+}
+
 /* エクスポート画面: 論文 Methods 用文案（生成 AI 支援の開示文コピー） */
 .export__methods {
   margin-top: var(--space-6);
