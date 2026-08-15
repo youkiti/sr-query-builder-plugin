@@ -24,6 +24,12 @@ module.exports = (env, argv) => {
     );
   }
 
+  // Google Picker 許可ページ（GitHub Pages 配信）をローカル配信して検証するための上書き口。
+  // 本番ビルドでは環境変数を無視して空文字を注入する（src/lib/google/pickerUrl.ts が
+  // 本番 URL へフォールバックする）。localhost をストア提出物へ焼き込む事故を構造的に防ぐため、
+  // 「本番では読まない」ことを設定側で保証している。
+  const pickerPageUrlOverride = isProduction ? '' : (process.env.PICKER_PAGE_URL?.trim() ?? '');
+
   return {
     entry: {
       // background は demo でも実物をそのまま使う（popup.html を開くだけで、
@@ -70,6 +76,7 @@ module.exports = (env, argv) => {
     plugins: [
       new webpack.DefinePlugin({
         __BUILD_DATE__: JSON.stringify(new Date().toISOString().slice(0, 10)),
+        __PICKER_PAGE_URL__: JSON.stringify(pickerPageUrlOverride),
       }),
       new CopyPlugin({
         patterns: [

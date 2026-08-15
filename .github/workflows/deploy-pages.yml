@@ -13,6 +13,14 @@ on:
       # 公開ページの正典が変わったときだけ動かす（本体の実装変更では走らせない）
       - 'hosted/**'
       - '.github/workflows/deploy-pages.yml'
+      # Picker 許可ページ（hosted/picker.html）の JS は src/ からビルドして配信する。
+      # ここに入れておかないと、picker.ts を直しても配信物が古いままになる
+      - 'src/picker/**'
+      - 'src/lib/google/pickerUrl.ts'
+      - 'src/types/google-picker.d.ts'
+      - 'webpack.picker.config.js'
+      - 'package.json'
+      - 'package-lock.json'
   # 内容を変えずに再デプロイしたいとき（設定変更後の再実行など）の手動起動
   workflow_dispatch:
 
@@ -38,6 +46,28 @@ jobs:
       - name: リポジトリを取得する
         uses: actions/checkout@v4
 
+      - name: Node をセットアップする
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 依存をインストールする
+        run: npm ci
+
+      - name: Picker 許可ページの JS をビルドする
+        # 出力は hosted/picker.js（.gitignore 済み）。次の「配信セットを組み立てる」で
+        # hosted/ ごと _site/ へコピーされる。
+        # 3 変数は secrets ではなく repository variables に置く（公開配信される JS に
+        # 埋め込まれるため構造上秘匿できない。API キー側はリファラー制限 + API 制限で守る）。
+        # 未登録のままだと webpack.picker.config.js が本番モードで停止する（CI は green でも
+        # デプロイだけが落ちる形になるので、変数登録はマージの前提）。
+        run: npm run build:picker
+        env:
+          PICKER_API_KEY: ${{ vars.PICKER_API_KEY }}
+          PICKER_WEB_CLIENT_ID: ${{ vars.PICKER_WEB_CLIENT_ID }}
+          GCP_PROJECT_NUMBER: ${{ vars.GCP_PROJECT_NUMBER }}
+
       - name: 配信セットを組み立てる
         # hosted/README.md は開発者向けなので配信しない（旧 gh-pages ブランチにも入れていなかった）。
         # .nojekyll は不要 — artifact をそのまま配信するので Jekyll のビルドが走らない
@@ -47,10 +77,12 @@ jobs:
           rm -f _site/README.md _site/screenshots/.gitkeep
 
       - name: 配信ファイルがそろっているか確認する
-        # 4 ページ + 共通アセット + スクリーンショット 5 枚。欠けたまま公開すると
-        # リンク切れ（ストア審査で参照されるプライバシーポリシー URL を含む）に気づけない
+        # 5 ページ + 共通アセット + スクリーンショット 5 枚。欠けたまま公開すると
+        # リンク切れ（ストア審査で参照されるプライバシーポリシー URL を含む）に気づけない。
+        # picker.js はビルド成果物なので、ビルドが黙って失敗した場合もここで止まる
         run: |
-          for f in index.html help.html privacy-policy.html terms-of-service.html style.css lang.js \
+          for f in index.html help.html privacy-policy.html terms-of-service.html picker.html \
+                   style.css lang.js picker.js \
                    screenshots/s1-protocol.png screenshots/s2-blocks.png screenshots/s3-draft.png \
                    screenshots/s4-validation.png screenshots/s5-export.png; do
             test -f "_site/$f" || { echo "::error::_site/$f が見つかりません"; exit 1; }
