@@ -69,6 +69,8 @@ Chrome ウェブストアの掲載に必要な画像。スクリーンショッ�
 - **`oauth2.scopes` を `https://www.googleapis.com/auth/drive.file` の 1 本に変更**（`https://www.googleapis.com/auth/spreadsheets` を削除）: センシティブスコープ（`spreadsheets` 等）を含むアプリを Production（一般公開）で運用するには Google の OAuth 検証（app verification）を通す必要があり、検証を通さないまま Production に出すと「確認されていないアプリ」の警告が出たうえ利用者 100 人で打ち止めになる（tiab-review-plugin が実際にこの上限に到達した実績がある）。一方 `drive.file` は非センシティブ（推奨）スコープのため、これ 1 本に絞れば OAuth 検証そのものが不要になり利用者数の上限も付かない。Sheets API v4 は `drive.file` を正式な認可スコープとして受理する（公式ドキュメントに明記）ため、本拡張は Sheets の読み書きも `drive.file`（利用者が選択した/拡張が作成したファイルのみへのアクセス）で機能上の損失なく行える。
 - **`permissions` から `"tabs"` を削除**: メインビューは `chrome.tabs.create({ url: chrome.runtime.getURL('app.html') })` で開いており、これは `"tabs"` permission が無くても動作する（`"tabs"` は他タブの URL / title / favicon など機微情報を読み取る場合にのみ必要）。typecheck / test / lint / dev / test:e2e のすべてが通ることを確認した上で削除した。
 
+**追記（2026-08-15）**: `src/manifest.json` の `oauth2.scopes` を `drive.file` 1 本へ絞っただけでは足りず、GCP 同意画面（「データアクセス」）に登録済みのスコープ宣言は自動では消えない。`spreadsheets` の宣言を消し忘れたまま Production（一般公開）へ切り替えようとしたところ「アプリの検証が必要です」と要求された。同意画面側からも `spreadsheets` を削除したことで検証要求は解消し、同日中に同意画面を Production（一般公開）へ切り替え済み。
+
 ## `key.pem` の扱い（確定事項）
 
 拡張 ID は現行の **`bckokafmjighegpjiocopkagghppnjld`** を維持できる。production ビルド（`npm run build`）は manifest から `key` フィールドを削除する（Chrome ウェブストアは manifest に `key` があるとアップロードを拒否するため）が、**初回ストアアップロード時だけ**、対応する秘密鍵を `key.pem` として zip ルートに同梱すれば、Store がその `key.pem` から同じ拡張 ID を導出する。したがって、ストア用に別の OAuth client_id を新規発行する必要はなく、既存の `client_id`（アルファ配布と共通）がそのまま使える。秘密鍵の実体はリポジトリ外で管理し、コミットしないこと。2 回目以降の更新 zip には `key.pem` は不要（ID はストアのアイテムに固定される）。

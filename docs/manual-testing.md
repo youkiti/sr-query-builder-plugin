@@ -51,8 +51,7 @@ Selenium 制御下の Chrome で対話ログインを踏むと Google が
 起動した通常 Chrome で:
 
 1. `chrome://extensions` → デベロッパーモード ON → `dist/` を読み込む（未読込なら）
-2. ツールバーの拡張アイコン → Popup の「ログイン」→ OAuth 同意を完了（通常 Chrome なので弾かれない）。
-   確認用アカウントが同意画面（Testing）のテストユーザーに登録済みであること
+2. ツールバーの拡張アイコン → Popup の「ログイン」→ OAuth 同意を完了（通常 Chrome なので弾かれない）
 3. ついでに拡張の Options を開き Gemini / NCBI API キーを保存しておくと `options` シーンが無停止で通る
 4. **この Chrome を完全に終了**（プロファイルの排他ロックを解放するため）
 5. 以後は `npm run manual:check` を実行 → `login` シーンは「ログイン済み」を検知してスキップされる
@@ -165,7 +164,7 @@ Chrome ウェブストアの掲載ページに使うスクリーンショット�
 | 症状 | 見るところ |
 |---|---|
 | 「このブラウザまたはアプリは安全でない可能性があります」でログイン不可 | Google の自動化検知。**§0-1b の通常 Chrome で先にログイン**して認可をプロファイルにキャッシュする（最も確実）。ハーネス側も `--disable-blink-features=AutomationControlled` + `excludeSwitches('enable-automation')` を付与済みだが、Web ログイン自体を踏まないのが根本回避 |
-| ログインが `bad client id` 系で失敗 | 拡張 ID（0-1）と GCP の OAuth クライアント設定の一致。同意画面のテストユーザー登録 |
+| ログインが `bad client id` 系で失敗 | 拡張 ID（0-1）と GCP の OAuth クライアント設定の一致 |
 | `dist/manifest.json の client_id が未設定` で即終了 | `.env` の `OAUTH_CLIENT_ID` を設定して `npm run dev` し直す |
 | ガード状態のプレースホルダで止まる | 前段シーンが未実行（例: `export` の前に `draft`）。順に実行するか既定通しで回す |
 | クリップボード読み取りが取れない | 権限依存。UI の「コピーしました」メッセージで代替確認（ハーネスも fallback 済み） |
