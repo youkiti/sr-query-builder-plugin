@@ -54,7 +54,14 @@ import {
   type ValidationSummary,
 } from './services';
 import type { SeedPaper } from '@/domain/seedPaper';
-import { efetchArticles, esearch, type EfetchArticle } from '@/lib/ncbi';
+import {
+  efetchArticles,
+  esearch,
+  fetchMeshChildren,
+  fetchMeshLabels,
+  fetchMeshTreeNumbers,
+  type EfetchArticle,
+} from '@/lib/ncbi';
 import {
   appendExcessFilterBlocks,
   getLatestFormulaVersion,
@@ -472,6 +479,37 @@ function buildDefaultViewOptions(
         runImproveBlock(store, runtime, llmFactoryDepsBase(), input),
       onGetImproveContext: (blockId: string): Promise<BlockImprovementContext | null> =>
         getBlockImprovementContext(blockId, { store, google: runtime.google }),
+      // ブロック・インスペクタ（src/app/views/blockInspector.ts。requirements: 検索式編集の
+      // MeSH/フリーワード可視化）の計測 callback。既存の NCBI 呼び出し経路をそのまま再利用する
+      // （新しい fetch 経路は増やさない。issue #58 chunk 3a）。
+      // - onCountHits は esearch（src/lib/ncbi/eutils.ts）経由なので、発行前トークンバケット
+      //   （issue #59・EutilsDeps.rateLimiter 未指定時は sharedEutilsRateLimiters に解決される）
+      //   を通る。
+      // - onFetchMeshTrees（db=mesh の esearch+esummary。src/lib/ncbi/mesh.ts）と
+      //   onFetchMeshChildren / onFetchMeshLabels（MeSH RDF SPARQL。src/lib/ncbi/meshRdf.ts）は
+      //   retryWithBackoff のみでレート制御が無い（issue #59 の対象は eutils.ts の
+      //   esearch/efetchArticles のみで、この 2 ファイルは元から対象外）。本チャンクは配線のみで
+      //   この 2 ファイルには手を入れていないため、この既存ギャップはそのまま残る。
+      onCountHits: async (expression: string): Promise<number> => {
+        const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
+        return (await esearch(expression, eutils, { retmax: 0 })).count;
+      },
+      onFetchMeshTrees: async (descriptors: string[]) => {
+        const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
+        const treeByDescriptor = await fetchMeshTreeNumbers(descriptors, eutils);
+        return Array.from(treeByDescriptor, ([descriptor, treeNumbers]) => ({
+          descriptor,
+          treeNumbers,
+        }));
+      },
+      onFetchMeshChildren: async (treeNumber: string) => {
+        const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
+        return fetchMeshChildren(treeNumber, eutils);
+      },
+      onFetchMeshLabels: async (treeNumbers: string[]) => {
+        const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
+        return fetchMeshLabels(treeNumbers, eutils);
+      },
       // 編集中 md を store（formulaEditDraft）へ反映する。鉛筆の手編集 / AI 提案 accept の
       // 両方から呼ばれる（editView.ts の FormulaEditor.setMd）。
       onDraftChange: (markdown: string) => {

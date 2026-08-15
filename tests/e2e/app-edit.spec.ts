@@ -6,6 +6,7 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { injectAppStub } from './fixtures/appStub';
+import { registerMeshRdfStub, registerNcbiStub } from './fixtures/apiStubs';
 import { fullStateScenario, FULL_APP_STATE } from './fixtures/scenarios/fullState';
 import type { AppState } from '../../src/app/store';
 
@@ -159,6 +160,48 @@ test.describe('app-edit (#/edit)', () => {
     );
     await page.goto(APP_URL);
     await expect(page.locator('.edit__block-accept')).toBeVisible();
+    const result = await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze();
+    expect(result.violations, JSON.stringify(result.violations, null, 2)).toEqual([]);
+  });
+
+  test('鉛筆を開くとブロック・インスペクタが展開し、既存の NCBI スタブ経路（esearch）だけを叩く（issue #58 chunk 3a）', async ({
+    page,
+  }) => {
+    const esearchCalls: string[] = [];
+    await registerNcbiStub(page, {
+      esearch: (decodedUrl) => {
+        esearchCalls.push(decodedUrl);
+        return { count: '1234', idlist: [] };
+      },
+    });
+    await registerMeshRdfStub(page);
+    await injectAppStub(page, fullStateScenario());
+    await page.goto(APP_URL);
+
+    const firstRow = page.locator('.edit__block-row').first();
+    await firstRow.locator('.edit__block-edit-toggle').click();
+    await expect(firstRow.locator('.bins')).toBeVisible();
+    // #1 はフリーワードのみ（"ARDS"[tiab] OR "acute respiratory distress"[tiab]）なので
+    // フリーワード Δ 表が出て、onCountHits（esearch）が実際に呼ばれる。
+    await expect(firstRow.locator('.bins__delta-row').first()).toBeVisible();
+    await expect
+      .poll(() => esearchCalls.length, { message: 'esearch スタブが呼ばれること' })
+      .toBeGreaterThan(0);
+    expect(esearchCalls.some((u) => u.includes('db=pubmed'))).toBe(true);
+  });
+
+  test('a11y: axe violation zero（ブロック・インスペクタ展開時。issue #58 chunk 3a）', async ({
+    page,
+  }) => {
+    await registerNcbiStub(page, { esearch: () => ({ count: '10', idlist: [] }) });
+    await registerMeshRdfStub(page);
+    await injectAppStub(page, fullStateScenario());
+    await page.goto(APP_URL);
+
+    const firstRow = page.locator('.edit__block-row').first();
+    await firstRow.locator('.edit__block-edit-toggle').click();
+    await expect(firstRow.locator('.bins')).toBeVisible();
+    await expect(firstRow.locator('.bins__delta-row').first()).toBeVisible();
     const result = await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze();
     expect(result.violations, JSON.stringify(result.violations, null, 2)).toEqual([]);
   });
