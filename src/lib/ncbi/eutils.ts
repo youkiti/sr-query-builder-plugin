@@ -44,12 +44,15 @@ export const NCBI_RATE_LIMIT_WITH_API_KEY = 10;
  * 組み立てても枠は分裂せず 1 プロセス全体で共有される。API キーの有無で 2 段のバケットを
  * 使い分ける（同じプロセス内でキー有り／無しの呼び出しが混在しても、それぞれの枠を守る）。
  *
- * `capacity` は指定しない（`TokenBucket` の既定で `ratePerSecond` と同値になる = 無バースト）。
- * 受け入れ条件は「任意の 1 秒窓で 3 req/s ／ 10 req/s を超えないこと」であり、`capacity` を
- * `ratePerSecond` より大きくすると、その差分だけ待ち時間ゼロで即時発火できてしまい、
- * この条件を破る（例: capacity=50 なら最初の 1 秒間に最大 53 リクエストが飛び得る）。
+ * `capacity: 1` を明示する。`TokenBucket` は `tokens = capacity` の満タン状態で始まるため、
+ * `capacity` を省略する（＝既定で `ratePerSecond` と同値になる）と、その分だけ待ち時間ゼロで
+ * 即時発火できてしまい「無バースト」にならない（例: capacity=3 なら、満タンの 3 個を瞬時に
+ * 消費したうえで補充ぶんも同じ秒内に使えるため、最初の 1 秒間に最大 6 リクエストが飛び得る）。
+ * 受け入れ条件は「任意の 1 秒窓で 3 req/s ／ 10 req/s を超えないこと」であり、これを満たすには
+ * `capacity: 1`（トークンは常に高々 1 個だけ持ち、消費のたびに最小間隔ぶん待つ純粋なペーシング）
+ * にする必要がある。
  * Python 版 `check_block_overlap.py` の `_respect_rate_limit` も同様に無バースト（直前
- * リクエストからの最小間隔のみを守るペーシング）であり、それと揃えた形。
+ * リクエストからの最小間隔のみを守るペーシング）であり、`capacity: 1` はそれと揃えた形。
  *
  * この無バースト設定は、状態を持ち越すモジュールスコープの共有バケットを実時間を進めない
  * テスト（`flush()` が微小な macrotask を数回回すだけで `setTimeout` の完了を待たない等）で
@@ -65,8 +68,8 @@ export const NCBI_RATE_LIMIT_WITH_API_KEY = 10;
  *   が担当するため、二重に検証する必要がない）。
  */
 export const sharedEutilsRateLimiters = {
-  withoutApiKey: new TokenBucket({ ratePerSecond: NCBI_RATE_LIMIT_WITHOUT_API_KEY }),
-  withApiKey: new TokenBucket({ ratePerSecond: NCBI_RATE_LIMIT_WITH_API_KEY }),
+  withoutApiKey: new TokenBucket({ ratePerSecond: NCBI_RATE_LIMIT_WITHOUT_API_KEY, capacity: 1 }),
+  withApiKey: new TokenBucket({ ratePerSecond: NCBI_RATE_LIMIT_WITH_API_KEY, capacity: 1 }),
 };
 
 /**
