@@ -7,6 +7,15 @@ import {
 } from '@/app/services';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
 import { buildBlockInspector, type BlockInspectorDeps, type SiblingBlock } from './blockInspector';
+import { renderEditableBlockInto, type EditableBlockHandlers } from './editableBlock';
+import {
+  buildLegend,
+  diffExpressions,
+  renderDiffSideInto,
+  renderExpressionInto,
+} from './formulaDisplay';
+import { dedupeOperands, sortOperandsMeshFirst } from './meshExpressionEdit';
+import { appendFreeword, removeOperandAt, setOperandTerm } from './operandEdit';
 import { ROUTE_LABELS } from '../router';
 import type { AppState, BlocksDraft, BlockImprovementState, FormulaSaveState } from '../store';
 import type { RenderView } from './types';
@@ -14,13 +23,26 @@ import type { RenderView } from './types';
 /**
  * 検索式手編集画面（#/edit）。
  *
- * ブロック（`#1`〜）ごとのカードを並べ、各ブロックに対して 2 つの編集手段を提供する:
+ * ブロック（`#1`〜）ごとのカードを並べ、各ブロックに対して 3 つの編集手段を提供する:
  *
- * 1. **インライン手編集**: カードにホバー / フォーカスすると鉛筆ボタンが現れ、
- *    クリックでその行を直接書き換えられる。保存すると内部の formula_md を更新する。
- * 2. **ブロック単位 AI 改善（requirements.md §4.7）**: 「AI に改善させる」を押すと
+ * 1. **チップ編集（クイック編集。issue #58 chunk 3b）**: 鉛筆アイコンでカードを開くと、
+ *    式が句（operand）単位のチップに割れる（editableBlock.ts）。MeSH は × で削除・リンクの
+ *    まま、フリーワードは × で削除・クリックでその場編集、末尾の「＋ 語を追加」で新語を足せる。
+ *    句の書き換えは operandEdit.ts の純関数（removeOperandAt / setOperandTerm /
+ *    appendFreeword）に委譲し、editView 自身は文字列操作をしない。あわせて
+ *    「重複する語を整理」「MeSH を先頭に並べ替え」（meshExpressionEdit.ts の
+ *    dedupeOperands / sortOperandsMeshFirst）をクイック操作として置く。
+ * 2. **詳細編集（生テキスト）**: チップ編集面の下にある折りたたみ。複合句（ネスト群。
+ *    チップでは削除しかできない）や式全体の一括書き換えのための逃げ道。既定で閉じている。
+ * 3. **ブロック単位 AI 改善（requirements.md §4.7）**: 「AI に改善させる」を押すと
  *    任意の指示文を入力する欄が開き（空でも可）、improve-block skill を実行する。
- *    提案 expression と rationale を diff 表示し、「置き換える」で内部 md に反映する。
+ *    提案 expression と rationale を句単位の diff（formulaDisplay.ts の diffExpressions /
+ *    renderDiffSideInto）で色分け表示し、「置き換える」で内部 md に反映する。
+ *
+ * ブロック行の下には、鉛筆または AI パネルを開いたときだけブロック・インスペクタ
+ * （blockInspector.ts）を展開する。チップ・詳細編集・インスペクタの MeSH ブラウザ
+ * （置換 / OR追加 / 削除）・Δ 表のいずれから編集しても、同じ純粋関数（operandEdit /
+ * meshExpressionEdit）を経由した同じ結果になる。
  *
  * 検索式 Markdown 全文は `state.formulaEditDraft`、ブロック単位 AI 改善の進捗/提案/エラーは
  * `state.blockImprovement`、保存の進捗/結果/エラーは `state.formulaSave`、編集メモは
@@ -129,9 +151,14 @@ function resolveNote(state: AppState): string {
  * 保持することで、再描画をまたいで生存させる。そうしないと:
  * - `caches` 側: 同じ式を再描画のたびに esearch / MeSH RDF へ問い合わせ直してしまう
  *   （blockInspector.ts の `BlockInspectorDeps` 各 doc コメント参照）
- * - `openBlocks` 側: 「どのブロックのインスペクタを開いたか」が LLM コスト集計
- *   （cumulativeCostUsd）等、他ブロックの操作起点の setState による全ビュー再描画で
- *   閉じてしまう（issue #39 / #42 と同じ構造の回帰。issue #58 chunk 3a）
+ * - `editOpenBlocks` / `aiOpenBlocks` 側: 「どのブロックの鉛筆編集面 / AI パネルを開いたか」が
+ *   LLM コスト集計（cumulativeCostUsd）等、他ブロックの操作起点の setState による全ビュー
+ *   再描画で閉じてしまう（issue #39 / #42 と同じ構造の回帰。issue #58 chunk 3a）
+ *
+ * `editOpenBlocks` と `aiOpenBlocks` を分けているのは、鉛筆（チップ編集 + 詳細編集）と
+ * AI 指示フォームは独立に開閉できるため。片方の開閉判定にもう片方の集合を参照する必要が
+ * 無くなる分、chunk 3a で必要だった「両方閉じていたら削除」という相互参照ロジックが要らなくなる
+ * （インスペクタの表示可否は `isInspectorOpen` で両集合の OR を取る）。
  */
 interface EditInspectorRuntime {
   caches: Pick<
@@ -143,12 +170,14 @@ interface EditInspectorRuntime {
     | 'meshLabelCache'
     | 'meshExpandedState'
   >;
+  /** 鉛筆（チップ編集 + 「詳細編集（生テキスト）」）を開いたブロック ID の集合。 */
+  editOpenBlocks: Set<string>;
   /**
-   * 鉛筆インライン編集 または AI 指示入力フォーム（未送信）を開いたブロック ID の集合。
+   * AI 指示入力フォーム（未送信）を開いたブロック ID の集合。
    * AI 改善の結果（running/ready/error）は store.blockImprovement 由来で毎描画ごとに
    * 判定できるためここには含めない（`isInspectorOpen` 参照）。
    */
-  openBlocks: Set<string>;
+  aiOpenBlocks: Set<string>;
 }
 
 function createInspectorRuntime(): EditInspectorRuntime {
@@ -161,7 +190,8 @@ function createInspectorRuntime(): EditInspectorRuntime {
       meshLabelCache: new Map(),
       meshExpandedState: new Map(),
     },
-    openBlocks: new Set(),
+    editOpenBlocks: new Set(),
+    aiOpenBlocks: new Set(),
   };
 }
 
@@ -171,7 +201,11 @@ function isInspectorOpen(
   blockId: string,
   improvement: BlockImprovementState | null
 ): boolean {
-  return inspector.openBlocks.has(blockId) || improvement !== null;
+  return (
+    inspector.editOpenBlocks.has(blockId) ||
+    inspector.aiOpenBlocks.has(blockId) ||
+    improvement !== null
+  );
 }
 
 /**
@@ -221,7 +255,7 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
     const lead = doc.createElement('p');
     lead.className = 'edit__lead';
     lead.textContent =
-      '各ブロックは鉛筆アイコンで直接編集するか、「AI に改善させる」で再設計できます。最後に「新バージョンとして保存」を押すと FormulaVersions に user_edit として追記されます。';
+      '各ブロックは鉛筆アイコンでチップ編集するか、「AI に改善させる」で再設計できます。最後に「新バージョンとして保存」を押すと FormulaVersions に user_edit として追記されます。';
     container.appendChild(lead);
 
     // 表示する md は store（formulaEditDraft）優先、無ければ現在の formula。
@@ -277,6 +311,8 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
     const blocksHeading = doc.createElement('h3');
     blocksHeading.textContent = 'ブロック';
     blocksSection.appendChild(blocksHeading);
+    // MeSH / フリーワードの色分け凡例（読み取り表示・チップ編集・AI 差分の 3 か所で共通）。
+    blocksSection.appendChild(buildLegend(doc));
     const blocksList = doc.createElement('ul');
     blocksList.className = 'edit__block-list';
     blocksSection.appendChild(blocksList);
@@ -450,12 +486,15 @@ function buildBlockRow(
   header.appendChild(tools);
   li.appendChild(header);
 
+  // 読み取り表示（MeSH / フリーワードを色分け。formulaDisplay.ts の renderExpressionInto）。
+  // 鉛筆編集面が開いている間は隠す（旧実装からの継続）。
   const currentPre = doc.createElement('pre');
   currentPre.className = 'edit__block-current';
-  currentPre.textContent = expression;
+  renderExpressionInto(currentPre, expression);
   li.appendChild(currentPre);
 
-  // インライン手編集用スロット（鉛筆ボタンで開く）
+  // インライン手編集用スロット（鉛筆ボタンで開く）。中身は syncEditSlot が組む
+  // （チップ編集 + クイック整理 + 「詳細編集（生テキスト）」）。
   const editSlot = doc.createElement('div');
   editSlot.className = 'edit__block-edit';
   li.appendChild(editSlot);
@@ -477,11 +516,40 @@ function buildBlockRow(
   li.appendChild(inspectorSlot);
 
   /**
-   * inspector.openBlocks / store.blockImprovement の現在値に基づいてインスペクタを描画し直す。
-   * 「開くべきか」の判定に editSlot / aiSlot の DOM を見ないのは、この関数は行の初回構築時
-   * （まだ何もクリックしていない時点）にも呼ぶため。編集フォーム自体は再描画をまたいで
-   * 復元しない仕様（本 issue のスコープ外）なので、初回はキャッシュされた開閉状態
-   * （inspector.openBlocks）と store 由来の improvement だけで判定する。
+   * ブロック式を newExpression へ差し替える（チップ / クイック整理 / インスペクタの
+   * MeSH ブラウザ・Δ 表からの編集の共通適用口。issue #58 chunk 3b）。
+   *
+   * - 変化が無ければ何もしない（無駄な再描画をしない）。
+   * - 差し替え後に式が空になる操作は拒否し、onError（渡されていれば）へ理由を伝える
+   *   （ブロック行が空文字になると formula_md の再パースが壊れるため）。
+   * - 成功時は editor.setMd（store 経由 / フォールバックローカル再描画のいずれでも同期的に
+   *   完了する）でブロック一覧を作り直したあと、focusTerm があれば同じ語のチップへ
+   *   フォーカスを戻す（要素の消失でフォーカスが body に落ちるのを防ぐ）。
+   *
+   * 詳細編集（生テキスト）の保存は、この関数を経由しない（無変更でも常に commit する・
+   * 空文字は独自の文言で弾く、という元のインライン編集の挙動をそのまま保つため）。
+   */
+  function commitExpression(
+    nextExpression: string,
+    focusTerm: string | null,
+    onError?: (message: string) => void
+  ): void {
+    const next = nextExpression.trim();
+    if (next === expression.trim()) {
+      return;
+    }
+    if (next === '') {
+      onError?.('ブロックを空にすることはできません。');
+      return;
+    }
+    editor.setMd(applyBlockImprovement(editor.getMd(), blockId, next));
+    restoreChipFocus(doc, blockId, focusTerm);
+  }
+
+  /**
+   * inspector.editOpenBlocks / aiOpenBlocks / store.blockImprovement の現在値に基づいて
+   * インスペクタを描画し直す。「開くべきか」の判定に editSlot / aiSlot の DOM を見ないのは、
+   * この関数は行の初回構築時（まだ何もクリックしていない時点）にも呼ぶため。
    */
   function syncInspector(): void {
     inspectorSlot.innerHTML = '';
@@ -496,38 +564,57 @@ function buildBlockRow(
       onFetchMeshTrees: callbacks.onFetchMeshTrees,
       onFetchMeshChildren: callbacks.onFetchMeshChildren,
       onFetchMeshLabels: callbacks.onFetchMeshLabels,
+      // MeSH ブラウザの置換 / OR追加 / 削除、Δ 表の語編集・削除を有効化する。
+      // チップ編集面と同じ commitExpression を通すので、インスペクタ側から触っても
+      // チップ側から触っても同じ結果になる（blockInspector.ts の doc コメント参照）。
+      onApplyExpression: (next) => commitExpression(next, null),
       ...inspector.caches,
     });
     if (el) {
       inspectorSlot.appendChild(el);
     }
   }
-  syncInspector();
 
   /**
-   * 鉛筆編集 / AI フォームの一方を閉じた直後に呼ぶ。もう一方（同じ行内の editSlot / aiSlot）が
-   * まだ開いていればインスペクタは出したままにし、両方閉じていればブロック ID を
-   * openBlocks から外す（次回以降の再描画で自動的に開き直さないようにする）。
+   * inspector.editOpenBlocks に基づいて editSlot（チップ編集 + 詳細編集）を描画し直す。
+   * `editOpenBlocks` は再描画をまたいで保持されるため、チップ操作（commitExpression）
+   * 自身が引き起こす再描画でもパネルは開いたまま保たれる（何度も鉛筆を押し直さずに
+   * 連続して句を削除・編集できる）。
    */
-  function closeInspectorIfBothClosed(): void {
-    if (editSlot.childElementCount === 0 && aiSlot.childElementCount === 0) {
-      inspector.openBlocks.delete(blockId);
+  function syncEditSlot(): void {
+    editSlot.innerHTML = '';
+    const open = inspector.editOpenBlocks.has(blockId);
+    if (!open) {
+      currentPre.style.display = '';
+      editToggle.removeAttribute('aria-expanded');
+      return;
     }
+    currentPre.style.display = 'none';
+    editToggle.setAttribute('aria-expanded', 'true');
+    renderEditPanel(doc, editSlot, blockId, expression, editor, commitExpression, closeEditSlot);
+  }
+
+  function openEditSlot(): void {
+    inspector.editOpenBlocks.add(blockId);
+    syncEditSlot();
     syncInspector();
   }
 
-  editToggle.addEventListener('click', () => {
-    if (editSlot.childElementCount > 0) {
-      // 既に開いていればトグルで閉じる
-      closeInlineEdit(editSlot, currentPre, editToggle);
-      closeInspectorIfBothClosed();
-      return;
-    }
-    openInlineEdit(doc, editSlot, currentPre, editToggle, blockId, expression, editor, () =>
-      closeInspectorIfBothClosed()
-    );
-    inspector.openBlocks.add(blockId);
+  function closeEditSlot(): void {
+    inspector.editOpenBlocks.delete(blockId);
+    syncEditSlot();
     syncInspector();
+  }
+
+  syncEditSlot();
+  syncInspector();
+
+  editToggle.addEventListener('click', () => {
+    if (inspector.editOpenBlocks.has(blockId)) {
+      closeEditSlot();
+    } else {
+      openEditSlot();
+    }
   });
 
   improveBtn.addEventListener('click', () => {
@@ -537,13 +624,11 @@ function buildBlockRow(
     if (aiSlot.childElementCount > 0) {
       // 既に開いていればトグルで閉じる。
       aiSlot.innerHTML = '';
-      // openBlocks の更新は、この下の onClearImprovement()（store 配線ありなら同期的に
+      // aiOpenBlocks の削除は、この下の onClearImprovement()（store 配線ありなら同期的に
       // 全ビュー再描画を起こし、この行を含む DOM 全体が作り直される）より前に済ませる。
-      // 後回しにすると、再描画で作り直された新しい行がまだ更新前の openBlocks を読んで
-      // しまい、閉じたはずのインスペクタが再構築後の行に残ってしまう。
-      if (editSlot.childElementCount === 0) {
-        inspector.openBlocks.delete(blockId);
-      }
+      // 後回しにすると、再描画で作り直された新しい行がまだ更新前の aiOpenBlocks を読んで
+      // しまい、閉じたはずのインスペクタが再構築後の行に残ってしまう（issue #58 chunk 3a）。
+      inspector.aiOpenBlocks.delete(blockId);
       if (improvement) {
         // store 由来の提案パネル（ready/error）を閉じる場合は恒久的に引っ込める
         // （呼ばなければ次の再描画で同じ内容が復元されてしまう）。
@@ -567,29 +652,161 @@ function buildBlockRow(
       callbacks.onGetImproveContext,
       () => {
         // 「キャンセル」（未送信のまま閉じる）は上の分岐を通らないので個別に処理する。
-        closeInspectorIfBothClosed();
+        inspector.aiOpenBlocks.delete(blockId);
+        syncInspector();
       }
     );
-    inspector.openBlocks.add(blockId);
+    inspector.aiOpenBlocks.add(blockId);
     syncInspector();
   });
 
   return li;
 }
 
-/** 鉛筆ボタンで開くインライン編集フォームを構築する。 */
-function openInlineEdit(
+/**
+ * チップ編集のコミット後、フォーカスを妥当な場所へ戻す。
+ *
+ * commitExpression は editor.setMd を呼んだ時点でブロック一覧が（store 経由 / フォールバック
+ * ローカル再描画のいずれでも）同期的に作り直されているため、この関数が呼ばれる時点で
+ * クリックされた × ボタンや確定した input は既に DOM から切り離されている。何もしないと
+ * フォーカスが document.body へ落ちる（要素が消えたときのブラウザの既定動作）ため、
+ * 明示的に戻す。
+ *
+ * - focusTerm が指定されていれば、同じ語（data-operand-term。editableBlock.ts 参照）の
+ *   チップへ戻す。
+ * - 見つからなければ「＋ 語を追加」ボタン、それも無ければ鉛筆ボタンへ戻す。
+ */
+function restoreChipFocus(doc: Document, blockId: string, focusTerm: string | null): void {
+  const row = doc.querySelector<HTMLElement>(`.edit__block-row[data-block-id="${blockId}"]`);
+  if (!row) {
+    return;
+  }
+  if (focusTerm !== null) {
+    for (const chip of Array.from(row.querySelectorAll<HTMLElement>('.edit__chip'))) {
+      if (chip.getAttribute('data-operand-term') !== focusTerm) {
+        continue;
+      }
+      const target = chip.querySelector<HTMLElement>(
+        '.edit__chip-term--editable, .edit__chip-term--mesh'
+      );
+      if (target) {
+        target.focus();
+        return;
+      }
+    }
+  }
+  const addBtn = row.querySelector<HTMLButtonElement>('.edit__chip-add-btn');
+  if (addBtn) {
+    addBtn.focus();
+    return;
+  }
+  row.querySelector<HTMLButtonElement>('.edit__block-edit-toggle')?.focus();
+}
+
+/**
+ * 鉛筆で開いた編集面の中身を構築する（issue #58 chunk 3b）。
+ *
+ * 1. **チップ編集**（editableBlock.ts）: MeSH / フリーワードの句単位で削除・語編集・追加。
+ *    句の書き換えは operandEdit.ts の純関数（removeOperandAt / setOperandTerm /
+ *    appendFreeword）に委譲する。
+ * 2. **クイック整理**: 「重複する語を整理」（dedupeOperands）/ 「MeSH を先頭に並べ替え」
+ *    （sortOperandsMeshFirst）。適用しても変化が無ければボタンを disabled にする。
+ * 3. **詳細編集（生テキスト）**: チップでは自由編集できない複合句（ネスト群）や式全体の
+ *    一括書き換え用の逃げ道（editableBlock.ts の同名コメント参照）。鉛筆クリック直後から
+ *    常に表示する（チップと同じタイミングで開閉する。折りたたみにしないのは、issue #42 の
+ *    実操作 E2E 回帰確認 `tests/e2e/journey-edit-save.spec.ts` が `.edit__block-edit-toggle`
+ *    クリック直後に `.edit__block-edit-input` へ直接 `fill()` する前提で書かれており、
+ *    追加の開閉操作を挟むとそのテストが壊れるため）。保存 / キャンセル / エラー表示は
+ *    旧来のインライン編集（issue #58 chunk 3a 以前）と完全に同じ挙動: 保存は無変更でも
+ *    commit し、空文字は独自の文言で弾く。キャンセルは詳細編集だけでなく鉛筆編集面全体
+ *    （チップ含む）を閉じる（onCancelWhole）。commitExpression は経由しない。
+ */
+function renderEditPanel(
   doc: Document,
   slot: HTMLElement,
-  currentPre: HTMLElement,
-  editToggle: HTMLButtonElement,
   blockId: string,
   expression: string,
   editor: FormulaEditor,
-  onClosed: () => void
+  commitExpression: (
+    next: string,
+    focusTerm: string | null,
+    onError?: (message: string) => void
+  ) => void,
+  onCancelWhole: () => void
 ): void {
-  currentPre.style.display = 'none';
-  editToggle.setAttribute('aria-expanded', 'true');
+  const chipsWrap = doc.createElement('div');
+  slot.appendChild(chipsWrap);
+
+  const chipsError = doc.createElement('p');
+  chipsError.className = 'edit__block-chips-error';
+  chipsError.setAttribute('aria-live', 'polite');
+
+  const handlers: EditableBlockHandlers = {
+    onRemove: (index) => {
+      commitExpression(removeOperandAt(expression, index), null, (msg) => {
+        chipsError.textContent = msg;
+      });
+    },
+    onEditTerm: (index, newTerm) => {
+      commitExpression(setOperandTerm(expression, index, newTerm), newTerm, (msg) => {
+        chipsError.textContent = msg;
+      });
+    },
+    onAddFreeword: (term) => {
+      commitExpression(appendFreeword(expression, term), term, (msg) => {
+        chipsError.textContent = msg;
+      });
+    },
+  };
+  renderEditableBlockInto(chipsWrap, expression, handlers);
+  slot.appendChild(chipsError);
+
+  const quickTools = doc.createElement('div');
+  quickTools.className = 'edit__block-quicktools';
+
+  const dedupeBtn = doc.createElement('button');
+  dedupeBtn.type = 'button';
+  dedupeBtn.className = 'edit__block-quicktool';
+  dedupeBtn.textContent = '重複する語を整理';
+  const deduped = dedupeOperands(expression);
+  dedupeBtn.disabled = deduped.trim() === expression.trim();
+  dedupeBtn.addEventListener('click', () => commitExpression(deduped, null));
+  quickTools.appendChild(dedupeBtn);
+
+  const sortBtn = doc.createElement('button');
+  sortBtn.type = 'button';
+  sortBtn.className = 'edit__block-quicktool';
+  sortBtn.textContent = 'MeSH を先頭に並べ替え';
+  const sorted = sortOperandsMeshFirst(expression);
+  sortBtn.disabled = sorted.trim() === expression.trim();
+  sortBtn.addEventListener('click', () => commitExpression(sorted, null));
+  quickTools.appendChild(sortBtn);
+
+  slot.appendChild(quickTools);
+  slot.appendChild(buildRawEditForm(doc, blockId, expression, editor, onCancelWhole));
+}
+
+/**
+ * 「詳細編集（生テキスト）」。チップ編集面の下に常時表示する（鉛筆クリックで即座に
+ * `.edit__block-edit-input` を操作できる。issue #42 の実操作 E2E 回帰確認との互換性の
+ * 理由は renderEditPanel の doc コメント参照）。保存 / キャンセル / エラー表示は旧来の
+ * インライン編集（issue #58 chunk 3a 以前）と完全に同じ挙動: 保存は無変更でも commit し、
+ * 空文字は独自の文言で弾く。キャンセルは詳細編集だけでなく鉛筆編集面全体（チップ含む）を
+ * 閉じる（onCancelWhole）。
+ */
+function buildRawEditForm(
+  doc: Document,
+  blockId: string,
+  expression: string,
+  editor: FormulaEditor,
+  onCancelWhole: () => void
+): HTMLElement {
+  const wrap = doc.createElement('div');
+  wrap.className = 'edit__block-rawedit';
+  const label = doc.createElement('p');
+  label.className = 'edit__block-rawedit-label';
+  label.textContent = '詳細編集（生テキスト）';
+  wrap.appendChild(label);
 
   const form = doc.createElement('div');
   form.className = 'edit__block-edit-form';
@@ -619,8 +836,7 @@ function openInlineEdit(
   editError.setAttribute('aria-live', 'polite');
   form.appendChild(editError);
 
-  slot.appendChild(form);
-  input.focus();
+  wrap.appendChild(form);
 
   saveBtn.addEventListener('click', () => {
     const next = input.value.trim();
@@ -631,7 +847,8 @@ function openInlineEdit(
     try {
       const updated = applyBlockImprovement(editor.getMd(), blockId, next);
       // setMd がブロック一覧（または store 経由の全体）を再描画するため、
-      // この row は破棄され新値で再生成される。
+      // この row は破棄され新値で再生成される（editOpenBlocks は保持されるので、
+      // 新しい行はチップ編集面が開いたまま再構築される）。
       editor.setMd(updated);
     } catch (err) {
       editError.textContent = `保存に失敗しました: ${formatError(err)}`;
@@ -639,19 +856,10 @@ function openInlineEdit(
   });
 
   cancelBtn.addEventListener('click', () => {
-    closeInlineEdit(slot, currentPre, editToggle);
-    onClosed();
+    onCancelWhole();
   });
-}
 
-function closeInlineEdit(
-  slot: HTMLElement,
-  currentPre: HTMLElement,
-  editToggle: HTMLButtonElement
-): void {
-  slot.innerHTML = '';
-  currentPre.style.display = '';
-  editToggle.removeAttribute('aria-expanded');
+  return wrap;
 }
 
 /**
@@ -854,6 +1062,10 @@ function renderImprovementState(
 
 /**
  * improve-block 結果の diff を表示し、accept / reject ボタンを用意する。
+ * before/after は句単位（formulaDisplay.ts の diffExpressions / renderDiffSideInto）で
+ * 削除 = 取り消し線・追加 = 強調に色分けする（issue #58 chunk 3b）。concatenated textContent
+ * は元の expression 文字列と一致する（renderDiffSideInto の doc コメント参照）。
+ *
  * accept は「現在の編集中 md」（editor.getMd()、他ブロックへの並行編集を含みうる）に対して
  * applyBlockImprovement を当てる。提案受信時点の md を base として握らないのは、md が
  * store 化された今それをやると他ブロックへの並行編集を巻き戻してしまうため。
@@ -872,6 +1084,8 @@ function renderProposal(
   rationale.textContent = result.rationale === '' ? '（改善ポイントの説明なし）' : result.rationale;
   slot.appendChild(rationale);
 
+  const tokenDiff = diffExpressions(result.currentExpression, result.proposedExpression);
+
   const diff = doc.createElement('div');
   diff.className = 'edit__block-diff';
   const before = doc.createElement('div');
@@ -880,7 +1094,7 @@ function renderProposal(
   beforeHeader.textContent = 'Before:';
   before.appendChild(beforeHeader);
   const beforePre = doc.createElement('pre');
-  beforePre.textContent = result.currentExpression;
+  renderDiffSideInto(beforePre, tokenDiff.beforeTokens);
   before.appendChild(beforePre);
 
   const after = doc.createElement('div');
@@ -889,7 +1103,7 @@ function renderProposal(
   afterHeader.textContent = 'After:';
   after.appendChild(afterHeader);
   const afterPre = doc.createElement('pre');
-  afterPre.textContent = result.proposedExpression;
+  renderDiffSideInto(afterPre, tokenDiff.afterTokens);
   after.appendChild(afterPre);
 
   diff.appendChild(before);
@@ -924,13 +1138,11 @@ function renderProposal(
   feedback.setAttribute('aria-live', 'polite');
   slot.appendChild(feedback);
 
-  // accept / reject のどちらも inspector.openBlocks は意図的に触らない。「開いたことがある
-  // ブロックのインスペクタは、明示的な鉛筆/AI ボタンのトグル close 以外では閉じない」という
-  // 単純な規則のままにしておくと、提案の accept/reject 直後も（editSlot が閉じていれば）
-  // インスペクタが開いたまま残ることがある。accept 後に更新済み式の計測値をすぐ見られる
-  // 利点があり、受け入れ条件にも含まれないため許容している。もし閉じる方向で touch するなら
-  // syncInspector 呼び出しの位置（onClearImprovement の同期再描画より前か後か）に注意
-  // すること（このファイル内の改善ボタン toggle-close 分岐と同じ罠がある）。
+  // accept / reject のどちらも inspector.editOpenBlocks / aiOpenBlocks は意図的に触らない。
+  // 「開いたことがあるブロックのインスペクタは、明示的な鉛筆/AI ボタンのトグル close 以外では
+  // 閉じない」という単純な規則のままにしておくと、提案の accept/reject 直後も（鉛筆編集面が
+  // 閉じていれば）インスペクタが開いたまま残ることがある。accept 後に更新済み式の計測値を
+  // すぐ見られる利点があり、受け入れ条件にも含まれないため許容している。
   acceptBtn.addEventListener('click', () => {
     try {
       const next = applyBlockImprovement(editor.getMd(), blockId, result.proposedExpression);
