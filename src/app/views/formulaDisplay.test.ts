@@ -1,7 +1,12 @@
 import {
+  MESH_BROWSER_BASE,
   classifyFieldTag,
+  deriveKeywordQueries,
+  diffExpressions,
   extractMeshTerm,
   normalizeOperand,
+  renderDiffSideInto,
+  renderExpressionInto,
   tokenizeExpression,
   tokenizeOperands,
 } from './formulaDisplay';
@@ -106,6 +111,31 @@ describe('extractMeshTerm', () => {
   });
 });
 
+describe('renderExpressionInto', () => {
+  function render(expr: string): HTMLElement {
+    const doc = document.implementation.createHTMLDocument('t');
+    const parent = doc.createElement('div');
+    renderExpressionInto(parent, expr);
+    return parent;
+  }
+
+  test('MeSH 語はリンク（別タブ）になり、MeSH ブラウザ URL を指す', () => {
+    const parent = render('"Heart Failure"[Mesh] OR hf[tiab]');
+    const link = parent.querySelector<HTMLAnchorElement>('a.draft__term--mesh')!;
+    expect(link.textContent).toBe('"Heart Failure"[Mesh]');
+    expect(link.getAttribute('href')).toBe(`${MESH_BROWSER_BASE}${encodeURIComponent('Heart Failure')}`);
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
+  test('フリーワードは span、演算子は地のまま、全文は欠落しない', () => {
+    const expr = '"Heart Failure"[Mesh] OR hf[tiab]';
+    const parent = render(expr);
+    expect(parent.querySelector('span.draft__term--freeword')?.textContent).toBe('hf[tiab]');
+    expect(parent.textContent).toBe(expr);
+  });
+});
+
 describe('tokenizeOperands', () => {
   test('外側括弧を glue に寄せ、OR で句に割る', () => {
     expect(tokenizeOperands('(a[tiab] OR b[tiab])')).toEqual([
@@ -142,5 +172,98 @@ describe('tokenizeOperands', () => {
 describe('normalizeOperand', () => {
   test('連続空白を 1 つに畳み、前後の空白と大小を無視する', () => {
     expect(normalizeOperand('  Heart   Failure[tiab] ')).toBe('heart failure[tiab]');
+  });
+});
+
+describe('diffExpressions', () => {
+  test('削除された語・追加された語を句単位で検出する', () => {
+    const before = '(a[tiab] OR b[tiab] OR c[tiab])';
+    const after = '(a[tiab] OR b[tiab] OR d[tiab])';
+    const diff = diffExpressions(before, after);
+    expect(diff.removed).toEqual(['c[tiab]']);
+    expect(diff.added).toEqual(['d[tiab]']);
+    // before 側の各句に status が付く
+    const beforeStatuses = diff.beforeTokens
+      .filter((t) => t.isOperand)
+      .map((t) => `${t.text}:${t.status}`);
+    expect(beforeStatuses).toEqual(['a[tiab]:same', 'b[tiab]:same', 'c[tiab]:removed']);
+    const afterStatuses = diff.afterTokens
+      .filter((t) => t.isOperand)
+      .map((t) => `${t.text}:${t.status}`);
+    expect(afterStatuses).toEqual(['a[tiab]:same', 'b[tiab]:same', 'd[tiab]:added']);
+  });
+
+  test('語順・大文字小文字・空白だけの違いは増減 0 とみなす', () => {
+    const before = '(a[tiab] OR B[Tiab])';
+    const after = '(b[tiab]  OR  a[tiab])';
+    const diff = diffExpressions(before, after);
+    expect(diff.removed).toEqual([]);
+    expect(diff.added).toEqual([]);
+  });
+
+  test('スクリーンショットの外科医ブロック例: 4 語削除・0 語追加', () => {
+    const before =
+      '(Surgeons[Mesh] OR surgeon*[tiab] OR surgical resident*[tiab] OR surgical trainee*[tiab] OR surgical fellow*[tiab] OR surgical registrar*[tiab] OR general surgeon*[tiab] OR surgical specialist*[tiab] OR neurosurgeon*[tiab] OR orthopedic surgeon*[tiab] OR orthopaedic surgeon*[tiab])';
+    const after =
+      '(Surgeons[Mesh] OR surgeon*[tiab] OR surgical resident*[tiab] OR surgical trainee*[tiab] OR surgical fellow*[tiab] OR surgical registrar*[tiab] OR surgical specialist*[tiab])';
+    const diff = diffExpressions(before, after);
+    expect(diff.removed).toEqual([
+      'general surgeon*[tiab]',
+      'neurosurgeon*[tiab]',
+      'orthopedic surgeon*[tiab]',
+      'orthopaedic surgeon*[tiab]',
+    ]);
+    expect(diff.added).toEqual([]);
+  });
+});
+
+describe('deriveKeywordQueries', () => {
+  test('MeSH は explode/noexp で単体クエリを作り、フリーワードはタグ込みのまま', () => {
+    const expr = '("Asthma"[Mesh] OR "Lung"[Mesh:NoExp] OR wheeze[tiab] OR "cough"[tiab])';
+    expect(deriveKeywordQueries(expr)).toEqual([
+      { display: 'Asthma', query: '"Asthma"[Mesh]', kind: 'mesh' },
+      { display: 'Lung', query: '"Lung"[Mesh:NoExp]', kind: 'mesh' },
+      { display: 'wheeze[tiab]', query: 'wheeze[tiab]', kind: 'freeword' },
+      { display: '"cough"[tiab]', query: '"cough"[tiab]', kind: 'freeword' },
+    ]);
+  });
+
+  test('同一語の重複は 1 つにまとめる', () => {
+    const expr = '(asthma[tiab] OR asthma[tiab])';
+    expect(deriveKeywordQueries(expr)).toEqual([
+      { display: 'asthma[tiab]', query: 'asthma[tiab]', kind: 'freeword' },
+    ]);
+  });
+
+  test('タグ無し結合行はキーワード 0', () => {
+    expect(deriveKeywordQueries('#1 AND #2')).toEqual([]);
+  });
+});
+
+describe('renderDiffSideInto', () => {
+  function renderSide(before: string, after: string, side: 'before' | 'after'): HTMLElement {
+    const doc = document.implementation.createHTMLDocument('t');
+    const parent = doc.createElement('pre');
+    const diff = diffExpressions(before, after);
+    renderDiffSideInto(parent, side === 'before' ? diff.beforeTokens : diff.afterTokens);
+    return parent;
+  }
+
+  test('削除句は <del>、追加句は <ins>、全文テキストは元式と一致する', () => {
+    const before = '(a[tiab] OR c[tiab])';
+    const after = '(a[tiab] OR d[tiab])';
+    const beforeEl = renderSide(before, after, 'before');
+    expect(beforeEl.querySelector('del.formula-diff__term--removed')?.textContent).toBe('c[tiab]');
+    expect(beforeEl.textContent).toBe(before);
+
+    const afterEl = renderSide(before, after, 'after');
+    expect(afterEl.querySelector('ins.formula-diff__term--added')?.textContent).toBe('d[tiab]');
+    expect(afterEl.textContent).toBe(after);
+  });
+
+  test('MeSH 句はリンクを保ったまま差分要素で包まれる', () => {
+    const beforeEl = renderSide('("Asthma"[Mesh] OR x[tiab])', '(x[tiab])', 'before');
+    const removed = beforeEl.querySelector('del.formula-diff__term--removed')!;
+    expect(removed.querySelector('a.draft__term--mesh')?.textContent).toBe('"Asthma"[Mesh]');
   });
 });

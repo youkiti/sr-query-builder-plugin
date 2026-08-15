@@ -17,6 +17,18 @@ import { objectSchema, stringSchema } from './schema';
 export interface ImproveBlockInput {
   /** 現在の 1 行 expression（`#N ...` の N 部分は含まない） */
   currentExpression: string;
+  /**
+   * 現在の expression を PubMed で実際に検索したヒット数（esearch count）。
+   * UI で各ブロックに表示している実数をそのまま渡す。null/undefined なら未計測として省略。
+   */
+  currentHits?: number | null;
+  /**
+   * 式を構成するキーワード（MeSH / フリーワード）ごとの単体ヒット数と、フリーワードの寄与
+   * （Δ・削除候補/低収量区分）。編集画面のインスペクタが計測した実数。空なら省略。
+   */
+  keywordHits?: KeywordHitContext[];
+  /** フリーワードを OR で結合し重複除去した合計（インスペクタの「tiab 合計」）。無ければ省略 */
+  freewordDedupTotal?: number | null;
   /** ブロックラベル（例: `Population`）。不明なら空文字で良い */
   blockLabel: string;
   /** ブロックの自然言語説明。空文字なら LLM は expression 単体から推定する */
@@ -31,12 +43,38 @@ export interface ImproveBlockInput {
   validation?: ValidationContext | null;
 }
 
+/** キーワード 1 語の単体ヒット数 + 寄与情報（プロンプト用）。 */
+export interface KeywordHitContext {
+  /** 語（MeSH descriptor or フリーワードのテキスト） */
+  term: string;
+  kind: 'mesh' | 'freeword';
+  /** 単体 esearch ヒット数。計測不可なら null */
+  hits: number | null;
+  /** フリーワードのみ: 個別降順で OR 累積したときの純増（Δ）。MeSH・計測不可は null */
+  delta?: number | null;
+  /**
+   * フリーワードのみ: 寄与区分（normal / lowYield=ほぼ寄与なし / redundant=他語に内包＝削除候補）。
+   * MeSH・計測不可は null。
+   */
+  status?: 'normal' | 'lowYield' | 'redundant' | null;
+}
+
 /** improve-block に渡すシード論文 1 件（プロンプト用の最小情報）。 */
 export interface SeedPaperContext {
   pmid: string;
   title: string;
   /** include / maybe / initial 等のユーザー判定 */
   decision: string;
+  /**
+   * この論文に PubMed が付与した MeSH 記述子（チェックタグは除外済みの想定）。
+   * どの索引語を式へ補えば seed に当たるかの判断材料。未取得なら空配列。
+   */
+  meshHeadings?: string[];
+  /**
+   * アブストラクト抜粋（呼び出し側で冒頭を切り詰め済み）。本文に出る同義語・表記ゆれの根拠。
+   * 未取得・抄録なしなら null。
+   */
+  abstract?: string | null;
 }
 
 /** 直近の検証捕捉情報。 */
@@ -74,6 +112,16 @@ export const IMPROVE_BLOCK_SYSTEM_PROMPT = `
   ことを重視する。特に「取りこぼし PMID」がある場合は、その論文が引っかかるよう
   同義語・表記ゆれ・MeSH を補って感度を上げる（ただし無関係な語の追加で特異度を
   大きく下げない）。
+- シード論文に MeSH 記述子やアブストラクト抜粋が添えられている場合は、それを根拠に
+  式を補強する。具体的には、複数の seed に共通して付く MeSH をブロックに足す候補にし、
+  アブストラクト本文に現れる表記（同義語・略語・複数形）を tiab 語として補う。
+  推測ではなく seed に実在する語を優先する。
+- 現在のヒット数が与えられた場合は、それを感度・特異度の判断材料にする。極端に少ない
+  （取りこぼしの懸念）なら同義語・表記ゆれ・MeSH で感度を上げ、極端に多い（ノイズ過多）
+  なら過度に広い語を絞る。rationale では狙いを件数に触れて説明してよい。
+- キーワード別ヒット数が与えられた場合は、0 件の語（綴り・語形ミスの疑い）は修正または
+  削除し、ヒットの多すぎる広すぎる語は絞り込みを検討する。逆に主要概念で語が不足していれば
+  同義語・MeSH を補う。どの語を足し引きしたかを件数に触れて rationale に書いてよい。
 - rationale は日本語 1-2 文で、何をどう変えたか書く。
 `.trim();
 
@@ -86,6 +134,11 @@ RQ: {{RQ}}
 
 現在の expression:
 {{CURRENT}}
+
+現在のヒット数（PubMed esearch）: {{HITS}}
+
+キーワード別ヒット数（単体）:
+{{KEYWORD_HITS}}
 
 シード論文（捕捉すべき既知の重要論文）:
 {{SEEDS}}
@@ -121,6 +174,8 @@ export async function improveBlockExpression(
     .replace('{{LABEL}}', input.blockLabel)
     .replace('{{DESC}}', input.blockDescription === '' ? '(不明)' : input.blockDescription)
     .replace('{{CURRENT}}', input.currentExpression)
+    .replace('{{HITS}}', formatHits(input.currentHits))
+    .replace('{{KEYWORD_HITS}}', formatKeywordHits(input.keywordHits, input.freewordDedupTotal))
     .replace('{{SEEDS}}', formatSeeds(input.seedPapers))
     .replace('{{VALIDATION}}', formatValidation(input.validation))
     .replace(
@@ -142,13 +197,71 @@ export async function improveBlockExpression(
   };
 }
 
-/** シード論文リストを箇条書きへ整形する。空なら「(なし)」。 */
+/** 現在のヒット数を整形する。未計測（null/undefined）なら「(未計測)」。 */
+function formatHits(hits: number | null | undefined): string {
+  if (hits === null || hits === undefined) {
+    return '(未計測)';
+  }
+  return `${hits.toLocaleString('en-US')} 件`;
+}
+
+/**
+ * キーワード別ヒット数を箇条書きへ整形する。空なら「(未計測)」。
+ * フリーワードは純増 Δ と区分（削除候補 / ほぼ寄与なし / 0 件）まで注記し、末尾に OR 合計を添える。
+ */
+function formatKeywordHits(
+  keywordHits: KeywordHitContext[] | undefined,
+  freewordDedupTotal: number | null | undefined
+): string {
+  if (!keywordHits || keywordHits.length === 0) {
+    return '(未計測)';
+  }
+  const lines = keywordHits.map((k) => {
+    const kindLabel = k.kind === 'mesh' ? 'MeSH' : 'tiab';
+    if (k.hits === null) {
+      return `- ${k.term} [${kindLabel}]: (未計測)`;
+    }
+    const parts = [`${k.hits.toLocaleString('en-US')} 件`];
+    if (k.delta !== null && k.delta !== undefined) {
+      parts.push(`純増Δ +${k.delta.toLocaleString('en-US')}`);
+    }
+    const notes: string[] = [];
+    if (k.hits === 0) {
+      notes.push('⚠ 0件（綴り/語形を確認）');
+    } else if (k.status === 'redundant') {
+      notes.push('⚠ 他語に内包＝削除候補');
+    } else if (k.status === 'lowYield') {
+      notes.push('△ ほぼ寄与なし');
+    }
+    const noteStr = notes.length > 0 ? ` ${notes.join(' ')}` : '';
+    return `- ${k.term} [${kindLabel}]: ${parts.join('・')}${noteStr}`;
+  });
+  if (freewordDedupTotal !== null && freewordDedupTotal !== undefined) {
+    lines.push(`（フリーワード OR 合計・重複除去後: ${freewordDedupTotal.toLocaleString('en-US')} 件）`);
+  }
+  return lines.join('\n');
+}
+
+/**
+ * シード論文リストを箇条書きへ整形する。空なら「(なし)」。
+ * MeSH 記述子・アブストラクト抜粋があれば、AI が同義語/索引語を拾えるよう同じ項目内に添える。
+ */
 function formatSeeds(seeds: SeedPaperContext[] | undefined): string {
   if (!seeds || seeds.length === 0) {
     return '(なし)';
   }
   return seeds
-    .map((s) => `- PMID ${s.pmid} [${s.decision}]: ${s.title}`)
+    .map((s) => {
+      const lines = [`- PMID ${s.pmid} [${s.decision}]: ${s.title}`];
+      if (s.meshHeadings && s.meshHeadings.length > 0) {
+        lines.push(`    MeSH: ${s.meshHeadings.join('; ')}`);
+      }
+      const abstract = s.abstract?.trim();
+      if (abstract) {
+        lines.push(`    抄録: ${abstract}`);
+      }
+      return lines.join('\n');
+    })
     .join('\n');
 }
 

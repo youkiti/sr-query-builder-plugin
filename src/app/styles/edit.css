@@ -207,6 +207,40 @@
   border-left: 3px solid var(--color-success, #28a745);
 }
 
+/* 句単位の差分ハイライト（削除=赤・取り消し線 / 追加=緑 / 変更なし=淡色）。
+   formulaDisplay.ts の renderDiffSideInto が生成する formula-diff__term--* クラス。
+   tint は .edit__block-diff-before/after pre の背景（--color-bg-muted #f7f7f9）の上に載り、
+   その上にさらに renderExpressionInto が塗る .draft__term--mesh / --freeword の半透明色が
+   重なる三層合成になる。MeSH の文字色 #1f6b3a は三層合成後にコントラストが AA を割り込みやすいので、
+   tint の alpha はここで抑えておく（removed 0.14→0.10, added 0.18→0.12）。
+   実測（MeSH 文字 / 三層合成後）: removed 4.42:1→4.65:1、added 4.49:1→4.73:1。
+   薄く見えても「tint を濃くして目立たせよう」と単独では戻さないこと（AA 未達に戻る）。 */
+.formula-diff__term--removed {
+  background: rgba(215, 58, 73, 0.1);
+  border-radius: 2px;
+  text-decoration: line-through;
+  text-decoration-color: var(--color-danger, #d73a49);
+}
+
+.formula-diff__term--removed a,
+.formula-diff__term--removed span {
+  text-decoration: line-through;
+}
+
+.formula-diff__term--added {
+  background: rgba(40, 167, 69, 0.12);
+  border-radius: 2px;
+}
+
+/* 変更なしの句を弱めるのは opacity ではなく color で行うこと: opacity は子孫をまとめて
+   1 グループとして合成するため、子側の .draft__term--mesh / --freeword が自分の文字色で
+   コントラストを回復できず、実効コントラストが AA 未達（0.5 では 3.28:1）になる
+   （blockInspector.css の .bins__delta-row--redundant と同じ理由）。
+   color なら子は自分の color 宣言で上書きできる。--color-text-muted は #f7f7f9 上で 4.93:1。 */
+.formula-diff__term--same {
+  color: var(--color-text-muted);
+}
+
 .edit__block-actions {
   display: flex;
   gap: var(--space-2);
