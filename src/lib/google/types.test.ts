@@ -1,4 +1,19 @@
-import { GoogleApiError, googleFetch } from './types';
+import { GoogleApiError, googleFetch, isAccessDeniedStatus } from './types';
+
+describe('isAccessDeniedStatus', () => {
+  test('403 / 404 を「未許可の可能性」として拾う', () => {
+    // drive.file スコープでは、未選択のファイルが 404 で返ることがある
+    expect(isAccessDeniedStatus(403)).toBe(true);
+    expect(isAccessDeniedStatus(404)).toBe(true);
+  });
+
+  test('それ以外のステータスは対象外', () => {
+    expect(isAccessDeniedStatus(200)).toBe(false);
+    expect(isAccessDeniedStatus(401)).toBe(false);
+    expect(isAccessDeniedStatus(429)).toBe(false);
+    expect(isAccessDeniedStatus(500)).toBe(false);
+  });
+});
 
 function makeDeps(response: Response): { fetch: jest.Mock; getAccessToken: jest.Mock } {
   return {

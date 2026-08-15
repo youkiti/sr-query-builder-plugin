@@ -349,6 +349,7 @@ body {
   display: inline-block;
 }
 
+.document-page h3,
 .help-page h3 {
   font-size: 1rem;
   margin: 24px 0 8px;

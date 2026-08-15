@@ -16,6 +16,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm run dev          # webpack 開発ビルド（dist/ へ出力。完了報告前に必ず通すこと）
 npm run watch        # 開発ビルドの watch
 npm run build        # 本番ビルド（dist-release/ へ出力。.env の OAUTH_CLIENT_ID 必須）
+npm run build:picker # Google Picker 許可ページの JS（hosted/picker.js）。PICKER_* / GCP_PROJECT_NUMBER 必須
+npm run dev:picker   # 同上の開発ビルド（キー未設定でも警告のみで通る。ローカル検証用）
 npm run release:alpha # アルファ配布: dev ビルド → zip 化 → Drive アップロードを一発（詳細は「アルファ配布」節）
 npm test             # jest（jsdom）unit テスト
 npm run test:e2e     # Playwright E2E（実 Chromium + axe a11y。API はすべて stub）
@@ -117,13 +119,14 @@ npm run pack:release                     # 既存 dist-release/ だけをパッ�
 
 ## 公開ページ（GitHub Pages / `hosted/`）
 
-Chrome ウェブストア審査・利用者向けに公開する静的ページ 4 枚（ランディング / 使い方ガイド / プライバシーポリシー / 利用規約）+ 共通 `style.css` / `lang.js` / `screenshots/` の正典は [hosted/](hosted/) に置く。デプロイ先は GitHub Pages（ソースは **GitHub Actions**）。
+Chrome ウェブストア審査・利用者向けに公開する静的ページ 4 枚（ランディング / 使い方ガイド / プライバシーポリシー / 利用規約）+ **Google Picker 許可ページ**（`picker.html`）+ 共通 `style.css` / `lang.js` / `screenshots/` の正典は [hosted/](hosted/) に置く。デプロイ先は GitHub Pages（ソースは **GitHub Actions**）。
 
 - **プライバシーポリシーの公開 URL は Chrome ウェブストア審査の必須要件**。公開済み URL は `https://youkiti.github.io/sr-query-builder-plugin/privacy-policy.html`
 - **プライバシーポリシーの正典は [docs/store/privacy-policy.md](docs/store/privacy-policy.md)**。`hosted/privacy-policy.html` はその転記＋英訳なので、**内容を変えるときは両方を直す**（乖離するとストア審査で参照される URL の内容とリポジトリの原稿がずれる）
 - ja / en は**併記ではなく切替**（`lang.js` が `html[data-lang]` で表示側を絞る）。文言を足すときは両言語分を書くこと
 - ストア掲載用スクリーンショットは `npm run shots`（Playwright + stub 環境。無人実行）で `hosted/screenshots/` へ出力する（1280×800 の 5 枚）。実 API を叩いた本物の画面で撮り直したいときは `npm run manual:check -- --shots` を使う
-- **デプロイは自動**（[.github/workflows/deploy-pages.yml](.github/workflows/deploy-pages.yml)。`master` の `hosted/**` が変わると発火し、`hosted/` を `_site/` へ組み立てて `actions/deploy-pages` で公開する）。手動のコピー作業は不要。内容を変えずに再デプロイしたいときは Actions タブから `workflow_dispatch` で手動実行する。公開 URL は `https://youkiti.github.io/sr-query-builder-plugin/`（有効）
+- **デプロイは自動**（[.github/workflows/deploy-pages.yml](.github/workflows/deploy-pages.yml)。`master` の `hosted/**` と Picker ページのビルド入力（`src/picker/**` 等）が変わると発火し、`npm run build:picker` → `hosted/` を `_site/` へ組み立てて `actions/deploy-pages` で公開する）。手動のコピー作業は不要。内容を変えずに再デプロイしたいときは Actions タブから `workflow_dispatch` で手動実行する。公開 URL は `https://youkiti.github.io/sr-query-builder-plugin/`（有効）
+- **`hosted/picker.html` だけは拡張本体と結合している**（他の 4 ページは読み物）。共有スプレッドシートは `drive.file` スコープでは Picker で選択するまで開けないため、拡張が `chrome.identity.launchWebAuthFlow` でこのページを開き、選択された fileId をリダイレクトで受け取る。**`picker.js` はビルド成果物**（`.gitignore` 済み。正典は [src/picker/picker.ts](src/picker/picker.ts)、`npm run build:picker` が `hosted/` へ出力）。**ビルドに `PICKER_API_KEY` / `PICKER_WEB_CLIENT_ID` / `GCP_PROJECT_NUMBER`（repository variables）が要る。未登録だと PR の CI が green のままデプロイだけが落ちる**。Web OAuth クライアントは拡張用クライアントと同一 GCP プロジェクトに置くこと（`drive.file` の付与はプロジェクト単位のため、別プロジェクトだと選択させても読めない）。詳細は [hosted/README.md](hosted/README.md)
 - **旧方式（`gh-pages` ブランチへ worktree 経由で手動 push）は廃止**。`gh-pages` ブランチは Pages のソースから外れており、push しても公開内容は変わらない（履歴として残置）。経緯と注意点は [hosted/README.md](hosted/README.md)
 - スクリーンショットは `hosted/screenshots/*.png` としてリポジトリにコミット済みで、workflow はそれをコピーするだけ（CI で `npm run shots` は走らせない）。撮り直したら生成物をコミットすること
 - 提出物一式の全体像・進捗は [docs/store/README.md](docs/store/README.md) を参照
@@ -146,7 +149,9 @@ src/
 ├── lib/            # 横断ライブラリ（google: OAuth+Sheets+Drive / llm: LLMProvider 抽象+Gemini / ncbi: E-utilities / combination-expression / search-formula-md）
 ├── popup/          # 認証・プロジェクト作成/選択の入口
 ├── options/        # BYOK 設定（Gemini API キー / NCBI API キー）
-├── background/     # service-worker
+├── background/     # service-worker + Picker 許可フロー（pickerGrant.ts）
+├── picker/         # Google Picker 許可ページの JS（拡張ではなく GitHub Pages 側で動く。
+│                   # 出力は hosted/picker.js。webpack.picker.config.js が別途ビルドする）
 └── manifest.json   # Manifest V3
 ```
 

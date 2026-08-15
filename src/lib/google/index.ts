@@ -1,4 +1,9 @@
-export { googleFetch, GoogleApiError, type GoogleApiDeps } from './types';
+export {
+  googleFetch,
+  GoogleApiError,
+  isAccessDeniedStatus,
+  type GoogleApiDeps,
+} from './types';
 export {
   createChromeAuthDeps,
   getAccessToken,

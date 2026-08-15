@@ -18,7 +18,8 @@ import {
   loadExistingProject,
   type ChromeRuntimeDeps,
 } from '@/app/services';
-import { getCurrentUserEmail } from '@/lib/google';
+import { GoogleApiError, getCurrentUserEmail, isAccessDeniedStatus } from '@/lib/google';
+import { PICKER_GRANT_MESSAGE, type PickerGrantResult } from '@/background/pickerGrant';
 import {
   getRecentProjects,
   setCurrentProject,
@@ -51,6 +52,12 @@ export interface PopupDeps {
    * Google 側のトークン失効は行わない（Chrome の identity キャッシュからの除去のみ）。
    */
   signOut: () => Promise<void>;
+  /**
+   * Google Picker による共有スプレッドシートのアクセス許可を背景 service worker に依頼する。
+   * popup は許可ウィンドウが開いた時点で閉じる（フォーカスを失うため）ので、この Promise が
+   * 解決しないまま popup ごと消えるのが通常の経路。処理そのものは背景側で完結する。
+   */
+  requestPickerGrant: (spreadsheetId: string) => Promise<PickerGrantResult>;
 }
 
 export function createChromePopupDeps(): PopupDeps {
@@ -104,6 +111,11 @@ export function createChromePopupDeps(): PopupDeps {
       // 別アカウントでログインし直しても他人の recent が残らない。
       await chrome.storage.local.remove(['currentProject', 'recentProjects']);
     },
+    requestPickerGrant: (spreadsheetId) =>
+      chrome.runtime.sendMessage({
+        type: PICKER_GRANT_MESSAGE,
+        spreadsheetId,
+      }) as Promise<PickerGrantResult>,
   };
 }
 
@@ -306,15 +318,137 @@ function bindOpenForm(doc: Document, deps: PopupDeps): void {
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     if (error) error.textContent = '';
-    void loadExistingProject(idInput.value, deps.runtime)
-      .then(async () => {
-        idInput.value = '';
-        await openAppOrRedirect(doc, deps);
+    void openById(doc, deps, idInput.value.trim(), idInput);
+  });
+}
+
+/**
+ * ID 指定でプロジェクトを開く。403/404（＝ Picker で未選択の共有シートの可能性）のときだけ、
+ * エラー文言ではなく許可導線を出す。
+ */
+async function openById(
+  doc: Document,
+  deps: PopupDeps,
+  spreadsheetId: string,
+  idInput: HTMLInputElement
+): Promise<void> {
+  const error = doc.getElementById('popup-open-error');
+  // 前回の試行で出した許可導線を畳んでから開き直す（再試行もここを通る）
+  clearPickerGuidance(doc);
+  try {
+    await loadExistingProject(spreadsheetId, deps.runtime);
+    idInput.value = '';
+    await openAppOrRedirect(doc, deps);
+  } catch (err) {
+    if (err instanceof GoogleApiError && isAccessDeniedStatus(err.status)) {
+      showPickerGuidance(doc, deps, spreadsheetId, idInput);
+      return;
+    }
+    if (error) error.textContent = formatError(err);
+  }
+}
+
+function clearPickerGuidance(doc: Document): void {
+  const container = doc.getElementById('popup-open-guidance');
+  if (!container) return;
+  container.innerHTML = '';
+  container.hidden = true;
+}
+
+/**
+ * 共有スプレッドシートのアクセス許可導線を出す。
+ *
+ * 文言で 403/404 を「Picker 未選択」と断定しないこと。同じステータスは「シートが削除された」
+ * 「ID が誤っている」「そもそも自分のアカウントに共有されていない」でも返るため、許可しても
+ * 開けなかったときにユーザーが次に何を疑えばよいか分からなくなる。
+ */
+function showPickerGuidance(
+  doc: Document,
+  deps: PopupDeps,
+  spreadsheetId: string,
+  idInput: HTMLInputElement
+): void {
+  const container = doc.getElementById('popup-open-guidance');
+  const error = doc.getElementById('popup-open-error');
+  if (!container) {
+    // 導線を置く場所が無い DOM では、せめて理由を文字で伝える
+    if (error) {
+      error.textContent =
+        'このスプレッドシートを開く許可がありません。Google での許可が必要な可能性があります。';
+    }
+    return;
+  }
+  container.innerHTML = '';
+  container.hidden = false;
+
+  const message = doc.createElement('p');
+  message.textContent =
+    'このスプレッドシートを開くには、Google での許可が必要です（初回のみ）。開いた画面で対象のシートを選んでください。';
+  container.appendChild(message);
+
+  const hint = doc.createElement('p');
+  hint.className = 'popup__guidance-hint';
+  hint.textContent =
+    '許可しても開けない場合は、シートが削除されている・ID が間違っている・自分のアカウントに共有されていない、のいずれかの可能性があります。';
+  container.appendChild(hint);
+
+  const status = doc.createElement('p');
+  status.className = 'popup__guidance-hint';
+  status.setAttribute('role', 'status');
+  container.appendChild(status);
+
+  const actions = doc.createElement('div');
+  actions.className = 'popup__guidance-actions';
+
+  const grantBtn = doc.createElement('button');
+  grantBtn.type = 'button';
+  grantBtn.className = 'popup__button popup__button--primary';
+  grantBtn.textContent = 'Google で許可する';
+  grantBtn.addEventListener('click', () => {
+    grantBtn.disabled = true;
+    status.textContent = '許可画面を開いています…';
+    void deps
+      .requestPickerGrant(spreadsheetId)
+      .then((result) => {
+        // ここまで来られるのは popup が閉じずに残っていた場合だけ。
+        // 閉じていれば背景側がプロジェクト登録とメインビュー起動まで済ませている。
+        grantBtn.disabled = false;
+        status.textContent = describeGrantResult(result);
       })
       .catch((err: unknown) => {
-        if (error) error.textContent = formatError(err);
+        grantBtn.disabled = false;
+        status.textContent = `許可に失敗しました: ${formatError(err)}`;
       });
   });
+  actions.appendChild(grantBtn);
+
+  const retryBtn = doc.createElement('button');
+  retryBtn.type = 'button';
+  retryBtn.className = 'popup__button';
+  retryBtn.textContent = '再試行';
+  retryBtn.addEventListener('click', () => {
+    retryBtn.disabled = true;
+    status.textContent = '';
+    void openById(doc, deps, spreadsheetId, idInput).finally(() => {
+      retryBtn.disabled = false;
+    });
+  });
+  actions.appendChild(retryBtn);
+
+  container.appendChild(actions);
+}
+
+function describeGrantResult(result: PickerGrantResult): string {
+  switch (result.status) {
+    case 'granted':
+      return '許可しました。メインビューを開いています…';
+    case 'cancelled':
+      return '許可がキャンセルされました。';
+    case 'busy':
+      return '許可画面を開いています。表示された画面で操作してください。';
+    default:
+      return `許可に失敗しました: ${result.message}`;
+  }
 }
 
 function formatError(err: unknown): string {

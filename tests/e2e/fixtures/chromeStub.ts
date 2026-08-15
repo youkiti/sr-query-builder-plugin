@@ -24,6 +24,12 @@ export interface PopupScenario {
     driveFolderId: string;
     title: string;
   }>;
+  /**
+   * `chrome.runtime.sendMessage`（Picker 許可依頼）が返す結果。
+   * 実際の許可フローは背景 service worker + 実 Google なので E2E では代替できず、
+   * popup 側の表示だけを検証するためにここで固定値を返す。
+   */
+  pickerGrantResult?: { status: string; message?: string };
 }
 
 export const DEFAULT_SCENARIO: PopupScenario = {
@@ -57,10 +63,18 @@ export async function injectChromeStub(page: Page, scenario: PopupScenario): Pro
 
     const lastErrorRef: { value: undefined | { message: string } } = { value: undefined };
 
+    const pickerGrantCalls: unknown[] = [];
+    data['__pickerGrantCalls'] = pickerGrantCalls;
+
     const chromeStub = {
       runtime: {
         getURL: (p: string) => `chrome-extension://test/${p}`,
         openOptionsPage: () => undefined,
+        // 背景 service worker への Picker 許可依頼。呼ばれた事実を残しつつ固定値を返す
+        sendMessage: async (message: unknown): Promise<unknown> => {
+          pickerGrantCalls.push(message);
+          return s.pickerGrantResult ?? { status: 'cancelled' };
+        },
         get lastError() {
           return lastErrorRef.value;
         },

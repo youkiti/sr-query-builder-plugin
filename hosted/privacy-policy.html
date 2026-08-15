@@ -3,7 +3,7 @@
      内容の正典は docs/store/privacy-policy.md。本ファイルはその HTML 転記 + 英訳であり、
      **更新時は必ず両方を直す**（hosted/README.md「公開ページ」参照）。
      ja / en は両方を持ち、表示は lang.js + CSS が片方だけに絞る（併記しない）。
-     version: 2026-08-12 -->
+     version: 2026-08-15 -->
 <html lang="ja">
   <head>
     <meta charset="utf-8" />
@@ -56,7 +56,7 @@
         </h1>
         <p class="last-updated">
           <span class="ja" lang="ja"
-            >最終更新: 2026-08-12 / 対象バージョン: v0.3.0<br />
+            >最終更新: 2026-08-15 / 対象バージョン: v0.3.0<br />
             対象: Chrome 拡張機能「SR Query Builder」（sr-query-builder-plugin）<br />
             配布元: 本拡張は MIT ライセンス（<a
               href="https://github.com/youkiti/sr-query-builder-plugin/blob/master/LICENSE"
@@ -64,7 +64,7 @@
             >）の OSS です。</span
           >
           <span class="en" lang="en"
-            >Last updated: 2026-08-12 / Covers v0.3.0<br />
+            >Last updated: 2026-08-15 / Covers v0.3.0<br />
             Applies to: the Chrome extension “SR Query Builder” (sr-query-builder-plugin)<br />
             Distribution: this extension is open-source software under the
             <a href="https://github.com/youkiti/sr-query-builder-plugin/blob/master/LICENSE">MIT licence</a>.</span
@@ -254,6 +254,38 @@
                 </tr>
                 <tr>
                   <td>
+                    <span class="ja" lang="ja"
+                      >開こうとした共有スプレッドシートの ID・サインイン中のメールアドレス</span
+                    >
+                    <span class="en" lang="en"
+                      >The ID of the shared spreadsheet you are opening, and your signed-in email address</span
+                    >
+                  </td>
+                  <td>
+                    <span class="ja" lang="ja"
+                      >本拡張の公開ページ（<a href="picker.html">picker.html</a>）。URL フラグメント（<code>#</code>
+                      以降）で渡すため、HTTP リクエストとしては送信されません</span
+                    >
+                    <span class="en" lang="en"
+                      >This site’s <a href="picker.html">picker.html</a>; passed in the URL fragment (after
+                      <code>#</code>), so it is never sent as part of the HTTP request</span
+                    >
+                  </td>
+                  <td>
+                    <span class="ja" lang="ja"
+                      >Google
+                      ピッカーで対象ファイルを選択し、そのファイルだけにアクセスを許可するため（次回の拡張機能更新から適用。現在配信中の
+                      v0.3.0 はこの画面を使いません）</span
+                    >
+                    <span class="en" lang="en"
+                      >Selecting the file in the Google Picker so that access is granted to that file only (takes
+                      effect from the next extension update; the version currently distributed, v0.3.0, does not use
+                      this screen)</span
+                    >
+                  </td>
+                </tr>
+                <tr>
+                  <td>
                     <span class="ja" lang="ja">Google OAuth トークン</span>
                     <span class="en" lang="en">Google OAuth token</span>
                   </td>
@@ -298,19 +330,70 @@
             <li>
               <span class="ja" lang="ja"
                 ><code>https://www.googleapis.com/auth/drive.file</code> —
-                <strong>利用者が作成に関与したファイル（本拡張が作成したスプレッドシート・Drive フォルダ・ログファイル）だけ</strong>
+                <strong>利用者が作成に関与したファイル（本拡張が作成したスプレッドシート・Drive フォルダ・ログファイル、および利用者が Google ピッカーで明示的に選択したファイル）だけ</strong>
                 にアクセスします。Drive 全体を読むスコープ（<code>drive.readonly</code> 等）や、全スプレッドシートへ
                 アクセスできる <code>https://www.googleapis.com/auth/spreadsheets</code> スコープは要求しません。</span
               >
               <span class="en" lang="en"
                 ><code>https://www.googleapis.com/auth/drive.file</code> — access limited to
                 <strong>files the user was involved in creating (spreadsheets, Drive folders and log files created by
-                the extension)</strong>. Broader scopes such as <code>drive.readonly</code>, or the
+                the extension, plus any file the user explicitly selects in the Google Picker)</strong>. Broader
+                scopes such as <code>drive.readonly</code>, or the
                 <code>https://www.googleapis.com/auth/spreadsheets</code> scope that reaches every spreadsheet, are
                 never requested.</span
               >
             </li>
           </ul>
+
+          <h3>
+            <span class="ja" lang="ja">共有スプレッドシートを開くとき（Google ピッカー）</span>
+            <span class="en" lang="en">Opening a shared spreadsheet (Google Picker)</span>
+          </h3>
+          <p>
+            <span class="ja" lang="ja"
+              >（次回の拡張機能更新から適用。現在配信中の v0.3.0 はこの画面を使いません）</span
+            >
+            <span class="en" lang="en"
+              >(Applies from the next extension update; v0.3.0, the version currently published, does not use this
+              screen.)</span
+            >
+          </p>
+          <p>
+            <span class="ja" lang="ja"
+              >他の利用者が作成して共有したスプレッドシートは、上記スコープの性質上、<strong>利用者がそのファイルを明示的に選択するまで本拡張からは読めません</strong>。このため、共有スプレッドシートを開こうとしたときに
+              Google 公式の「ピッカー」（ファイル選択画面）を表示し、対象ファイルを 1
+              回だけ選んでもらいます。選択されたファイルにのみアクセスが許可され、Drive 上の他のファイルは対象になりません。</span
+            >
+            <span class="en" lang="en"
+              >Because of the scope above, a spreadsheet created and shared by someone else
+              <strong>cannot be read by this extension until the user explicitly selects that file</strong>. When you
+              try to open such a spreadsheet, the extension therefore shows Google’s official Picker (file selection
+              dialog) and asks you to select the file once. Access is then granted to that file only; no other file
+              in your Drive becomes accessible.</span
+            >
+          </p>
+          <p>
+            <span class="ja" lang="ja"
+              >ピッカーの画面は、Chrome 拡張のセキュリティ制約（Manifest V3 の CSP）により拡張内に埋め込めないため、本拡張の公開ページ（<a
+                href="picker.html"
+                >picker.html</a
+              >。GitHub Pages で配信される静的ページ）に置いています。このページは Google
+              の公式スクリプトを読み込んでファイル選択画面を表示し、<strong>選択されたファイルの ID を拡張機能へ返すだけ</strong>です。開発者が運用するサーバーは介在せず、ファイルの内容もサインイン情報もこのページには保存されません。なお、選択の際に利用者のメールアドレスを
+              URL のフラグメント（<code>#</code> 以降。HTTP
+              リクエストとして送信されない部分）で渡し、拡張でサインイン中のアカウントと同一かを確認します。異なるアカウントで許可された場合は、取得したトークンを破棄して選択をやり直してもらいます。</span
+            >
+            <span class="en" lang="en"
+              >Chrome extension security rules (the Manifest V3 CSP) prevent the Picker from being embedded inside the
+              extension, so it is hosted on this site instead (<a href="picker.html">picker.html</a>, a static page
+              served by GitHub Pages). That page loads Google’s official scripts to display the file selection dialog
+              and <strong>only returns the selected file’s ID to the extension</strong>. No developer-operated server
+              is involved, and neither file contents nor sign-in information are stored on the page. Your email
+              address is passed to it in the URL fragment (the part after <code>#</code>, which is never sent as part
+              of the HTTP request) so that the page can confirm you are granting access with the same account you are
+              signed in with in the extension; if a different account is used, the token obtained is discarded and
+              you are asked to try again.</span
+            >
+          </p>
           <p>
             <span class="ja" lang="ja"
               >サインイン中アカウントのメールアドレスは OAuth スコープではなく、Chrome 拡張 API の

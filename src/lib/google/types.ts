@@ -23,6 +23,19 @@ export class GoogleApiError extends Error {
   }
 }
 
+/**
+ * 「このファイルにアクセスする許可が無い」ことを示すステータスかどうか。
+ *
+ * OAuth スコープを `drive.file` 1 本に絞っているため、ユーザーが Google Picker で明示的に
+ * 選択していないスプレッドシートは読めない。このとき Sheets API が返すのは 403 とは限らず、
+ * **存在自体を秘匿するため 404 が返ることもある**ので、両方をまとめて「未許可の可能性」として扱う。
+ * （実際に削除済み／ID 誤りでも 404 になるため、これは断定ではなく分類にすぎない。
+ * 呼び出し側の文言も「許可が必要」と断定せず、削除・ID 誤りの可能性を併記すること）
+ */
+export function isAccessDeniedStatus(status: number): boolean {
+  return status === 403 || status === 404;
+}
+
 /** 生レスポンス本文をメッセージに埋め込む際の切り詰め長（文字数） */
 const RESPONSE_BODY_PREVIEW_LIMIT = 200;
 
