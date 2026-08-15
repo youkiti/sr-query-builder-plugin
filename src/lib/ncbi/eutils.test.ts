@@ -476,6 +476,47 @@ describe('レートリミッタ（issue #59）', () => {
     expect(sleep).toHaveBeenCalledTimes(1);
     expect(sleep.mock.calls[0]?.[0]).toBeCloseTo(1000 / 3, 5);
   });
+
+  // sharedEutilsRateLimiters は capacity を省略せず 1 を明示している（無バーストの要件）。
+  // capacity が誤って ratePerSecond と同値（旧実装のバグ）に戻ると、reset() 直後に
+  // 複数回連続で即時 acquire() できてしまう。reset() 直後に 2 回 acquire() を呼び、
+  // 1 回目は即時、2 回目は実時間の待機（補充待ち）が必要になることを固定するヘルパー。
+  // このバケットはモジュールスコープの実インスタンスで now/sleep を注入できないため、
+  // 実タイマーで検証するが、待つのは「まだ解決していないこと」の確認用に短い猶予
+  // （補充間隔より確実に短い時間）だけで、それを超えて待つのは片付け（2 回目の完了待ち）
+  // の 1 回だけに留める。
+  async function expectBucketDoesNotBurst(
+    bucket: TokenBucket,
+    graceMs: number
+  ): Promise<void> {
+    bucket.reset();
+
+    await bucket.acquire(); // 1 回目: 満タンの 1 個を即時消費（待機なし）
+
+    let secondResolved = false;
+    const second = bucket.acquire().then(() => {
+      secondResolved = true;
+    });
+
+    // 実時間を短く進めるだけ。capacity=1 なら 2 回目の補充に補充間隔ぶんかかるため、
+    // graceMs 時点ではまだ解決していないはず（capacity=ratePerSecond のバグ実装なら即時解決してしまう）。
+    await new Promise((resolve) => setTimeout(resolve, graceMs));
+    expect(secondResolved).toBe(false);
+
+    await second; // タイマーを残さないよう完了まで待ってから後片付け
+    expect(secondResolved).toBe(true);
+  }
+
+  test('sharedEutilsRateLimiters.withoutApiKey はバーストしない（capacity: 1 の固定回帰テスト）', async () => {
+    // 3 req/s → 補充間隔 約 333ms。50ms の猶予は十分に短い。
+    await expectBucketDoesNotBurst(sharedEutilsRateLimiters.withoutApiKey, 50);
+  });
+
+  test('sharedEutilsRateLimiters.withApiKey はバーストしない（capacity: 1 の固定回帰テスト）', async () => {
+    // 10 req/s → 補充間隔 約 100ms。50ms の猶予はそれより短いので同じ書き方が使える。
+    // withApiKey は待機自体が約 100ms で済むため、2 テスト合計の待ち時間は 500ms 程度に収まる。
+    await expectBucketDoesNotBurst(sharedEutilsRateLimiters.withApiKey, 50);
+  });
 });
 
 describe('EutilsError', () => {
