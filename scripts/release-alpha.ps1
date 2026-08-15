@@ -82,4 +82,4 @@ if (Test-Path $guide) {
 Write-Host "==> 完了。Drive フォルダの現在の中身:" -ForegroundColor Green
 & rclone lsl "gdrive:" --drive-root-folder-id $fid
 Write-Host ""
-Write-Host "リマインド: 新しいテスターは OAuth テストユーザー登録が必要 / Drive の共有権限付与を忘れずに。" -ForegroundColor Yellow
+Write-Host "リマインド: Drive の共有権限付与を忘れずに。" -ForegroundColor Yellow

@@ -51,8 +51,7 @@ Selenium 制御下の Chrome で対話ログインを踏むと Google が
 起動した通常 Chrome で:
 
 1. `chrome://extensions` → デベロッパーモード ON → `dist/` を読み込む（未読込なら）
-2. ツールバーの拡張アイコン → Popup の「ログイン」→ OAuth 同意を完了（通常 Chrome なので弾かれない）。
-   確認用アカウントが同意画面（Testing）のテストユーザーに登録済みであること
+2. ツールバーの拡張アイコン → Popup の「ログイン」→ OAuth 同意を完了（通常 Chrome なので弾かれない）
 3. ついでに拡張の Options を開き Gemini / NCBI API キーを保存しておくと `options` シーンが無停止で通る
 4. **この Chrome を完全に終了**（プロファイルの排他ロックを解放するため）
 5. 以後は `npm run manual:check` を実行 → `login` シーンは「ログイン済み」を検知してスキップされる

@@ -435,7 +435,6 @@ async function scenePrepare(driver) {
       '  1. chrome://extensions 右上の「デベロッパーモード」を ON',
       `  2. 「パッケージ化されていない拡張機能を読み込む」で ${DIST_DIR} を選択`,
       '  3. 別タブで https://accounts.google.com を開き、確認用 Google アカウントにログイン',
-      '     （OAuth 同意画面が Testing の場合はテストユーザーに登録済みのアカウント）',
     ].join('\n'),
   );
   await driver.get(POPUP_URL);

@@ -91,8 +91,8 @@ npm run release:alpha -- -SkipBuild   # 既存 dist をそのまま zip → ア�
 - zip 名は `package.json` の `version` 由来（`sr-query-builder-plugin-dev-v<version>.zip`）。バージョンを上げるときは `package.json` と [src/manifest.json](src/manifest.json) の `version` を揃えて更新する
 - source map（`*.map`）は除外して圧縮
 - アップロードは `rclone` の `gdrive:` リモート経由、宛先は `.env` の `GOOGLE_DRIVE`（フォルダ URL でも ID でも可）。`docs/alpha-test-guide.md` も同時アップロード
-- **自動化できない 2 点（毎回手動）**: ① 新規テスターの Gmail を OAuth テストユーザーに登録（<https://console.cloud.google.com/auth/audience>。同意画面が Testing 状態のため未登録だと他アカウントはログイン不可）／ ② Drive ファイルの共有権限付与（rclone は転送のみ）
-- **本番リリース時の注意**: `npm run build`（production）は manifest から `key` を削除するが、初回ストアアップロード時だけ zip ルートに対応する `key.pem` を同梱すれば Chrome ウェブストアが同じ拡張 ID（`bckokafmjighegpjiocopkagghppnjld`）を導出するため、ストア用に別の OAuth client_id を作る必要はない。スコープは `drive.file` のみ（非センシティブ）なので Production 公開に OAuth 検証は不要
+- **自動化できない手動作業**: Drive ファイルの共有権限付与（rclone は転送のみ）。同意画面が Production（一般公開）のため、テスターの Gmail を OAuth テストユーザーに登録する作業はもう不要
+- **本番リリース時の注意**: `npm run build`（production）は manifest から `key` を削除するが、初回ストアアップロード時だけ zip ルートに対応する `key.pem` を同梱すれば Chrome ウェブストアが同じ拡張 ID（`bckokafmjighegpjiocopkagghppnjld`）を導出するため、ストア用に別の OAuth client_id を作る必要はない。スコープは `drive.file` のみ（非センシティブ）なので Production 公開に OAuth 検証は不要。ただし **`src/manifest.json` の `oauth2.scopes` を狭めるだけでは不十分**: GCP 同意画面の「データアクセス」に登録済みのスコープ宣言は自動では消えないため、両方を揃えないと Production 公開時に検証要求が出る（`spreadsheets` の宣言を消し忘れていたため、2026-08-15 に実際にこれで詰まった）。同意画面は同日中に Production（一般公開）へ切り替え済み
 
 ## 本番リリース（Chrome ウェブストア提出用 zip）
 
