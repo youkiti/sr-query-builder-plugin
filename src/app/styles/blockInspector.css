@@ -1,0 +1,460 @@
+/*
+ * ブロック・インスペクタ（blockInspector.ts）のスタイル。
+ * 編集画面（鉛筆インライン編集）または AI 改善パネルを開いたときだけブロックの下に展開する
+ * 補助ビュー。MeSH ツリー / フリーワード Δ / 他ブロック重複を可視化する。
+ *
+ * MeSH=緑・フリーワード=青の配色は draft.css の .draft__term--mesh / .draft__term--freeword
+ * と同じ色（#1f6b3a / #1f4fb8）に揃えている。tokens.css にはこの 2 色専用のカスタムプロパティが
+ * 無いため、他画面の共有トークンを汚さないよう .bins スコープのローカル変数として定義する。
+ *
+ * --color-warning-text / --color-danger-text: 警告・危険を示す「文字色」専用の暗色バリアント。
+ * 共有トークンの --color-warning (#c57d1b) / --color-danger (#c9362f) はこのコンポーネントの
+ * 淡い背景（.bins の --color-bg-muted #f7f7f9 や各バッジの薄いティント背景）に載せると
+ * 3.06〜4.15:1 までしか出ず、通常文字の WCAG AA 基準 4.5:1 を満たさない（実測値は各セレクタの
+ * 直前コメントに記載）。文字色にはこの暗色バリアントを使い、bins__delta-bar のような
+ * 装飾用の面（非テキスト）には従来どおり明るい --color-warning / --color-danger を使う。
+ */
+.bins {
+  --color-mesh: #1f6b3a;
+  --color-mesh-bg: rgba(46, 140, 79, 0.12);
+  --color-mesh-border: rgba(46, 140, 79, 0.4);
+  --color-freeword: #1f4fb8;
+  --color-freeword-bg: rgba(42, 99, 214, 0.1);
+  --color-freeword-border: rgba(42, 99, 214, 0.4);
+  --color-warning-text: #9a6113;
+  --color-danger-text: #a3271f;
+
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-muted);
+  font-size: var(--font-size-sm);
+}
+
+.bins__heading {
+  margin: 0 0 var(--space-2);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.bins__section {
+  margin-top: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px dashed var(--color-border);
+}
+
+.bins__section:first-of-type {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+.bins__section-title {
+  margin: 0 0 var(--space-2);
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+/* セクションの基調色（MeSH=緑 / フリーワード=青）。左アクセントと見出し色で示す */
+.bins__mesh {
+  border-left: 3px solid var(--color-mesh-border);
+  padding-left: var(--space-2);
+}
+
+.bins__mesh .bins__section-title {
+  color: var(--color-mesh);
+}
+
+.bins__freeword {
+  border-left: 3px solid var(--color-freeword-border);
+  padding-left: var(--space-2);
+}
+
+.bins__freeword .bins__section-title {
+  color: var(--color-freeword);
+}
+
+.bins__muted,
+.bins__loading {
+  margin: var(--space-1) 0;
+  color: var(--color-text-muted);
+}
+
+/* ---- MeSH ツリー ---- */
+.bins__tree,
+.bins__tree ul {
+  list-style: none;
+  margin: 0;
+  padding-left: var(--space-4);
+}
+
+.bins__tree {
+  padding-left: 0;
+}
+
+.bins__tree-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 1px 0;
+}
+
+.bins__tree-id {
+  font-family: var(--font-family-mono);
+  color: var(--color-text-muted);
+}
+
+.bins__tree-line--structural .bins__tree-id {
+  opacity: 0.65;
+}
+
+/* 祖先ノードの名前（MeSH RDF で逆引き。PubMed 風に ID の隣へ） */
+.bins__tree-name {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.bins__tree-term {
+  background: var(--color-mesh-bg);
+  color: var(--color-mesh);
+  border-radius: 3px;
+  padding: 0 4px;
+  font-weight: 600;
+}
+
+.bins__badge {
+  font-size: var(--font-size-sm);
+  border-radius: 3px;
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
+.bins__badge--explode {
+  background: rgba(42, 99, 214, 0.12);
+  color: var(--color-primary-hover);
+}
+
+/* 背景 rgba(201, 54, 47, 0.12) は .bins の #f7f7f9 上で実効 #f1e0e1 になり、
+   --color-danger (#c9362f) だと 4.07:1 で AA 未達。--color-danger-text なら 5.75:1 */
+.bins__badge--redundant {
+  background: rgba(201, 54, 47, 0.12);
+  color: var(--color-danger-text);
+}
+
+.bins__divergence {
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-muted);
+}
+
+/* --color-warning (#c57d1b) を .bins の #f7f7f9 に載せると 3.10:1 で AA 未達。
+   --color-warning-text (#9a6113) なら 4.79:1 */
+.bins__divergence--spread {
+  color: var(--color-warning-text);
+}
+
+/* ---- フリーワード Δ 表 ---- */
+.bins__delta-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.bins__delta-row td {
+  padding: 2px var(--space-2);
+  vertical-align: middle;
+}
+
+.bins__delta-term {
+  font-family: var(--font-family-mono);
+}
+
+/* Δ 表: 語クリック編集 / × 削除（onApplyExpression 注入時のみ出る） */
+.bins__delta-term-btn {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+}
+
+.bins__delta-term-btn:hover,
+.bins__delta-term-btn:focus-visible {
+  text-decoration-style: solid;
+}
+
+.bins__delta-input {
+  font-family: var(--font-family-mono);
+  padding: 0 2px;
+  border: 1px solid var(--color-primary);
+  border-radius: 3px;
+  min-width: 8ch;
+}
+
+.bins__delta-actions {
+  text-align: right;
+}
+
+.bins__delta-remove {
+  font: inherit;
+  line-height: 1;
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  padding: 0 2px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+/* 背景 rgba(214, 69, 69, 0.12) は .bins の #f7f7f9 上で実効 #f3e2e3 になり、
+   --color-danger だと 4.15:1 で AA 未達。--color-danger-text なら 5.86:1 */
+.bins__delta-remove:hover,
+.bins__delta-remove:focus-visible {
+  color: var(--color-danger-text);
+  background: rgba(214, 69, 69, 0.12);
+}
+
+.bins__delta-individual,
+.bins__delta-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.bins__delta-value {
+  font-weight: 600;
+}
+
+.bins__delta-barcell {
+  width: 120px;
+}
+
+.bins__delta-bar {
+  display: block;
+  height: 8px;
+  min-width: 1px;
+  border-radius: 4px;
+  background: var(--color-primary);
+}
+
+.bins__delta-flag {
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+/* Δ=0（完全内包）= 削除候補。行を弱め、フラグを危険色に。
+   弱め方は opacity ではなく color で行うこと: opacity は子孫をまとめて 1 グループとして
+   合成するため、子側の .bins__delta-flag が独自の文字色（--color-danger-text）を
+   指定しても打ち消せず、実効コントラストが AA 未達（3.80:1）になる。color なら
+   子は自分の color 宣言で上書きできるので、フラグだけ危険色のまま読める強さを保てる。 */
+.bins__delta-row--redundant {
+  color: var(--color-text-muted);
+}
+
+/* バー背景（非テキスト、AA 対象外）は opacity で弱めていた分、地の色がそのまま出て
+   従来より濃く見える。「削除候補の行は控えめに」という視覚意図を保つため半透明にする */
+.bins__delta-row--redundant .bins__delta-bar {
+  background: rgba(201, 54, 47, 0.7);
+}
+
+/* --color-danger-text (#a3271f) を素の #f7f7f9 に載せると 6.85:1 で AA を満たす
+   （.bins__delta-row--redundant はもう opacity で弱めていないため、そのまま届く。
+   5.75:1 は .bins__badge--redundant の淡い赤背景 #f1e0e1 に載せたときの値で、こことは別） */
+.bins__delta-row--redundant .bins__delta-flag {
+  color: var(--color-danger-text);
+}
+
+.bins__delta-row--lowYield .bins__delta-bar {
+  background: var(--color-warning);
+}
+
+/* --color-warning (#c57d1b) を .bins の #f7f7f9 に載せると 3.10:1 で AA 未達。
+   --color-warning-text (#9a6113) なら 4.79:1 */
+.bins__delta-row--lowYield .bins__delta-flag {
+  color: var(--color-warning-text);
+}
+
+.bins__delta-total {
+  margin: var(--space-2) 0 0;
+  font-weight: 600;
+}
+
+.bins__count {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+/* 件数バッジは白背景（通常行）/ 淡い緑背景（起点行）どちらにも載る。--color-danger だと
+   起点行側の背景で 4.48:1 と AA 未達に近く、--color-danger-text なら両背景で 6.3:1 以上 */
+.bins__count--error {
+  color: var(--color-danger-text);
+}
+
+/* ---- 他ブロックとの重複 ---- */
+/* --color-warning (#c57d1b) を .bins の #f7f7f9 に載せると 3.10:1 で AA 未達。
+   --color-warning-text (#9a6113) なら 4.79:1 */
+.bins__overlap-line {
+  margin: var(--space-1) 0;
+  color: var(--color-warning-text);
+}
+
+/* ---- MeSH ブラウザ（PubMed 風インデントツリー）---- */
+/* 同じ語（descriptor）の枝をまとめるグループ */
+.bins__group {
+  margin: var(--space-3) 0 0;
+}
+
+.bins__group:first-child {
+  margin-top: 0;
+}
+
+.bins__group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 2px var(--space-1);
+  border-left: 3px solid var(--color-mesh);
+}
+
+.bins__group-name {
+  font-weight: 600;
+}
+
+.bins__badge--multi {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--color-text-muted);
+}
+
+/* 「この語を削除」: グループ単位で descriptor を式から外す。
+   白背景なので --color-danger でも 5.18:1 で AA を満たすが、他の危険色テキストと
+   トーンを揃えるため --color-danger-text に統一する（白背景では 7.32:1） */
+.bins__group-delete {
+  margin-left: auto;
+  font-size: var(--font-size-sm);
+  border: 1px solid rgba(214, 42, 42, 0.4);
+  border-radius: 3px;
+  padding: 0 6px;
+  background: var(--color-surface, #fff);
+  color: var(--color-danger-text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.bins__group-delete:hover {
+  background: rgba(214, 42, 42, 0.08);
+}
+
+.bins__branch {
+  margin: var(--space-2) 0 0;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: var(--space-1) 0;
+  background: var(--color-surface, #fff);
+}
+
+.bins__branch-children:not([hidden]) {
+  display: block;
+}
+
+/* 1 行（インデントは padding-left を JS で付与） */
+.bins__row:not([hidden]) {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 22px;
+  padding-right: var(--space-2);
+}
+
+.bins__row:hover {
+  background: rgba(0, 0, 0, 0.035);
+}
+
+.bins__row--origin {
+  background: var(--color-mesh-bg);
+  border-radius: 3px;
+}
+
+/* 展開トグル ▸/▾ */
+.bins__row-toggle {
+  flex: 0 0 auto;
+  width: 18px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  line-height: 1;
+  padding: 0;
+}
+
+.bins__row-toggle--leaf {
+  cursor: default;
+  visibility: hidden;
+}
+
+/* カテゴリ root（M 人々の集団）。MeSH 語ではないので地のテキスト */
+.bins__row-cat {
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+/* 第1階層の tree id（M01 など） */
+.bins__row-id {
+  font-family: var(--font-family-mono);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+/* ノード名（クリック＝置換）。リンク風ボタン */
+.bins__row-name {
+  border: none;
+  background: transparent;
+  color: var(--color-mesh);
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+}
+
+.bins__row-name:hover {
+  text-decoration: underline;
+}
+
+.bins__row-name--static {
+  color: var(--color-text);
+  cursor: default;
+}
+
+.bins__row-name--static:hover {
+  text-decoration: none;
+}
+
+.bins__badge--origin {
+  background: var(--color-mesh-bg);
+  color: var(--color-mesh);
+}
+
+/* OR追加（平常時は控えめ、hover/focus で前面に） */
+.bins__row-or {
+  font-size: var(--font-size-sm);
+  border: 1px solid var(--color-mesh-border);
+  border-radius: 3px;
+  padding: 0 6px;
+  background: var(--color-surface, #fff);
+  color: var(--color-mesh);
+  cursor: pointer;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.bins__row:hover .bins__row-or,
+.bins__row:focus-within .bins__row-or,
+.bins__row-or:focus {
+  opacity: 1;
+}

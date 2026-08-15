@@ -76,6 +76,25 @@ describe('tokenizeExpression', () => {
     const expr = '(Community-Acquired Pneumonia[Mesh] OR "CAP"[tiab]) AND Glucocorticoids[Mesh]';
     expect(tokenizeExpression(expr).map((s) => s.text).join('')).toBe(expr);
   });
+
+  // 回帰テスト: 引用符内の AND/OR/NOT をブール演算子の境界として誤分割していたバグ
+  // （例: "Oral and Maxillofacial Surgeons"[Mesh] を "and" の位置で分割し、
+  // "Maxillofacial Surgeons"[Mesh] のみを MeSH 語として扱ってしまう）の修正確認。
+  test('引用符内に and を含む MeSH 語を分割しない', () => {
+    expect(tokenizeExpression('"Oral and Maxillofacial Surgeons"[Mesh] OR surgeon*[tiab]')).toEqual([
+      { text: '"Oral and Maxillofacial Surgeons"[Mesh]', kind: 'mesh' },
+      { text: ' OR ', kind: 'plain' },
+      { text: 'surgeon*[tiab]', kind: 'freeword' },
+    ]);
+  });
+
+  test('引用符内に or を含むフリーワード語を分割しない', () => {
+    expect(tokenizeExpression('"heart or lung"[tiab] OR x[tiab]')).toEqual([
+      { text: '"heart or lung"[tiab]', kind: 'freeword' },
+      { text: ' OR ', kind: 'plain' },
+      { text: 'x[tiab]', kind: 'freeword' },
+    ]);
+  });
 });
 
 describe('extractMeshTerm', () => {
