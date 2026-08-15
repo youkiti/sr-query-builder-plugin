@@ -256,6 +256,7 @@ async function hydrateCurrentProject(store: AppStore, runtime: ChromeRuntimeDeps
         currentFormulaVersionId: latestFormula.versionId,
         currentFormulaMarkdown: latestFormula.formulaMd,
         currentFormulaModel: latestFormula.model,
+        currentFormulaCreatedBy: latestFormula.createdBy,
       }));
     }
     // 再試行で成功したときにバナーを消す
@@ -457,6 +458,7 @@ function buildDefaultViewOptions(
           currentFormulaVersionId: version.versionId,
           currentFormulaMarkdown: version.formulaMd,
           currentFormulaModel: version.model,
+          currentFormulaCreatedBy: version.createdBy,
         }));
       },
     },

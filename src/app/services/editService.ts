@@ -82,6 +82,7 @@ export async function saveEditedFormula(
     ...s,
     currentFormulaVersionId: versionId,
     currentFormulaMarkdown: input.formulaMd,
+    currentFormulaCreatedBy: 'user_edit',
   }));
 
   return { versionId, parentVersionId };

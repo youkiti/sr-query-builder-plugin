@@ -1,4 +1,5 @@
 import type { CurrentProjectEntry } from '@/features/project';
+import type { FormulaCreatedBy } from '@/domain/formulaVersion';
 import type { ExcessFilterCandidate } from '@/features/formula/skills';
 import type {
   AnalyzeMissedSeedsResult,
@@ -270,6 +271,17 @@ export interface AppState {
    * export 画面の Methods 文案に埋め込む。model 列導入前の旧バージョンでは null
    */
   currentFormulaModel: string | null;
+  /**
+   * 現在の検索式が AI 生成そのまま（`ai_draft`）か、AI 生成結果に手を加えて保存した版
+   * （`user_edit`）かを表す（FormulaVersions.created_by 由来）。`user_edit` になる経路は
+   * #/edit の手編集保存だけでなく、過大ヒットフィルタ承認（bootstrap.ts の
+   * runApplyExcessFilters が内部で saveEditedFormula を呼ぶ）も含む。issue #40:
+   * draftView が「再生成すると手を加えた版が破棄される」ことをこの値で判定し、
+   * `user_edit` のときだけ再生成前に破棄確認を挟む（確認文言は経路を特定しない表現に
+   * すること）。currentFormulaModel と同様に版の切り替え・リセット箇所すべてで同期して
+   * 設定する
+   */
+  currentFormulaCreatedBy: FormulaCreatedBy | null;
   /** 検索式ドラフト生成の実行状態。未実行（完了済み含む）なら null */
   draftRun: DraftRunState | null;
   /** 境界事例取得（#/expand）の実行状態。未実行なら null */
@@ -313,6 +325,7 @@ export const INITIAL_STATE: AppState = {
   currentFormulaVersionId: null,
   currentFormulaMarkdown: null,
   currentFormulaModel: null,
+  currentFormulaCreatedBy: null,
   draftRun: null,
   expandRun: null,
   validationResult: null,

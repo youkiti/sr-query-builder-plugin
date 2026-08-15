@@ -90,6 +90,7 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
     actions.className = 'draft__actions';
     const generateBtn = doc.createElement('button');
     generateBtn.type = 'button';
+    generateBtn.className = 'draft__generate';
     generateBtn.textContent = running
       ? '実行中…'
       : existing
@@ -97,7 +98,68 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
         : '生成して検証する';
     generateBtn.disabled = running;
     actions.appendChild(generateBtn);
+
+    // 「検証のみ再実行」(issue #40 症状 A): 検証失敗からのリカバリ導線に限定せず、
+    // 保存済みの式があり実行中でなければ実行状態から独立して常に描画する。
+    // #/edit の手編集保存後や、生成が正常終了した後の「式は変えず検証だけやり直す」
+    // 入口としても使えるようにするため。生成ボタンと同じ .draft__actions の行に置く。
+    const canRevalidate =
+      existing !== null && ctx.state.currentFormulaVersionId !== null && !running;
+    if (canRevalidate) {
+      const revalidateBtn = doc.createElement('button');
+      revalidateBtn.type = 'button';
+      revalidateBtn.className = 'draft__revalidate';
+      revalidateBtn.textContent = '検証のみ再実行（生成はやり直しません）';
+      revalidateBtn.addEventListener('click', () => {
+        if (!callbacks.onRevalidate || revalidateBtn.disabled) {
+          return;
+        }
+        revalidateBtn.disabled = true;
+        void callbacks.onRevalidate();
+      });
+      actions.appendChild(revalidateBtn);
+    }
     container.appendChild(actions);
+
+    // 手を加えた版の破棄確認（issue #40 症状 B）: currentFormulaCreatedBy === 'user_edit' の
+    // 版を再生成が無警告で上書きしないよう、生成ボタン押下時にインライン確認を挟む。
+    // 'user_edit' になる経路は #/edit の手編集保存だけでなく、過大ヒットフィルタ承認
+    // （bootstrap.ts の runApplyExcessFilters が内部で saveEditedFormula を呼ぶ）も含むため、
+    // 確認文言・コメントとも経路を特定しない表現にすること（「#/edit で手編集した」と
+    // 断定しない）。ai_draft / null（未生成含む）のときは従来どおり即実行する
+    // （余計なクリックを増やさない）。
+    //
+    // ローカル DOM 状態（store 非経由）: setState による再描画が起きるとこのパネルは
+    // 閉じる。現状 #/draft はパネル表示中に setState を起こすアイドル更新を持たない
+    // （cumulativeCostUsd の再集計は LLM 呼び出し完了時のみ走り、確認中は LLM を呼んで
+    // いないため issue #39 のような消失は起きない）。将来アイドル時の setState（定期更新等）
+    // を #/draft に持ち込むときは、この状態を store（formulaEditNote 等と同様の設計）へ
+    // 移すこと。
+    const discardConfirm = doc.createElement('div');
+    discardConfirm.className = 'draft__discard-confirm';
+    discardConfirm.hidden = true;
+    const discardMessage = doc.createElement('p');
+    discardMessage.className = 'draft__discard-message';
+    discardMessage.setAttribute('role', 'alert');
+    // textContent は初期描画時ではなく、表示する瞬間（showDiscardConfirm）に設定する。
+    // role="alert" の live region は「内容の変更」で announce されるため、描画時に先に
+    // textContent を入れて hidden を外すだけでは支援技術に読み上げられないことがある。
+    discardConfirm.appendChild(discardMessage);
+
+    const discardActions = doc.createElement('div');
+    discardActions.className = 'draft__discard-actions';
+    const discardConfirmBtn = doc.createElement('button');
+    discardConfirmBtn.type = 'button';
+    discardConfirmBtn.className = 'draft__discard-confirm-btn';
+    discardConfirmBtn.textContent = '破棄して再生成する';
+    const discardCancelBtn = doc.createElement('button');
+    discardCancelBtn.type = 'button';
+    discardCancelBtn.className = 'draft__discard-cancel';
+    discardCancelBtn.textContent = 'やめる';
+    discardActions.appendChild(discardConfirmBtn);
+    discardActions.appendChild(discardCancelBtn);
+    discardConfirm.appendChild(discardActions);
+    container.appendChild(discardConfirm);
 
     // 全体の進捗トラッカー（プログレスバー + ステップカウンタ + フェーズ・ステッパー）。
     // 「今やっていること」の 1 行（下の status）に対し、こちらは「全体のどこか」を示し、
@@ -123,22 +185,8 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
       } else {
         const phaseLabel = run.phase === 'validating' ? '検証' : '生成';
         errorBox.textContent = `${phaseLabel}に失敗しました: ${run.error ?? '不明なエラー'}`;
-        // 検証フェーズの失敗は生成済みの式が残っているので、LLM を呼ばない再検証を促す
-        // （fix-plan 2-2）。生成フェーズの失敗は式が無い/古いので再生成しかない。
-        if (run.phase === 'validating' && existing) {
-          const revalidateBtn = doc.createElement('button');
-          revalidateBtn.type = 'button';
-          revalidateBtn.className = 'draft__revalidate';
-          revalidateBtn.textContent = '検証のみ再実行（生成はやり直しません）';
-          revalidateBtn.addEventListener('click', () => {
-            if (!callbacks.onRevalidate || revalidateBtn.disabled) {
-              return;
-            }
-            revalidateBtn.disabled = true;
-            void callbacks.onRevalidate();
-          });
-          container.appendChild(revalidateBtn);
-        }
+        // 「検証のみ再実行」ボタンは実行状態から独立して .draft__actions に描画する
+        // （issue #40 症状 A）。ここでは失敗文言のみを出す。
       }
     }
 
@@ -171,14 +219,66 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
       renderValidationResults(doc, results, storedSummary, callbacks, readStoredAnalysis(ctx.state));
     }
 
-    generateBtn.addEventListener('click', () => {
+    // 状態遷移（draftRun の running 設定）は bootstrap 側。setState → 再描画で
+    // ボタンが即座に無効化されるため、ここでのローカル無効化は保険のみ
+    const runGenerate = (): void => {
       if (!callbacks.onGenerate || generateBtn.disabled) {
         return;
       }
-      // 状態遷移（draftRun の running 設定）は bootstrap 側。setState → 再描画で
-      // ボタンが即座に無効化されるため、ここでのローカル無効化は保険のみ
       generateBtn.disabled = true;
       void callbacks.onGenerate();
+    };
+
+    // 確認パネルを表示する。window.confirm と違い、フォーカス移動も読み上げ発火も
+    // 自前で用意する必要がある（issue #40 レビュー指摘）。
+    // - textContent をここで（表示の瞬間に）設定することで、role="alert" の live region が
+    //   「内容の変更」を検知して announce できるようにする
+    // - discardConfirmBtn.focus() でキーボード / スクリーンリーダー利用者にも
+    //   パネルの出現が伝わるようにする
+    const showDiscardConfirm = (): void => {
+      discardMessage.textContent = `AI の生成結果に手を加えた版（version: ${
+        ctx.state.currentFormulaVersionId ?? '(未保存)'
+      }）です。再生成するとこの版は破棄され、ブロック定義から作り直されます。よろしいですか？`;
+      discardConfirm.hidden = false;
+      discardConfirmBtn.focus();
+    };
+
+    const hideDiscardConfirm = (): void => {
+      discardConfirm.hidden = true;
+      // 次回表示時に textContent が必ず「変化」として検知されるよう空に戻す
+      // （同じバージョンで連続して開いた場合に同一文字列の再設定で announce が
+      // 発火しないことを避けるため）。
+      discardMessage.textContent = '';
+    };
+
+    generateBtn.addEventListener('click', () => {
+      if (generateBtn.disabled) {
+        return;
+      }
+      // currentFormulaCreatedBy が 'user_edit'（#/edit の手編集保存、または過大ヒット
+      // フィルタ承認 saveEditedFormula 経由）のときだけ確認を挟む（issue #40 症状 B）。
+      // ai_draft / null（未生成含む）は従来どおり即実行する。
+      if (ctx.state.currentFormulaCreatedBy === 'user_edit') {
+        showDiscardConfirm();
+        return;
+      }
+      runGenerate();
+    });
+
+    discardConfirmBtn.addEventListener('click', () => {
+      hideDiscardConfirm();
+      runGenerate();
+    });
+
+    discardCancelBtn.addEventListener('click', () => {
+      hideDiscardConfirm();
+      // 開いたきっかけの要素へフォーカスを戻す。何もしないと「やめる」自身が
+      // hidden 化した親ごと消え、フォーカスが行き場を失って body に落ちる
+      // （キーボード利用者が文書先頭へ飛ばされる）。「破棄して再生成する」側は
+      // 直後に runGenerate() → setState で全体再描画されビューごと作り直される
+      // ため、どのみちフォーカスは維持できず対応不要（過大ヒットフィルタ承認等の
+      // 既存 UI と同じ挙動）。
+      generateBtn.focus();
     });
   };
 }

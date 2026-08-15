@@ -60,6 +60,7 @@ describe('startApp', () => {
       currentFormulaVersionId: null,
       currentFormulaMarkdown: null,
       currentFormulaModel: null,
+      currentFormulaCreatedBy: null,
       draftRun: null,
       expandRun: null,
       validationResult: null,
@@ -109,6 +110,7 @@ describe('startApp', () => {
       currentFormulaVersionId: null,
       currentFormulaMarkdown: null,
       currentFormulaModel: null,
+      currentFormulaCreatedBy: null,
       draftRun: null,
       expandRun: null,
       validationResult: null,
@@ -736,6 +738,8 @@ describe('startApp - wiring 層', () => {
     const state = handle.store.getState();
     expect(state.currentFormulaVersionId).toBe('fv-1');
     expect(state.currentFormulaModel).toBe('gemini-3.5-flash');
+    // issue #40: hydrate も createdBy を復元する（draftView の破棄確認判定に使う）
+    expect(state.currentFormulaCreatedBy).toBe('ai_draft');
   });
 
   test('protocol view 既定 onListVersions が Protocol タブの全バージョンを読む', async () => {
@@ -1077,6 +1081,8 @@ describe('startApp - wiring 層', () => {
     expect(handle.store.getState().currentFormulaVersionId).toBe('v2');
     expect(handle.store.getState().currentFormulaMarkdown).toContain('md-v2');
     expect(handle.store.getState().currentFormulaModel).toBe('gemini-3.5-flash');
+    // issue #40: 履歴読み込みも createdBy を復元する
+    expect(handle.store.getState().currentFormulaCreatedBy).toBe('ai_draft');
   });
 
   test('edit view 既定 onSave が FormulaVersions に user_edit 行を追加する', async () => {

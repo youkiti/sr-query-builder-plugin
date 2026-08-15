@@ -59,6 +59,7 @@ function makeStateWithDrafts(): AppState {
     currentFormulaVersionId: null,
     currentFormulaMarkdown: null,
     currentFormulaModel: null,
+    currentFormulaCreatedBy: null,
     draftRun: null,
     expandRun: null,
     validationResult: null,
@@ -148,6 +149,7 @@ describe('approveBlocks', () => {
       ...s,
       currentFormulaVersionId: 'F-9',
       currentFormulaMarkdown: '# 旧検索式',
+      currentFormulaCreatedBy: 'ai_draft',
       validationResult: {
         formulaVersionId: 'F-9',
         summary: {} as NonNullable<AppState['validationResult']>['summary'],
@@ -168,6 +170,7 @@ describe('approveBlocks', () => {
     expect(state.currentProtocolVersion).toBe(1);
     expect(state.currentFormulaVersionId).toBeNull();
     expect(state.currentFormulaMarkdown).toBeNull();
+    expect(state.currentFormulaCreatedBy).toBeNull();
     expect(state.validationResult).toBeNull();
     expect(state.missedAnalysis).toBeNull();
   });

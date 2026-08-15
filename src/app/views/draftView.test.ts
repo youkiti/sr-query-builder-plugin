@@ -418,7 +418,7 @@ describe('検証のみ再実行（fix-plan 2-2）', () => {
     expect(onRevalidate).toHaveBeenCalledTimes(1);
   });
 
-  test('生成フェーズの失敗では再実行ボタンを出さない（式が無い/古いため）', () => {
+  test('生成フェーズの失敗でも式があれば再実行ボタンが出る（実行状態から独立。issue #40）', () => {
     const view = createDraftView();
     const container = buildContainer();
     view(container, {
@@ -434,10 +434,22 @@ describe('検証のみ再実行（fix-plan 2-2）', () => {
       }),
       navigate: jest.fn(),
     });
-    expect(container.querySelector('.draft__revalidate')).toBeNull();
+    // 旧仕様は「検証フェーズの失敗からのリカバリ」限定だったが、issue #40 により
+    // 実行状態から独立させたので、生成フェーズの失敗でも式が残っていれば出る。
+    expect(container.querySelector('.draft__revalidate')).not.toBeNull();
   });
 
-  test('式が無ければ検証フェーズ失敗でも再実行ボタンを出さない', () => {
+  test('検証成功後（エラー無し）でも保存済み式があれば再実行ボタンが出る（issue #40）', () => {
+    const view = createDraftView();
+    const container = buildContainer();
+    view(container, {
+      state: validatingErrorState({ draftRun: null }),
+      navigate: jest.fn(),
+    });
+    expect(container.querySelector('.draft__revalidate')).not.toBeNull();
+  });
+
+  test('式が無ければ再実行ボタンを出さない', () => {
     const view = createDraftView();
     const container = buildContainer();
     view(container, {
@@ -447,6 +459,35 @@ describe('検証のみ再実行（fix-plan 2-2）', () => {
     expect(container.querySelector('.draft__revalidate')).toBeNull();
   });
 
+  test('バージョン未確定（currentFormulaVersionId が null）なら再実行ボタンを出さない', () => {
+    const view = createDraftView();
+    const container = buildContainer();
+    view(container, {
+      state: validatingErrorState({ currentFormulaVersionId: null, draftRun: null }),
+      navigate: jest.fn(),
+    });
+    expect(container.querySelector('.draft__revalidate')).toBeNull();
+  });
+
+  test('実行中は式・バージョンがあっても再実行ボタンを出さない', () => {
+    const view = createDraftView();
+    const container = buildContainer();
+    view(container, {
+      state: validatingErrorState({ draftRun: runningState() }),
+      navigate: jest.fn(),
+    });
+    expect(container.querySelector('.draft__revalidate')).toBeNull();
+  });
+
+  test('生成ボタンと同じ .draft__actions 行に配置される', () => {
+    const view = createDraftView();
+    const container = buildContainer();
+    view(container, { state: validatingErrorState(), navigate: jest.fn() });
+    const actions = container.querySelector('.draft__actions');
+    expect(actions?.querySelector('.draft__generate')).not.toBeNull();
+    expect(actions?.querySelector('.draft__revalidate')).not.toBeNull();
+  });
+
   test('onRevalidate 未指定でもクリックで例外にならない', () => {
     const view = createDraftView();
     const container = buildContainer();
@@ -454,6 +495,142 @@ describe('検証のみ再実行（fix-plan 2-2）', () => {
     expect(() =>
       container.querySelector<HTMLButtonElement>('.draft__revalidate')!.click()
     ).not.toThrow();
+  });
+});
+
+describe('手編集版の破棄確認（issue #40 症状 B）', () => {
+  const MD = '## PubMed/MEDLINE\n\n```\n#1 x\n```\n';
+
+  function userEditState(extra: Partial<AppState> = {}): AppState {
+    return stateReady({
+      currentFormulaMarkdown: MD,
+      currentFormulaVersionId: 'fv-9',
+      currentFormulaCreatedBy: 'user_edit',
+      ...extra,
+    });
+  }
+
+  test('user_edit の式で生成ボタンを押すと確認 UI が出て onGenerate は呼ばれない', () => {
+    const onGenerate = jest.fn().mockResolvedValue(undefined);
+    const view = createDraftView({ onGenerate });
+    const container = buildContainer();
+    view(container, { state: userEditState(), navigate: jest.fn() });
+
+    expect(container.querySelector('.draft__discard-confirm')).toHaveProperty('hidden', true);
+    container.querySelector<HTMLButtonElement>('.draft__generate')!.click();
+    expect(onGenerate).not.toHaveBeenCalled();
+    const confirm = container.querySelector('.draft__discard-confirm');
+    expect(confirm).toHaveProperty('hidden', false);
+    expect(confirm?.querySelector('[role="alert"]')?.textContent).toContain('fv-9');
+    expect(confirm?.textContent).toContain('破棄');
+  });
+
+  test('確認メッセージは経路を特定しない文言（#/edit を名指ししない。レビュー指摘対応）', () => {
+    // user_edit は #/edit の手編集保存だけでなく過大ヒットフィルタ承認（saveEditedFormula
+    // 経由）でも付く。「#/edit で手編集した」と断定すると経路によっては事実と食い違うため、
+    // draftView 側の文言は経路を特定しない表現でなければならない。
+    const view = createDraftView();
+    const container = buildContainer();
+    view(container, { state: userEditState(), navigate: jest.fn() });
+    container.querySelector<HTMLButtonElement>('.draft__generate')!.click();
+    const message = container.querySelector('.draft__discard-message')?.textContent ?? '';
+    expect(message).not.toContain('#/edit');
+    expect(message).toContain('fv-9');
+    expect(message).toContain('破棄');
+  });
+
+  test('初期描画時点では警告メッセージの本文は空（表示の瞬間に設定される。レビュー指摘対応）', () => {
+    // role="alert" の live region は「内容の変更」で announce されるため、描画時に
+    // 先に本文を入れてしまうと表示（hidden 解除）だけでは読み上げが発火しない。
+    const view = createDraftView();
+    const container = buildContainer();
+    view(container, { state: userEditState(), navigate: jest.fn() });
+    expect(container.querySelector('.draft__discard-message')?.textContent).toBe('');
+  });
+
+  test('確認 UI 表示時に「破棄して再生成する」ボタンへ focus() が呼ばれる（レビュー指摘対応）', () => {
+    // window.confirm が提供していた「フォーカスが確認先へ移る」挙動を自前で用意する。
+    // jsdom の detached document（createHTMLDocument）は activeElement を追従しないため、
+    // ここでは focus() 呼び出し自体をスパイして検証する（実ブラウザでの実効性は E2E で
+    // .draft__discard-confirm-btn への activeElement 遷移として別途確認する）。
+    const onGenerate = jest.fn().mockResolvedValue(undefined);
+    const view = createDraftView({ onGenerate });
+    const container = buildContainer();
+    view(container, { state: userEditState(), navigate: jest.fn() });
+    const confirmBtn = container.querySelector<HTMLButtonElement>('.draft__discard-confirm-btn')!;
+    const focusSpy = jest.spyOn(confirmBtn, 'focus');
+    container.querySelector<HTMLButtonElement>('.draft__generate')!.click();
+    expect(focusSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test('「やめる」で閉じると本文もクリアされる（次回表示時に確実に announce されるため）', () => {
+    const view = createDraftView();
+    const container = buildContainer();
+    view(container, { state: userEditState(), navigate: jest.fn() });
+    container.querySelector<HTMLButtonElement>('.draft__generate')!.click();
+    container.querySelector<HTMLButtonElement>('.draft__discard-cancel')!.click();
+    expect(container.querySelector('.draft__discard-message')?.textContent).toBe('');
+  });
+
+  test('「やめる」で閉じると開いたきっかけの生成ボタンへ focus() が戻る（レビュー指摘対応）', () => {
+    // 「やめる」自身が hidden 化した親ごと消えるため、フォーカスを明示的に戻さないと
+    // 行き場を失って body に落ち、キーボード利用者が文書先頭へ飛ばされる。
+    const view = createDraftView();
+    const container = buildContainer();
+    view(container, { state: userEditState(), navigate: jest.fn() });
+    const generateBtn = container.querySelector<HTMLButtonElement>('.draft__generate')!;
+    const focusSpy = jest.spyOn(generateBtn, 'focus');
+    generateBtn.click();
+    container.querySelector<HTMLButtonElement>('.draft__discard-cancel')!.click();
+    expect(focusSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test('確認 UI の「破棄して再生成する」で onGenerate が呼ばれ、確認 UI は閉じる', () => {
+    const onGenerate = jest.fn().mockResolvedValue(undefined);
+    const view = createDraftView({ onGenerate });
+    const container = buildContainer();
+    view(container, { state: userEditState(), navigate: jest.fn() });
+
+    container.querySelector<HTMLButtonElement>('.draft__generate')!.click();
+    container.querySelector<HTMLButtonElement>('.draft__discard-confirm-btn')!.click();
+
+    expect(onGenerate).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('.draft__discard-confirm')).toHaveProperty('hidden', true);
+  });
+
+  test('確認 UI の「やめる」で閉じるだけで onGenerate は呼ばれない', () => {
+    const onGenerate = jest.fn().mockResolvedValue(undefined);
+    const view = createDraftView({ onGenerate });
+    const container = buildContainer();
+    view(container, { state: userEditState(), navigate: jest.fn() });
+
+    container.querySelector<HTMLButtonElement>('.draft__generate')!.click();
+    container.querySelector<HTMLButtonElement>('.draft__discard-cancel')!.click();
+
+    expect(onGenerate).not.toHaveBeenCalled();
+    expect(container.querySelector('.draft__discard-confirm')).toHaveProperty('hidden', true);
+  });
+
+  test('createdBy が ai_draft なら確認無しで即実行する', () => {
+    const onGenerate = jest.fn().mockResolvedValue(undefined);
+    const view = createDraftView({ onGenerate });
+    const container = buildContainer();
+    view(container, {
+      state: userEditState({ currentFormulaCreatedBy: 'ai_draft' }),
+      navigate: jest.fn(),
+    });
+    container.querySelector<HTMLButtonElement>('.draft__generate')!.click();
+    expect(onGenerate).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('.draft__discard-confirm')).toHaveProperty('hidden', true);
+  });
+
+  test('createdBy が null（未生成含む）なら確認無しで即実行する', () => {
+    const onGenerate = jest.fn().mockResolvedValue(undefined);
+    const view = createDraftView({ onGenerate });
+    const container = buildContainer();
+    view(container, { state: stateReady(), navigate: jest.fn() });
+    container.querySelector<HTMLButtonElement>('.draft__generate')!.click();
+    expect(onGenerate).toHaveBeenCalledTimes(1);
   });
 });
 

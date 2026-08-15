@@ -87,6 +87,7 @@ function makeState(overrides: Partial<AppState> = {}): AppState {
     currentFormulaVersionId: 'parent-v',
     currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 old\n```\n',
     currentFormulaModel: null,
+    currentFormulaCreatedBy: 'ai_draft',
     draftRun: null,
     expandRun: null,
     validationResult: null,
@@ -178,6 +179,8 @@ describe('saveEditedFormula', () => {
     expect(map['created_at']).toBe('2026-04-19T00:00:00.000Z');
     expect(store.getState().currentFormulaVersionId).toBe('new-id');
     expect(store.getState().currentFormulaMarkdown).toBe(VALID_MD);
+    // 保存後は 'user_edit' になる（issue #40: draftView の再生成確認がこの値を見る）
+    expect(store.getState().currentFormulaCreatedBy).toBe('user_edit');
   });
 
   test('store の currentFormulaModel を model 列に引き継ぐ（手編集は AI 不使用のため）', async () => {

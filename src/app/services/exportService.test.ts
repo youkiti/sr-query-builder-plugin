@@ -34,6 +34,7 @@ function stateWithFormula(): AppState {
     currentFormulaVersionId: 'v-42',
     currentFormulaMarkdown: formulaMd,
     currentFormulaModel: null,
+    currentFormulaCreatedBy: null,
     draftRun: null,
     expandRun: null,
     validationResult: null,
