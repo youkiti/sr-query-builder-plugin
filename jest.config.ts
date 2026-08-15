@@ -23,6 +23,10 @@ const config: Config = {
     '<rootDir>/src/app/app.ts',
     '<rootDir>/src/options/options.ts',
     '<rootDir>/src/background/service-worker.ts',
+    // Picker 許可ページ（GitHub Pages 配信）。拡張の外で動き、gsi/client + Picker という
+    // 実物の外部スクリプトに依存するため jsdom では意味のある検証ができない。
+    // URL 組み立てと戻り値の解析だけを src/lib/google/pickerUrl.ts 側でテストする
+    '<rootDir>/src/picker/',
     // デモビルド専用層（撮影用 dist-demo/ にのみ載り、dist/・dist-release/ には
     // 含まれない）。テスト自体は通常どおり実行されるが、カバレッジ集計からは除外する。
     '<rootDir>/src/demo/',

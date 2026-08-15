@@ -19,8 +19,11 @@ export function buildHydrateErrorBanner(
 
   const hint = doc.createElement('p');
   hint.className = 'view__hydrate-error-hint';
+  // 他人が作った共有シートは、Google Picker で選択するまで drive.file スコープでは読めない
+  // （403/404）。この経路には許可導線がまだ無く、再試行を何度押しても状況が変わらないため、
+  // 許可導線のある popup へ誘導する（#24 のフェーズ 2 で本経路にも導線を足す予定）。
   hint.textContent =
-    '保存済みのプロトコル・検索式が表示されていない可能性があります。再試行してください。';
+    '保存済みのプロトコル・検索式が表示されていない可能性があります。再試行してください。共有されたスプレッドシートの場合は、拡張機能のポップアップにある「スプレッドシート ID で開く」からやり直すと、Google での許可の案内が表示されます。';
   banner.appendChild(hint);
 
   if (onRetry) {

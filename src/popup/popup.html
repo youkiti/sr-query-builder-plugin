@@ -77,6 +77,9 @@
             <button type="submit" class="popup__button">開く</button>
           </form>
           <p class="popup__form-error" id="popup-open-error"></p>
+          <!-- 他人が作った共有シートを開こうとしてアクセス拒否になったときの許可導線。
+               中身は bootstrap.ts が組み立てる（既定は空・hidden） -->
+          <div class="popup__guidance" id="popup-open-guidance" hidden></div>
         </section>
       </div>
 

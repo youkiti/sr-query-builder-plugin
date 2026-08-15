@@ -22,6 +22,10 @@ dist-release/
 coverage/
 # 動画収録用デモビルド（video/REQUIREMENTS.md の PR2 で追加予定。webpack --env demo の出力）
 dist-demo/
+# Google Picker 許可ページの JS（npm run build:picker の出力）。配信ファイルの置き場である
+# hosted/ へ直接出力するが、生成物なのでコミットしない（正典は src/picker/picker.ts）
+hosted/picker.js
+hosted/picker.js.map
 
 # 環境変数（OAuth クライアント ID は個別配置）
 .env

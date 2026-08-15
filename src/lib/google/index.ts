@@ -1,4 +1,9 @@
-export { googleFetch, GoogleApiError, type GoogleApiDeps } from './types';
+export {
+  googleFetch,
+  GoogleApiError,
+  isAccessDeniedStatus,
+  type GoogleApiDeps,
+} from './types';
 export {
   createChromeAuthDeps,
   getAccessToken,
@@ -10,6 +15,14 @@ export {
   getCurrentUserEmail,
   type ProfileDeps,
 } from './identity';
+export {
+  PICKER_PAGE_URL,
+  buildPickerUrl,
+  isExtensionRedirectUri,
+  parsePickerRedirect,
+  type BuildPickerUrlOptions,
+  type PickerRedirectResult,
+} from './pickerUrl';
 export {
   createSpreadsheet,
   writeHeaderRow,

@@ -1,5 +1,6 @@
 import { SHEET_HEADERS } from '@/domain/sheetsSchema';
 import { STORAGE_KEY_GEMINI } from '@/app/services';
+import { PICKER_GRANT_MESSAGE, type PickerGrantResult } from '@/background/pickerGrant';
 import {
   STORAGE_KEY_PENDING_APP_TAB,
   createChromePopupDeps,
@@ -25,10 +26,31 @@ function buildDocument(): Document {
       <p id="popup-create-error"></p>
       <form id="popup-open-form"><input id="popup-open-id" /></form>
       <p id="popup-open-error"></p>
+      <div id="popup-open-guidance" hidden></div>
     </div>
     <button id="open-options"></button>
   `;
   return doc;
+}
+
+/** 403（未許可）を返す fetch 応答。drive.file スコープの未選択シートを模す */
+function accessDeniedResponse(status = 403): Response {
+  return {
+    ok: false,
+    status,
+    json: async () => ({ error: { message: 'The caller does not have permission' } }),
+    text: async () => JSON.stringify({ error: { message: 'The caller does not have permission' } }),
+  } as Response;
+}
+
+function guidance(doc: Document): HTMLElement {
+  return doc.getElementById('popup-open-guidance') as HTMLElement;
+}
+
+function guidanceButton(doc: Document, label: string): HTMLButtonElement | undefined {
+  return Array.from(guidance(doc).querySelectorAll('button')).find(
+    (btn) => btn.textContent === label
+  );
 }
 
 function jsonResponse(body: unknown): Response {
@@ -46,6 +68,7 @@ interface TestPopupDeps extends PopupDeps {
   signOut: jest.Mock<Promise<void>, []>;
   openAppTab: jest.Mock<void, []>;
   openOptions: jest.Mock<void, []>;
+  requestPickerGrant: jest.Mock<Promise<PickerGrantResult>, [string]>;
 }
 
 function makeDeps(
@@ -62,6 +85,7 @@ function makeDeps(
     isAuthenticated: jest.fn().mockResolvedValue(opts.authed ?? true),
     signIn: jest.fn().mockResolvedValue(true),
     signOut: jest.fn().mockResolvedValue(undefined),
+    requestPickerGrant: jest.fn().mockResolvedValue({ status: 'granted' }),
     runtime: {
       google: {
         fetch: fetchMock as unknown as typeof fetch,
@@ -250,6 +274,188 @@ describe('startPopup / ログイン済', () => {
     expect(deps.openAppTab).not.toHaveBeenCalled();
   });
 
+  test('403 のときはエラー文言ではなく Picker 許可導線を出す', async () => {
+    const doc = buildDocument();
+    const { deps, fetchMock } = makeDeps();
+    fetchMock.mockResolvedValue(accessDeniedResponse(403));
+    await startPopup(doc, deps);
+    const idInput = doc.getElementById('popup-open-id') as HTMLInputElement;
+    idInput.value = 'shared-sid';
+    (doc.getElementById('popup-open-form') as HTMLFormElement).dispatchEvent(
+      new Event('submit', { cancelable: true })
+    );
+    await flushAsync();
+    await flushAsync();
+
+    expect(guidance(doc).hidden).toBe(false);
+    expect(guidance(doc).textContent).toContain('Google での許可が必要です');
+    // 403/404 は削除済み・ID 誤りでも返るため、Picker 未選択と断定しない
+    expect(guidance(doc).textContent).toContain('削除されている');
+    // 実際に返ってきた API エラーも機械的な補足として出す（ID 打ち間違いなどに気づけるように）
+    expect(guidance(doc).textContent).toContain('HTTP 403');
+    expect(guidance(doc).textContent).toContain('The caller does not have permission');
+    expect(doc.getElementById('popup-open-error')?.textContent).toBe('');
+    expect(deps.openAppTab).not.toHaveBeenCalled();
+    // 入力値は消さない（再試行に使うため）
+    expect(idInput.value).toBe('shared-sid');
+  });
+
+  test('404 でも同じ導線を出す（drive.file では未選択が 404 になりうる）', async () => {
+    const doc = buildDocument();
+    const { deps, fetchMock } = makeDeps();
+    fetchMock.mockResolvedValue(accessDeniedResponse(404));
+    await startPopup(doc, deps);
+    (doc.getElementById('popup-open-id') as HTMLInputElement).value = 'shared-sid';
+    (doc.getElementById('popup-open-form') as HTMLFormElement).dispatchEvent(
+      new Event('submit', { cancelable: true })
+    );
+    await flushAsync();
+    await flushAsync();
+    expect(guidance(doc).hidden).toBe(false);
+  });
+
+  test('許可ボタンで背景へ依頼し、結果を表示する', async () => {
+    const doc = buildDocument();
+    const { deps, fetchMock } = makeDeps();
+    fetchMock.mockResolvedValue(accessDeniedResponse(403));
+    deps.requestPickerGrant.mockResolvedValue({ status: 'cancelled' });
+    await startPopup(doc, deps);
+    (doc.getElementById('popup-open-id') as HTMLInputElement).value = 'shared-sid';
+    (doc.getElementById('popup-open-form') as HTMLFormElement).dispatchEvent(
+      new Event('submit', { cancelable: true })
+    );
+    await flushAsync();
+    await flushAsync();
+
+    guidanceButton(doc, 'Google で許可する')?.click();
+    await flushAsync();
+
+    expect(deps.requestPickerGrant).toHaveBeenCalledWith('shared-sid');
+    expect(guidance(doc).textContent).toContain('キャンセル');
+  });
+
+  test('許可の失敗理由は導線内に表示する', async () => {
+    const doc = buildDocument();
+    const { deps, fetchMock } = makeDeps();
+    fetchMock.mockResolvedValue(accessDeniedResponse(403));
+    deps.requestPickerGrant.mockResolvedValue({ status: 'failed', message: '一致していません' });
+    await startPopup(doc, deps);
+    (doc.getElementById('popup-open-id') as HTMLInputElement).value = 'shared-sid';
+    (doc.getElementById('popup-open-form') as HTMLFormElement).dispatchEvent(
+      new Event('submit', { cancelable: true })
+    );
+    await flushAsync();
+    await flushAsync();
+
+    guidanceButton(doc, 'Google で許可する')?.click();
+    await flushAsync();
+    expect(guidance(doc).textContent).toContain('一致していません');
+  });
+
+  test('許可依頼そのものが失敗しても導線は壊れない', async () => {
+    const doc = buildDocument();
+    const { deps, fetchMock } = makeDeps();
+    fetchMock.mockResolvedValue(accessDeniedResponse(403));
+    deps.requestPickerGrant.mockRejectedValue(new Error('receiving end does not exist'));
+    await startPopup(doc, deps);
+    (doc.getElementById('popup-open-id') as HTMLInputElement).value = 'shared-sid';
+    (doc.getElementById('popup-open-form') as HTMLFormElement).dispatchEvent(
+      new Event('submit', { cancelable: true })
+    );
+    await flushAsync();
+    await flushAsync();
+
+    const grantBtn = guidanceButton(doc, 'Google で許可する');
+    grantBtn?.click();
+    await flushAsync();
+    expect(guidance(doc).textContent).toContain('receiving end does not exist');
+    expect(grantBtn?.disabled).toBe(false);
+  });
+
+  test('許可ボタンを押した後に再試行で導線を畳み直しても、遅れて届いた結果は握り潰されない', async () => {
+    const doc = buildDocument();
+    const { deps, fetchMock } = makeDeps();
+    fetchMock.mockResolvedValue(accessDeniedResponse(403));
+    let resolveGrant: (result: PickerGrantResult) => void = () => undefined;
+    deps.requestPickerGrant.mockReturnValue(
+      new Promise<PickerGrantResult>((resolve) => {
+        resolveGrant = resolve;
+      })
+    );
+    await startPopup(doc, deps);
+    (doc.getElementById('popup-open-id') as HTMLInputElement).value = 'shared-sid';
+    (doc.getElementById('popup-open-form') as HTMLFormElement).dispatchEvent(
+      new Event('submit', { cancelable: true })
+    );
+    await flushAsync();
+    await flushAsync();
+
+    // 許可ボタンを押す（この時点では requestPickerGrant はまだ解決しない）
+    guidanceButton(doc, 'Google で許可する')?.click();
+    await flushAsync();
+
+    // その状態で「再試行」を押す。openById → clearPickerGuidance が走り、
+    // 直前の status/grantBtn は文書から切り離される（まだ 403 のままなので導線は作り直される）
+    guidanceButton(doc, '再試行')?.click();
+    await flushAsync();
+    await flushAsync();
+    expect(guidance(doc).hidden).toBe(false);
+
+    // 遅れて元の許可依頼が解決する。status/grantBtn は既に切り離されているが、
+    // 結果はどこにも書かれないまま消えてはいけない
+    resolveGrant({ status: 'granted' });
+    await flushAsync();
+
+    const combinedText =
+      (guidance(doc).textContent ?? '') + (doc.getElementById('popup-open-error')?.textContent ?? '');
+    expect(combinedText).toContain('許可しました');
+  });
+
+  test('再試行が成功すればメインビューを開き、導線は消える', async () => {
+    const doc = buildDocument();
+    const { deps, fetchMock } = makeDeps();
+    fetchMock.mockResolvedValue(accessDeniedResponse(403));
+    await startPopup(doc, deps);
+    (doc.getElementById('popup-open-id') as HTMLInputElement).value = 'sid';
+    (doc.getElementById('popup-open-form') as HTMLFormElement).dispatchEvent(
+      new Event('submit', { cancelable: true })
+    );
+    await flushAsync();
+    await flushAsync();
+    expect(guidance(doc).hidden).toBe(false);
+
+    // Picker で許可された後の状態を模す
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        values: [
+          [...SHEET_HEADERS.Meta],
+          ['pid', 'タイトル', 'sid', 'did', '1.0', '2026-04-19T00:00:00.000Z', 'me@x'],
+        ],
+      })
+    );
+    guidanceButton(doc, '再試行')?.click();
+    await flushAsync();
+    await flushAsync();
+
+    expect(deps.openAppTab).toHaveBeenCalledTimes(1);
+    expect(guidance(doc).hidden).toBe(true);
+  });
+
+  test('403 以外のエラーでは導線を出さない', async () => {
+    const doc = buildDocument();
+    const { deps, fetchMock } = makeDeps();
+    fetchMock.mockResolvedValue(accessDeniedResponse(500));
+    await startPopup(doc, deps);
+    (doc.getElementById('popup-open-id') as HTMLInputElement).value = 'sid';
+    (doc.getElementById('popup-open-form') as HTMLFormElement).dispatchEvent(
+      new Event('submit', { cancelable: true })
+    );
+    await flushAsync();
+    await flushAsync();
+    expect(guidance(doc).hidden).toBe(true);
+    expect(doc.getElementById('popup-open-error')?.textContent).toContain('500');
+  });
+
   test('open-options をクリックすると openOptions が呼ばれる', async () => {
     const doc = buildDocument();
     const { deps } = makeDeps();
@@ -393,6 +599,28 @@ describe('startPopup / ログイン済', () => {
     ).not.toThrow();
     await flushAsync();
   });
+
+  test('許可導線の置き場が無い DOM では、理由をエラー欄に出して終わる', async () => {
+    const doc = document.implementation.createHTMLDocument('partial');
+    doc.body.innerHTML = `
+      <p id="popup-status"></p>
+      <section id="popup-auth" hidden></section>
+      <div id="popup-projects">
+        <form id="popup-open-form"><input id="popup-open-id" /></form>
+        <p id="popup-open-error"></p>
+      </div>
+    `;
+    const { deps, fetchMock } = makeDeps();
+    fetchMock.mockResolvedValue(accessDeniedResponse(403));
+    await startPopup(doc, deps);
+    (doc.getElementById('popup-open-id') as HTMLInputElement).value = 'sid';
+    (doc.getElementById('popup-open-form') as HTMLFormElement).dispatchEvent(
+      new Event('submit', { cancelable: true })
+    );
+    await flushAsync();
+    await flushAsync();
+    expect(doc.getElementById('popup-open-error')?.textContent).toContain('許可');
+  });
 });
 
 describe('createChromePopupDeps', () => {
@@ -433,6 +661,33 @@ describe('createChromePopupDeps', () => {
     expect(getAuthToken).toHaveBeenLastCalledWith({ interactive: false }, expect.any(Function));
     expect(await deps.signIn()).toBe(true);
     expect(getAuthToken).toHaveBeenLastCalledWith({ interactive: true }, expect.any(Function));
+  });
+
+  test('requestPickerGrant は背景 service worker へメッセージを投げる', async () => {
+    const sendMessage = jest.fn().mockResolvedValue({ status: 'granted' });
+    (globalThis as unknown as { chrome: typeof chrome }).chrome = {
+      tabs: { create: jest.fn() },
+      runtime: { getURL: (p: string) => p, sendMessage, lastError: undefined },
+      identity: {
+        getAuthToken: (_o: unknown, cb: (t: string) => void) => cb('TOK'),
+        removeCachedAuthToken: (_o: unknown, cb: () => void) => cb(),
+        getProfileUserInfo: (_o: unknown, cb: (i: { email: string; id: string }) => void) =>
+          cb({ email: 'me@x', id: 'u' }),
+      },
+      storage: {
+        local: {
+          get: jest.fn().mockResolvedValue({}),
+          set: jest.fn().mockResolvedValue(undefined),
+          remove: jest.fn().mockResolvedValue(undefined),
+        },
+      },
+    } as unknown as typeof chrome;
+    const deps = createChromePopupDeps();
+    await expect(deps.requestPickerGrant('sid')).resolves.toEqual({ status: 'granted' });
+    expect(sendMessage).toHaveBeenCalledWith({
+      type: PICKER_GRANT_MESSAGE,
+      spreadsheetId: 'sid',
+    });
   });
 
   test('signOut はキャッシュトークンを除去し、storage.local から currentProject / recentProjects を削除する', async () => {

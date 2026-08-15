@@ -1,0 +1,102 @@
+<!doctype html>
+<!-- Google Picker 許可ページ（GitHub Pages 配信）。正典はこのファイル（master の hosted/）。
+     拡張機能が chrome.identity.launchWebAuthFlow でこのページを開き、ユーザーが選択した
+     スプレッドシートの ID をリダイレクト（chromiumapp.org）で受け取る。ページの挙動は
+     src/picker/picker.ts（ビルド成果物 picker.js。hosted/ には commit しない）。
+     ja / en は両方を持ち、表示は lang.js + CSS が片方だけに絞る（併記しない）。
+     version: 2026-08-15 -->
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- 拡張機能から開かれる作業用ページなので検索結果には載せない -->
+    <meta name="robots" content="noindex" />
+    <title data-en="Grant access to a spreadsheet — SR Query Builder Plugin">
+      スプレッドシートへのアクセス許可 — SR Query Builder Plugin
+    </title>
+    <meta
+      name="description"
+      content="共有スプレッドシートを SR Query Builder Plugin から開くための、Google ピッカーによるアクセス許可ページ。"
+      data-en-content="Google Picker page that grants SR Query Builder Plugin access to a shared spreadsheet."
+    />
+    <link rel="stylesheet" href="style.css" />
+    <!-- 表示言語（ja / en）の解決と切替。初期描画前に確定させるため head で同期読み込みする -->
+    <script src="lang.js"></script>
+    <!-- Google Identity Services（トークン取得）と Google Picker。async のため picker.js 側で出現を待つ -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="https://apis.google.com/js/api.js" async defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container">
+        <a class="logo" href="index.html">SR Query Builder Plugin</a>
+        <!-- 言語切替ボタンは lang.js が組み立てる（JS 無効時は空のまま = 両言語が並ぶ） -->
+        <div class="lang-switch" data-lang-switch></div>
+      </div>
+    </header>
+
+    <main class="picker-page">
+      <div class="container">
+        <h1>
+          <span class="ja" lang="ja">スプレッドシートへのアクセス許可</span>
+          <span class="en" lang="en">Grant access to a spreadsheet</span>
+        </h1>
+
+        <div class="picker-card">
+          <p>
+            <span class="ja" lang="ja">
+              この拡張機能は、あなたが選んだファイルだけにアクセスします（Google
+              ドライブ全体は読みません）。他の人が作った共有スプレッドシートを開くには、下のボタンから
+              1 回だけ、そのファイルを選んで許可してください。
+            </span>
+            <span class="en" lang="en">
+              This extension can only access the files you pick — it never reads your whole Google
+              Drive. To open a spreadsheet created by someone else, select that file once using the
+              button below.
+            </span>
+          </p>
+          <p class="picker-hint">
+            <span class="ja" lang="ja">
+              ファイル選択画面に目的のスプレッドシートが出てこない場合は、まず Google
+              ドライブ側でそのファイルがあなたのアカウントに共有されているかを確認してください。共有されている場合は「共有アイテム」タブも確認し、それでも見つからないときは「すべてのスプレッドシートから選ぶ」をお試しください。
+            </span>
+            <span class="en" lang="en">
+              If the spreadsheet does not appear in the picker, first check that the file is shared
+              with your account in Google Drive. Also look at the “Shared with me” tab; if it is
+              still missing, try “Choose from all spreadsheets”.
+            </span>
+          </p>
+
+          <div class="picker-actions">
+            <button id="startBtn" type="button" class="picker-button">
+              <span class="ja" lang="ja">Google で許可する</span>
+              <span class="en" lang="en">Grant access with Google</span>
+            </button>
+            <a id="allSheetsLink" href="#" class="picker-link">
+              <span class="ja" lang="ja">すべてのスプレッドシートから選ぶ</span>
+              <span class="en" lang="en">Choose from all spreadsheets</span>
+            </a>
+          </div>
+
+          <p id="status" class="picker-status" role="status"></p>
+        </div>
+
+        <p class="picker-hint">
+          <span class="ja" lang="ja">
+            許可の内容は
+            <a href="https://myaccount.google.com/permissions">Google アカウントの設定</a>
+            からいつでも取り消せます。詳しくは<a href="privacy-policy.html">プライバシーポリシー</a>をご覧ください。
+          </span>
+          <span class="en" lang="en">
+            You can revoke this access at any time from your
+            <a href="https://myaccount.google.com/permissions">Google Account settings</a>. See the
+            <a href="privacy-policy.html">privacy policy</a> for details.
+          </span>
+        </p>
+      </div>
+    </main>
+
+    <!-- src/picker/picker.ts のビルド成果物（npm run build:picker が hosted/ へ出力する） -->
+    <script src="picker.js"></script>
+  </body>
+</html>

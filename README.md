@@ -70,6 +70,19 @@ npm run lint && npm run lint:css && npm run typecheck && npm test && npm run tes
 3. `npm run dev` で `dist/` を生成
 4. Chrome の `chrome://extensions` で「デベロッパーモード」を ON にし、「パッケージ化されていない拡張機能を読み込む」で `dist/` を選択
 
+### Google Picker（共有スプレッドシートを開く導線）の設定
+
+OAuth スコープは `drive.file` の 1 本のみで、Drive 全体は読みません。その代わり、**他人が作って共有したスプレッドシートは、利用者が Google ピッカーでそのファイルを選択するまで開けません**（403/404 になる）。この選択画面は Manifest V3 の CSP により拡張内に置けないため、GitHub Pages 側の [hosted/picker.html](hosted/picker.html) でホストし、拡張は `chrome.identity.launchWebAuthFlow` でそれを開いて選択結果を受け取ります（実装は [src/picker/picker.ts](src/picker/picker.ts) と [src/lib/google/pickerUrl.ts](src/lib/google/pickerUrl.ts)）。
+
+この導線を動かすには、**拡張用 OAuth クライアントと同一の GCP プロジェクト**で以下を用意します（`drive.file` の付与はプロジェクト単位のため、別プロジェクトのクライアントで選択させても拡張側からは読めません）。
+
+1. Google Picker API（`picker.googleapis.com`）を有効化する（`photospicker.googleapis.com` は別物）
+2. API キーを発行し、**発行と同時に**「HTTP リファラー制限（`https://youkiti.github.io/*` と `http://localhost:8080/*`）」「API 制限（Picker API のみ）」を設定する
+3. OAuth クライアント（アプリケーションタイプ: **ウェブアプリケーション**）を作成し、承認済み JavaScript 生成元に `https://youkiti.github.io` と `http://localhost:8080` を登録する
+4. 上記 2 つと GCP プロジェクト番号を `.env`（`PICKER_API_KEY` / `PICKER_WEB_CLIENT_ID` / `GCP_PROJECT_NUMBER`）と GitHub の repository **variables** に設定する
+
+3 値はいずれも公開配信される JS に埋め込まれるため構造上秘匿できません（secrets ではなく variables に置くのはこのため）。API キーはリファラー制限と API 制限で守ります。ローカルでの確認手順とデプロイの仕組みは [hosted/README.md](hosted/README.md) を参照。
+
 ## ライセンス
 
 - 本拡張: [MIT](LICENSE)

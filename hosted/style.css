@@ -349,6 +349,7 @@ body {
   display: inline-block;
 }
 
+.document-page h3,
 .help-page h3 {
   font-size: 1rem;
   margin: 24px 0 8px;
@@ -511,6 +512,83 @@ th {
 .copyright {
   color: rgb(255 255 255 / 60%);
   font-size: 0.875rem;
+}
+
+/* Picker 許可ページ（picker.html）。拡張機能が launchWebAuthFlow で開く小さめのウィンドウで
+   表示されるため、本文ページ（.document-page）より横幅を詰めてカード 1 枚に収める。
+   .btn-primary / .btn-secondary はヒーローの青背景に載せる前提（白地に白ボタン）なので流用しない */
+.picker-page {
+  padding: 40px 0;
+  flex: 1;
+}
+
+.picker-page h1 {
+  font-size: 1.6rem;
+  margin-bottom: 20px;
+}
+
+.picker-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 28px;
+}
+
+.picker-card p {
+  margin-bottom: 16px;
+}
+
+.picker-hint {
+  color: var(--text-secondary);
+  font-size: 0.9375rem;
+}
+
+.picker-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 24px;
+}
+
+/* 白地に載せるので背景は primary（白文字とのコントラスト比 5.36:1 = WCAG AA 合格）。
+   トーンを下げたくなっても primary-light（3.0:1 未満）には落とさないこと */
+.picker-button {
+  padding: 12px 24px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--primary);
+  color: #fff;
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.picker-button:hover:not(:disabled) {
+  background: var(--primary-dark);
+}
+
+.picker-button:disabled {
+  /* 白文字とのコントラスト比 5.68:1。opacity で薄めると内側の文字色が回復できなくなる */
+  background: var(--text-secondary);
+  cursor: not-allowed;
+}
+
+.picker-link {
+  color: var(--primary);
+  font-size: 0.9375rem;
+  text-decoration: underline;
+}
+
+/* JS が hidden 属性で導線を畳むため、display 指定が hidden を上書きしないようにする */
+.picker-link[hidden] {
+  display: none;
+}
+
+.picker-status {
+  margin: 20px 0 0;
+  min-height: 1.8em;
+  white-space: pre-wrap;
 }
 
 @media (width <= 640px) {

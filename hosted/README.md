@@ -1,6 +1,8 @@
 # hosted/ — GitHub Pages 配信ファイル（公開ページ）
 
-GitHub Pages で配信する、ランディング・使い方ガイド・プライバシーポリシー・利用規約 4 ページの正典置き場。拡張本体とのメッセージプロトコル等の結合は無く、拡張側からは通常の外部リンク（`target="_blank"`）で新規タブに開くだけ。
+GitHub Pages で配信する、ランディング・使い方ガイド・プライバシーポリシー・利用規約 4 ページと、**Google Picker 許可ページ**（`picker.html`）の正典置き場。
+
+前者 4 ページは読み物で、拡張本体との結合は無い（拡張側からは通常の外部リンクで開くだけ）。**`picker.html` だけは拡張機能と結合している**: 拡張が `chrome.identity.launchWebAuthFlow` でこのページを開き、ユーザーが選んだスプレッドシートの ID をリダイレクトで受け取る。詳細は下記「Google Picker 許可ページ（picker.html）」を参照。
 
 **デプロイは自動**（`master` の `hosted/**` が変わると [.github/workflows/deploy-pages.yml](../.github/workflows/deploy-pages.yml) が公開する）。手動のコピー作業は不要になった。詳細は下記「デプロイ（GitHub Actions による自動デプロイ）」を参照。
 
@@ -12,7 +14,9 @@ GitHub Pages で配信する、ランディング・使い方ガイド・プラ�
 | [help.html](help.html) | 使い方ガイド（ワークフローレベル。トラブルシューティング・FAQ を含む） | `https://youkiti.github.io/sr-query-builder-plugin/help.html` |
 | [privacy-policy.html](privacy-policy.html) | プライバシーポリシー（`docs/store/privacy-policy.md` の転記＋英訳。ストア審査必須） | `https://youkiti.github.io/sr-query-builder-plugin/privacy-policy.html` |
 | [terms-of-service.html](terms-of-service.html) | 利用規約 | `https://youkiti.github.io/sr-query-builder-plugin/terms-of-service.html` |
-| [style.css](style.css) | 4 ページ共通スタイル（青基調。`src/styles/tokens.css` の `--color-primary: #2a63d6` に準拠） | `https://youkiti.github.io/sr-query-builder-plugin/style.css` |
+| [picker.html](picker.html) | Google Picker 許可ページ（共有スプレッドシートへのアクセス許可。拡張から開かれる） | `https://youkiti.github.io/sr-query-builder-plugin/picker.html` |
+| `picker.js` | `picker.html` の挙動。**正典は [../src/picker/picker.ts](../src/picker/picker.ts)** で、ここには `npm run build:picker` の出力が置かれる（`.gitignore` 済み・コミットしない） | `https://youkiti.github.io/sr-query-builder-plugin/picker.js` |
+| [style.css](style.css) | 5 ページ共通スタイル（青基調。`src/styles/tokens.css` の `--color-primary: #2a63d6` に準拠） | `https://youkiti.github.io/sr-query-builder-plugin/style.css` |
 | [lang.js](lang.js) | 表示言語（ja / en）の解決・切替 | `https://youkiti.github.io/sr-query-builder-plugin/lang.js` |
 | [screenshots/](screenshots/) | index.html が参照するスクリーンショット 5 枚（`s1-protocol.png` 〜 `s5-export.png`） | `https://youkiti.github.io/sr-query-builder-plugin/screenshots/*.png` |
 | [README.md](README.md) | 本ファイル（開発者向け）。**配信セットからは除外する**（workflow が `_site/README.md` を削除する） | 配信しない |
@@ -26,6 +30,36 @@ GitHub Pages で配信する、ランディング・使い方ガイド・プラ�
 - 言語の決定順は **`?lang=` → `localStorage`（キー: `sr-query-builder-plugin.lang`） → ブラウザの言語設定 → `ja`**
 - ヘッダー（index はヒーロー）の `[data-lang-switch]` に `lang.js` が切替ボタンを組み立てる。JS が無効な環境では `data-lang` が付かず、従来どおり両言語が並ぶ（degrade）
 - `lang.js` は `<head>` から同期読み込みする（初回描画より前に `data-lang` を確定させ、切替のちらつきを避けるため）
+
+## Google Picker 許可ページ（picker.html）
+
+OAuth スコープを `drive.file` 1 本に絞っている副作用で、**他人が作った共有スプレッドシートは、ユーザーが Google Picker で明示的に選択するまでアプリから読めない**（403/404 になる）。MV3 の CSP（`script-src 'self'`）により拡張ページ内に Picker（`apis.google.com` のリモートスクリプト）を埋め込めないため、Picker はここ（GitHub Pages）でホストする。
+
+- 拡張機能が `chrome.identity.launchWebAuthFlow` で `picker.html#redirect=...&fileId=...&email=...` を開く（パラメータはクエリではなく**フラグメント**。メールアドレスを配信サーバーのログに残さないため）
+- ユーザーがシートを選ぶと `https://<拡張ID>.chromiumapp.org/picker#picked=<fileId>`（キャンセルは `#cancelled=1`）へ遷移し、拡張側がリダイレクトを捕捉する
+- URL の組み立て・戻り値の解析・戻り先の検証（オープンリダイレクト防止）は拡張と共有の [../src/lib/google/pickerUrl.ts](../src/lib/google/pickerUrl.ts)
+
+**`picker.js` はビルド成果物**（`.gitignore` 済み）。正典は [../src/picker/picker.ts](../src/picker/picker.ts) で、`npm run build:picker` が `hosted/picker.js` へ出力する。**このディレクトリの他のファイルと違い、`picker.js` を手で編集しても次のビルドで消える。**
+
+ビルドには次の 3 つの環境変数が要る（`.env` / GitHub の repository **variables**。公開配信される JS に埋め込まれるため構造上秘匿できず、secrets には置かない）:
+
+| 変数 | 用途 |
+|---|---|
+| `PICKER_API_KEY` | Picker API 用の API キー。HTTP リファラー制限（`https://youkiti.github.io/*` / `http://localhost:8080/*`）と API 制限（Picker API のみ）を**発行時に同時指定**する |
+| `PICKER_WEB_CLIENT_ID` | Picker ページ用の OAuth クライアント ID（ウェブアプリケーション型） |
+| `GCP_PROJECT_NUMBER` | `setAppId` に渡す GCP プロジェクト番号 |
+
+**この Web OAuth クライアントは、拡張機能の OAuth クライアントと同一の GCP プロジェクトに属していなければならない。** `drive.file` の付与はプロジェクト（アプリ）単位なので、別プロジェクトのクライアントで選択させても拡張側のトークンでは読めない。
+
+ローカルで動作確認するとき:
+
+```bash
+npm run dev:picker                                  # hosted/picker.js を開発モードでビルド
+python -m http.server 8080 --directory hosted       # http://localhost:8080/picker.html
+# .env に PICKER_PAGE_URL=http://localhost:8080/picker.html を設定してから npm run dev
+```
+
+`PICKER_PAGE_URL` の上書きは **dev ビルドでのみ有効**で、本番ビルドは値を無視して公開 URL を使う（localhost をストア提出物へ焼き込む事故を構造的に防ぐため。[../webpack.config.js](../webpack.config.js) 参照）。
 
 ## 更新時に守ること
 
@@ -49,9 +83,19 @@ GitHub Pages で配信する、ランディング・使い方ガイド・プラ�
 
 workflow がやること:
 
-1. `hosted/` を `_site/` へコピーし、開発者向けの `README.md` と `screenshots/.gitkeep` を除く
-2. 4 ページ + `style.css` / `lang.js` + スクリーンショット 5 枚がそろっているか確認する（欠けていたら失敗させる）
-3. `actions/upload-pages-artifact` → `actions/deploy-pages` で公開する
+1. `npm ci` → repository variables の 3 値がそろっているか確認する（欠けていれば `::error::` を出して即停止する。次のビルドステップまで進ませない）
+2. `npm run build:picker` で `hosted/picker.js` を生成する（repository variables の 3 値を注入）
+3. `hosted/` を `_site/` へコピーし、開発者向けの `README.md` と `screenshots/.gitkeep` を除く
+4. 5 ページ + `style.css` / `lang.js` / `picker.js` + スクリーンショット 5 枚がそろっているか確認する（欠けていたら失敗させる）
+5. `actions/upload-pages-artifact` → `actions/deploy-pages` で公開する
+
+発火条件は `hosted/**` のほか、`picker.js` のビルド入力（`src/picker/**` / `src/lib/google/pickerUrl.ts` / `src/types/google-picker.d.ts` / `webpack.picker.config.js` / `package.json` / `package-lock.json`）。**`PICKER_API_KEY` / `PICKER_WEB_CLIENT_ID` / `GCP_PROJECT_NUMBER` が repository variables に無いと、上記 1. の確認ステップでデプロイが止まる**（`master` へのマージ自体は妨げない。CI の `verify` / `e2e` ジョブもこの workflow とは別物なので、PR の CI は green のまま通る。この 3 変数を登録するまでデプロイだけが失敗し続ける点に注意）。**変数の登録は `master` へのマージの前提**であり、次の手順で先に登録しておくこと:
+
+1. 3 つの値（Picker API 用 API キー・Picker ページ用 OAuth クライアント ID・GCP プロジェクト番号）を Google Cloud Console で発行する。詳細は上記「Google Picker 許可ページ（picker.html）」節の表を参照（API キーは HTTP リファラー制限 + API 制限を発行時に同時指定すること）
+2. GitHub 上でリポジトリ変数として登録する。方法はどちらでもよい:
+   - `gh` CLI: `gh variable set PICKER_API_KEY --body "<値>"`（`PICKER_WEB_CLIENT_ID` / `GCP_PROJECT_NUMBER` も同様に 1 つずつ実行）
+   - Web UI: このリポジトリの **Settings → Secrets and variables → Actions → Variables** タブ → `New repository variable` から 3 つ登録する
+3. `gh variable list` で 3 つとも登録済みであることを確認してから `hosted/**` を含む PR を `master` へマージする（登録済みならこの workflow の 1. のステップは即通過する）
 
 **通常の更新手順**: 上記「更新時に守ること」を反映して `hosted/` を編集し、PR を `master` へマージする。以上。
 内容を変えずに再デプロイしたいときは Actions タブから `deploy-pages` を `workflow_dispatch` で手動実行する。
@@ -88,6 +132,7 @@ PC 幅とスマホ幅の両方で確認する:
 
 - 4 ページ間の相互リンク（ヘッダー nav / フッター / 本文内リンク）がすべて正しい URL を指しているか
 - `index.html` のスクリーンショット 5 枚が表示されるか（リンク切れ・404 が無いか）
+- `picker.html` を**直接**開くと「拡張機能から開いてください」と表示され、許可ボタンが押せない状態になっているか（`redirect` の検証が効いていることの確認）
 - 言語切替が機能するか: ヘッダー（index はヒーロー）の切替ボタン／URL に `?lang=en` を付けて開いた場合／言語を切り替えた状態で別ページへ遷移したときに選択が保持されるか（`localStorage`）
 
 ## ストアダッシュボードへの反映（実施済み）

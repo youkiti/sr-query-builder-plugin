@@ -143,3 +143,42 @@
   text-decoration: underline;
   background: transparent;
 }
+
+/* 共有スプレッドシートのアクセス許可導線（bootstrap.ts が中身を組み立てる）。
+   drive.file スコープでは、他人が作ったシートは Google Picker で選ぶまで開けないため、
+   403/404 のときにエラー文言の代わりにこのブロックを出す */
+.popup__guidance {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  /* 警告であることは左ボーダーで示す。--color-warning を淡い背景の文字色に使うと
+     コントラスト比 3.02:1 で AA を割るため、文字色は既定の --color-text に委ねる */
+  border-left: 3px solid var(--color-warning);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-muted);
+  font-size: var(--font-size-sm);
+}
+
+.popup__guidance p {
+  margin: 0;
+}
+
+.popup__guidance-hint {
+  color: var(--color-text-muted);
+}
+
+/* API から返った生のエラーメッセージ（formatError(err)）を機械的な補足として出す行。
+   等幅フォントにして「人が書いた案内文」と見た目で区別する。文字色は --color-text-muted
+   のままにする（--color-bg-muted との組で 4.93:1。CLAUDE.md の実測値を踏襲） */
+.popup__guidance-detail {
+  color: var(--color-text-muted);
+  font-family: var(--font-family-mono);
+  word-break: break-all;
+}
+
+.popup__guidance-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
