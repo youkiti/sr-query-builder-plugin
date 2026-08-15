@@ -77,7 +77,12 @@ Chrome ウェブストアの掲載に必要な画像。スクリーンショッ�
 
 ## 既知のリスク・要検証
 
-`oauth2.scopes` を `drive.file` 1 本へ縮小したことに伴い、本フェーズでは未解決で、実機確認または後続フェーズで対応が必要な事項が 2 点ある。
+`oauth2.scopes` を `drive.file` 1 本へ縮小したことに伴い、本フェーズで洗い出した事項は 2 点あった。うち 1 点は解消済み、残り 1 点は未検証のまま残っている（**未解決は 1 点**）。
 
-1. **既存プロジェクトへの影響（要実機検証）**: 旧スコープ（`spreadsheets`）を持った状態で作成された既存のスプレッドシート（アルファ配布中のテスターが作成済みのもの）に対し、`drive.file` のファイル単位のアクセス付与が引き継がれるかは未検証。引き継がれない場合、既存プロジェクトを開くと 403 になり得るため、実機（実 Google 認証）での確認が必要。403 になる場合は移行導線（下記の Picker、またはプロジェクト再作成）が要る。
-2. **「スプレッドシート ID から開く」の制約**: `drive.file` は「本拡張が作成したファイル + 利用者が Picker で明示的に選択したファイル」に限られるため、popup の「スプレッドシート ID から開く」導線（[src/popup/bootstrap.ts](../../src/popup/bootstrap.ts)）は、他人が作成した共有スプレッドシートに対しては 403 になる。後続フェーズで Google Picker を移植して解消する予定（同シリーズの sr-data-extraction-plugin が `hosted/picker.html` を GitHub Pages に置き `externally_connectable` で拡張と通信する方式で実装済み。これを移植する）。
+1. **既存プロジェクトへの影響（要実機検証・未解決）**: 旧スコープ（`spreadsheets`）を持った状態で作成された既存のスプレッドシート（アルファ配布中のテスターが作成済みのもの）に対し、`drive.file` のファイル単位のアクセス付与が引き継がれるかは未検証。引き継がれない場合、既存プロジェクトを開くと 403 になり得るため、実機（実 Google 認証）での確認が必要。**Picker が実装済みなので（下記「解消済み」参照）、403 になった場合の移行導線は既にある**（プロジェクト再作成に頼らず、Picker 経由でアクセス許可を取り直せる）。ただし**許可導線が出るのは「スプレッドシート ID から開く」フォームからの経路だけ**で、履歴（最近のプロジェクト）のクリックから 403 になった場合は出ない（`showPickerGuidance` は [src/popup/bootstrap.ts](../../src/popup/bootstrap.ts) の `openById` からのみ呼ばれる）。この経路で詰まったときは、同じ ID をフォームに貼り直してもらう必要がある。実機検証ではこの点も併せて確認すること。
+
+### 解消済み
+
+- ✅ **「スプレッドシート ID から開く」の制約（issue #24 / PR #85 で解消）**: `drive.file` は「本拡張が作成したファイル + 利用者が Picker で明示的に選択したファイル」に限られるため、popup の「スプレッドシート ID から開く」導線（[src/popup/bootstrap.ts](../../src/popup/bootstrap.ts)）は、他人が作成した共有スプレッドシートに対しては 403/404 になりうる。PR #85（2026-08-15 に `master` へマージ済み）で Picker 許可フローを実装し解消した。
+  - **当初の issue #24 が想定していた方式（`externally_connectable` でホストページと拡張がメッセージ通信する）とは異なる方式が採られている**点に注意: 実際には、拡張機能が `chrome.identity.launchWebAuthFlow`（[src/background/service-worker.ts](../../src/background/service-worker.ts) / [src/background/pickerGrant.ts](../../src/background/pickerGrant.ts)）で GitHub Pages 上の Picker 許可ページ（[hosted/picker.html](../../hosted/picker.html) / [src/picker/picker.ts](../../src/picker/picker.ts)。公開 URL: <https://youkiti.github.io/sr-query-builder-plugin/picker.html>）を開き、利用者がファイルを選択すると `https://<拡張ID>.chromiumapp.org/picker#picked=<ファイルID>` へのリダイレクトでファイル ID だけを受け取る。`externally_connectable` は設定していない（メッセージパッシングではなくリダイレクトで結果を受け渡すため不要）。URL 組み立てとリダイレクト解析は [src/lib/google/pickerUrl.ts](../../src/lib/google/pickerUrl.ts)。
+  - **注**: PR #85 は `master` へマージ済みで `deploy-pages` によりページも公開済みだが、Chrome ウェブストアへの提出はまだ行っていない（現在配信中のバージョンにはまだ含まれない）。
