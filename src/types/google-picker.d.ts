@@ -90,6 +90,12 @@ declare namespace google.accounts.oauth2 {
 
   function initTokenClient(config: TokenClientConfig): TokenClient;
   function revoke(token: string, callback?: () => void): void;
+  /**
+   * granular consent（Google が個別スコープごとに許可/拒否させる同意画面）では、
+   * ユーザーが要求したスコープの一部だけを許可できる。`TokenResponse.scope` を自前で
+   * 文字列比較する代わりに、公式 API で「要求した全スコープが付与されたか」を確認する。
+   */
+  function hasGrantedAllScopes(tokenResponse: TokenResponse, ...scopes: string[]): boolean;
 }
 
 declare const gapi: { load(api: string, callback: () => void): void };

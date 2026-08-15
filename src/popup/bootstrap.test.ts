@@ -291,6 +291,9 @@ describe('startPopup / ログイン済', () => {
     expect(guidance(doc).textContent).toContain('Google での許可が必要です');
     // 403/404 は削除済み・ID 誤りでも返るため、Picker 未選択と断定しない
     expect(guidance(doc).textContent).toContain('削除されている');
+    // 実際に返ってきた API エラーも機械的な補足として出す（ID 打ち間違いなどに気づけるように）
+    expect(guidance(doc).textContent).toContain('HTTP 403');
+    expect(guidance(doc).textContent).toContain('The caller does not have permission');
     expect(doc.getElementById('popup-open-error')?.textContent).toBe('');
     expect(deps.openAppTab).not.toHaveBeenCalled();
     // 入力値は消さない（再試行に使うため）
@@ -367,6 +370,45 @@ describe('startPopup / ログイン済', () => {
     await flushAsync();
     expect(guidance(doc).textContent).toContain('receiving end does not exist');
     expect(grantBtn?.disabled).toBe(false);
+  });
+
+  test('許可ボタンを押した後に再試行で導線を畳み直しても、遅れて届いた結果は握り潰されない', async () => {
+    const doc = buildDocument();
+    const { deps, fetchMock } = makeDeps();
+    fetchMock.mockResolvedValue(accessDeniedResponse(403));
+    let resolveGrant: (result: PickerGrantResult) => void = () => undefined;
+    deps.requestPickerGrant.mockReturnValue(
+      new Promise<PickerGrantResult>((resolve) => {
+        resolveGrant = resolve;
+      })
+    );
+    await startPopup(doc, deps);
+    (doc.getElementById('popup-open-id') as HTMLInputElement).value = 'shared-sid';
+    (doc.getElementById('popup-open-form') as HTMLFormElement).dispatchEvent(
+      new Event('submit', { cancelable: true })
+    );
+    await flushAsync();
+    await flushAsync();
+
+    // 許可ボタンを押す（この時点では requestPickerGrant はまだ解決しない）
+    guidanceButton(doc, 'Google で許可する')?.click();
+    await flushAsync();
+
+    // その状態で「再試行」を押す。openById → clearPickerGuidance が走り、
+    // 直前の status/grantBtn は文書から切り離される（まだ 403 のままなので導線は作り直される）
+    guidanceButton(doc, '再試行')?.click();
+    await flushAsync();
+    await flushAsync();
+    expect(guidance(doc).hidden).toBe(false);
+
+    // 遅れて元の許可依頼が解決する。status/grantBtn は既に切り離されているが、
+    // 結果はどこにも書かれないまま消えてはいけない
+    resolveGrant({ status: 'granted' });
+    await flushAsync();
+
+    const combinedText =
+      (guidance(doc).textContent ?? '') + (doc.getElementById('popup-open-error')?.textContent ?? '');
+    expect(combinedText).toContain('許可しました');
   });
 
   test('再試行が成功すればメインビューを開き、導線は消える', async () => {

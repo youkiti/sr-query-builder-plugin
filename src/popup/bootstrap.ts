@@ -54,8 +54,9 @@ export interface PopupDeps {
   signOut: () => Promise<void>;
   /**
    * Google Picker による共有スプレッドシートのアクセス許可を背景 service worker に依頼する。
-   * popup は許可ウィンドウが開いた時点で閉じる（フォーカスを失うため）ので、この Promise が
-   * 解決しないまま popup ごと消えるのが通常の経路。処理そのものは背景側で完結する。
+   * popup.html は通常タブとして開かれる（フォーカスを失っても閉じない）ため、この Promise は
+   * 通常どおり解決する。処理の本体（プロジェクト登録・メインビュー起動）は背景側で完結するので、
+   * この Promise はあくまで popup タブ側の表示更新用。
    */
   requestPickerGrant: (spreadsheetId: string) => Promise<PickerGrantResult>;
 }
@@ -341,7 +342,7 @@ async function openById(
     await openAppOrRedirect(doc, deps);
   } catch (err) {
     if (err instanceof GoogleApiError && isAccessDeniedStatus(err.status)) {
-      showPickerGuidance(doc, deps, spreadsheetId, idInput);
+      showPickerGuidance(doc, deps, spreadsheetId, idInput, err);
       return;
     }
     if (error) error.textContent = formatError(err);
@@ -361,12 +362,15 @@ function clearPickerGuidance(doc: Document): void {
  * 文言で 403/404 を「Picker 未選択」と断定しないこと。同じステータスは「シートが削除された」
  * 「ID が誤っている」「そもそも自分のアカウントに共有されていない」でも返るため、許可しても
  * 開けなかったときにユーザーが次に何を疑えばよいか分からなくなる。
+ * 代わりに、実際に返ってきた API エラー（`err`）を機械的な補足情報として別行に出す。
+ * ID の打ち間違い（多くは 404）はこの行で気づける。
  */
 function showPickerGuidance(
   doc: Document,
   deps: PopupDeps,
   spreadsheetId: string,
-  idInput: HTMLInputElement
+  idInput: HTMLInputElement,
+  err: unknown
 ): void {
   const container = doc.getElementById('popup-open-guidance');
   const error = doc.getElementById('popup-open-error');
@@ -392,6 +396,11 @@ function showPickerGuidance(
     '許可しても開けない場合は、シートが削除されている・ID が間違っている・自分のアカウントに共有されていない、のいずれかの可能性があります。';
   container.appendChild(hint);
 
+  const detail = doc.createElement('p');
+  detail.className = 'popup__guidance-detail';
+  detail.textContent = `エラー詳細: ${formatError(err)}`;
+  container.appendChild(detail);
+
   const status = doc.createElement('p');
   status.className = 'popup__guidance-hint';
   status.setAttribute('role', 'status');
@@ -410,14 +419,10 @@ function showPickerGuidance(
     void deps
       .requestPickerGrant(spreadsheetId)
       .then((result) => {
-        // ここまで来られるのは popup が閉じずに残っていた場合だけ。
-        // 閉じていれば背景側がプロジェクト登録とメインビュー起動まで済ませている。
-        grantBtn.disabled = false;
-        status.textContent = describeGrantResult(result);
+        writeGrantOutcome(doc, status, grantBtn, describeGrantResult(result));
       })
       .catch((err: unknown) => {
-        grantBtn.disabled = false;
-        status.textContent = `許可に失敗しました: ${formatError(err)}`;
+        writeGrantOutcome(doc, status, grantBtn, `許可に失敗しました: ${formatError(err)}`);
       });
   });
   actions.appendChild(grantBtn);
@@ -436,6 +441,37 @@ function showPickerGuidance(
   actions.appendChild(retryBtn);
 
   container.appendChild(actions);
+}
+
+/**
+ * 許可依頼（`requestPickerGrant`）の結果をユーザーへ届ける。
+ *
+ * 「再試行」ボタン経由で `openById` → `clearPickerGuidance`（`container.innerHTML = ''`）が
+ * 走ると、ここで受け取った `status` / `grantBtn` は既に文書から外れている可能性がある
+ * （このハンドラは popup タブが開いたままなら通常どおり解決するが、その間にユーザーが
+ * 「再試行」を押して導線を畳み直しているケース）。その場合は現在表示中の導線コンテナを
+ * 取得し直し、そこにまだ status 要素が残っていればそちらへ、無ければ `#popup-open-error` へ
+ * フォールバックして結果を伝える。何も起きないまま結果が消えることは避ける。
+ */
+function writeGrantOutcome(
+  doc: Document,
+  status: HTMLElement,
+  grantBtn: HTMLButtonElement,
+  message: string
+): void {
+  if (status.isConnected) {
+    grantBtn.disabled = false;
+    status.textContent = message;
+    return;
+  }
+  const container = doc.getElementById('popup-open-guidance');
+  const currentStatus = container?.querySelector<HTMLElement>('[role="status"]') ?? null;
+  if (currentStatus) {
+    currentStatus.textContent = message;
+    return;
+  }
+  const error = doc.getElementById('popup-open-error');
+  if (error) error.textContent = message;
 }
 
 function describeGrantResult(result: PickerGrantResult): string {

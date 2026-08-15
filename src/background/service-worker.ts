@@ -48,9 +48,10 @@ function isPickerGrantRequest(message: unknown): message is PickerGrantRequest {
 /**
  * popup からの Picker 許可依頼を受ける。
  *
- * popup は許可ウィンドウが開いた時点で閉じる（フォーカスを失うため）ので、応答を受け取れる
- * とは限らない。プロジェクトの登録とメインビューの起動まで背景側で完結させ、sendResponse は
- * 「popup がまだ生きていれば表示を更新するための情報」として扱う。
+ * popup.html は通常タブとして開かれるため（`action.default_popup` 無し）フォーカスを失っても
+ * 閉じないが、それでもユーザーが手動でタブを閉じる／別タブに切り替えて放置する可能性はある。
+ * プロジェクトの登録とメインビューの起動まで背景側で完結させ、sendResponse は
+ * 「popup タブがまだ開いていれば表示を更新するための情報」として扱う。
  *
  * externally_connectable は設定していないため、ここに届くのは自拡張内からのメッセージだけ。
  */

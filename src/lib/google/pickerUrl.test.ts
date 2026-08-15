@@ -5,8 +5,9 @@ import {
   parsePickerRedirect,
 } from './pickerUrl';
 
-// 拡張機能 ID は a〜p の 32 文字。テスト用のダミー（本物の ID である必要はない）
-const REDIRECT_URI = 'https://abcdefghijklmnopabcdefghijklmnop.chromiumapp.org/picker';
+// 本拡張の拡張機能 ID（src/manifest.json の固定 key に由来。isExtensionRedirectUri は
+// この ID との完全一致を要求するため、ダミー ID では検証にならない）
+const REDIRECT_URI = 'https://bckokafmjighegpjiocopkagghppnjld.chromiumapp.org/picker';
 
 describe('PICKER_PAGE_URL', () => {
   test('DefinePlugin を通らない環境では本番の配信 URL にフォールバックする', () => {
@@ -50,7 +51,8 @@ describe('buildPickerUrl', () => {
 describe('isExtensionRedirectUri', () => {
   test('chromiumapp.org のリダイレクト URI を受け入れる', () => {
     expect(isExtensionRedirectUri(REDIRECT_URI)).toBe(true);
-    expect(isExtensionRedirectUri('https://abcdefghijklmnopabcdefghijklmnop.chromiumapp.org/')).toBe(
+    // パス無し（末尾スラッシュのみ）も許容する
+    expect(isExtensionRedirectUri('https://bckokafmjighegpjiocopkagghppnjld.chromiumapp.org/')).toBe(
       true
     );
   });
@@ -70,6 +72,10 @@ describe('isExtensionRedirectUri', () => {
       false
     );
     expect(isExtensionRedirectUri('https://abc.chromiumapp.org/')).toBe(false);
+    // a〜p 32 文字の正当な形式だが、自拡張の ID とは別の拡張機能を装っている
+    expect(
+      isExtensionRedirectUri('https://abcdefghijklmnopabcdefghijklmnop.chromiumapp.org/')
+    ).toBe(false);
     // パス区切りが無い（ホスト名の続きを装える）
     expect(isExtensionRedirectUri('https://abcdefghijklmnopabcdefghijklmnop.chromiumapp.org')).toBe(
       false

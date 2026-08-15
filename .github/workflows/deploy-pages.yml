@@ -55,6 +55,26 @@ jobs:
       - name: 依存をインストールする
         run: npm ci
 
+      - name: Picker 許可ページ用の repository variables がそろっているか確認する
+        # PICKER_API_KEY / PICKER_WEB_CLIENT_ID / GCP_PROJECT_NUMBER は secrets ではなく
+        # repository variables に置く運用（公開配信される JS に埋め込まれるため構造上秘匿できない）。
+        # 未登録のまま次のビルドへ進むと webpack.picker.config.js が本番モードで throw し、
+        # 抽象的な webpack のエラーメッセージだけが残ってデプロイが落ちる。ここで先に検知し、
+        # 何が足りないか・どこに登録するかを明示して止める。
+        run: |
+          missing=()
+          [ -z "${PICKER_API_KEY}" ] && missing+=("PICKER_API_KEY")
+          [ -z "${PICKER_WEB_CLIENT_ID}" ] && missing+=("PICKER_WEB_CLIENT_ID")
+          [ -z "${GCP_PROJECT_NUMBER}" ] && missing+=("GCP_PROJECT_NUMBER")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::次の repository variables が未登録です: ${missing[*]}。GitHub の Settings → Secrets and variables → Actions → Variables タブから登録してください（値の入手元は hosted/README.md の「Google Picker 許可ページ（picker.html）」節を参照）。"
+            exit 1
+          fi
+        env:
+          PICKER_API_KEY: ${{ vars.PICKER_API_KEY }}
+          PICKER_WEB_CLIENT_ID: ${{ vars.PICKER_WEB_CLIENT_ID }}
+          GCP_PROJECT_NUMBER: ${{ vars.GCP_PROJECT_NUMBER }}
+
       - name: Picker 許可ページの JS をビルドする
         # 出力は hosted/picker.js（.gitignore 済み）。次の「配信セットを組み立てる」で
         # hosted/ ごと _site/ へコピーされる。

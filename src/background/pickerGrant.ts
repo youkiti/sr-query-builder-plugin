@@ -5,10 +5,12 @@
  * ユーザーが Picker で明示的に選択するまで読めない。この一連（Picker ページを開く →
  * 選択結果を受け取る → プロジェクトとして開き直す）を担う。
  *
- * **なぜ popup ではなく背景 service worker に置くか**: Chrome の popup はフォーカスを失った
- * 時点で閉じ、実行中の JS ごと破棄される。`launchWebAuthFlow` は別ウィンドウを開くため、
- * popup で待っていると必ずその瞬間に消えて結果を受け取れない。popup は開始を依頼するだけにし、
- * 完了後の処理（プロジェクト登録・メインビュー起動）まで背景側で完結させる。
+ * **なぜ popup ではなく背景 service worker に置くか**: 本拡張は `action.default_popup` を
+ * 持たず、popup.html は `chrome.tabs.create` で通常タブとして開かれる（フォーカスを失っても
+ * 閉じない）。それでもこの処理を背景側に置くのは、(1) `inFlight` による単一飛行ガードが
+ * popup タブをまたいで効くようにするため（popup を複数タブで開いても許可ウィンドウが二重に
+ * 開かない）、(2) popup タブをユーザーが閉じてもフロー（Picker ページを開く → 選択結果を
+ * 受け取る → プロジェクトを開き直す）が背景側だけで完走できるようにするため。
  */
 
 import { buildPickerUrl, parsePickerRedirect } from '@/lib/google/pickerUrl';

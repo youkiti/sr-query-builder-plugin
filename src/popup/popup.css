@@ -168,6 +168,15 @@
   color: var(--color-text-muted);
 }
 
+/* API から返った生のエラーメッセージ（formatError(err)）を機械的な補足として出す行。
+   等幅フォントにして「人が書いた案内文」と見た目で区別する。文字色は --color-text-muted
+   のままにする（--color-bg-muted との組で 4.93:1。CLAUDE.md の実測値を踏襲） */
+.popup__guidance-detail {
+  color: var(--color-text-muted);
+  font-family: var(--font-family-mono);
+  word-break: break-all;
+}
+
 .popup__guidance-actions {
   display: flex;
   gap: var(--space-2);

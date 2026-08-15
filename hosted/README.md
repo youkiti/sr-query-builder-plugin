@@ -83,12 +83,19 @@ python -m http.server 8080 --directory hosted       # http://localhost:8080/pick
 
 workflow がやること:
 
-1. `npm ci` → `npm run build:picker` で `hosted/picker.js` を生成する（repository variables の 3 値を注入）
-2. `hosted/` を `_site/` へコピーし、開発者向けの `README.md` と `screenshots/.gitkeep` を除く
-3. 5 ページ + `style.css` / `lang.js` / `picker.js` + スクリーンショット 5 枚がそろっているか確認する（欠けていたら失敗させる）
-4. `actions/upload-pages-artifact` → `actions/deploy-pages` で公開する
+1. `npm ci` → repository variables の 3 値がそろっているか確認する（欠けていれば `::error::` を出して即停止する。次のビルドステップまで進ませない）
+2. `npm run build:picker` で `hosted/picker.js` を生成する（repository variables の 3 値を注入）
+3. `hosted/` を `_site/` へコピーし、開発者向けの `README.md` と `screenshots/.gitkeep` を除く
+4. 5 ページ + `style.css` / `lang.js` / `picker.js` + スクリーンショット 5 枚がそろっているか確認する（欠けていたら失敗させる）
+5. `actions/upload-pages-artifact` → `actions/deploy-pages` で公開する
 
-発火条件は `hosted/**` のほか、`picker.js` のビルド入力（`src/picker/**` / `src/lib/google/pickerUrl.ts` / `src/types/google-picker.d.ts` / `webpack.picker.config.js` / `package.json` / `package-lock.json`）。**`PICKER_API_KEY` / `PICKER_WEB_CLIENT_ID` / `GCP_PROJECT_NUMBER` が repository variables に無いと、本番モードのビルドが停止してデプロイだけが失敗する**（PR の CI は green のまま通るので気づきにくい）。変数の登録は `master` へのマージの前提。
+発火条件は `hosted/**` のほか、`picker.js` のビルド入力（`src/picker/**` / `src/lib/google/pickerUrl.ts` / `src/types/google-picker.d.ts` / `webpack.picker.config.js` / `package.json` / `package-lock.json`）。**`PICKER_API_KEY` / `PICKER_WEB_CLIENT_ID` / `GCP_PROJECT_NUMBER` が repository variables に無いと、上記 1. の確認ステップでデプロイが止まる**（`master` へのマージ自体は妨げない。CI の `verify` / `e2e` ジョブもこの workflow とは別物なので、PR の CI は green のまま通る。この 3 変数を登録するまでデプロイだけが失敗し続ける点に注意）。**変数の登録は `master` へのマージの前提**であり、次の手順で先に登録しておくこと:
+
+1. 3 つの値（Picker API 用 API キー・Picker ページ用 OAuth クライアント ID・GCP プロジェクト番号）を Google Cloud Console で発行する。詳細は上記「Google Picker 許可ページ（picker.html）」節の表を参照（API キーは HTTP リファラー制限 + API 制限を発行時に同時指定すること）
+2. GitHub 上でリポジトリ変数として登録する。方法はどちらでもよい:
+   - `gh` CLI: `gh variable set PICKER_API_KEY --body "<値>"`（`PICKER_WEB_CLIENT_ID` / `GCP_PROJECT_NUMBER` も同様に 1 つずつ実行）
+   - Web UI: このリポジトリの **Settings → Secrets and variables → Actions → Variables** タブ → `New repository variable` から 3 つ登録する
+3. `gh variable list` で 3 つとも登録済みであることを確認してから `hosted/**` を含む PR を `master` へマージする（登録済みならこの workflow の 1. のステップは即通過する）
 
 **通常の更新手順**: 上記「更新時に守ること」を反映して `hosted/` を編集し、PR を `master` へマージする。以上。
 内容を変えずに再デプロイしたいときは Actions タブから `deploy-pages` を `workflow_dispatch` で手動実行する。

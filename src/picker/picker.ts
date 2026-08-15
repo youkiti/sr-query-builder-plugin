@@ -29,6 +29,23 @@ const USERINFO_ENDPOINT = 'https://www.googleapis.com/oauth2/v3/userinfo';
 /** gsi/client と api.js は async 属性で読み込むので、参照前に出現を待つ */
 const SCRIPT_WAIT_TIMEOUT_MS = 15000;
 
+/**
+ * granular consent でユーザーが要求スコープの一部だけを許可した場合を判定する。
+ *
+ * `google.accounts.oauth2.hasGrantedAllScopes` を直接呼ばず関数として受け取るのは、
+ * webpack DefinePlugin が注入する `__PICKER_WEB_CLIENT_ID__` 等に依存する `requestToken` /
+ * `openPicker` を経由せずにこの判定だけを単体テストできるようにするための最小限の seam。
+ */
+export function shouldRevokeForMissingScopes(
+  resp: google.accounts.oauth2.TokenResponse,
+  hasGrantedAllScopes: (
+    tokenResponse: google.accounts.oauth2.TokenResponse,
+    ...scopes: string[]
+  ) => boolean
+): boolean {
+  return !hasGrantedAllScopes(resp, DRIVE_FILE_SCOPE, USERINFO_SCOPE);
+}
+
 type Lang = 'ja' | 'en';
 
 interface Messages {
@@ -40,7 +57,10 @@ interface Messages {
   success: string;
   cancelled: string;
   wrongAccount: (expected: string) => string;
+  scopeDenied: string;
   error: (detail: string) => string;
+  cancelReturn: string;
+  filteredCancelled: string;
 }
 
 const MESSAGES: Record<Lang, Messages> = {
@@ -55,7 +75,12 @@ const MESSAGES: Record<Lang, Messages> = {
     cancelled: '選択をキャンセルしました。もう一度お試しください。',
     wrongAccount: (expected) =>
       `別のアカウントで許可されました。拡張機能でログイン中のアカウント（${expected}）で許可し直してください。`,
+    scopeDenied:
+      'ファイルを選択する権限（ドライブのファイル選択）が許可されませんでした。もう一度お試しのうえ、表示されるチェックをすべて有効にしてください。',
     error: (detail) => `エラーが発生しました: ${detail}`,
+    cancelReturn: 'キャンセルして戻る',
+    filteredCancelled:
+      '選択をキャンセルしました。目的のスプレッドシートが見つからない場合は、ボタンから選び直せます。',
   },
   en: {
     ownedViewLabel: 'My Drive',
@@ -68,7 +93,12 @@ const MESSAGES: Record<Lang, Messages> = {
     cancelled: 'Selection cancelled. Please try again.',
     wrongAccount: (expected) =>
       `You granted access with a different account. Please retry with the account signed in to the extension (${expected}).`,
+    scopeDenied:
+      'Permission to pick a file (Drive file selection) was not granted. Please try again and make sure to leave all the checkboxes enabled on the consent screen.',
     error: (detail) => `Something went wrong: ${detail}`,
+    cancelReturn: 'Cancel and go back',
+    filteredCancelled:
+      "Selection cancelled. If you can't find the spreadsheet you're looking for, choose again using the button.",
   },
 };
 
@@ -147,6 +177,46 @@ function redirectToExtension(redirectUri: string, fragment: string): void {
   window.location.href = `${redirectUri}#${fragment}`;
 }
 
+const CANCEL_RETURN_LINK_ID = 'cancelReturnLink';
+
+/**
+ * 絞り込み中（fileId 指定あり）の Picker が CANCEL されたときに出す、次の一手の選択肢。
+ *
+ * 絞り込みが効いていると、共有はされているが対象外の権限設定などで目的のシートが
+ * Picker に 1 件も出てこないことがある。以前はここで即 `redirectToExtension` していたため、
+ * ページに留まる間もなく拡張機能へ戻されてしまい、hint 文が案内する
+ * 「すべてのスプレッドシートから選ぶ」を試す機会が無かった。
+ *
+ * 「すべてのスプレッドシートから選ぶ」は既存の `#allSheetsLink`（fileId 指定時は最初から
+ * 表示されており、クリックで `start(true)` を呼ぶ）をそのまま使い回す。ここでは
+ * 「キャンセルして戻る」側だけを動的に用意する（.picker-actions 末尾へ追加。二重生成は
+ * しない）。
+ */
+function showFilteredCancelChoice(redirectUri: string): void {
+  const messages = t();
+  setStatus(messages.filteredCancelled);
+
+  const allSheetsLink = document.getElementById('allSheetsLink') as HTMLAnchorElement | null;
+  if (allSheetsLink) allSheetsLink.hidden = false;
+
+  const actions = document.querySelector('.picker-actions');
+  if (!actions) return;
+  let cancelLink = document.getElementById(CANCEL_RETURN_LINK_ID) as HTMLAnchorElement | null;
+  if (!cancelLink) {
+    cancelLink = document.createElement('a');
+    cancelLink.id = CANCEL_RETURN_LINK_ID;
+    cancelLink.href = '#';
+    cancelLink.className = 'picker-link';
+    cancelLink.addEventListener('click', (event) => {
+      event.preventDefault();
+      redirectToExtension(redirectUri, 'cancelled=1');
+    });
+    actions.appendChild(cancelLink);
+  }
+  cancelLink.textContent = messages.cancelReturn;
+  cancelLink.hidden = false;
+}
+
 /**
  * スプレッドシート選択用の Picker を開く。
  *
@@ -180,8 +250,17 @@ function openPicker(token: string, fileId: string | null, redirectUri: string): 
         setStatus(messages.success);
         redirectToExtension(redirectUri, `picked=${encodeURIComponent(id)}`);
       } else if (action === google.picker.Action.CANCEL) {
-        setStatus(messages.cancelled);
-        redirectToExtension(redirectUri, 'cancelled=1');
+        if (fileId) {
+          // 絞り込み中の CANCEL はもう広げる先がある。即リダイレクトせず選択肢を出す。
+          // モーダルを閉じるのは選択肢を押せるようにするためなので、Picker の既定の
+          // 自動クローズ挙動には依存せずここで明示的に閉じる
+          picker.setVisible(false);
+          showFilteredCancelChoice(redirectUri);
+        } else {
+          // 絞り込み無し（既に全件表示済み）はこれ以上広げる先が無いので従来どおり即リダイレクト
+          setStatus(messages.cancelled);
+          redirectToExtension(redirectUri, 'cancelled=1');
+        }
       }
     })
     .build();
@@ -213,6 +292,19 @@ async function start(ignoreFileId = false): Promise<void> {
     await waitForGoogleApis();
     const resp = await requestToken(expectedEmail);
     const token = resp.access_token;
+    // 参照だけを剥がして渡すと、GIS 実装が内部で this に依存していた場合に TypeError になりうる。
+    // レシーバ（google.accounts.oauth2）を保ったまま呼び出すためアロー関数でラップする
+    if (
+      shouldRevokeForMissingScopes(resp, (tokenResponse, ...scopes) =>
+        google.accounts.oauth2.hasGrantedAllScopes(tokenResponse, ...scopes)
+      )
+    ) {
+      // granular consent でユーザーが drive.file を拒否した状態。使えないトークンのまま
+      // Picker を開いても 403 で行き止まりになるだけなので、ここで止めてやり直させる
+      google.accounts.oauth2.revoke(token, () => undefined);
+      setStatus(t().scopeDenied);
+      return;
+    }
     const actualEmail = await fetchUserEmail(token);
     if (expectedEmail && actualEmail.toLowerCase() !== expectedEmail.toLowerCase()) {
       // 別アカウントで許可されても拡張機能側からは読めない。トークンを捨ててやり直させる

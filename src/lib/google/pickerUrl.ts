@@ -53,15 +53,25 @@ export function buildPickerUrl(options: BuildPickerUrlOptions): string {
 }
 
 /**
- * redirect パラメータが拡張機能の chromiumapp.org リダイレクト URI かどうかを検証する純粋関数。
+ * 本拡張の拡張機能 ID。`src/manifest.json` の `key` フィールドで固定しているため、
+ * dev（unpacked 読込）でも本番（ストア版。`key.pem` で同一鍵を使う）でも常にこの値になる。
+ * 詳細は CLAUDE.md「dev ビルドと本番ビルドは出力先を分離している」節を参照。
+ */
+const EXTENSION_ID = 'bckokafmjighegpjiocopkagghppnjld';
+
+/**
+ * redirect パラメータが「この拡張機能」の chromiumapp.org リダイレクト URI かどうかを
+ * 検証する純粋関数。
  *
  * Picker ページはこの検証を通った場合だけ `window.location.href` で遷移する。redirect は
  * URL フラグメント経由で外から渡ってくる値なので、拡張機能自身が発行したリダイレクト URI
- * であることを確認してからでないとオープンリダイレクトの踏み台になる。
- * 拡張機能 ID は a〜p の 32 文字（Chrome の仕様）。
+ * であることを確認してからでないとオープンリダイレクトの踏み台になる。拡張 ID が固定されて
+ * いる（上記 `EXTENSION_ID`）ため、a〜p 32 文字の任意の拡張 ID ではなく自拡張 ID との完全一致
+ * まで絞り込める。末尾スラッシュ以降のパス（`chrome.identity.getRedirectURL('picker')` が
+ * 返す `/picker` など）は許容する。
  */
 export function isExtensionRedirectUri(url: string): boolean {
-  return /^https:\/\/[a-p]{32}\.chromiumapp\.org\//.test(url);
+  return url.startsWith(`https://${EXTENSION_ID}.chromiumapp.org/`);
 }
 
 /** Picker ページから戻ってきた結果。null は解釈不能（呼び出し側でエラー表示する） */
