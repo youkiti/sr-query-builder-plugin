@@ -88,11 +88,39 @@ export async function saveEditedFormula(
   return { versionId, parentVersionId };
 }
 
+/**
+ * ブロック・インスペクタ（src/app/views/blockInspector.ts）が計測したキーワード 1 語ぶんの
+ * ヒット数。improveBlockExpression の KeywordHitContext と同じ形（構造的に代入可能）だが、
+ * サービス層が views 層の型へ依存しないよう、この層自身の宣言として持つ（issue #58 chunk 3c。
+ * SeedContextEntry / ValidationContext と同じ理由）。
+ */
+export interface MeasuredKeywordHit {
+  term: string;
+  kind: 'mesh' | 'freeword';
+  /** 単体 esearch ヒット数。未計測なら null */
+  hits: number | null;
+  /** フリーワードのみ: 個別降順で OR 累積したときの純増（Δ）。MeSH・未計測は null */
+  delta?: number | null;
+  /** フリーワードのみ: 寄与区分（normal / lowYield / redundant）。MeSH・未計測は null */
+  status?: 'normal' | 'lowYield' | 'redundant' | null;
+}
+
 export interface RequestBlockImprovementInput {
   /** 改善対象のブロック ID（例: `"1"`, `"RCTfilter"`） */
   blockId: string;
   /** ユーザーが任意で書いた改善指示。空文字なら「おまかせ」改善 */
   instruction?: string;
+  /**
+   * ブロック・インスペクタが計測済みの、このブロック式全体のヒット数（issue #58 chunk 3c）。
+   * インスペクタは個々の語（MeSH・フリーワード）の単体ヒット数しか計測しないため、
+   * 現状 editView から渡ることはない（常に省略＝未計測扱い）。将来ブロック全体のヒット数を
+   * 計測する経路ができたときのための受け口として残す。
+   */
+  currentHits?: number | null;
+  /** ブロック・インスペクタが計測済みのキーワード別ヒット数。未計測・インスペクタ未展開なら省略 */
+  keywordHits?: MeasuredKeywordHit[];
+  /** ブロック・インスペクタが計測済みのフリーワード OR 合計（重複除去後）。未計測なら省略 */
+  freewordDedupTotal?: number | null;
 }
 
 /** AI 改善文脈に載せるシード論文 1 件。 */
@@ -269,6 +297,13 @@ export async function requestBlockImprovement(
   const proposal: ImproveBlockProposal = await improveBlockExpression(
     {
       currentExpression: context.currentExpression,
+      // インスペクタが計測済みのヒット数（issue #58 chunk 3c）。渡し手は editView（AI 改善の
+      // submit 時に blockInspector.collectMeasuredContext で読んだ値）。ここでは受け取った
+      // input をそのまま improve-block skill の入力へ転記するだけで、ここで計測はしない
+      // （NCBI へのリクエストを増やさないため）。
+      currentHits: input.currentHits,
+      keywordHits: input.keywordHits,
+      freewordDedupTotal: input.freewordDedupTotal,
       blockLabel: context.blockLabel,
       blockDescription: context.blockDescription,
       researchQuestion: context.researchQuestion,

@@ -27,6 +27,7 @@ import {
   type BlockMeshTermMeta,
   type FreewordDeltaResult,
   type FreewordDeltaRow,
+  type FreewordDeltaStatus,
   type FreewordTermInput,
   type MeshTreeEntry,
 } from '@/features/validation';
@@ -58,12 +59,26 @@ export interface BlockInspectorDeps {
   /** 式→件数キャッシュ（edit view インスタンスと共有） */
   hitsCache: Map<string, Promise<number>>;
   /**
+   * hitsCache の解決済みスナップショット（edit view インスタンスと共有。issue #58 chunk 3c）。
+   * hitsCache は Promise を保持するため、値が確定済みかどうかを await なしに判定できない。
+   * 「AI に改善させる」の実行時は同期的に（新規 esearch を発行せず）計測済みの値だけを拾って
+   * プロンプトへ渡したいため、cachedCount が解決するたびにこちらへも書き込む。
+   * 省略時（呼び出し側が渡さない）はスナップショットが取れないだけで、通常の計測動作
+   * （バッジ表示・Δ 計算）自体には影響しない。
+   */
+  hitsSnapshot?: Map<string, number>;
+  /**
    * フリーワード Δ の結果キャッシュ（edit view インスタンスと共有）。キーはフリーワード語の集合。
    * 個別件数は hitsCache でキャッシュ済みでも、表全体（並べ替え＋累積 OR）はインスペクタ再構築の
    * たびに作り直され「計算中…」が一瞬戻る。語の集合が同じ式（MeSH だけ編集した等）では
    * 計算結果をそのまま使い回し、再表示時の再計算とちらつきを避ける。
    */
   freewordDeltaCache: Map<string, Promise<FreewordDeltaResult>>;
+  /**
+   * freewordDeltaCache の解決済みスナップショット（hitsSnapshot と同じ理由。issue #58 chunk 3c）。
+   * 「AI に改善させる」がフリーワードの Δ・寄与区分をプロンプトへ渡すための同期読み出し口。
+   */
+  freewordDeltaSnapshot?: Map<string, FreewordDeltaResult>;
   /** descriptor 群→tree entries キャッシュ（edit view インスタンスと共有） */
   meshTreeCache: Map<string, Promise<MeshTreeEntry[]>>;
   /** tree number→子ノード キャッシュ（edit view インスタンスと共有） */
@@ -143,6 +158,74 @@ function isExplodeTag(segmentText: string): boolean {
   return !/:\s*noexp/i.test(tag);
 }
 
+/** インスペクタが計測したキーワード 1 語ぶんのヒット数（issue #58 chunk 3c）。 */
+export interface MeasuredKeywordHit {
+  term: string;
+  kind: 'mesh' | 'freeword';
+  /** 単体 esearch ヒット数。未計測なら null */
+  hits: number | null;
+  /** フリーワードのみ: 個別降順で OR 累積したときの純増（Δ）。MeSH・未計測は null */
+  delta?: number | null;
+  /** フリーワードのみ: 寄与区分。MeSH・未計測は null */
+  status?: FreewordDeltaStatus | null;
+}
+
+/** collectMeasuredContext の戻り値（issue #58 chunk 3c）。 */
+export interface MeasuredBlockContext {
+  keywordHits: MeasuredKeywordHit[];
+  /** フリーワード OR 合計（重複除去後）。フリーワードが未計測なら null */
+  freewordDedupTotal: number | null;
+}
+
+/**
+ * インスペクタがこれまでに計測した値を、新規 NCBI リクエストを一切発行せずに同期的に取り出す
+ * （issue #58 chunk 3c。「AI に改善させる」実行時に improve-block skill へ渡す文脈を組み立てる用途）。
+ *
+ * hitsSnapshot / freewordDeltaSnapshot（cachedCount / freewordDeltaCached が解決のたびに書き込む、
+ * hitsCache / freewordDeltaCache の確定値スナップショット）だけを読む。値が無い（インスペクタ未展開・
+ * MeSH バッジがまだ表示範囲に入っていない・Δ 計算が未解決、等）語は結果に含めない —
+ * 「計測できていない」を憶測で埋めないため。
+ *
+ * - MeSH 語: このブロックの descriptor と完全一致する `"descriptor"[Mesh]` の計測値のみ拾う
+ *   （祖先・子孫ノードのバッジ計測は対象外）。
+ * - フリーワード: このブロックのフリーワード集合と完全一致する Δ 計算結果が解決済みのときだけ、
+ *   行ごとの個別ヒット数・Δ・寄与区分と、OR 合計（freewordDedupTotal）をまとめて返す。
+ *   一部の語だけ計測済みでも、集合が一致しなければ（Δ 計算が式全体を単位にしているため）拾わない。
+ */
+export function collectMeasuredContext(
+  expression: string,
+  snapshots: Pick<BlockInspectorDeps, 'hitsSnapshot' | 'freewordDeltaSnapshot'>
+): MeasuredBlockContext {
+  const terms = extractBlockTerms(expression);
+  const keywordHits: MeasuredKeywordHit[] = [];
+
+  for (const meshTerm of terms.meshTerms) {
+    const hits = snapshots.hitsSnapshot?.get(meshHitQuery(meshTerm.descriptor));
+    if (hits !== undefined) {
+      keywordHits.push({ term: meshTerm.descriptor, kind: 'mesh', hits });
+    }
+  }
+
+  let freewordDedupTotal: number | null = null;
+  if (terms.freewordTerms.length > 0) {
+    const delta = snapshots.freewordDeltaSnapshot?.get(freewordCacheKey(terms.freewordTerms));
+    if (delta) {
+      freewordDedupTotal = delta.totalDeduped;
+      for (const row of delta.rows) {
+        keywordHits.push({
+          term: row.display,
+          kind: 'freeword',
+          hits: row.individualError ? null : row.individual,
+          delta: row.individualError ? null : row.delta,
+          status: row.individualError ? null : row.status,
+        });
+      }
+    }
+  }
+
+  return { keywordHits, freewordDedupTotal };
+}
+
 /**
  * ブロック・インスペクタの DOM を構築する。
  * 必要な callback が無い場合（MeSH も件数も注入されていない）は null を返し、edit view は何も足さない。
@@ -181,11 +264,12 @@ export function buildBlockInspector(
   return section;
 }
 
-/** 式→件数のキャッシュ越し count。 */
+/** 式→件数のキャッシュ越し count。解決した値は snapshot（渡されていれば）にも同期的に残す。 */
 function cachedCount(
   onCountHits: NonNullable<BlockInspectorDeps['onCountHits']>,
   cache: Map<string, Promise<number>>,
-  query: string
+  query: string,
+  snapshot?: Map<string, number>
 ): Promise<number> {
   const cached = cache.get(query);
   if (cached) {
@@ -193,7 +277,7 @@ function cachedCount(
   }
   const pending = onCountHits(query);
   cache.set(query, pending);
-  pending.catch(() => cache.delete(query));
+  pending.then((count) => snapshot?.set(query, count)).catch(() => cache.delete(query));
   return pending;
 }
 
@@ -614,7 +698,7 @@ function buildBranchRow(doc: Document, opts: BranchRowOptions): HTMLElement {
 
   // 件数（explode）。
   if (params.onCountHits && label !== null) {
-    row.appendChild(buildCountBadge(doc, `"${text}"[Mesh]`, params));
+    row.appendChild(buildCountBadge(doc, meshHitQuery(text), params));
   }
 
   // OR追加（hover/focus で出す。起点語自身は既に式にあるので出さない）。
@@ -697,27 +781,34 @@ function buildRedundancyLine(
 }
 
 /**
- * フリーワード Δ をキャッシュ越しに計算する。キーは語（query）の集合。
+ * フリーワード語集合から freewordDeltaCache / freewordDeltaSnapshot 共通のキーを作る。
  * analyzeFreewordDelta は内部で個別件数の降順に並べ替えるので、入力順は結果に影響しない。
- * よって順不同で安定なキー（query をソートして連結）にし、同じ語集合なら計算を 1 回に抑える。
+ * よって順不同で安定なキー（query をソートして連結）にする。区切り文字は U+0001
+ * （検索式の query には現れない想定）。
  */
+function freewordCacheKey(terms: readonly FreewordTermInput[]): string {
+  return terms
+    .map((t) => t.query)
+    .sort()
+    .join('\u0001');
+}
+
+/** フリーワード Δ をキャッシュ越しに計算する。キーは freewordCacheKey（同じ語集合なら計算を 1 回に抑える）。 */
 function freewordDeltaCached(
   params: BlockInspectorParams,
   freewordTerms: FreewordTermInput[],
   onCountHits: NonNullable<BlockInspectorDeps['onCountHits']>
 ): Promise<FreewordDeltaResult> {
-  const key = freewordTerms
-    .map((t) => t.query)
-    .sort()
-    .join('');
+  const key = freewordCacheKey(freewordTerms);
   const cached = params.freewordDeltaCache.get(key);
   if (cached) {
     return cached;
   }
   const pending = analyzeFreewordDelta(freewordTerms, (q) =>
-    cachedCount(onCountHits, params.hitsCache, q)
+    cachedCount(onCountHits, params.hitsCache, q, params.hitsSnapshot)
   );
   params.freewordDeltaCache.set(key, pending);
+  pending.then((result) => params.freewordDeltaSnapshot?.set(key, result));
   // 失敗は握りつぶさず、次回再試行できるようキャッシュから外す。
   pending.catch(() => params.freewordDeltaCache.delete(key));
   return pending;
@@ -954,6 +1045,11 @@ function buildOverlapSection(
 
 // ---- 共通ヘルパー ---------------------------------------------------------
 
+/** MeSH ラベルの explode 件数を問う esearch クエリ。バッジ表示と collectMeasuredContext で共有する。 */
+function meshHitQuery(label: string): string {
+  return `"${label}"[Mesh]`;
+}
+
 /**
  * 「…」→件数 に差し替わる小さな件数バッジ。
  *
@@ -972,7 +1068,7 @@ function buildCountBadge(
   badgeEl.className = 'bins__count bins__count--pending';
   badgeEl.textContent = '…';
   observeInView(badgeEl, () => {
-    cachedCount(onCountHits, params.hitsCache, query)
+    cachedCount(onCountHits, params.hitsCache, query, params.hitsSnapshot)
       .then((count) => {
         badgeEl.className = 'bins__count bins__count--done';
         badgeEl.textContent = `${count.toLocaleString()} 件`;

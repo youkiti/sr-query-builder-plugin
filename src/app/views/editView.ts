@@ -6,7 +6,12 @@ import {
   type SaveEditedFormulaInput,
 } from '@/app/services';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
-import { buildBlockInspector, type BlockInspectorDeps, type SiblingBlock } from './blockInspector';
+import {
+  buildBlockInspector,
+  collectMeasuredContext,
+  type BlockInspectorDeps,
+  type SiblingBlock,
+} from './blockInspector';
 import { renderEditableBlockInto, type EditableBlockHandlers } from './editableBlock';
 import {
   buildLegend,
@@ -164,7 +169,9 @@ interface EditInspectorRuntime {
   caches: Pick<
     BlockInspectorDeps,
     | 'hitsCache'
+    | 'hitsSnapshot'
     | 'freewordDeltaCache'
+    | 'freewordDeltaSnapshot'
     | 'meshTreeCache'
     | 'meshChildrenCache'
     | 'meshLabelCache'
@@ -184,7 +191,11 @@ function createInspectorRuntime(): EditInspectorRuntime {
   return {
     caches: {
       hitsCache: new Map(),
+      // hitsCache / freewordDeltaCache の確定値スナップショット。「AI に改善させる」submit 時に
+      // collectMeasuredContext が同期的（新規 esearch なし）に読む（issue #58 chunk 3c）。
+      hitsSnapshot: new Map(),
       freewordDeltaCache: new Map(),
+      freewordDeltaSnapshot: new Map(),
       meshTreeCache: new Map(),
       meshChildrenCache: new Map(),
       meshLabelCache: new Map(),
@@ -650,6 +661,7 @@ function buildBlockRow(
       expression,
       callbacks.onImproveBlock,
       callbacks.onGetImproveContext,
+      inspector.caches,
       () => {
         // 「キャンセル」（未送信のまま閉じる）は上の分岐を通らないので個別に処理する。
         inspector.aiOpenBlocks.delete(blockId);
@@ -867,6 +879,11 @@ function buildRawEditForm(
  * 任意の指示文（空でも可）と、「AI に渡す内容を見る」の開示を備える。
  * 「改善案を取得」で onImproveBlock を呼ぶ。進捗・結果は store.blockImprovement 経由で
  * 反映されるため、ここでは呼び出すだけで解決値は扱わない（expand の onFetch と同じ思想）。
+ *
+ * submit 時、インスペクタが既に計測済みの値（measuredCaches の hitsSnapshot /
+ * freewordDeltaSnapshot）を collectMeasuredContext で同期的に読み、非空のときだけ
+ * onImproveBlock の入力に載せる（issue #58 chunk 3c）。新規 esearch は発行しない
+ * （インスペクタを開いていない・計測が未解決のブロックでは何も載らないのが正常）。
  */
 function openAiPromptForm(
   doc: Document,
@@ -875,6 +892,7 @@ function openAiPromptForm(
   expression: string,
   onImproveBlock: NonNullable<EditViewCallbacks['onImproveBlock']>,
   onGetImproveContext: EditViewCallbacks['onGetImproveContext'],
+  measuredCaches: EditInspectorRuntime['caches'],
   onClosed: () => void
 ): void {
   slot.innerHTML = '';
@@ -941,7 +959,16 @@ function openAiPromptForm(
     // （store 連携が無い呼び出し側でも二重送信を軽減する）。
     submitBtn.disabled = true;
     cancelBtn.disabled = true;
-    void onImproveBlock({ blockId, instruction: instruction.value });
+    const measured = collectMeasuredContext(expression, measuredCaches);
+    void onImproveBlock({
+      blockId,
+      instruction: instruction.value,
+      // 何も計測できていなければキーを足さない（呼び出し側の「未計測」判定と揃える）。
+      ...(measured.keywordHits.length > 0 ? { keywordHits: measured.keywordHits } : {}),
+      ...(measured.freewordDedupTotal !== null
+        ? { freewordDedupTotal: measured.freewordDedupTotal }
+        : {}),
+    });
   });
 }
 
