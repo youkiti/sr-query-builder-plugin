@@ -121,6 +121,25 @@ export interface RequestBlockImprovementInput {
   keywordHits?: MeasuredKeywordHit[];
   /** ブロック・インスペクタが計測済みのフリーワード OR 合計（重複除去後）。未計測なら省略 */
   freewordDedupTotal?: number | null;
+  /**
+   * 兄弟ブロック（結合行を除く他の概念ブロック）のうち、自分の式と語を共有しているもの
+   * （issue #89）。「#1 と重複するキーワードを消して」のような指示を AI が根拠を持って
+   * 実行できるよう、editView.ts の computeSiblingOverlaps（views 層）が計算した結果を
+   * そのまま渡す。空・未計測なら省略。
+   */
+  siblings?: SiblingBlockContext[];
+}
+
+/**
+ * ブロック・インスペクタ（src/app/views/blockInspector.ts）が計算した、兄弟ブロック 1 件との
+ * 共有語。SiblingOverlap（views 層）と同じ形（構造的に代入可能）だが、サービス層が views 層の
+ * 型へ依存しないよう、この層自身の宣言として持つ（MeasuredKeywordHit と同じ理由。issue #89）。
+ */
+export interface SiblingBlockContext {
+  id: string;
+  label: string | null;
+  expression: string;
+  sharedTerms: string[];
 }
 
 /** AI 改善文脈に載せるシード論文 1 件。 */
@@ -152,6 +171,8 @@ export interface BlockImprovementContext {
   seedPapers: SeedContextEntry[];
   /** 直近の検証で得た捕捉情報。現バージョンと一致する結果のみ。なければ null */
   validation: ValidationContext | null;
+  /** 呼び出し元（editView）から渡された、共有語を持つ兄弟ブロック（issue #89）。空なら空配列 */
+  siblings: SiblingBlockContext[];
 }
 
 /** プロンプト肥大化を防ぐためのシード件数上限 */
@@ -169,10 +190,15 @@ export interface BlockImprovementContextDeps {
  * 副作用なし（SeedPapers タブの読み取りのみ）。requestBlockImprovement と
  * 「AI に渡す内容を見る」開示の双方が同じ文脈を共有するための単一ビルダー。
  *
+ * siblings（他ブロックとの共有語）はここでは計算しない。views 層
+ * （blockInspector.ts の computeSiblingOverlaps）が計算した結果をそのまま受け取って
+ * context へ載せるだけ（issue #89。サービス層が views 層の計算ロジックへ依存しないため）。
+ *
  * @returns ブロックが見つからない、または式が未生成なら null
  */
 export async function getBlockImprovementContext(
   blockId: string,
+  siblings: SiblingBlockContext[],
   deps: BlockImprovementContextDeps
 ): Promise<BlockImprovementContext | null> {
   const state = deps.store.getState();
@@ -198,6 +224,7 @@ export async function getBlockImprovementContext(
     currentExpression: target.expression,
     seedPapers,
     validation: collectValidationContext(deps.store),
+    siblings,
   };
 }
 
@@ -286,7 +313,7 @@ export async function requestBlockImprovement(
   if (state.currentFormulaMarkdown === null || state.currentFormulaMarkdown.trim() === '') {
     throw new Error('検索式がまだ生成されていません');
   }
-  const context = await getBlockImprovementContext(input.blockId, {
+  const context = await getBlockImprovementContext(input.blockId, input.siblings ?? [], {
     store: deps.store,
     google: deps.google,
   });
@@ -314,6 +341,9 @@ export async function requestBlockImprovement(
         decision: s.decision,
       })),
       validation: context.validation,
+      // 他ブロックとの共有語（issue #89）。「#1 と重複するキーワードを消して」のような指示を
+      // 根拠なしの推測にさせないための文脈。
+      siblingBlocks: context.siblings,
     },
     provider
   );

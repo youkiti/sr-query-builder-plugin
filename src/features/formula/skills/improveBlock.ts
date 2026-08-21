@@ -41,6 +41,27 @@ export interface ImproveBlockInput {
   seedPapers?: SeedPaperContext[];
   /** 直近の検証で得た捕捉情報。null なら未検証として省略 */
   validation?: ValidationContext | null;
+  /**
+   * この式と掛け合わせる他ブロック（結合行を除く。issue #89）。共有語の有無を問わず全件渡す
+   * （sharedTerms は空になりうる）。「#1 と重複するキーワードを消して」のような指示に、
+   * 完全一致で機械的に検出できた重複語を根拠として与えるとともに、完全一致しない重複
+   * （表記ゆれ・タグ違い・MeSH とフリーワードの対応等）にも式全文から判断する材料を渡す。
+   * 空・未計測なら省略（editView 側に兄弟ブロックが存在しない等）。
+   */
+  siblingBlocks?: SiblingBlockInput[];
+}
+
+/** improve-block に渡す兄弟ブロック 1 件（プロンプト用）。 */
+export interface SiblingBlockInput {
+  id: string;
+  label: string | null;
+  expression: string;
+  /**
+   * 自分の式と完全一致で共有している語（MeSH descriptor とフリーワード query が混在）。
+   * 0 件は「完全一致では見つからなかった」ことを示すだけで、重複が無いことの証明ではない
+   * （blockInspector.ts の computeSiblingOverlaps の doc コメント参照）。
+   */
+  sharedTerms: string[];
 }
 
 /** キーワード 1 語の単体ヒット数 + 寄与情報（プロンプト用）。 */
@@ -122,6 +143,16 @@ export const IMPROVE_BLOCK_SYSTEM_PROMPT = `
 - キーワード別ヒット数が与えられた場合は、0 件の語（綴り・語形ミスの疑い）は修正または
   削除し、ヒットの多すぎる広すぎる語は絞り込みを検討する。逆に主要概念で語が不足していれば
   同義語・MeSH を補う。どの語を足し引きしたかを件数に触れて rationale に書いてよい。
+- 他ブロック（掛け合わせる相手）の式が与えられた場合:
+  - 各ブロックに添えた「共有語」は、自分の式との**完全一致**で機械的に検出できたものだけ。
+    表記ゆれ・単数複数（child/children）・フィールドタグの違い（[tiab]/[tw]）・
+    MeSH とフリーワードの対応関係（"Asthma"[Mesh] と asthma[tiab]）は含まれていない。
+    共有語が 0 件でも「重複が無い」ことの証明にはならない。
+  - 「重複を消して」「他のブロックと被る語を消して」といった指示に対して削除してよいのは、
+    (a) 共有語として明示されている語、または (b) 他ブロックの式全文と照らして明らかに
+    同義・表記ゆれの重複だと判断できる語、のうち**ユーザーの指示が指しているもの**だけに限る。
+  - 指示から対象を特定できない語を推測で削除してはならない。
+- 語を削除するときは、削除した語を rationale に列挙すること。
 - rationale は日本語 1-2 文で、何をどう変えたか書く。
 `.trim();
 
@@ -139,6 +170,9 @@ RQ: {{RQ}}
 
 キーワード別ヒット数（単体）:
 {{KEYWORD_HITS}}
+
+他ブロック（掛け合わせる相手）:
+{{SIBLINGS}}
 
 シード論文（捕捉すべき既知の重要論文）:
 {{SEEDS}}
@@ -176,6 +210,7 @@ export async function improveBlockExpression(
     .replace('{{CURRENT}}', input.currentExpression)
     .replace('{{HITS}}', formatHits(input.currentHits))
     .replace('{{KEYWORD_HITS}}', formatKeywordHits(input.keywordHits, input.freewordDedupTotal))
+    .replace('{{SIBLINGS}}', formatSiblings(input.siblingBlocks))
     .replace('{{SEEDS}}', formatSeeds(input.seedPapers))
     .replace('{{VALIDATION}}', formatValidation(input.validation))
     .replace(
@@ -240,6 +275,25 @@ function formatKeywordHits(
     lines.push(`（フリーワード OR 合計・重複除去後: ${freewordDedupTotal.toLocaleString('en-US')} 件）`);
   }
   return lines.join('\n');
+}
+
+/**
+ * 他ブロック（掛け合わせる相手）を箇条書きへ整形する。空・未指定なら「(渡されていない)」。
+ * 各行にブロック ID・ラベル・式全文・共有語を出す（issue #89。重複削除の根拠にするため）。
+ * sharedTerms が空の兄弟も出す（共有語は完全一致でしか検出できないため、0 件は「重複が
+ * 完全一致では見つからなかった」ことを示すだけで「重複が無い」ことの証明ではない）。
+ */
+function formatSiblings(siblings: SiblingBlockInput[] | undefined): string {
+  if (!siblings || siblings.length === 0) {
+    return '(渡されていない)';
+  }
+  return siblings
+    .map((s) => {
+      const label = s.label ? ` ${s.label}` : '';
+      const shared = s.sharedTerms.length > 0 ? s.sharedTerms.join(', ') : '(完全一致の重複なし)';
+      return [`- #${s.id}${label}: ${s.expression}`, `    共有語: ${shared}`].join('\n');
+    })
+    .join('\n');
 }
 
 /**

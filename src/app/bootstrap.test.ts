@@ -1396,6 +1396,45 @@ describe('startApp - wiring 層', () => {
     expect(logAppends.length).toBeGreaterThan(0);
   });
 
+  test('edit view 既定 onGetImproveContext は view が計算した siblings をそのまま context へ載せる（issue #89）', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+      'apiKeys.gemini': 'KEY',
+    });
+    fetchMock.mockImplementation(async () => jsonResponse({}));
+    const handle = startApp(doc, {
+      getHash: () => '#/edit',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({
+      ...s,
+      currentFormulaVersionId: 'v1',
+      // #1/#2 は "Asthma"[Mesh] を共有する（結合行 #3 は比較対象に含まれない）。
+      currentFormulaMarkdown: [
+        '## PubMed/MEDLINE',
+        '',
+        '```',
+        '#1 "Asthma"[Mesh] OR asthma*[tiab]',
+        '#2 "Asthma"[Mesh] OR children[tiab]',
+        '#3 #1 AND #2',
+        '```',
+        '',
+      ].join('\n'),
+    }));
+    const row = doc.querySelector('.edit__block-row[data-block-id="1"]')!;
+    row.querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
+    for (let i = 0; i < 5; i += 1) {
+      await flush();
+    }
+    const siblingsSection = row.querySelector('.edit__block-ai-context-siblings');
+    expect(siblingsSection?.textContent).toContain('#2:');
+    expect(siblingsSection?.textContent).toContain('共有語: Asthma');
+  });
+
   test('edit view 既定 onImproveBlock は store.blockImprovement を running → ready と遷移させる', async () => {
     const doc = buildDocument();
     const { runtime, fetchMock } = makeRuntime({

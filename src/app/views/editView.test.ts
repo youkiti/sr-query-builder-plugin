@@ -354,7 +354,13 @@ describe('createEditView - ブロック単位 AI 改善（送信は fire-and-for
     instruction.value = '同義語を増やして';
     row.querySelector<HTMLButtonElement>('.edit__block-ai-submit')!.click();
     // 新契約: view はこの呼び出しの解決値を使わない（結果は state.blockImprovement 経由）。
-    expect(onImproveBlock).toHaveBeenCalledWith({ blockId: '1', instruction: '同義語を増やして' });
+    // stateReadyFull の #2（children[tiab]）は共有語 0 件だが、siblings は完全一致の有無を
+    // 問わず全兄弟を渡す契約なので sharedTerms: [] のまま載る（issue #89 must-fix）。
+    expect(onImproveBlock).toHaveBeenCalledWith({
+      blockId: '1',
+      instruction: '同義語を増やして',
+      siblings: [{ id: '2', label: null, expression: 'children[tiab]', sharedTerms: [] }],
+    });
   });
 
   test('AI ボタン再クリックでフォームをトグルで閉じる', () => {
@@ -426,7 +432,13 @@ describe('createEditView - AI 改善の進捗・提案・エラーは state.bloc
     const instruction = row.querySelector<HTMLTextAreaElement>('.edit__block-ai-instruction')!;
     instruction.value = '同義語を増やして';
     row.querySelector<HTMLButtonElement>('.edit__block-ai-submit')!.click();
-    expect(onImproveBlock).toHaveBeenCalledWith({ blockId: '1', instruction: '同義語を増やして' });
+    // stateReadyFull の #2（children[tiab]）は共有語 0 件だが、siblings は完全一致の有無を
+    // 問わず全兄弟を渡す契約なので sharedTerms: [] のまま載る（issue #89 must-fix）。
+    expect(onImproveBlock).toHaveBeenCalledWith({
+      blockId: '1',
+      instruction: '同義語を増やして',
+      siblings: [{ id: '2', label: null, expression: 'children[tiab]', sharedTerms: [] }],
+    });
 
     // 無関係な setState による全ビュー再描画をシミュレート（同じ container に再度 view を適用）。
     view(container, {
@@ -657,6 +669,92 @@ describe('createEditView - AI 改善の進捗・提案・エラーは state.bloc
   });
 });
 
+describe('createEditView - 提案 diff の削除/追加サマリ（issue #89）', () => {
+  function stateWithProposal(current: string, proposed: string): AppState {
+    return {
+      ...stateReadyFull,
+      blockImprovement: {
+        formulaVersionId: 'v1',
+        blockId: '1',
+        status: 'ready',
+        result: {
+          blockId: '1',
+          currentExpression: current,
+          proposedExpression: proposed,
+          rationale: 'r',
+        },
+        error: null,
+      },
+    };
+  }
+
+  test('削除のみ: 語数と MeSH/フリーワード内訳が出る', () => {
+    const view = createEditView({ onImproveBlock: jest.fn() });
+    const container = buildContainer();
+    view(container, {
+      state: stateWithProposal('"Pneumonia"[Mesh] OR cough[tiab]', '"Pneumonia"[Mesh]'),
+      navigate: jest.fn(),
+    });
+    const summary = blockRow(container, '1').querySelector('.edit__block-diff-summary');
+    expect(summary?.textContent).toBe(
+      'この提案で 1 語が削除されます（削除: MeSH 0 / フリーワード 1）'
+    );
+  });
+
+  test('追加のみ: 内訳の括弧無しで語数だけ出る', () => {
+    const view = createEditView({ onImproveBlock: jest.fn() });
+    const container = buildContainer();
+    view(container, {
+      state: stateWithProposal('"Pneumonia"[Mesh]', '"Pneumonia"[Mesh] OR cough[tiab]'),
+      navigate: jest.fn(),
+    });
+    const summary = blockRow(container, '1').querySelector('.edit__block-diff-summary');
+    expect(summary?.textContent).toBe('この提案で 1 語が追加されます');
+  });
+
+  test('削除と追加の両方が起きる場合、両方の語数と削除の内訳が出る', () => {
+    const view = createEditView({ onImproveBlock: jest.fn() });
+    const container = buildContainer();
+    view(container, {
+      state: stateWithProposal(
+        '"Pneumonia"[Mesh] OR cough[tiab]',
+        '"Pneumonia"[Mesh] OR fever[tiab]'
+      ),
+      navigate: jest.fn(),
+    });
+    const summary = blockRow(container, '1').querySelector('.edit__block-diff-summary');
+    expect(summary?.textContent).toBe(
+      'この提案で 1 語が削除され、1 語が追加されます（削除: MeSH 0 / フリーワード 1）'
+    );
+  });
+
+  test('MeSH とフリーワードが混在する削除は内訳を両方数える', () => {
+    const view = createEditView({ onImproveBlock: jest.fn() });
+    const container = buildContainer();
+    view(container, {
+      state: stateWithProposal(
+        '"Asthma"[Mesh] OR "Pneumonia"[Mesh] OR cough[tiab] OR fever[tiab] OR wheeze[tiab]',
+        '"Bronchitis"[Mesh] OR sneeze[tiab]'
+      ),
+      navigate: jest.fn(),
+    });
+    const summary = blockRow(container, '1').querySelector('.edit__block-diff-summary');
+    expect(summary?.textContent).toBe(
+      'この提案で 5 語が削除され、2 語が追加されます（削除: MeSH 2 / フリーワード 3）'
+    );
+  });
+
+  test('提案が現式と同じ（差分なし）ならサマリ行は出ない', () => {
+    const view = createEditView({ onImproveBlock: jest.fn() });
+    const container = buildContainer();
+    view(container, {
+      state: stateWithProposal('asthma[tiab]', 'asthma[tiab]'),
+      navigate: jest.fn(),
+    });
+    expect(blockRow(container, '1').querySelector('.edit__block-diff-summary')).toBeNull();
+  });
+});
+
 describe('createEditView - 編集中 md は state から解決される（formulaEditDraft）', () => {
   test('formulaEditDraft が現在の formula バージョンと一致すればそちらの md を表示する', () => {
     const view = createEditView();
@@ -728,6 +826,7 @@ describe('createEditView - AI に渡す内容を見る（文脈開示）', () =>
       { pmid: '222', title: 'Seed B', decision: 'include', source: 'interactive' },
     ],
     validation: { captureRate: 0.5, capturedPmids: ['111'], missedPmids: ['222'] },
+    siblings: [],
   };
 
   test('開示にシード論文と検証捕捉情報が出る', async () => {
@@ -738,11 +837,21 @@ describe('createEditView - AI に渡す内容を見る（文脈開示）', () =>
     view(container, { state: stateReadyFull, navigate: jest.fn() });
     const row = blockRow(container, '1');
     row.querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
-    expect(onGetImproveContext).toHaveBeenCalledWith('1');
+    // stateReadyFull の #2（children[tiab]）は共有語 0 件だが、兄弟ブロック自体は存在するので
+    // sharedTerms: [] のまま渡る（issue #89 must-fix: 完全一致しない重複でも渡すため）。
+    expect(onGetImproveContext).toHaveBeenCalledWith('1', [
+      { id: '2', label: null, expression: 'children[tiab]', sharedTerms: [] },
+    ]);
     expect(row.querySelector('.edit__block-ai-context-loading')).toBeTruthy();
     await flushAsync();
     await flushAsync();
     expect(row.querySelector('.edit__block-ai-context-loading')).toBeNull();
+    // このテストの onGetImproveContext モックは呼び出し引数によらず context（siblings: []）を
+    // 常に返すため、表示は resolved context の値（0 件）を反映する。
+    expect(row.querySelector('.edit__block-ai-context-siblings')).toBeNull();
+    expect(row.querySelector('.edit__block-ai-context-siblings-empty')?.textContent).toBe(
+      '(他ブロックなし)'
+    );
     const seeds = row.querySelector('.edit__block-ai-context-seeds')!;
     expect(seeds.textContent).toContain('PMID 111（初期・include）: Seed A');
     expect(seeds.textContent).toContain('PMID 222（対話拡張・include）: Seed B');
@@ -750,6 +859,68 @@ describe('createEditView - AI に渡す内容を見る（文脈開示）', () =>
       '捕捉率 50%'
     );
     expect(row.querySelector('.edit__block-ai-context-validation')?.textContent).toContain('222');
+  });
+
+  test('兄弟ブロックとの共有語がある場合、開示の「他ブロック」に出て submit でも onImproveBlock に載る（issue #89）', async () => {
+    const onImproveBlock = jest.fn().mockResolvedValue(undefined);
+    const contextWithSiblings: BlockImprovementContext = {
+      ...context,
+      siblings: [
+        {
+          id: '2',
+          label: null,
+          expression: '"Asthma"[Mesh] OR children[tiab]',
+          sharedTerms: ['Asthma'],
+        },
+      ],
+    };
+    const onGetImproveContext = jest.fn().mockResolvedValue(contextWithSiblings);
+    const view = createEditView({ onImproveBlock, onGetImproveContext });
+    const container = buildContainer();
+    const md = [
+      '## PubMed/MEDLINE',
+      '',
+      '```',
+      '#1 "Asthma"[Mesh] OR asthma*[tiab]',
+      '#2 "Asthma"[Mesh] OR children[tiab]',
+      '#3 #1 AND #2',
+      '```',
+      '',
+    ].join('\n');
+    view(container, { state: { ...stateReady, currentFormulaMarkdown: md }, navigate: jest.fn() });
+    const row = blockRow(container, '1');
+    row.querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
+    // computeSiblingOverlaps(expression, siblings) が同期的に計算され、開示側へも渡る。
+    expect(onGetImproveContext).toHaveBeenCalledWith('1', [
+      {
+        id: '2',
+        label: null,
+        expression: '"Asthma"[Mesh] OR children[tiab]',
+        sharedTerms: ['Asthma'],
+      },
+    ]);
+    await flushAsync();
+    await flushAsync();
+    const siblingsSection = row.querySelector('.edit__block-ai-context-siblings')!;
+    expect(siblingsSection.textContent).toContain('#2:');
+    expect(siblingsSection.textContent).toContain('"Asthma"[Mesh] OR children[tiab]');
+    expect(siblingsSection.textContent).toContain('共有語: Asthma');
+
+    row.querySelector<HTMLTextAreaElement>('.edit__block-ai-instruction')!.value =
+      '#2 と重複するキーワードを消して';
+    row.querySelector<HTMLButtonElement>('.edit__block-ai-submit')!.click();
+    expect(onImproveBlock).toHaveBeenCalledWith({
+      blockId: '1',
+      instruction: '#2 と重複するキーワードを消して',
+      siblings: [
+        {
+          id: '2',
+          label: null,
+          expression: '"Asthma"[Mesh] OR children[tiab]',
+          sharedTerms: ['Asthma'],
+        },
+      ],
+    });
   });
 
   test('context が null でも現式は出て、シードは (登録なし)・検証は (未検証)', async () => {
@@ -769,6 +940,11 @@ describe('createEditView - AI に渡す内容を見る（文脈開示）', () =>
     // 現式は fallback で表示される
     expect(row.querySelector('.edit__block-ai-context-list')?.textContent).toContain(
       'asthma[tiab]'
+    );
+    // 他ブロックも context が null のときは fallbackSiblings（computeSiblingOverlaps の結果）で
+    // 表示される。#2 は共有語 0 件だが兄弟ブロック自体は存在するので一覧に出る（issue #89 must-fix）。
+    expect(row.querySelector('.edit__block-ai-context-siblings')?.textContent).toContain(
+      '完全一致の重複なし'
     );
   });
 
@@ -1351,7 +1527,11 @@ describe('createEditView - AI 改善へインスペクタの計測済みヒッ�
     row.querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
     row.querySelector<HTMLTextAreaElement>('.edit__block-ai-instruction')!.value = '見直して';
     row.querySelector<HTMLButtonElement>('.edit__block-ai-submit')!.click();
-    expect(onImproveBlock).toHaveBeenCalledWith({ blockId: '1', instruction: '見直して' });
+    expect(onImproveBlock).toHaveBeenCalledWith({
+      blockId: '1',
+      instruction: '見直して',
+      siblings: [{ id: '2', label: null, expression: 'children[tiab]', sharedTerms: [] }],
+    });
     const call = onImproveBlock.mock.calls[0]![0] as Record<string, unknown>;
     expect('keywordHits' in call).toBe(false);
     expect('freewordDedupTotal' in call).toBe(false);
@@ -1368,7 +1548,11 @@ describe('createEditView - AI 改善へインスペクタの計測済みヒッ�
     // await flushAsync() を挟まず、Δ 計算が pending のうちに送信する。
     row.querySelector<HTMLTextAreaElement>('.edit__block-ai-instruction')!.value = '見直して';
     row.querySelector<HTMLButtonElement>('.edit__block-ai-submit')!.click();
-    expect(onImproveBlock).toHaveBeenCalledWith({ blockId: '1', instruction: '見直して' });
+    expect(onImproveBlock).toHaveBeenCalledWith({
+      blockId: '1',
+      instruction: '見直して',
+      siblings: [{ id: '2', label: null, expression: 'children[tiab]', sharedTerms: [] }],
+    });
   });
 });
 

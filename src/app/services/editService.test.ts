@@ -636,18 +636,44 @@ describe('requestBlockImprovement - シード / 検証文脈', () => {
     expect(calls[0]).toContain('現在のヒット数（PubMed esearch）: (未計測)');
     expect(calls[0]).toContain('キーワード別ヒット数（単体）:\n(未計測)');
   });
+
+  test('siblings（兄弟ブロックとの共有語）が improve-block のプロンプトに転記される（issue #89）', async () => {
+    const store = createStore(makeState({ currentFormulaMarkdown: VALID_MD }));
+    const { factory, calls } = capturingFactory();
+    await requestBlockImprovement(
+      {
+        blockId: '1',
+        siblings: [
+          { id: '2', label: 'Outcome', expression: 'children[tiab] OR asthma[tiab]', sharedTerms: ['asthma[tiab]'] },
+        ],
+      },
+      { store, google: emptySeedsGoogle(), llmFactory: factory }
+    );
+    expect(calls[0]).toContain('#2 Outcome: children[tiab] OR asthma[tiab]');
+    expect(calls[0]).toContain('共有語: asthma[tiab]');
+  });
+
+  test('siblings 未指定なら (渡されていない)', async () => {
+    const store = createStore(makeState({ currentFormulaMarkdown: VALID_MD }));
+    const { factory, calls } = capturingFactory();
+    await requestBlockImprovement(
+      { blockId: '1' },
+      { store, google: emptySeedsGoogle(), llmFactory: factory }
+    );
+    expect(calls[0]).toContain('他ブロック（掛け合わせる相手）:\n(渡されていない)');
+  });
 });
 
 describe('getBlockImprovementContext', () => {
   test('式が未生成なら null', async () => {
     const store = createStore(makeState({ currentFormulaMarkdown: null }));
-    const ctx = await getBlockImprovementContext('1', { store, google: emptySeedsGoogle() });
+    const ctx = await getBlockImprovementContext('1', [], { store, google: emptySeedsGoogle() });
     expect(ctx).toBeNull();
   });
 
   test('存在しない blockId は null', async () => {
     const store = createStore(makeState({ currentFormulaMarkdown: VALID_MD }));
-    const ctx = await getBlockImprovementContext('99', { store, google: emptySeedsGoogle() });
+    const ctx = await getBlockImprovementContext('99', [], { store, google: emptySeedsGoogle() });
     expect(ctx).toBeNull();
   });
 
@@ -667,7 +693,7 @@ describe('getBlockImprovementContext', () => {
     const google = seedsGoogle([
       { pmid: '111', title: 'Seed A', source: 'initial', is_valid: 'true', user_decision: 'include' },
     ]);
-    const ctx = await getBlockImprovementContext('1', { store, google });
+    const ctx = await getBlockImprovementContext('1', [], { store, google });
     expect(ctx).not.toBeNull();
     expect(ctx!.researchQuestion).toBe('RQ');
     expect(ctx!.blockLabel).toBe('Population');
@@ -680,6 +706,19 @@ describe('getBlockImprovementContext', () => {
       capturedPmids: ['111'],
       missedPmids: ['222'],
     });
+    expect(ctx!.siblings).toEqual([]);
+  });
+
+  test('siblings は渡された値をそのまま context に載せる（issue #89）', async () => {
+    const store = createStore(makeState({ currentFormulaMarkdown: VALID_MD }));
+    const siblings = [
+      { id: '2', label: 'Outcome', expression: 'children[tiab]', sharedTerms: ['Asthma'] },
+    ];
+    const ctx = await getBlockImprovementContext('1', siblings, {
+      store,
+      google: emptySeedsGoogle(),
+    });
+    expect(ctx!.siblings).toEqual(siblings);
   });
 });
 

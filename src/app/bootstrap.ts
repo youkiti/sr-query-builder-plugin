@@ -477,8 +477,8 @@ function buildDefaultViewOptions(
       // view はこの Promise の解決値を使わない（expand の onFetch と同じ思想。issue #39 対応）。
       onImproveBlock: async (input: RequestBlockImprovementInput): Promise<void> =>
         runImproveBlock(store, runtime, llmFactoryDepsBase(), input),
-      onGetImproveContext: (blockId: string): Promise<BlockImprovementContext | null> =>
-        getBlockImprovementContext(blockId, { store, google: runtime.google }),
+      onGetImproveContext: (blockId, siblings): Promise<BlockImprovementContext | null> =>
+        getBlockImprovementContext(blockId, siblings, { store, google: runtime.google }),
       // ブロック・インスペクタ（src/app/views/blockInspector.ts。requirements: 検索式編集の
       // MeSH/フリーワード可視化）の計測 callback。既存の NCBI 呼び出し経路をそのまま再利用する
       // （新しい fetch 経路は増やさない。issue #58 chunk 3a）。

@@ -14,8 +14,10 @@ import {
 import {
   buildBlockInspector,
   collectMeasuredContext,
+  computeSiblingOverlaps,
   type BlockInspectorDeps,
   type SiblingBlock,
+  type SiblingOverlap,
 } from './blockInspector';
 import { renderEditableBlockInto, type EditableBlockHandlers } from './editableBlock';
 import {
@@ -23,8 +25,10 @@ import {
   diffExpressions,
   renderDiffSideInto,
   renderExpressionInto,
+  tokenizeExpression,
+  type ExpressionDiff,
 } from './formulaDisplay';
-import { dedupeOperands, sortOperandsMeshFirst } from './meshExpressionEdit';
+import { dedupeOperands, operandMeshDescriptor, sortOperandsMeshFirst } from './meshExpressionEdit';
 import { appendFreeword, removeOperandAt, setOperandTerm } from './operandEdit';
 import { ROUTE_LABELS } from '../router';
 import type { AppState, BlocksDraft, BlockImprovementState, FormulaSaveState } from '../store';
@@ -45,14 +49,21 @@ import type { RenderView } from './types';
  * 2. **詳細編集（生テキスト）**: チップ編集面の下にある折りたたみ。複合句（ネスト群。
  *    チップでは削除しかできない）や式全体の一括書き換えのための逃げ道。既定で閉じている。
  * 3. **ブロック単位 AI 改善（requirements.md §4.7）**: 「AI に改善させる」を押すと
- *    任意の指示文を入力する欄が開き（空でも可）、improve-block skill を実行する。
+ *    任意の指示文を入力する欄が開き（空でも可）、improve-block skill を実行する。送信時は
+ *    兄弟ブロック（結合行を除く他の概念ブロック）を式・完全一致の共有語つきで渡す
+ *    （blockInspector.ts の computeSiblingOverlaps。共有語 0 件の兄弟も渡す — 表記ゆれ・
+ *    タグ違い等「完全一致しない重複」もありうるため、0 件を「重複なし」と決めつけて隠さない）
+ *    ので、「#1 と重複するキーワードを消して」のような指示を根拠を持って実行できる
+ *    （issue #89。以前は自分の式しか渡らず、過剰削除の原因になっていた）。
  *    提案 expression と rationale を句単位の diff（formulaDisplay.ts の diffExpressions /
- *    renderDiffSideInto）で色分け表示し、「置き換える」で内部 md に反映する。
+ *    renderDiffSideInto）で色分け表示し、削除/追加語数のサマリを添えたうえで、
+ *    「置き換える」で内部 md に反映する。
  *
  * ブロック行の下には、鉛筆または AI パネルを開いたときだけブロック・インスペクタ
  * （blockInspector.ts）を展開する。チップ・詳細編集・インスペクタの MeSH ブラウザ
- * （置換 / OR追加 / 削除）・Δ 表のいずれから編集しても、同じ純粋関数（operandEdit /
- * meshExpressionEdit）を経由した同じ結果になる。
+ * （置換 / OR追加 / 削除）・Δ 表・他ブロックとの重複セクション（削除ボタン。issue #89）の
+ * いずれから編集しても、同じ純粋関数（operandEdit / meshExpressionEdit）を経由した
+ * 同じ結果になる。
  *
  * 上記 3 手段はいずれも `isCombination=false` の概念ブロックだけが対象（issue #88）。
  * `#3 #1 AND #2` のような掛け合わせ行（他ブロック ID への参照を含む行）は検索の実体を
@@ -93,8 +104,16 @@ export interface EditViewCallbacks
    * 結果は返り値ではなく store.blockImprovement 経由で view に届く（view は解決値を使わない）。
    */
   onImproveBlock?: (input: RequestBlockImprovementInput) => Promise<void>;
-  /** 「AI に渡す内容を見る」表示用の文脈スナップショットを取得する（SeedPapers 読み取りを伴う） */
-  onGetImproveContext?: (blockId: string) => Promise<BlockImprovementContext | null>;
+  /**
+   * 「AI に渡す内容を見る」表示用の文脈スナップショットを取得する（SeedPapers 読み取りを伴う）。
+   * siblings は onImproveBlock の submit 時に渡すのと同じ computeSiblingOverlaps の結果
+   * （issue #89）。開示の内容と実際にプロンプトへ載る内容を一致させるため、view 側
+   * （openAiPromptForm）で 1 度だけ計算したものをここへも渡す。
+   */
+  onGetImproveContext?: (
+    blockId: string,
+    siblings: SiblingOverlap[]
+  ) => Promise<BlockImprovementContext | null>;
   /** 編集中の md 全文を store（formulaEditDraft）へ反映する */
   onDraftChange?: (markdown: string) => void;
   /** ブロック単位 AI 改善の提案を破棄する（accept / reject の両方で呼ぶ） */
@@ -669,10 +688,12 @@ function buildBlockRow(
       onFetchMeshTrees: callbacks.onFetchMeshTrees,
       onFetchMeshChildren: callbacks.onFetchMeshChildren,
       onFetchMeshLabels: callbacks.onFetchMeshLabels,
-      // MeSH ブラウザの置換 / OR追加 / 削除、Δ 表の語編集・削除を有効化する。
-      // チップ編集面と同じ commitExpression を通すので、インスペクタ側から触っても
-      // チップ側から触っても同じ結果になる（blockInspector.ts の doc コメント参照）。
-      onApplyExpression: (next) => commitExpression(next, null),
+      // MeSH ブラウザの置換 / OR追加 / 削除、Δ 表の語編集・削除、他ブロックとの重複セクション
+      // の削除ボタン（issue #89）を有効化する。チップ編集面と同じ commitExpression を通すので、
+      // インスペクタ側から触ってもチップ側から触っても同じ結果になる（blockInspector.ts の
+      // doc コメント参照）。onError は式が空になる等で拒否されたときの理由を呼び出し元
+      // （重複セクションのエラー行）へ伝える。
+      onApplyExpression: (next, onError) => commitExpression(next, null, onError),
       ...inspector.caches,
     });
     if (el) {
@@ -753,6 +774,7 @@ function buildBlockRow(
       aiSlot,
       blockId,
       expression,
+      siblings,
       callbacks.onImproveBlock,
       callbacks.onGetImproveContext,
       inspector.caches,
@@ -978,18 +1000,27 @@ function buildRawEditForm(
  * freewordDeltaSnapshot）を collectMeasuredContext で同期的に読み、非空のときだけ
  * onImproveBlock の入力に載せる（issue #58 chunk 3c）。新規 esearch は発行しない
  * （インスペクタを開いていない・計測が未解決のブロックでは何も載らないのが正常）。
+ *
+ * 兄弟ブロック（結合行を除く他の概念ブロック）は computeSiblingOverlaps(expression, siblings)
+ * をここで 1 度だけ計算し、「AI に渡す内容を見る」（onGetImproveContext）と実際の submit
+ * （onImproveBlock）の両方へ同じ値を渡す（開示と実際にプロンプトへ載る内容を一致させる
+ * という openAiPromptForm 全体の設計方針を守るため）。共有語（sharedTerms）は完全一致でしか
+ * 検出できないため、共有語が 0 件の兄弟も含めて全件渡す（issue #89。表記ゆれ等で完全一致
+ * しない重複のときに AI へ何も渡らず、根拠の無い推測で過剰削除するのを防ぐため）。
  */
 function openAiPromptForm(
   doc: Document,
   slot: HTMLElement,
   blockId: string,
   expression: string,
+  siblings: SiblingBlock[],
   onImproveBlock: NonNullable<EditViewCallbacks['onImproveBlock']>,
   onGetImproveContext: EditViewCallbacks['onGetImproveContext'],
   measuredCaches: EditInspectorRuntime['caches'],
   onClosed: () => void
 ): void {
   slot.innerHTML = '';
+  const overlaps = computeSiblingOverlaps(expression, siblings);
   const form = doc.createElement('div');
   form.className = 'edit__block-ai-form';
 
@@ -1015,10 +1046,10 @@ function openAiPromptForm(
     loading.textContent = '読み込み中…';
     details.appendChild(loading);
     form.appendChild(details);
-    onGetImproveContext(blockId)
+    onGetImproveContext(blockId, overlaps)
       .then((context) => {
         loading.remove();
-        details.appendChild(buildContextBody(doc, context, expression));
+        details.appendChild(buildContextBody(doc, context, expression, overlaps));
       })
       .catch(() => {
         loading.textContent = '文脈の取得に失敗しました（改善は実行できます）。';
@@ -1062,15 +1093,27 @@ function openAiPromptForm(
       ...(measured.freewordDedupTotal !== null
         ? { freewordDedupTotal: measured.freewordDedupTotal }
         : {}),
+      // 兄弟ブロックが 1 件も無ければキーを足さない（issue #89。既存の未計測判定と揃える）。
+      // computeSiblingOverlaps は共有語の有無にかかわらず全兄弟を返すため、この条件は
+      // 「共有語がある兄弟が居るか」ではなく「兄弟ブロックが存在するか」になる
+      // （完全一致しない重複でも AI に自分以外の式を見せるため。blockInspector.ts の
+      // computeSiblingOverlaps の doc コメント参照）。
+      ...(overlaps.length > 0 ? { siblings: overlaps } : {}),
     });
   });
 }
 
-/** 「AI に渡す内容を見る」の中身。context が null なら現式のみ示す。 */
+/**
+ * 「AI に渡す内容を見る」の中身。context が null なら現式・siblings は fallback で示す
+ * （fallbackSiblings は openAiPromptForm が computeSiblingOverlaps で同期的に計算した値。
+ * context.siblings はそれを onGetImproveContext 経由でそのまま echo したものなので、
+ * 通常は同じ内容になる）。
+ */
 function buildContextBody(
   doc: Document,
   context: BlockImprovementContext | null,
-  fallbackExpression: string
+  fallbackExpression: string,
+  fallbackSiblings: SiblingOverlap[]
 ): HTMLElement {
   const wrapper = doc.createElement('div');
   wrapper.className = 'edit__block-ai-context-body';
@@ -1086,6 +1129,37 @@ function buildContextBody(
   appendContextItem(doc, dl, '説明', desc && desc !== '' ? desc : '(自動推定)');
   appendContextItem(doc, dl, '現在の式', current);
   wrapper.appendChild(dl);
+
+  // 他ブロック（issue #89: 重複を根拠づけるため AI にも見せる文脈と同じものを表示する）。
+  // siblings は結合行を除く全ての兄弟ブロック（共有語の有無を問わない）。共有語は
+  // MeSH descriptor / フリーワード query の完全一致でしか検出できないため、0 件でも
+  // 「重複が無い」とは限らない（表記ゆれ等）ことを表示上も明示する。
+  const siblings = context?.siblings ?? fallbackSiblings;
+  const siblingsHeading = doc.createElement('p');
+  siblingsHeading.className = 'edit__block-ai-context-subheading';
+  siblingsHeading.textContent = `他ブロック（${siblings.length} 件）`;
+  wrapper.appendChild(siblingsHeading);
+  if (siblings.length === 0) {
+    const none = doc.createElement('p');
+    // seeds セクションの「(登録なし)」と意味が異なる（他ブロックが無い＝結合行以外に
+    // ブロックが自分だけ）ため、意図的に別クラスにする（既存の .edit__block-ai-context-empty
+    // との querySelector 衝突も避ける）。
+    none.className = 'edit__block-ai-context-siblings-empty';
+    none.textContent = '(他ブロックなし)';
+    wrapper.appendChild(none);
+  } else {
+    const siblingList = doc.createElement('ul');
+    siblingList.className = 'edit__block-ai-context-siblings';
+    for (const sib of siblings) {
+      const item = doc.createElement('li');
+      const sibLabel = sib.label ? ` ${sib.label}` : '';
+      const sharedText =
+        sib.sharedTerms.length > 0 ? sib.sharedTerms.join(', ') : '完全一致の重複なし';
+      item.textContent = `#${sib.id}${sibLabel}: ${sib.expression}（共有語: ${sharedText}）`;
+      siblingList.appendChild(item);
+    }
+    wrapper.appendChild(siblingList);
+  }
 
   // シード論文
   const seeds = context?.seedPapers ?? [];
@@ -1231,6 +1305,12 @@ function renderProposal(
   diff.appendChild(after);
   slot.appendChild(diff);
 
+  // 削除サマリ（issue #89）: 過剰削除に気づけるよう、diff の直下に語数と内訳を 1 行で出す。
+  const summaryLine = buildDiffSummaryLine(doc, tokenDiff);
+  if (summaryLine) {
+    slot.appendChild(summaryLine);
+  }
+
   const actions = doc.createElement('div');
   actions.className = 'edit__block-actions';
 
@@ -1284,6 +1364,73 @@ function renderProposal(
     slot.innerHTML = '';
     callbacks.onClearImprovement?.();
   });
+}
+
+/**
+ * 提案 diff の削除/追加サマリ行（issue #89）。過剰削除に気づけるよう、句数と
+ * MeSH / フリーワード内訳を 1 行で示す。削除・追加どちらも 0 件なら null（行を出さない）。
+ * 例: 「この提案で 7 語が削除され、2 語が追加されます（削除: MeSH 2 / フリーワード 5）」
+ */
+function buildDiffSummaryLine(doc: Document, diff: ExpressionDiff): HTMLElement | null {
+  if (diff.removed.length === 0 && diff.added.length === 0) {
+    return null;
+  }
+  let sentence: string;
+  if (diff.removed.length > 0 && diff.added.length > 0) {
+    sentence = `この提案で ${diff.removed.length} 語が削除され、${diff.added.length} 語が追加されます`;
+  } else if (diff.removed.length > 0) {
+    sentence = `この提案で ${diff.removed.length} 語が削除されます`;
+  } else {
+    sentence = `この提案で ${diff.added.length} 語が追加されます`;
+  }
+  if (diff.removed.length > 0) {
+    sentence += `（削除: ${summarizeOperandKinds(diff.removed)}）`;
+  }
+  const p = doc.createElement('p');
+  p.className = 'edit__block-diff-summary';
+  p.textContent = sentence;
+  return p;
+}
+
+/**
+ * operand テキスト群を MeSH / フリーワード / その他（複合句など判定できないもの）に分類して
+ * 「MeSH x / フリーワード y[ / その他 z]」の内訳文字列にする。
+ */
+function summarizeOperandKinds(texts: readonly string[]): string {
+  let mesh = 0;
+  let freeword = 0;
+  let other = 0;
+  for (const text of texts) {
+    const kind = classifyOperandKind(text);
+    if (kind === 'mesh') {
+      mesh += 1;
+    } else if (kind === 'freeword') {
+      freeword += 1;
+    } else {
+      other += 1;
+    }
+  }
+  const parts = [`MeSH ${mesh}`, `フリーワード ${freeword}`];
+  if (other > 0) {
+    parts.push(`その他 ${other}`);
+  }
+  return parts.join(' / ');
+}
+
+/**
+ * 1 つの operand テキストを MeSH / フリーワード / その他 に分類する
+ * （operandEdit.ts の analyzeOperand と同じ判定。単一の MeSH/フリーワード句だけを識別し、
+ * 複合句・タグ無しはその他に寄せる）。
+ */
+function classifyOperandKind(text: string): 'mesh' | 'freeword' | 'other' {
+  if (operandMeshDescriptor(text) !== null) {
+    return 'mesh';
+  }
+  const segments = tokenizeExpression(text.trim()).filter((s) => s.text.trim() !== '');
+  if (segments.length === 1 && segments[0]!.kind === 'freeword') {
+    return 'freeword';
+  }
+  return 'other';
 }
 
 function formatError(err: unknown): string {

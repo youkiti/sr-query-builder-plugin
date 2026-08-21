@@ -247,4 +247,67 @@ describe('improveBlockExpression', () => {
     const userMsg = calls[0]!.find((m) => m.role === 'user')?.content ?? '';
     expect(userMsg).toContain('キーワード別ヒット数（単体）:\n(未計測)');
   });
+
+  test('他ブロック（siblingBlocks）が ID・ラベル・式・共有語つきで箇条書きに載る（issue #89）', async () => {
+    const { provider: p, calls } = provider(JSON.stringify({}));
+    await improveBlockExpression(
+      {
+        currentExpression: '"Asthma"[Mesh] OR asthma*[tiab]',
+        blockLabel: 'Population',
+        blockDescription: '喘息',
+        researchQuestion: 'RQ',
+        userInstruction: '#1 と重複するキーワードを消して',
+        siblingBlocks: [
+          {
+            id: '2',
+            label: 'Outcome',
+            expression: '"Asthma"[Mesh] OR hospitalization[tiab]',
+            sharedTerms: ['Asthma'],
+          },
+        ],
+      },
+      p
+    );
+    const userMsg = calls[0]!.find((m) => m.role === 'user')?.content ?? '';
+    expect(userMsg).toContain('他ブロック（掛け合わせる相手）:');
+    expect(userMsg).toContain('- #2 Outcome: "Asthma"[Mesh] OR hospitalization[tiab]');
+    expect(userMsg).toContain('共有語: Asthma');
+  });
+
+  test('共有語が完全一致で見つからない兄弟も渡り、「(完全一致の重複なし)」と出る（issue #89 must-fix）', async () => {
+    const { provider: p, calls } = provider(JSON.stringify({}));
+    await improveBlockExpression(
+      {
+        currentExpression: 'asthma[tiab]',
+        blockLabel: 'Population',
+        blockDescription: '喘息',
+        researchQuestion: 'RQ',
+        userInstruction: '#2 と重複するキーワードを消して',
+        siblingBlocks: [
+          // タグ違い（asthma[tw] vs asthma[tiab]）で完全一致しないため sharedTerms は空。
+          { id: '2', label: 'Outcome', expression: 'asthma[tw]', sharedTerms: [] },
+        ],
+      },
+      p
+    );
+    const userMsg = calls[0]!.find((m) => m.role === 'user')?.content ?? '';
+    expect(userMsg).toContain('- #2 Outcome: asthma[tw]');
+    expect(userMsg).toContain('共有語: (完全一致の重複なし)');
+  });
+
+  test('siblingBlocks が無ければ (渡されていない)', async () => {
+    const { provider: p, calls } = provider(JSON.stringify({}));
+    await improveBlockExpression(
+      {
+        currentExpression: 'x',
+        blockLabel: 'L',
+        blockDescription: 'D',
+        researchQuestion: 'RQ',
+        userInstruction: '',
+      },
+      p
+    );
+    const userMsg = calls[0]!.find((m) => m.role === 'user')?.content ?? '';
+    expect(userMsg).toContain('他ブロック（掛け合わせる相手）:\n(渡されていない)');
+  });
 });

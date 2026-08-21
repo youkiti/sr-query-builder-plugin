@@ -156,9 +156,19 @@
 
 .edit__block-ai-context-empty,
 .edit__block-ai-context-loading,
-.edit__block-ai-context-validation {
+.edit__block-ai-context-validation,
+.edit__block-ai-context-siblings-empty {
   margin: 0;
   color: var(--color-text-muted);
+}
+
+.edit__block-ai-context-siblings {
+  margin: 0;
+  padding-left: var(--space-4);
+}
+
+.edit__block-ai-context-siblings li {
+  overflow-wrap: anywhere;
 }
 
 .edit__block-current {
@@ -253,6 +263,13 @@
    color なら子は自分の color 宣言で上書きできる。--color-text-muted は #f7f7f9 上で 4.93:1。 */
 .formula-diff__term--same {
   color: var(--color-text-muted);
+}
+
+/* 削除/追加サマリ行（issue #89）。文字色は既定の --color-text に委ねる
+   （警告色ではなく単なる集計情報なので、他の淡色注記と違い強調しない）。 */
+.edit__block-diff-summary {
+  margin: var(--space-1) 0 0;
+  font-size: var(--font-size-sm);
 }
 
 .edit__block-actions {

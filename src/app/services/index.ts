@@ -87,6 +87,7 @@ export {
   type RequestBlockImprovementInput,
   type SaveEditedFormulaInput,
   type SaveEditedFormulaResult,
+  type SiblingBlockContext,
 } from './editService';
 export {
   fetchBoundaryCandidates,

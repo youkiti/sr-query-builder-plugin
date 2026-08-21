@@ -14,6 +14,9 @@
  * 2. **フリーワード Δ 表**: 個別ヒット数の多い順に並べ、上から OR で累積したときの
  *    純増（Δ）を行ごとに出す。Δ=0 は削除候補、Δ 極小は低収量として色分けする。
  * 3. **他ブロックとの重複**: 同じ MeSH / フリーワードを使っている別ブロックを 1 行で示す。
+ *    共有語ごとに「削除」ボタンを添え、AI を使わずその場でブロック式から外せる（issue #89）。
+ *    同じ共有語の情報は「AI に改善させる」提出時に improve-block skill へも渡す
+ *    （editView.ts の openAiPromptForm 参照）。
  *
  * 計測は注入された `onCountHits`（esearch count）と `onFetchMeshTrees`（db=mesh tree number）に
  * 委譲し、結果は edit view から渡されるキャッシュで使い回す（同一式の重複 esearch を防ぐ）。
@@ -53,9 +56,12 @@ export interface BlockInspectorDeps {
   onFetchMeshLabels?: (treeNumbers: string[]) => Promise<Map<string, MeshTreeNode>>;
   /**
    * MeSH ブラウザからの置換 / OR追加でブロック式を差し替える。注入された場合のみ
-   * ノード名クリック（置換）・「OR追加」ボタンを出す。引数は当該ブロックの新しい式全文。
+   * ノード名クリック（置換）・「OR追加」ボタンを出す。第 1 引数は当該ブロックの新しい式全文。
+   * 第 2 引数 onError は、差し替えが拒否された（例: 式が空になる）ときに呼び出し元へ理由を
+   * 伝えるための任意コールバック（issue #89。既存の呼び出し箇所は渡さなくてもよい＝
+   * 無言で失敗する従来どおりの挙動のまま）。
    */
-  onApplyExpression?: (nextExpression: string) => void;
+  onApplyExpression?: (nextExpression: string, onError?: (message: string) => void) => void;
   /** 式→件数キャッシュ（edit view インスタンスと共有） */
   hitsCache: Map<string, Promise<number>>;
   /**
@@ -259,7 +265,7 @@ export function buildBlockInspector(
   }
 
   // 3. 他ブロックとの重複
-  section.appendChild(buildOverlapSection(doc, terms, params.siblings));
+  section.appendChild(buildOverlapSection(doc, terms, params));
 
   return section;
 }
@@ -1007,40 +1013,144 @@ function beginDeltaEdit(
 
 // ---- 他ブロックとの重複セクション ------------------------------------------
 
+/** 兄弟ブロック 1 件について、自分の式と共有している語（issue #89）。 */
+export interface SiblingOverlap {
+  id: string;
+  label: string | null;
+  expression: string;
+  /** 自分と共有している語（MeSH descriptor とフリーワード query が混在。表示順は MeSH → フリーワード） */
+  sharedTerms: string[];
+}
+
+/**
+ * 自分の式と兄弟ブロックそれぞれとの共有語を計算する（issue #89）。
+ * buildOverlapSection（表示）と、AI 改善へ渡す文脈（editView.ts の openAiPromptForm）の
+ * 双方が同じ計算を共有するための純関数。
+ *
+ * **兄弟ブロックは共有語の有無にかかわらず全件返す**（sharedTerms は空配列になりうる）。
+ * 共有語の判定は MeSH descriptor / フリーワード query の完全一致のみで、
+ * タグ違い（`[tiab]` vs `[tw]`）・単複（child/children）・MeSH とフリーワードの対応
+ * （`"Asthma"[Mesh]` vs `asthma[tiab]`）のような「完全一致しない重複」は検出できない。
+ * これらを 0 件（＝重複なし）として黙って除外すると、AI へは何も渡らず、根拠の無い
+ * 推測での過剰削除が再発する（issue #89 の元テスター報告は完全一致とは限らない）。
+ * そのため呼び出し側（AI へ渡す文脈）は「兄弟が 1 件でもあれば渡す」を基準にし、
+ * 共有語が 0 件かどうかは付加情報として渡す。表示側（buildOverlapSection）だけが
+ * 「共有 0 件の兄弟は行を出さない」というこれまでの UI 方針でフィルタする。
+ */
+export function computeSiblingOverlaps(
+  expression: string,
+  siblings: readonly SiblingBlock[]
+): SiblingOverlap[] {
+  const terms = extractBlockTerms(expression);
+  const myMesh = new Set(terms.meshTerms.map((t) => t.descriptor));
+  const myFree = new Set(terms.freewordTerms.map((t) => t.query));
+
+  return siblings.map((sib) => {
+    const sibTerms = extractBlockTerms(sib.expression);
+    const sharedMesh = sibTerms.meshTerms.map((t) => t.descriptor).filter((d) => myMesh.has(d));
+    const sharedFree = sibTerms.freewordTerms.map((t) => t.query).filter((q) => myFree.has(q));
+    return {
+      id: sib.id,
+      label: sib.label,
+      expression: sib.expression,
+      sharedTerms: [...sharedMesh, ...sharedFree],
+    };
+  });
+}
+
 function buildOverlapSection(
   doc: Document,
   terms: ParsedBlockTerms,
-  siblings: readonly SiblingBlock[]
+  params: BlockInspectorParams
 ): HTMLElement {
   const wrap = doc.createElement('div');
   wrap.className = 'bins__section bins__overlap';
 
+  // 表示は従来どおり「共有語がある兄弟だけ」に絞る（computeSiblingOverlaps 自体は
+  // AI へ渡す都合上、共有語 0 件の兄弟も含めて返すため、ここで絞り込む）。
+  const overlaps = computeSiblingOverlaps(params.expression, params.siblings).filter(
+    (o) => o.sharedTerms.length > 0
+  );
+  // 削除ボタンのクリック時、共有語が MeSH descriptor かフリーワード query かを判定するのに使う。
   const myMesh = new Set(terms.meshTerms.map((t) => t.descriptor));
-  const myFree = new Set(terms.freewordTerms.map((t) => t.query));
 
-  const lines: HTMLElement[] = [];
-  for (const sib of siblings) {
-    const sibTerms = extractBlockTerms(sib.expression);
-    const sharedMesh = sibTerms.meshTerms.map((t) => t.descriptor).filter((d) => myMesh.has(d));
-    const sharedFree = sibTerms.freewordTerms.map((t) => t.query).filter((q) => myFree.has(q));
-    const shared = [...sharedMesh, ...sharedFree];
-    if (shared.length > 0) {
-      const p = doc.createElement('p');
-      p.className = 'bins__overlap-line';
-      const label = sib.label ? ` ${sib.label}` : '';
-      p.textContent = `⚠ #${sib.id}${label} と共有: ${shared.join(', ')}`;
-      lines.push(p);
-    }
-  }
+  const errorLine = doc.createElement('p');
+  errorLine.className = 'bins__overlap-error';
+  errorLine.setAttribute('aria-live', 'polite');
 
-  if (lines.length === 0) {
+  if (overlaps.length === 0) {
     wrap.appendChild(muted(doc, '他ブロックと重複する語はありません。'));
-  } else {
-    for (const line of lines) {
-      wrap.appendChild(line);
-    }
+    wrap.appendChild(errorLine);
+    return wrap;
   }
+
+  for (const overlap of overlaps) {
+    const p = doc.createElement('p');
+    p.className = 'bins__overlap-line';
+    const label = overlap.label ? ` ${overlap.label}` : '';
+    p.appendChild(doc.createTextNode(`⚠ #${overlap.id}${label} と共有: `));
+    overlap.sharedTerms.forEach((term, idx) => {
+      if (idx > 0) {
+        p.appendChild(doc.createTextNode(', '));
+      }
+      p.appendChild(buildOverlapTerm(doc, term, myMesh, errorLine, params));
+    });
+    wrap.appendChild(p);
+  }
+  wrap.appendChild(errorLine);
   return wrap;
+}
+
+/**
+ * 重複行 1 語ぶんの表示。onApplyExpression が注入されているときだけ「削除」ボタンを添える
+ * （issue #89。手作業でその場で消せる、AI を使わない道）。
+ * MeSH descriptor は removeMeshDescriptor、フリーワードは findOperandByText で operand を
+ * 引き当てて removeOperandAt に委譲する（editView のチップ編集・インスペクタの他セクションと
+ * 同じ純粋関数を経由するので、どこから触っても同じ結果になる）。
+ */
+function buildOverlapTerm(
+  doc: Document,
+  term: string,
+  myMesh: ReadonlySet<string>,
+  errorLine: HTMLElement,
+  params: BlockInspectorParams
+): HTMLElement {
+  const span = doc.createElement('span');
+  span.className = 'bins__overlap-term';
+  span.appendChild(doc.createTextNode(term));
+
+  if (params.onApplyExpression) {
+    const removeBtn = doc.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'bins__overlap-remove';
+    removeBtn.textContent = '削除';
+    removeBtn.title = `"${term}" をこのブロックから外す`;
+    removeBtn.setAttribute('aria-label', `「${term}」をこのブロックから削除`);
+    removeBtn.addEventListener('click', () => {
+      errorLine.textContent = '';
+      const next = myMesh.has(term)
+        ? removeMeshDescriptor(params.expression, term)
+        : removeOperandByQuery(params.expression, term);
+      if (next === null) {
+        // フリーワード query が式上の operand と引き当てられない（見つからない）場合は何もしない。
+        return;
+      }
+      params.onApplyExpression!(next, (msg) => {
+        errorLine.textContent = msg;
+      });
+    });
+    span.appendChild(removeBtn);
+  }
+  return span;
+}
+
+/** フリーワード query（タグ込み）を式上の operand へ引き当てて削除する。見つからなければ null。 */
+function removeOperandByQuery(expression: string, query: string): string | null {
+  const operand = findOperandByText(expression, query);
+  if (!operand) {
+    return null;
+  }
+  return removeOperandAt(expression, operand.index);
 }
 
 // ---- 共通ヘルパー ---------------------------------------------------------
