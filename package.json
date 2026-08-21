@@ -1,6 +1,6 @@
 {
   "name": "sr-query-builder-plugin",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Chrome 拡張: 研究プロトコルから PubMed 検索式を生成・検証・各 DB 向けに変換する",
   "private": true,
   "license": "MIT",
