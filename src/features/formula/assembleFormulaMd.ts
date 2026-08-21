@@ -4,6 +4,7 @@ import type {
   FreewordSuggestion,
   MeshSuggestion,
 } from '@/features/formula/skills';
+import { normalizeCombinationExpression } from '@/lib/combination-expression';
 import {
   serializePubmedFormulaMd,
   type FormulaBlock,
@@ -70,9 +71,16 @@ export function assembleFormulaMd(input: AssembleInput): AssembledFormula {
     isCombination: false,
   }));
   const finalId = String(userBlocks.length + 1);
-  const finalExpression = buildFinalExpression(
-    input.baseCombinationExpression,
-    input.filterResult.appendToCombination
+  // 最終行（結合式）の演算子を大文字へ正規化する（issue #92 B-7）。#/blocks の「結合式を編集」
+  // 入力は打鍵のたびに draft へ生の文字列を書き込み、そのまま baseCombinationExpression として
+  // ここへ渡ってくる（#/edit の「組み合わせ方を編集」パネルとは違い、入力経路上に正規化を
+  // 挟んでいない）。formula_md を組み立てる唯一の合流点であるこの関数で正規化することで、
+  // 入力経路がどこであれ（#/blocks 直接入力・#/edit 経由の再構成のいずれでも）小文字の
+  // and/or/not が formula_md の最終行に紛れ込まないことを保証する（PubMed は小文字の
+  // and/or/not を Boolean 演算子ではなく検索語として扱うため、紛れ込むとヒット数・捕捉率・
+  // 全 DB 変換が黙って狂う）。打鍵中の draft 自体は正規化しない（入力と喧嘩するため）。
+  const finalExpression = normalizeCombinationExpression(
+    buildFinalExpression(input.baseCombinationExpression, input.filterResult.appendToCombination)
   );
   if (finalExpression === '') {
     throw new AssembleFormulaError(

@@ -71,7 +71,10 @@ describe('computeSiblingOverlaps（issue #89）', () => {
         id: '2',
         label: 'Outcome',
         expression: '"Asthma"[Mesh] OR cough[tiab] OR fever[tiab]',
-        sharedTerms: ['Asthma', 'cough[tiab]'],
+        sharedTerms: [
+          { term: 'Asthma', kind: 'mesh' },
+          { term: 'cough[tiab]', kind: 'freeword' },
+        ],
       },
     ]);
   });
@@ -366,6 +369,40 @@ describe('buildBlockInspector', () => {
     )!;
     el.querySelector<HTMLButtonElement>('.bins__overlap-remove')!.click();
     expect(onApplyExpression).toHaveBeenCalledWith('"Pneumonia"[Mesh]', expect.any(Function));
+  });
+
+  test('同じ重複行に MeSH とフリーワードの共有語が並んでも、それぞれの「削除」が正しい方だけを消す（issue #92 B-5）', () => {
+    // このケース自体は旧実装（削除ボタンのクリック時に `myMesh.has(term)` で MeSH か
+    // フリーワードかを再判定する書き方）でも正しく通っていたはず（MeSH descriptor の文字列と
+    // フリーワード query の文字列は現行のトークナイザの下では衝突しないため）。
+    // ここでは computeSiblingOverlaps が確定させた kind をそのまま持ち回る設計を固定する
+    // 回帰テストとして、行内のどのボタンを押してもそのボタンに紐づく語だけが正しい種別で
+    // 削除されることを確認する（SharedTerm の doc コメント参照: term の再判定はトークナイザの
+    // 挙動への暗黙の依存になるため、kind を持ち回るほうが安全という設計判断）。
+    const doc = buildDoc();
+    const onApplyExpression = jest.fn();
+    const el = buildBlockInspector(
+      doc,
+      baseParams({
+        expression: '"Asthma"[Mesh] OR fever[tiab] OR cough[tiab]',
+        onCountHits: jest.fn().mockResolvedValue(1),
+        onApplyExpression,
+        siblings: [
+          { id: '2', label: 'Outcome', expression: '"Asthma"[Mesh] OR fever[tiab] OR wheeze[tiab]' },
+        ],
+      })
+    )!;
+    const removeButtons = el.querySelectorAll<HTMLButtonElement>('.bins__overlap-remove');
+    expect(removeButtons).toHaveLength(2);
+    // 1 件目（MeSH: Asthma）を削除 → MeSH descriptor だけが消える。
+    removeButtons[0]!.click();
+    expect(onApplyExpression).toHaveBeenCalledWith('fever[tiab] OR cough[tiab]', expect.any(Function));
+    // 2 件目（フリーワード: fever[tiab]）を削除 → フリーワードだけが消える。
+    removeButtons[1]!.click();
+    expect(onApplyExpression).toHaveBeenCalledWith(
+      '"Asthma"[Mesh] OR cough[tiab]',
+      expect.any(Function)
+    );
   });
 
   test('onApplyExpression 未指定なら重複行に削除ボタンを出さない', () => {

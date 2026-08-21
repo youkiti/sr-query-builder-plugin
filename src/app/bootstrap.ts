@@ -527,7 +527,17 @@ function buildDefaultViewOptions(
         }));
       },
       onClearImprovement: () => {
-        store.setState((s) => ({ ...s, blockImprovement: null }));
+        // 提案（blockImprovement）を引っ込めるタイミング（accept / reject / manualEditApply /
+        // AI パネルの再クリック close）は、そのブロックの「今回の提案ラウンド」が終わる瞬間
+        // でもある。手編集ドラフト（blockImprovementManualEditDraft。issue #92 B-3）を
+        // ここで一緒に消しておかないと、同じブロックで次に AI 改善を開いたとき、新しい提案の
+        // 初期値（result.proposedExpression）ではなく前ラウンドの手編集テキストが復元されてしまう
+        // （blockImprovementInstruction を送信成功時にクリアする runImproveBlock と同じ理由）。
+        store.setState((s) => ({
+          ...s,
+          blockImprovement: null,
+          blockImprovementManualEditDraft: null,
+        }));
       },
       // 編集メモを store（formulaEditNote）へ反映する。打鍵のたび（input）に呼ばれるが、
       // setStateSilently（購読者に通知しない＝再描画を起こさない）で書き込むため、
@@ -552,6 +562,20 @@ function buildDefaultViewOptions(
         store.setStateSilently((s) => ({
           ...s,
           blockImprovementInstruction: { formulaVersionId, blockId, instruction },
+        }));
+      },
+      // 「提案を編集してから採用する」欄（issue #90）の未送信テキストを store
+      // （blockImprovementManualEditDraft）へ反映する（issue #92 B-3）。onNoteChange /
+      // onInstructionChange と同じ理由・同じ使い方（setStateSilently で再描画を起こさない）。
+      onManualEditChange: (blockId: string, expression: string) => {
+        const formulaVersionId = store.getState().currentFormulaVersionId;
+        /* istanbul ignore if -- guards.ts の edit: needsFormula() により #/edit 到達時点で必ず非 null */
+        if (formulaVersionId === null) {
+          return;
+        }
+        store.setStateSilently((s) => ({
+          ...s,
+          blockImprovementManualEditDraft: { formulaVersionId, blockId, expression },
         }));
       },
     },
@@ -703,6 +727,30 @@ async function runImproveBlock(
           },
         ],
       },
+      // 送信成功時に「AI への指示」欄の未送信テキストをクリアする（issue #92 B-4）。
+      // クリアしないと、次に renderProposal が「指示を追加してやり直す」欄の初期値として
+      // 今しがた実行済みの指示を復元してしまい、そのまま送信すると同じ指示が新しい turn
+      // として二重に history へ積まれる（テスターが実際に踏んだ回帰）。送信は非同期
+      // （fire-and-forget）なので、この間に別ブロックの指示欄を触っている場合に備えて
+      // formulaVersionId・blockId が今回の送信と一致するときだけクリアする（一致しなければ
+      // それは別ブロックの未送信ドラフトなので触らない）。
+      // 失敗時（catch 節）はあえてクリアしない: 送信が失敗しただけなら、ユーザーが打った
+      // 指示は再送信のために残しておくほうが親切なため。
+      blockImprovementInstruction:
+        s.blockImprovementInstruction !== null &&
+        s.blockImprovementInstruction.formulaVersionId === formulaVersionId &&
+        s.blockImprovementInstruction.blockId === input.blockId
+          ? null
+          : s.blockImprovementInstruction,
+      // 「提案を編集してから採用する」欄（issue #92 B-3）も同じ理由でクリアする。クリアしないと
+      // 「指示を追加してやり直す」で新しい提案が届いたとき、renderProposal が新しい
+      // result.proposedExpression ではなく前 turn の手編集テキストを初期値にしてしまう。
+      blockImprovementManualEditDraft:
+        s.blockImprovementManualEditDraft !== null &&
+        s.blockImprovementManualEditDraft.formulaVersionId === formulaVersionId &&
+        s.blockImprovementManualEditDraft.blockId === input.blockId
+          ? null
+          : s.blockImprovementManualEditDraft,
     }));
   } catch (err) {
     store.setState((s) => ({

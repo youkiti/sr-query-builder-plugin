@@ -68,6 +68,54 @@ export function findUnreachableBlockIds(formula: PubmedFormula): string[] {
   return formula.blocks.filter((b) => !reached.has(b.id)).map((b) => b.id);
 }
 
+/**
+ * blockId の式を newExpression に差し替えたと仮定したとき、参照グラフに blockId 自身へ
+ * 戻る経路（循環）ができるかを判定する（issue #92 B-1）。
+ *
+ * 例: `#3 #1 AND #2`、`#4 #3 AND #Filter1` がある状態で #3 を `#1 AND #4` に書き換えると、
+ * #3 → #4 → #3 という経路ができる（#4 が #3 を参照しているため）。この式は
+ * `validateCombinationExpression`（構文）も `assertReferenceIntegrity`（参照が非空か）も
+ * 通ってしまい、`findUnreachableBlockIds` は起点からの到達判定に訪問済み集合を使う
+ * （無限ループ防止のため既訪問はスキップする設計）ため循環そのものを許容してしまう。
+ * 保存前のバリデーションには「起点から到達できるか」ではなく「自分から辿って自分に
+ * 戻れるか」を直接見るこの専用関数が要る。
+ *
+ * blockId 自身からの直接の自己参照（`newExpression` 中の `#blockId`）は
+ * {@link extractBlockReferences} が selfId として除外するため、ここでの判定対象にはならない
+ * （呼び出し元の `validateCombinationExpression` が knownIds から blockId 自身を除いているため、
+ * そもそも構文検証の時点で「未定義のブロック ID」として弾かれる）。
+ */
+export function wouldCreateReferenceCycle(
+  formula: PubmedFormula,
+  blockId: string,
+  newExpression: string
+): boolean {
+  const knownIds = new Set(formula.blocks.map((b) => b.id));
+  const byId = new Map(formula.blocks.map((b) => [b.id, b.expression]));
+  byId.set(blockId, newExpression);
+
+  const visited = new Set<string>();
+  const stack: string[] = extractBlockReferences(newExpression, blockId, knownIds);
+  while (stack.length > 0) {
+    const id = stack.pop() as string;
+    if (id === blockId) {
+      return true;
+    }
+    if (visited.has(id)) {
+      continue;
+    }
+    visited.add(id);
+    const expr = byId.get(id);
+    if (expr === undefined) {
+      continue;
+    }
+    for (const ref of extractBlockReferences(expr, id, knownIds)) {
+      stack.push(ref);
+    }
+  }
+  return false;
+}
+
 /** expandFormula.ts の `chooseEntryBlockId`（target 未指定時）と同じ選び方。 */
 function chooseEntryBlockId(formula: PubmedFormula): string | null {
   for (let i = formula.blocks.length - 1; i >= 0; i -= 1) {

@@ -262,7 +262,7 @@ describe('improveBlockExpression', () => {
             id: '2',
             label: 'Outcome',
             expression: '"Asthma"[Mesh] OR hospitalization[tiab]',
-            sharedTerms: ['Asthma'],
+            sharedTerms: [{ term: 'Asthma', kind: 'mesh' }],
           },
         ],
       },

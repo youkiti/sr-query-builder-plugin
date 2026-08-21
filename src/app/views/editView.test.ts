@@ -872,7 +872,7 @@ describe('createEditView - AI に渡す内容を見る（文脈開示）', () =>
           id: '2',
           label: null,
           expression: '"Asthma"[Mesh] OR children[tiab]',
-          sharedTerms: ['Asthma'],
+          sharedTerms: [{ term: 'Asthma', kind: 'mesh' }],
         },
       ],
     };
@@ -898,7 +898,7 @@ describe('createEditView - AI に渡す内容を見る（文脈開示）', () =>
         id: '2',
         label: null,
         expression: '"Asthma"[Mesh] OR children[tiab]',
-        sharedTerms: ['Asthma'],
+        sharedTerms: [{ term: 'Asthma', kind: 'mesh' }],
       },
     ]);
     await flushAsync();
@@ -919,7 +919,7 @@ describe('createEditView - AI に渡す内容を見る（文脈開示）', () =>
           id: '2',
           label: null,
           expression: '"Asthma"[Mesh] OR children[tiab]',
-          sharedTerms: ['Asthma'],
+          sharedTerms: [{ term: 'Asthma', kind: 'mesh' }],
         },
       ],
     });
@@ -1262,6 +1262,31 @@ describe('createEditView - チップ編集（issue #58 chunk 3b）', () => {
     );
     // チップ自体は消えていない（コミットされず、元の式のまま）
     expect(row.querySelector('.edit__chip-remove')).toBeTruthy();
+  });
+
+  test('語を #N にリネームして参照が混入すると、例外を投げずインラインエラーで拒否する（issue #92 B-2）', () => {
+    // applyBlockImprovement の参照整合性ガード（editService.ts の assertReferenceIntegrity）は
+    // 概念ブロックへの参照混入を拒否のため throw する。commitExpression（editView.ts）が
+    // これを try/catch していなかった旧実装では、この例外が click/keydown リスナの外へ抜け、
+    // チップ UI は更新されずユーザーには無反応＋console エラーしか残らなかった。
+    const onDraftChange = jest.fn();
+    const view = createEditView({ onDraftChange });
+    const container = buildContainer();
+    view(container, { state: stateReadyChips, navigate: jest.fn() });
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!.click();
+    const termBtn = blockRow(container, '1').querySelector<HTMLButtonElement>(
+      '.edit__chip-term--editable'
+    )!;
+    termBtn.click();
+    const input = blockRow(container, '1').querySelector<HTMLInputElement>('.edit__chip-input')!;
+    input.value = '#2';
+    expect(() => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    }).not.toThrow();
+    expect(onDraftChange).not.toHaveBeenCalled();
+    const chipsError = blockRow(container, '1').querySelector('.edit__block-chips-error');
+    expect(chipsError?.textContent).toContain('更新に失敗しました');
+    expect(chipsError?.textContent).toContain('他のブロックへの参照');
   });
 
   // buildContainer() は document.implementation.createHTMLDocument() で作った、window
@@ -1624,6 +1649,81 @@ describe('createEditView - AI 改善の会話継続（指示を追加してや�
       '空にすることはできません'
     );
   });
+
+  test('「提案を編集してから採用する」: 打鍵で onManualEditChange が呼ばれる（issue #92 B-3）', () => {
+    const onManualEditChange = jest.fn();
+    const view = createEditView({ onImproveBlock: jest.fn(), onManualEditChange });
+    const container = buildContainer();
+    view(container, { state: stateWithHistory([]), navigate: jest.fn() });
+    const manualInput = blockRow(container, '1').querySelector<HTMLTextAreaElement>(
+      '.edit__block-ai-manual-edit-input'
+    )!;
+    manualInput.value = '"Asthma"[Mesh] OR wheeze[tiab]';
+    manualInput.dispatchEvent(new Event('input'));
+    expect(onManualEditChange).toHaveBeenCalledWith('1', '"Asthma"[Mesh] OR wheeze[tiab]');
+  });
+
+  test('「提案を編集してから採用する」: state.blockImprovementManualEditDraft から復元され、パネルは開いたままになる（issue #92 B-3）', () => {
+    // この textarea は元々ローカル DOM のみで、LLM コスト集計等の setState による全ビュー
+    // 再描画（editView は再描画のたびに container.innerHTML = '' で丸ごと作り直す）を
+    // シミュレートする（同じ container に view を再適用）と入力途中の手編集が消えていた
+    // （テスターが実際に踏んだ回帰）。store backed にしたことで、再描画をまたいでも
+    // 入力内容と <details> の開閉状態の両方が保たれることを確認する。
+    const view = createEditView({ onImproveBlock: jest.fn() });
+    const container = buildContainer();
+    view(container, {
+      state: {
+        ...stateWithHistory([]),
+        blockImprovementManualEditDraft: {
+          formulaVersionId: 'v1',
+          blockId: '1',
+          expression: '打鍵中の手編集テキスト',
+        },
+      },
+      navigate: jest.fn(),
+    });
+    const row = blockRow(container, '1');
+    const manualInput = row.querySelector<HTMLTextAreaElement>('.edit__block-ai-manual-edit-input')!;
+    expect(manualInput.value).toBe('打鍵中の手編集テキスト');
+    expect(row.querySelector('details.edit__block-ai-manual-edit')?.hasAttribute('open')).toBe(
+      true
+    );
+  });
+
+  test('別ブロック（#2）の手編集ドラフトには波及しない（formulaVersionId・blockId の両方が一致するときだけ復元。issue #92 B-3）', () => {
+    const view = createEditView({ onImproveBlock: jest.fn() });
+    const container = buildContainer();
+    const RESULT_2: BlockImprovementResult = {
+      blockId: '2',
+      currentExpression: 'children[tiab]',
+      proposedExpression: 'child*[tiab]',
+      rationale: 'r2',
+    };
+    view(container, {
+      state: {
+        ...stateReadyFull,
+        blockImprovement: {
+          formulaVersionId: 'v1',
+          blockId: '2',
+          status: 'ready',
+          result: RESULT_2,
+          error: null,
+          history: [],
+        },
+        blockImprovementManualEditDraft: {
+          formulaVersionId: 'v1',
+          blockId: '1',
+          expression: 'ブロック1向けの手編集',
+        },
+      },
+      navigate: jest.fn(),
+    });
+    const manualInput = blockRow(container, '2').querySelector<HTMLTextAreaElement>(
+      '.edit__block-ai-manual-edit-input'
+    )!;
+    // ドラフトは #1 向けなので #2 には波及せず、従来どおり proposedExpression が初期値。
+    expect(manualInput.value).toBe('child*[tiab]');
+  });
 });
 
 describe('createEditView - ブロック・インスペクタから式を変更できる（onApplyExpression 配線。issue #58 chunk 3b）', () => {
@@ -1940,6 +2040,80 @@ describe('createEditView - 組み合わせ方の編集（issue #91）', () => {
         ?.getAttribute('aria-expanded')
     ).toBe('false');
   });
+
+  test('間接的な循環参照を作る書き換えは保存を拒否する（issue #92 B-1）', () => {
+    // #3 #1 AND #2、#4 #3 AND #Filter1 がある状態で #3 を「#1 AND #4」に書き換えると、
+    // #4 の定義（#3 を参照）を経由して #3 → #4 → #3 という循環ができる。構文（AND/OR/NOT +
+    // #ID のみ）としては正しく、#4 は既知の参照先なので validateCombinationExpression は
+    // 通ってしまうが、保存は拒否されなければならない（放置すると expandFormula.ts が
+    // 「検索式ブロックの参照が循環しています」で例外を投げる）。
+    const md = [
+      '## PubMed/MEDLINE',
+      '',
+      '```',
+      '#1 asthma[tiab]',
+      '#2 children[tiab]',
+      '#3 #1 AND #2',
+      '#Filter1 humans[mh]',
+      '#4 #3 AND #Filter1',
+      '```',
+      '',
+    ].join('\n');
+    const onDraftChange = jest.fn();
+    const view = createEditView({ onDraftChange });
+    const container = buildContainer();
+    view(container, { state: { ...stateReady, currentFormulaMarkdown: md }, navigate: jest.fn() });
+    blockRow(container, '3')
+      .querySelector<HTMLButtonElement>('.edit__block-combination-toggle')!
+      .click();
+    const input = blockRow(container, '3').querySelector<HTMLInputElement>(
+      '.edit__block-combination-input'
+    )!;
+    input.value = '#1 AND #4';
+    input.dispatchEvent(new Event('input'));
+    // 構文・参照先はどちらも正当なので「✓ 構文 OK」ではなく、循環を理由に拒否される。
+    const status = blockRow(container, '3').querySelector('.edit__block-combination-status');
+    expect(status?.textContent).toContain('循環');
+    blockRow(container, '3')
+      .querySelector<HTMLButtonElement>('.edit__block-combination-save')!
+      .click();
+    expect(onDraftChange).not.toHaveBeenCalled();
+  });
+
+  test('循環を作らない書き換えは従来どおり保存できる（issue #92 B-1 の非退行確認）', () => {
+    const md = [
+      '## PubMed/MEDLINE',
+      '',
+      '```',
+      '#1 asthma[tiab]',
+      '#2 children[tiab]',
+      '#3 #1 AND #2',
+      '#Filter1 humans[mh]',
+      '#4 #3 AND #Filter1',
+      '```',
+      '',
+    ].join('\n');
+    const onDraftChange = jest.fn();
+    const view = createEditView({ onDraftChange });
+    const container = buildContainer();
+    view(container, { state: { ...stateReady, currentFormulaMarkdown: md }, navigate: jest.fn() });
+    blockRow(container, '3')
+      .querySelector<HTMLButtonElement>('.edit__block-combination-toggle')!
+      .click();
+    const input = blockRow(container, '3').querySelector<HTMLInputElement>(
+      '.edit__block-combination-input'
+    )!;
+    input.value = '#1 OR #2';
+    input.dispatchEvent(new Event('input'));
+    expect(
+      blockRow(container, '3').querySelector('.edit__block-combination-status')?.textContent
+    ).toBe('✓ 構文 OK');
+    blockRow(container, '3')
+      .querySelector<HTMLButtonElement>('.edit__block-combination-save')!
+      .click();
+    expect(onDraftChange).toHaveBeenCalledTimes(1);
+    expect(onDraftChange.mock.calls[0]![0]).toContain('#3 #1 OR #2');
+  });
 });
 
 describe('createEditView - 参照とリテラル語が混在する掛け合わせ行（issue #88 対応後の退行修正）', () => {
@@ -2091,7 +2265,13 @@ describe('createEditView - 整合性の注意表示（issue #88）', () => {
   });
 
   test('保存ボタンは注意があっても disabled にならない（保存は止めない）', () => {
-    const md = ['## PubMed/MEDLINE', '', '```', '#1 asthma[tiab]', '```', ''].join('\n');
+    // issue #92 B-6 により 1 ブロック式は「掛け合わせる行がありません」の対象外になった
+    // （1 ブロックでは「最後の行を起点にする」フォールバックこそが正しい挙動のため）ので、
+    // この fixture は「注意が出る」ことが必要な検証意図に合わせて 2 ブロック・結合行無しに変更した
+    // （1 本目のテストと同じ fixture）。
+    const md = ['## PubMed/MEDLINE', '', '```', '#1 asthma[tiab]', '#2 children[tiab]', '```', ''].join(
+      '\n'
+    );
     const view = createEditView({ onSave: jest.fn() });
     const container = buildContainer();
     view(container, { state: { ...stateReady, currentFormulaMarkdown: md }, navigate: jest.fn() });
@@ -2099,6 +2279,19 @@ describe('createEditView - 整合性の注意表示（issue #88）', () => {
     expect(
       container.querySelector<HTMLButtonElement>('.edit__actions button')!.disabled
     ).toBe(false);
+  });
+
+  test('ブロックが 1 本だけの式では「掛け合わせる行がありません」を出さない（issue #92 B-6）', () => {
+    // 1 ブロック式には掛け合わせる相手がそもそも存在しないため、
+    // expandFormula.ts の chooseEntryBlockId が「結合行なし → 最後の行」にフォールバックする
+    // ことこそが正しい挙動であり、この注意は恒久的な偽陽性になっていた。
+    const md = ['## PubMed/MEDLINE', '', '```', '#1 asthma[tiab] OR "Asthma"[Mesh]', '```', ''].join(
+      '\n'
+    );
+    const view = createEditView();
+    const container = buildContainer();
+    view(container, { state: { ...stateReady, currentFormulaMarkdown: md }, navigate: jest.fn() });
+    expect(container.querySelector('.edit__consistency-notice')).toBeNull();
   });
 
   test('パースエラー時は注意表示も出ない（ブロックエラー表示のみ）', () => {

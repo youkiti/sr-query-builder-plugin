@@ -52,6 +52,7 @@ function makeState(): AppState {
     formulaSave: null,
     formulaEditNote: null,
     blockImprovementInstruction: null,
+    blockImprovementManualEditDraft: null,
     blocksDraftSavedAt: null,
     hydrateError: null,
   };

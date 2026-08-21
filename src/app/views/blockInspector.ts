@@ -265,7 +265,7 @@ export function buildBlockInspector(
   }
 
   // 3. 他ブロックとの重複
-  section.appendChild(buildOverlapSection(doc, terms, params));
+  section.appendChild(buildOverlapSection(doc, params));
 
   return section;
 }
@@ -1013,13 +1013,37 @@ function beginDeltaEdit(
 
 // ---- 他ブロックとの重複セクション ------------------------------------------
 
+/**
+ * 兄弟ブロックとの共有語 1 件（issue #92 B-5）。
+ * term だけでなく、それが computeSiblingOverlaps 側で MeSH descriptor として一致したのか
+ * フリーワード query として一致したのかを kind として持つ。
+ *
+ * term の文字列だけから種別を再判定する（例: `myMesh.has(term)` で「自分の式に同名の
+ * MeSH descriptor があるか」を見る）のではなく、computeSiblingOverlaps が共有語を
+ * 見つけた時点（myMesh 側の一致で見つけたか myFree 側の一致で見つけたか）で種別を確定させ、
+ * それをそのまま持ち回る設計にしている。
+ *
+ * 現行の tokenizeExpression / extractBlockTerms はタグ無しの語をどちらの集合にも
+ * 入れない（`[tag]` が付いた segment だけを mesh/freeword に分類し、タグ無しの裸の語は
+ * 'plain' として捨てる）ため、MeSH descriptor の文字列（括弧なし）とフリーワード query
+ * の文字列（`[tag]` 込み）は現状では衝突しない。つまり term ベースの再判定でも今は
+ * 取り違えは起きない。ただしこれは extractBlockTerms の現在の挙動への暗黙の依存であり、
+ * 将来タグ無しの語をフリーワードとして拾うようになる等でこの前提が崩れると、同名の
+ * MeSH descriptor とフリーワードが式内に共存するケースで取り違えが起きうる。kind を
+ * 計算時点で確定させて持ち回る設計はこの前提に依存しないため、より安全な側を採る。
+ */
+export interface SharedTerm {
+  term: string;
+  kind: 'mesh' | 'freeword';
+}
+
 /** 兄弟ブロック 1 件について、自分の式と共有している語（issue #89）。 */
 export interface SiblingOverlap {
   id: string;
   label: string | null;
   expression: string;
-  /** 自分と共有している語（MeSH descriptor とフリーワード query が混在。表示順は MeSH → フリーワード） */
-  sharedTerms: string[];
+  /** 自分と共有している語（表示順は MeSH → フリーワード。kind で種別を明示する。issue #92 B-5） */
+  sharedTerms: SharedTerm[];
 }
 
 /**
@@ -1047,8 +1071,14 @@ export function computeSiblingOverlaps(
 
   return siblings.map((sib) => {
     const sibTerms = extractBlockTerms(sib.expression);
-    const sharedMesh = sibTerms.meshTerms.map((t) => t.descriptor).filter((d) => myMesh.has(d));
-    const sharedFree = sibTerms.freewordTerms.map((t) => t.query).filter((q) => myFree.has(q));
+    const sharedMesh: SharedTerm[] = sibTerms.meshTerms
+      .map((t) => t.descriptor)
+      .filter((d) => myMesh.has(d))
+      .map((term) => ({ term, kind: 'mesh' as const }));
+    const sharedFree: SharedTerm[] = sibTerms.freewordTerms
+      .map((t) => t.query)
+      .filter((q) => myFree.has(q))
+      .map((term) => ({ term, kind: 'freeword' as const }));
     return {
       id: sib.id,
       label: sib.label,
@@ -1058,11 +1088,7 @@ export function computeSiblingOverlaps(
   });
 }
 
-function buildOverlapSection(
-  doc: Document,
-  terms: ParsedBlockTerms,
-  params: BlockInspectorParams
-): HTMLElement {
+function buildOverlapSection(doc: Document, params: BlockInspectorParams): HTMLElement {
   const wrap = doc.createElement('div');
   wrap.className = 'bins__section bins__overlap';
 
@@ -1071,8 +1097,6 @@ function buildOverlapSection(
   const overlaps = computeSiblingOverlaps(params.expression, params.siblings).filter(
     (o) => o.sharedTerms.length > 0
   );
-  // 削除ボタンのクリック時、共有語が MeSH descriptor かフリーワード query かを判定するのに使う。
-  const myMesh = new Set(terms.meshTerms.map((t) => t.descriptor));
 
   const errorLine = doc.createElement('p');
   errorLine.className = 'bins__overlap-error';
@@ -1089,11 +1113,11 @@ function buildOverlapSection(
     p.className = 'bins__overlap-line';
     const label = overlap.label ? ` ${overlap.label}` : '';
     p.appendChild(doc.createTextNode(`⚠ #${overlap.id}${label} と共有: `));
-    overlap.sharedTerms.forEach((term, idx) => {
+    overlap.sharedTerms.forEach((shared, idx) => {
       if (idx > 0) {
         p.appendChild(doc.createTextNode(', '));
       }
-      p.appendChild(buildOverlapTerm(doc, term, myMesh, errorLine, params));
+      p.appendChild(buildOverlapTerm(doc, shared, errorLine, params));
     });
     wrap.appendChild(p);
   }
@@ -1107,30 +1131,41 @@ function buildOverlapSection(
  * MeSH descriptor は removeMeshDescriptor、フリーワードは findOperandByText で operand を
  * 引き当てて removeOperandAt に委譲する（editView のチップ編集・インスペクタの他セクションと
  * 同じ純粋関数を経由するので、どこから触っても同じ結果になる）。
+ *
+ * MeSH かフリーワードかは shared.kind をそのまま使い、この関数では再判定しない
+ * （issue #92 B-5）。`myMesh.has(term)`（自分の式に同名の MeSH descriptor があるか）で
+ * 再判定する書き方も考えられるが、それは「タグ無しの語をどちらの集合にも入れない」という
+ * extractBlockTerms / tokenizeExpression の現在の挙動に暗黙に依存する（MeSH descriptor は
+ * 括弧なしの文字列、フリーワード query は `[tag]` 込みの文字列なので、現状は両者の文字列
+ * 空間が交わらず取り違えは起きない）。この前提が変わる（例: タグ無しの語をフリーワードとして
+ * 拾うようになる）と、同一ブロック内に同名の MeSH descriptor とタグ無しフリーワードが
+ * 両方あるケース（例: `"Asthma"[Mesh] OR Asthma OR wheez*[tiab]`）で取り違えが起きうる。
+ * kind は computeSiblingOverlaps が共有語を見つけた時点（myMesh 側の一致か myFree 側の
+ * 一致か）で確定しているため、そちらを持ち回るほうがこの前提に依存せず安全。
  */
 function buildOverlapTerm(
   doc: Document,
-  term: string,
-  myMesh: ReadonlySet<string>,
+  shared: SharedTerm,
   errorLine: HTMLElement,
   params: BlockInspectorParams
 ): HTMLElement {
   const span = doc.createElement('span');
   span.className = 'bins__overlap-term';
-  span.appendChild(doc.createTextNode(term));
+  span.appendChild(doc.createTextNode(shared.term));
 
   if (params.onApplyExpression) {
     const removeBtn = doc.createElement('button');
     removeBtn.type = 'button';
     removeBtn.className = 'bins__overlap-remove';
     removeBtn.textContent = '削除';
-    removeBtn.title = `"${term}" をこのブロックから外す`;
-    removeBtn.setAttribute('aria-label', `「${term}」をこのブロックから削除`);
+    removeBtn.title = `"${shared.term}" をこのブロックから外す`;
+    removeBtn.setAttribute('aria-label', `「${shared.term}」をこのブロックから削除`);
     removeBtn.addEventListener('click', () => {
       errorLine.textContent = '';
-      const next = myMesh.has(term)
-        ? removeMeshDescriptor(params.expression, term)
-        : removeOperandByQuery(params.expression, term);
+      const next =
+        shared.kind === 'mesh'
+          ? removeMeshDescriptor(params.expression, shared.term)
+          : removeOperandByQuery(params.expression, shared.term);
       if (next === null) {
         // フリーワード query が式上の operand と引き当てられない（見つからない）場合は何もしない。
         return;

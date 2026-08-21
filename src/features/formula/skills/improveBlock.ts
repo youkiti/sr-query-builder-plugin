@@ -77,17 +77,23 @@ export interface ImproveBlockTurn {
  */
 export const MAX_IMPROVE_HISTORY_TURNS = 5;
 
+/** 兄弟ブロックとの共有語 1 件（プロンプト用）。SharedTerm（blockInspector.ts）と同じ形（issue #92 B-5）。 */
+export interface SharedTermInput {
+  term: string;
+  kind: 'mesh' | 'freeword';
+}
+
 /** improve-block に渡す兄弟ブロック 1 件（プロンプト用）。 */
 export interface SiblingBlockInput {
   id: string;
   label: string | null;
   expression: string;
   /**
-   * 自分の式と完全一致で共有している語（MeSH descriptor とフリーワード query が混在）。
-   * 0 件は「完全一致では見つからなかった」ことを示すだけで、重複が無いことの証明ではない
-   * （blockInspector.ts の computeSiblingOverlaps の doc コメント参照）。
+   * 自分の式と完全一致で共有している語（MeSH descriptor とフリーワード query が混在。
+   * kind で種別を区別する）。0 件は「完全一致では見つからなかった」ことを示すだけで、
+   * 重複が無いことの証明ではない（blockInspector.ts の computeSiblingOverlaps の doc コメント参照）。
    */
-  sharedTerms: string[];
+  sharedTerms: SharedTermInput[];
 }
 
 /** キーワード 1 語の単体ヒット数 + 寄与情報（プロンプト用）。 */
@@ -349,7 +355,10 @@ function formatSiblings(siblings: SiblingBlockInput[] | undefined): string {
   return siblings
     .map((s) => {
       const label = s.label ? ` ${s.label}` : '';
-      const shared = s.sharedTerms.length > 0 ? s.sharedTerms.join(', ') : '(完全一致の重複なし)';
+      const shared =
+        s.sharedTerms.length > 0
+          ? s.sharedTerms.map((t) => t.term).join(', ')
+          : '(完全一致の重複なし)';
       return [`- #${s.id}${label}: ${s.expression}`, `    共有語: ${shared}`].join('\n');
     })
     .join('\n');

@@ -139,6 +139,15 @@ export interface RequestBlockImprovementInput {
 }
 
 /**
+ * 兄弟ブロックとの共有語 1 件。SharedTerm（views 層）と同じ形（構造的に代入可能）だが、
+ * サービス層が views 層の型へ依存しないよう、この層自身の宣言として持つ（issue #92 B-5）。
+ */
+export interface SharedTermContext {
+  term: string;
+  kind: 'mesh' | 'freeword';
+}
+
+/**
  * ブロック・インスペクタ（src/app/views/blockInspector.ts）が計算した、兄弟ブロック 1 件との
  * 共有語。SiblingOverlap（views 層）と同じ形（構造的に代入可能）だが、サービス層が views 層の
  * 型へ依存しないよう、この層自身の宣言として持つ（MeasuredKeywordHit と同じ理由。issue #89）。
@@ -147,7 +156,7 @@ export interface SiblingBlockContext {
   id: string;
   label: string | null;
   expression: string;
-  sharedTerms: string[];
+  sharedTerms: SharedTermContext[];
 }
 
 /** AI 改善文脈に載せるシード論文 1 件。 */

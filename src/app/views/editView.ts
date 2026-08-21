@@ -16,6 +16,7 @@ import {
   extractBlockReferences,
   findUnreachableBlockIds,
   parsePubmedFormulaMd,
+  wouldCreateReferenceCycle,
   type PubmedFormula,
 } from '@/lib/search-formula-md';
 import {
@@ -150,6 +151,14 @@ export interface EditViewCallbacks
    * （issue #90。store.ts の BlockImprovementInstruction doc コメント参照）。
    */
   onInstructionChange?: (blockId: string, instruction: string) => void;
+  /**
+   * 「提案を編集してから採用する」欄（issue #90）の未送信テキストを
+   * store（blockImprovementManualEditDraft）へ反映する（打鍵のたび＝input イベント）。
+   * onNoteChange / onInstructionChange と同じく setStateSilently で受けるため、
+   * この呼び出しは再描画を誘発しない（issue #92 B-3。store.ts の
+   * BlockImprovementManualEditDraft doc コメント参照）。
+   */
+  onManualEditChange?: (blockId: string, expression: string) => void;
 }
 
 /** 検索式 Markdown 全文を保持し、更新時にブロック一覧を再描画する内部コントローラ。 */
@@ -558,12 +567,14 @@ function renderBlockList(
         block.isCombination,
         combinationRefs,
         combinationKnownIds,
+        formula,
         editor,
         callbacks,
         improvement !== null && improvement.blockId === block.id ? improvement : null,
         siblings,
         inspector,
-        resolveInstructionDraft(state, block.id)
+        resolveInstructionDraft(state, block.id),
+        resolveManualEditDraft(state, block.id)
       )
     );
   }
@@ -588,16 +599,39 @@ function resolveInstructionDraft(state: AppState, blockId: string): string {
 }
 
 /**
+ * state.blockImprovementManualEditDraft を指定ブロックについて解決する（issue #92 B-3）。
+ * stale（別バージョン/別ブロック）または未入力なら null を返し、呼び出し元（renderProposal）は
+ * result.proposedExpression を初期値にフォールバックする。resolveInstructionDraft と違い
+ * 空文字にフォールバックしないのは、「ユーザーが手編集欄を空にした」状態と「まだ何も
+ * 触っていない」状態を区別する必要があるため（後者は proposedExpression を出したい）。
+ */
+function resolveManualEditDraft(state: AppState, blockId: string): string | null {
+  const draft = state.blockImprovementManualEditDraft;
+  if (
+    draft === null ||
+    draft.formulaVersionId !== state.currentFormulaVersionId ||
+    draft.blockId !== blockId
+  ) {
+    return null;
+  }
+  return draft.expression;
+}
+
+/**
  * ブロック一覧の直前に、検索式の構造上の問題を注意表示する（issue #88）。保存は止めない。
  *
  * - 掛け合わせ行が 1 本も無い: `expandFormula.ts` の `chooseEntryBlockId` は結合行が
  *   無ければ最後の行を起点にフォールバックするため、それ以外の行が検索に反映されない。
+ *   ただし**ブロックが 1 本しか無い式ではこのフォールバックこそが正しい挙動**（掛け合わせる
+ *   相手がそもそも存在しない）なので、`formula.blocks.length > 1` のときだけこの注意を出す
+ *   （issue #92 B-6。1 ブロック式は元々「最後の行を起点にする」以外の設計があり得ず、
+ *   このガードが無いと恒久的な偽陽性の警告になっていた）。
  * - `findUnreachableBlockIds` が非空: 起点から辿れないブロックがある（結合行の編集で
  *   参照を書き換えた、または最初から漏れていた等）。
  */
 function renderConsistencyNotices(doc: Document, slot: HTMLElement, formula: PubmedFormula): void {
   const hasCombination = formula.blocks.some((b) => b.isCombination);
-  if (!hasCombination) {
+  if (!hasCombination && formula.blocks.length > 1) {
     slot.appendChild(
       buildConsistencyNotice(
         doc,
@@ -628,12 +662,14 @@ function buildBlockRow(
   isCombination: boolean,
   combinationRefs: string[],
   combinationKnownIds: ReadonlySet<string>,
+  formula: PubmedFormula,
   editor: FormulaEditor,
   callbacks: EditViewCallbacks,
   improvement: BlockImprovementState | null,
   siblings: SiblingBlock[],
   inspector: EditInspectorRuntime,
-  instructionDraft: string
+  instructionDraft: string,
+  manualEditDraft: string | null
 ): HTMLElement {
   const li = doc.createElement('li');
   li.className = 'edit__block-row';
@@ -731,10 +767,18 @@ function buildBlockRow(
         return;
       }
       combinationPanelSlot.appendChild(
-        buildCombinationEditPanel(doc, blockId, expression, combinationKnownIds, editor, () => {
-          inspector.combinationOpenBlocks.delete(blockId);
-          syncCombinationPanel();
-        })
+        buildCombinationEditPanel(
+          doc,
+          blockId,
+          expression,
+          combinationKnownIds,
+          formula,
+          editor,
+          () => {
+            inspector.combinationOpenBlocks.delete(blockId);
+            syncCombinationPanel();
+          }
+        )
       );
     };
     syncCombinationPanel();
@@ -793,7 +837,8 @@ function buildBlockRow(
       blockId,
       siblings,
       inspector.caches,
-      instructionDraft
+      instructionDraft,
+      manualEditDraft
     );
   }
 
@@ -816,6 +861,14 @@ function buildBlockRow(
    *
    * 詳細編集（生テキスト）の保存は、この関数を経由しない（無変更でも常に commit する・
    * 空文字は独自の文言で弾く、という元のインライン編集の挙動をそのまま保つため）。
+   *
+   * applyBlockImprovement は参照整合性ガード（editService.ts の assertReferenceIntegrity）が
+   * 違反時に throw する。チップ編集で語を `#1` のような参照風の文字列にリネームする、
+   * インスペクタの Δ 表・MeSH ブラウザ・他ブロックとの重複セクション経由の編集で参照が
+   * 混入する、といった操作はここを経由するため、try/catch せずに呼ぶと例外が click リスナの
+   * 外へ抜け、チップ UI は更新されずユーザーには無反応＋console エラーしか残らない
+   * （生テキスト編集経路の buildRawEditForm と AI accept 経路の renderProposal は元から
+   * try/catch している。issue #92 B-2）。
    */
   function commitExpression(
     nextExpression: string,
@@ -830,7 +883,12 @@ function buildBlockRow(
       onError?.('ブロックを空にすることはできません。');
       return;
     }
-    editor.setMd(applyBlockImprovement(editor.getMd(), blockId, next));
+    try {
+      editor.setMd(applyBlockImprovement(editor.getMd(), blockId, next));
+    } catch (err) {
+      onError?.(`更新に失敗しました: ${formatError(err)}`);
+      return;
+    }
     restoreChipFocus(doc, blockId, focusTerm);
   }
 
@@ -1179,12 +1237,21 @@ function buildRawEditForm(
  *
  * キャンセル（onCancel）は式を変えずにパネルを閉じるだけ。入力途中のテキストはローカル DOM の
  * まま扱う（詳細編集の `.edit__block-edit-input` と同じ挙動。再描画で現在の式に戻る）。
+ *
+ * 循環参照の検出（issue #92 B-1）: `#3 #1 AND #2` と `#4 #3 AND #Filter1` があるとき #3 を
+ * `#1 AND #4` に書き換えると、#4 の定義を経由して #3 → #4 → #3 という経路ができてしまう。
+ * validateCombinationExpression は構文と「参照先が存在するか」しか見ないため、この種の
+ * 間接循環はすり抜ける（assertReferenceIntegrity も「参照が非空か」しか見ない）。放置すると
+ * 次の検証／変換／エクスポートで expandFormula.ts の chooseEntryBlockId 経由の探索が
+ * `throw new Error('検索式ブロックの参照が循環しています: #N')` に当たる。保存前に
+ * {@link wouldCreateReferenceCycle} でこの画面自身が拒否する。
  */
 function buildCombinationEditPanel(
   doc: Document,
   blockId: string,
   expression: string,
   knownIds: ReadonlySet<string>,
+  formula: PubmedFormula,
   editor: FormulaEditor,
   onCancel: () => void
 ): HTMLElement {
@@ -1212,14 +1279,15 @@ function buildCombinationEditPanel(
   errorList.className = 'edit__block-combination-errors';
   wrap.appendChild(errorList);
 
-  /** 現在の input 値を検証し、status / errorList を更新する。呼び出し元へ結果を返す。 */
-  function refreshValidation() {
+  /**
+   * 現在の input 値を検証し、status / errorList を更新する。呼び出し元へ結果を返す。
+   * 構文エラーが 0 件でも、この書き換えが参照グラフに循環を作る場合は hasCycle=true とし、
+   * 保存を拒否する（issue #92 B-1）。
+   */
+  function refreshValidation(): { validation: ReturnType<typeof validateCombinationExpression>; hasCycle: boolean } {
     const validation = validateCombinationExpression(input.value, knownIds);
     errorList.innerHTML = '';
-    if (validation.errors.length === 0) {
-      status.className = 'edit__block-combination-status edit__block-combination-status--ok';
-      status.textContent = '✓ 構文 OK';
-    } else {
+    if (validation.errors.length > 0) {
       status.className = 'edit__block-combination-status edit__block-combination-status--error';
       status.textContent = `⚠ ${validation.errors.length} 件のエラーがあります`;
       for (const err of validation.errors) {
@@ -1227,8 +1295,21 @@ function buildCombinationEditPanel(
         li.textContent = formatCombinationError(err);
         errorList.appendChild(li);
       }
+      return { validation, hasCycle: false };
     }
-    return validation;
+    const hasCycle = wouldCreateReferenceCycle(formula, blockId, input.value);
+    if (hasCycle) {
+      status.className = 'edit__block-combination-status edit__block-combination-status--error';
+      status.textContent = '⚠ この組み合わせ方は参照の循環を作ります';
+      const li = doc.createElement('li');
+      li.textContent =
+        '他のブロックの掛け合わせ行を辿ると自分自身に戻ってしまいます。参照先を見直してください。';
+      errorList.appendChild(li);
+      return { validation, hasCycle: true };
+    }
+    status.className = 'edit__block-combination-status edit__block-combination-status--ok';
+    status.textContent = '✓ 構文 OK';
+    return { validation, hasCycle: false };
   }
   refreshValidation();
   input.addEventListener('input', () => {
@@ -1250,8 +1331,8 @@ function buildCombinationEditPanel(
   wrap.appendChild(actions);
 
   saveBtn.addEventListener('click', () => {
-    const validation = refreshValidation();
-    if (validation.errors.length > 0) {
+    const { validation, hasCycle } = refreshValidation();
+    if (validation.errors.length > 0 || hasCycle) {
       return;
     }
     const next = normalizeCombinationExpression(input.value);
@@ -1445,7 +1526,9 @@ function buildContextBody(
       const item = doc.createElement('li');
       const sibLabel = sib.label ? ` ${sib.label}` : '';
       const sharedText =
-        sib.sharedTerms.length > 0 ? sib.sharedTerms.join(', ') : '完全一致の重複なし';
+        sib.sharedTerms.length > 0
+          ? sib.sharedTerms.map((t) => t.term).join(', ')
+          : '完全一致の重複なし';
       item.textContent = `#${sib.id}${sibLabel}: ${sib.expression}（共有語: ${sharedText}）`;
       siblingList.appendChild(item);
     }
@@ -1528,7 +1611,8 @@ function renderImprovementState(
   blockId: string,
   siblings: SiblingBlock[],
   measuredCaches: EditInspectorRuntime['caches'],
-  instructionDraft: string
+  instructionDraft: string,
+  manualEditDraft: string | null
 ): void {
   slot.innerHTML = '';
   if (improvement.status === 'running') {
@@ -1560,7 +1644,8 @@ function renderImprovementState(
     improvement.history,
     siblings,
     measuredCaches,
-    instructionDraft
+    instructionDraft,
+    manualEditDraft
   );
 }
 
@@ -1590,7 +1675,8 @@ function renderProposal(
   history: ImproveBlockTurn[],
   siblings: SiblingBlock[],
   measuredCaches: EditInspectorRuntime['caches'],
-  instructionDraft: string
+  instructionDraft: string,
+  manualEditDraft: string | null
 ): void {
   slot.innerHTML = '';
   const rationale = doc.createElement('p');
@@ -1634,16 +1720,30 @@ function renderProposal(
   // というケース向け。applyBlockImprovement を通す（#88 の参照整合性ガード・空文字チェックが
   // そこにある）ので accept ボタンと同じ安全性を持つ。既存 E2E は触らない新規要素なので
   // <details> で畳んでよい（CLAUDE.md の #/edit 注意事項参照）。
+  //
+  // 入力途中のテキストは指示欄（blockImprovementInstruction）と同じやり方で store
+  // （blockImprovementManualEditDraft）backed にする（issue #92 B-3）。この textarea は
+  // 元々ローカル DOM のみで、LLM コスト集計等の setState による全ビュー再描画（editView は
+  // 再描画のたびに `container.innerHTML = ''` で丸ごと作り直す）でこの render が呼ばれ直すと
+  // manualEditInput.value が毎回 result.proposedExpression で上書きされ、入力途中の手編集が
+  // 消えていた（テスターが実際に踏んだ回帰）。draft が無ければ（＝まだ手を触れていなければ）
+  // 従来どおり result.proposedExpression を初期値にする。
   const manualEditDetails = doc.createElement('details');
   manualEditDetails.className = 'edit__block-ai-manual-edit';
+  // draft が残っている（＝手を触れたことがある）なら、再描画をまたいでも開いたままにする。
+  // そうしないと値自体は復元されても <details> が閉じ直り、消えたように見えてしまう。
+  manualEditDetails.open = manualEditDraft !== null;
   const manualEditSummary = doc.createElement('summary');
   manualEditSummary.textContent = '提案を編集してから採用する';
   manualEditDetails.appendChild(manualEditSummary);
   const manualEditInput = doc.createElement('textarea');
   manualEditInput.className = 'edit__block-ai-manual-edit-input';
   manualEditInput.rows = 3;
-  manualEditInput.value = result.proposedExpression;
+  manualEditInput.value = manualEditDraft ?? result.proposedExpression;
   manualEditInput.setAttribute('aria-label', `ブロック #${blockId} の提案を編集`);
+  manualEditInput.addEventListener('input', () => {
+    callbacks.onManualEditChange?.(blockId, manualEditInput.value);
+  });
   manualEditDetails.appendChild(manualEditInput);
   const manualEditActions = doc.createElement('div');
   manualEditActions.className = 'edit__block-ai-manual-edit-actions';

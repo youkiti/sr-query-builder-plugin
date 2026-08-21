@@ -278,6 +278,27 @@ export interface BlockImprovementInstruction {
   instruction: string;
 }
 
+/**
+ * #/edit の「提案を編集してから採用する」欄（issue #90）の未送信テキスト（issue #92 B-3）。
+ *
+ * BlockImprovementInstruction と同じ理由（LLM コスト集計等の setState による全ビュー
+ * 再描画で入力途中のテキストが消える）で、ローカル DOM ではなく store に保持する。
+ * 指示欄（blockImprovementInstruction）とはフィールドを分ける: 指示欄は「AI へ送る指示」、
+ * こちらは「AI の提案を手で直した expression そのもの」で、意味も送信タイミングも異なる
+ * （指示欄は openAiPromptForm と renderProposal の「指示を追加してやり直す」で共有されるが、
+ * この手編集欄は renderProposal 側にしか無く、送信ではなく applyBlockImprovement への
+ * ローカル適用にしか使わない）。
+ *
+ * formulaVersionId・blockId の両方が現在の対象と一致するときだけ有効。別バージョンを
+ * 読み込み直した、または別ブロックの提案を開いたときは未入力（null 扱い）にフォールバックし、
+ * 呼び出し側（editView.ts の renderProposal）は result.proposedExpression を初期値にする。
+ */
+export interface BlockImprovementManualEditDraft {
+  formulaVersionId: string;
+  blockId: string;
+  expression: string;
+}
+
 export interface AppState {
   /** 現在のハッシュルート */
   route: RouteName;
@@ -337,6 +358,8 @@ export interface AppState {
   formulaEditNote: FormulaEditNote | null;
   /** #/edit の「AI への指示」欄（初回・追加とも）の未送信テキスト。未入力なら null */
   blockImprovementInstruction: BlockImprovementInstruction | null;
+  /** #/edit の「提案を編集してから採用する」欄の未送信テキスト。未入力なら null */
+  blockImprovementManualEditDraft: BlockImprovementManualEditDraft | null;
   /**
    * ブロック下書きバックアップ（chrome.storage.local）の保存時刻（ISO 8601）。
    * non-null なら「承認前の下書きが保存されている」= blocksView が未承認バナーを出す。
@@ -373,6 +396,7 @@ export const INITIAL_STATE: AppState = {
   formulaSave: null,
   formulaEditNote: null,
   blockImprovementInstruction: null,
+  blockImprovementManualEditDraft: null,
   blocksDraftSavedAt: null,
   hydrateError: null,
 };

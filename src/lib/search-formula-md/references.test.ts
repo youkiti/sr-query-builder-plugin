@@ -1,4 +1,8 @@
-import { extractBlockReferences, findUnreachableBlockIds } from './references';
+import {
+  extractBlockReferences,
+  findUnreachableBlockIds,
+  wouldCreateReferenceCycle,
+} from './references';
 import type { PubmedFormula } from './types';
 
 /** テスト用の PubmedFormula ビルダー（expandFormula.test.ts と同じ形）。 */
@@ -110,5 +114,49 @@ describe('findUnreachableBlockIds', () => {
     ]);
     // b のみ未到達（3 は自分自身なので対象外）
     expect(findUnreachableBlockIds(formula)).toEqual(['b']);
+  });
+});
+
+describe('wouldCreateReferenceCycle（issue #92 B-1）', () => {
+  test('間接的な循環（#3 を書き換えると #4 経由で自分に戻る）を検出する', () => {
+    const formula = f([
+      ['1', 'foo[tiab]'],
+      ['2', 'bar[tiab]'],
+      ['3', '#1 AND #2', true],
+      ['4', '#3 AND #Filter1', true],
+      ['Filter1', 'humans[mh]'],
+    ]);
+    // #3 を「#1 AND #4」に書き換えると #3 → #4 → #3 という経路ができる。
+    expect(wouldCreateReferenceCycle(formula, '3', '#1 AND #4')).toBe(true);
+  });
+
+  test('循環を作らない書き換えは false', () => {
+    const formula = f([
+      ['1', 'foo[tiab]'],
+      ['2', 'bar[tiab]'],
+      ['3', '#1 AND #2', true],
+      ['4', '#3 AND #Filter1', true],
+      ['Filter1', 'humans[mh]'],
+    ]);
+    expect(wouldCreateReferenceCycle(formula, '3', '#1 OR #2')).toBe(false);
+  });
+
+  test('自分を直接参照しない限り、無関係な参照だけでは循環にならない', () => {
+    const formula = f([
+      ['1', 'foo[tiab]'],
+      ['2', '#1'],
+      ['3', '#2', true],
+    ]);
+    expect(wouldCreateReferenceCycle(formula, '2', '#1')).toBe(false);
+  });
+
+  test('3 段以上のネストした循環も検出する', () => {
+    const formula = f([
+      ['1', '#2'],
+      ['2', '#3'],
+      ['3', 'x[tiab]', true],
+    ]);
+    // #3 を #1 に依存させると 3 → 1 → 2 → 3 の循環になる。
+    expect(wouldCreateReferenceCycle(formula, '3', '#1')).toBe(true);
   });
 });

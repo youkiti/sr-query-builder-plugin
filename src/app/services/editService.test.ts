@@ -11,6 +11,7 @@ import {
   requestBlockImprovement,
   saveEditedFormula,
   type BlockImprovementDeps,
+  type SiblingBlockContext,
 } from './editService';
 import type { LlmProviderFactory } from './llmProviderService';
 import type { LLMProvider } from '@/lib/llm';
@@ -98,6 +99,7 @@ function makeState(overrides: Partial<AppState> = {}): AppState {
     formulaSave: null,
     formulaEditNote: null,
     blockImprovementInstruction: null,
+    blockImprovementManualEditDraft: null,
     blocksDraftSavedAt: null,
     hydrateError: null,
     ...overrides,
@@ -645,7 +647,12 @@ describe('requestBlockImprovement - シード / 検証文脈', () => {
       {
         blockId: '1',
         siblings: [
-          { id: '2', label: 'Outcome', expression: 'children[tiab] OR asthma[tiab]', sharedTerms: ['asthma[tiab]'] },
+          {
+            id: '2',
+            label: 'Outcome',
+            expression: 'children[tiab] OR asthma[tiab]',
+            sharedTerms: [{ term: 'asthma[tiab]', kind: 'freeword' }],
+          },
         ],
       },
       { store, google: emptySeedsGoogle(), llmFactory: factory }
@@ -712,8 +719,8 @@ describe('getBlockImprovementContext', () => {
 
   test('siblings は渡された値をそのまま context に載せる（issue #89）', async () => {
     const store = createStore(makeState({ currentFormulaMarkdown: VALID_MD }));
-    const siblings = [
-      { id: '2', label: 'Outcome', expression: 'children[tiab]', sharedTerms: ['Asthma'] },
+    const siblings: SiblingBlockContext[] = [
+      { id: '2', label: 'Outcome', expression: 'children[tiab]', sharedTerms: [{ term: 'Asthma', kind: 'mesh' }] },
     ];
     const ctx = await getBlockImprovementContext('1', siblings, {
       store,
