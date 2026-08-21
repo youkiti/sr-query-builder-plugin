@@ -295,6 +295,37 @@ describe('improveBlockExpression', () => {
     expect(userMsg).toContain('共有語: (完全一致の重複なし)');
   });
 
+  test('siblingBlocks の式に $& や $\' を含んでもテンプレートが壊れない（issue #92 C-1）', async () => {
+    // String.prototype.replace の連鎖だと、置換値側の $&（マッチ文字列自身）や
+    // $'（マッチ位置より後ろ全体）が置換パターンとして展開され、プロンプトが
+    // 重複・破損する。兄弟ブロックの式は Embase の切り捨て記法 drug$ のような
+    // ユーザー由来のテキストを含みうるため、そのまま無傷でプロンプトへ載ることを確認する。
+    const { provider: p, calls } = provider(JSON.stringify({}));
+    await improveBlockExpression(
+      {
+        currentExpression: 'asthma[tiab]',
+        blockLabel: 'Population',
+        blockDescription: '喘息',
+        researchQuestion: 'RQ',
+        userInstruction: '#2 と重複するキーワードを消して',
+        siblingBlocks: [
+          {
+            id: '2',
+            label: 'Outcome',
+            expression: 'drug$& OR cost$\' analysis',
+            sharedTerms: [{ term: "drug$'", kind: 'freeword' }],
+          },
+        ],
+      },
+      p
+    );
+    const userMsg = calls[0]!.find((m) => m.role === 'user')?.content ?? '';
+    expect(userMsg).toContain('- #2 Outcome: drug$& OR cost$\' analysis');
+    expect(userMsg).toContain("共有語: drug$'");
+    // テンプレートの他セクション（例: シード論文見出し）が壊れて重複していないことも確認する。
+    expect(userMsg.match(/シード論文（捕捉すべき既知の重要論文）:/g)).toHaveLength(1);
+  });
+
   test('siblingBlocks が無ければ (渡されていない)', async () => {
     const { provider: p, calls } = provider(JSON.stringify({}));
     await improveBlockExpression(

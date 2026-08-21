@@ -1,5 +1,6 @@
 import type { ChatMessage, LLMProvider } from '@/lib/llm';
 import { parseSkillJson } from './parseSkillJson';
+import { renderPromptTemplate } from './renderPromptTemplate';
 import { objectSchema, stringSchema } from './schema';
 
 /**
@@ -247,16 +248,21 @@ export async function improveBlockExpression(
   // instruction」を入れる（history が空なら今回の userInstruction がその turn そのもの）。
   const firstInstruction = history.length > 0 ? history[0]!.instruction : input.userInstruction;
 
-  const userPrompt = IMPROVE_BLOCK_USER_PROMPT_TEMPLATE.replace('{{RQ}}', input.researchQuestion)
-    .replace('{{LABEL}}', input.blockLabel)
-    .replace('{{DESC}}', input.blockDescription === '' ? '(不明)' : input.blockDescription)
-    .replace('{{CURRENT}}', input.currentExpression)
-    .replace('{{HITS}}', formatHits(input.currentHits))
-    .replace('{{KEYWORD_HITS}}', formatKeywordHits(input.keywordHits, input.freewordDedupTotal))
-    .replace('{{SIBLINGS}}', formatSiblings(input.siblingBlocks))
-    .replace('{{SEEDS}}', formatSeeds(input.seedPapers))
-    .replace('{{VALIDATION}}', formatValidation(input.validation))
-    .replace('{{INSTRUCTION}}', formatInstruction(firstInstruction));
+  // renderPromptTemplate は split/join ベースで置換するため、値に $&・$' 等の
+  // 置換パターン特殊文字（Embase の切り捨て記法 drug$ など）が含まれてもテンプレートが
+  // 壊れない（String.prototype.replace の連鎖はこれを壊す。issue #92 C-1）。
+  const userPrompt = renderPromptTemplate(IMPROVE_BLOCK_USER_PROMPT_TEMPLATE, {
+    RQ: input.researchQuestion,
+    LABEL: input.blockLabel,
+    DESC: input.blockDescription === '' ? '(不明)' : input.blockDescription,
+    CURRENT: input.currentExpression,
+    HITS: formatHits(input.currentHits),
+    KEYWORD_HITS: formatKeywordHits(input.keywordHits, input.freewordDedupTotal),
+    SIBLINGS: formatSiblings(input.siblingBlocks),
+    SEEDS: formatSeeds(input.seedPapers),
+    VALIDATION: formatValidation(input.validation),
+    INSTRUCTION: formatInstruction(firstInstruction),
+  });
 
   const messages: ChatMessage[] = [
     { role: 'system', content: IMPROVE_BLOCK_SYSTEM_PROMPT },

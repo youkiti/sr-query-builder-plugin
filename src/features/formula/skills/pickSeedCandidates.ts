@@ -1,6 +1,7 @@
 import type { LLMProvider } from '@/lib/llm';
 import type { BoundaryCandidate, BoundaryPick } from './pickBoundaryCases';
 import { parseSkillJson } from './parseSkillJson';
+import { renderPromptTemplate } from './renderPromptTemplate';
 import { arraySchema, objectSchema, stringSchema } from './schema';
 
 /**
@@ -92,12 +93,15 @@ export async function pickSeedCandidates(
     return [];
   }
   const limit = clampLimit(input.limit);
-  const userPrompt = PICK_SEED_USER_PROMPT_TEMPLATE.replace('{{RQ}}', input.researchQuestion)
-    .replace('{{INCLUSION}}', input.inclusionCriteria || '(未記載)')
-    .replace('{{EXCLUSION}}', input.exclusionCriteria || '(未記載)')
-    .replace('{{COUNT}}', String(input.candidates.length))
-    .replace('{{CANDIDATES}}', formatCandidates(input.candidates))
-    .replace('{{LIMIT}}', String(limit));
+  // renderPromptTemplate を使う理由は improveBlock.ts と同じ（issue #92 C-1）。
+  const userPrompt = renderPromptTemplate(PICK_SEED_USER_PROMPT_TEMPLATE, {
+    RQ: input.researchQuestion,
+    INCLUSION: input.inclusionCriteria || '(未記載)',
+    EXCLUSION: input.exclusionCriteria || '(未記載)',
+    COUNT: String(input.candidates.length),
+    CANDIDATES: formatCandidates(input.candidates),
+    LIMIT: String(limit),
+  });
 
   const response = await provider.chat(
     [

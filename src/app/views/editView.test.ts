@@ -746,6 +746,25 @@ describe('createEditView - 提案 diff の削除/追加サマリ（issue #89）'
     );
   });
 
+  test('MeSH タグの分類はチップ編集（analyzeOperand）と同じ基準に揃っている（issue #92 C-5）', () => {
+    // 以前の classifyOperandKind は operandMeshDescriptor(text) !== null で判定しており、
+    // descriptor が空になる壊れた MeSH タグ（例: 語部分の無い [Mesh]）を「MeSH」ではなく
+    // 「その他」に分類していた。チップ編集（listOperands/analyzeOperand）は同じ入力を
+    // kind='mesh'（term=''）として扱うため、2 つの判定が食い違っていた。
+    // analyzeOperand へ一本化した結果、チップ編集の表示に揃えて「MeSH」に分類されることを
+    // 固定する（このケースの分類先をチップ側に揃えると決めた記録として残す）。
+    const view = createEditView({ onImproveBlock: jest.fn() });
+    const container = buildContainer();
+    view(container, {
+      state: stateWithProposal('[Mesh] OR cough[tiab]', 'cough[tiab]'),
+      navigate: jest.fn(),
+    });
+    const summary = blockRow(container, '1').querySelector('.edit__block-diff-summary');
+    expect(summary?.textContent).toBe(
+      'この提案で 1 語が削除されます（削除: MeSH 1 / フリーワード 0）'
+    );
+  });
+
   test('提案が現式と同じ（差分なし）ならサマリ行は出ない', () => {
     const view = createEditView({ onImproveBlock: jest.fn() });
     const container = buildContainer();
@@ -1619,6 +1638,48 @@ describe('createEditView - AI 改善の会話継続（指示を追加してや�
     row2.querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
     const instructionInput = row2.querySelector<HTMLTextAreaElement>('.edit__block-ai-instruction')!;
     expect(instructionInput.value).toBe('');
+  });
+
+  test('パネルを開く→指示を入力→キャンセル→再度開くと入力が復元される（onGetInstructionDraft。issue #92 C-3）', () => {
+    // onInstructionChange は setStateSilently で書くため、通常は再描画（editView が
+    // container.innerHTML ごと作り直すフルリドロー）を伴わない。openAiPromptForm が
+    // buildBlockRow の render 時スナップショット（instructionDraft 引数）だけを見ていると、
+    // 「キャンセルで閉じる → もう一度開く」のたびに空へ戻ってしまう（store には残っているのに
+    // 復元されない）。onGetInstructionDraft をパネルを開く瞬間の最新値取得コールバックとして
+    // 配線し、正しく復元されることを確認する（bootstrap.ts では resolveInstructionDraft(store
+    // .getState(), blockId) を渡す想定なので、ここでは同じ形の簡易ストア代わりの変数で模す）。
+    let latestInstruction = '';
+    const onInstructionChange = jest.fn((_blockId: string, instruction: string) => {
+      latestInstruction = instruction;
+    });
+    const onGetInstructionDraft = jest.fn((_blockId: string) => latestInstruction);
+    const view = createEditView({
+      onImproveBlock: jest.fn(),
+      onInstructionChange,
+      onGetInstructionDraft,
+    });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    const row = blockRow(container, '1');
+    const improveBtn = row.querySelector<HTMLButtonElement>('.edit__block-improve')!;
+
+    improveBtn.click();
+    expect(row.querySelector<HTMLTextAreaElement>('.edit__block-ai-instruction')!.value).toBe('');
+    const firstInstructionInput = row.querySelector<HTMLTextAreaElement>(
+      '.edit__block-ai-instruction'
+    )!;
+    firstInstructionInput.value = '同義語を増やして';
+    firstInstructionInput.dispatchEvent(new Event('input'));
+    expect(onInstructionChange).toHaveBeenCalledWith('1', '同義語を増やして');
+
+    row.querySelector<HTMLButtonElement>('.edit__block-ai-cancel')!.click();
+    expect(row.querySelector('.edit__block-ai-instruction')).toBeNull();
+
+    improveBtn.click();
+    expect(row.querySelector<HTMLTextAreaElement>('.edit__block-ai-instruction')!.value).toBe(
+      '同義語を増やして'
+    );
+    expect(onGetInstructionDraft).toHaveBeenLastCalledWith('1');
   });
 
   test('「提案を編集してから採用する」: 初期値は proposedExpression で、適用すると編集内容で置き換わる', () => {

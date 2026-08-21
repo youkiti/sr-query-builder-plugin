@@ -1,5 +1,6 @@
 import type { LLMProvider } from '@/lib/llm';
 import { parseSkillJson } from './parseSkillJson';
+import { renderPromptTemplate } from './renderPromptTemplate';
 import { arraySchema, objectSchema, stringSchema } from './schema';
 
 /**
@@ -92,10 +93,13 @@ export async function designFreewords(
 
   const seedSamplesBlock = formatSeedSamples(input.seedSamples ?? []);
 
-  const userPrompt = FREEWORD_DESIGNER_USER_PROMPT_TEMPLATE.replace('{{CONCEPT}}', input.conceptSummary)
-    .replace('{{REQUIREMENTS}}', requirementsBlock)
-    .replace('{{MESH_LIST}}', meshBlock)
-    .replace('{{SEED_SAMPLES}}', seedSamplesBlock);
+  // renderPromptTemplate を使う理由は improveBlock.ts と同じ（issue #92 C-1）。
+  const userPrompt = renderPromptTemplate(FREEWORD_DESIGNER_USER_PROMPT_TEMPLATE, {
+    CONCEPT: input.conceptSummary,
+    REQUIREMENTS: requirementsBlock,
+    MESH_LIST: meshBlock,
+    SEED_SAMPLES: seedSamplesBlock,
+  });
 
   const response = await provider.chat(
     [

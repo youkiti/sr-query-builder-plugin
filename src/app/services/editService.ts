@@ -222,9 +222,21 @@ export async function getBlockImprovementContext(
   if (state.currentFormulaMarkdown === null || state.currentFormulaMarkdown.trim() === '') {
     return null;
   }
+  // AI へ渡す現式は「保存済みの版」ではなく「ユーザーが今見ている編集中の下書き」に揃える
+  // （issue #92 C-2）。editView.ts の siblings（兄弟ブロックの式・共有語）は
+  // parsePubmedFormulaMd(editor.getMd()) 由来の下書きから計算されるため、ここで保存版から
+  // currentExpression を読むと、下書き基準で計算された共有語が保存版には存在しない語を
+  // 指しうる（「重複の根拠」が同一バージョンに存在しないことになる）。判定は
+  // editView.ts の resolveMarkdown と同じ（formulaEditDraft が現在のバージョンと一致すれば
+  // 優先し、無ければ＝未編集なら従来どおり保存版にフォールバックする）。
+  const draft = state.formulaEditDraft;
+  const markdown =
+    draft !== null && draft.formulaVersionId === state.currentFormulaVersionId
+      ? draft.markdown
+      : state.currentFormulaMarkdown;
   let formula;
   try {
-    formula = parsePubmedFormulaMd(state.currentFormulaMarkdown);
+    formula = parsePubmedFormulaMd(markdown);
   } catch {
     return null;
   }

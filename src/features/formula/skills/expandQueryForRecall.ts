@@ -5,6 +5,7 @@ import type {
   RecallAxis,
 } from '../recallExpansion';
 import { parseSkillJson } from './parseSkillJson';
+import { renderPromptTemplate } from './renderPromptTemplate';
 import { arraySchema, objectSchema, stringSchema } from './schema';
 
 /**
@@ -108,9 +109,12 @@ export async function expandQueryForRecall(
     return [];
   }
   const limit = clampLimit(input.perBlockLimit);
-  const userPrompt = EXPAND_RECALL_USER_PROMPT_TEMPLATE.replace('{{RQ}}', input.researchQuestion)
-    .replace('{{BLOCKS}}', formatBlocks(input.blocks))
-    .replace('{{LIMIT}}', String(limit));
+  // renderPromptTemplate を使う理由は improveBlock.ts と同じ（issue #92 C-1）。
+  const userPrompt = renderPromptTemplate(EXPAND_RECALL_USER_PROMPT_TEMPLATE, {
+    RQ: input.researchQuestion,
+    BLOCKS: formatBlocks(input.blocks),
+    LIMIT: String(limit),
+  });
 
   const response = await provider.chat(
     [

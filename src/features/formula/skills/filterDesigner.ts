@@ -7,6 +7,7 @@
 
 import type { LLMProvider } from '@/lib/llm';
 import { parseSkillJson } from './parseSkillJson';
+import { renderPromptTemplate } from './renderPromptTemplate';
 import { arraySchema, objectSchema, stringSchema } from './schema';
 
 export interface FilterDesignerInput {
@@ -239,10 +240,11 @@ export async function proposeExcessFilters(
   if (hits <= HIT_THRESHOLD) {
     return [];
   }
-  const userPrompt = EXCESS_FILTER_USER_PROMPT_TEMPLATE.replace('{{DESIGN}}', input.studyDesign).replace(
-    '{{HITS}}',
-    String(hits)
-  );
+  // renderPromptTemplate を使う理由は improveBlock.ts と同じ（issue #92 C-1）。
+  const userPrompt = renderPromptTemplate(EXCESS_FILTER_USER_PROMPT_TEMPLATE, {
+    DESIGN: input.studyDesign,
+    HITS: String(hits),
+  });
   const response = await provider.chat(
     [
       { role: 'system', content: EXCESS_FILTER_SYSTEM_PROMPT },

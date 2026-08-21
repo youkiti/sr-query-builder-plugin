@@ -728,6 +728,54 @@ describe('getBlockImprovementContext', () => {
     });
     expect(ctx!.siblings).toEqual(siblings);
   });
+
+  test('formulaEditDraft が現バージョンと一致すれば currentExpression は下書きの内容になる（issue #92 C-2）', async () => {
+    // editView.ts の siblings（兄弟ブロックの式・共有語）は編集中の下書き
+    // （parsePubmedFormulaMd(editor.getMd())）から計算される。currentExpression が
+    // 保存版のままだと、下書き基準の共有語が「同一バージョンには存在しない語」を
+    // 指してしまう。formulaEditDraft が現在の formulaVersionId と一致する間は
+    // 下書きを優先して読むことを確認する。
+    const store = createStore(
+      makeState({
+        currentFormulaMarkdown: VALID_MD,
+        currentFormulaVersionId: 'v-now',
+        formulaEditDraft: {
+          formulaVersionId: 'v-now',
+          markdown:
+            '## PubMed/MEDLINE\n\n```\n#1 asthma[tiab] OR wheeze[tiab]\n#2 children[tiab]\n#3 #1 AND #2\n```\n',
+        },
+      })
+    );
+    const ctx = await getBlockImprovementContext('1', [], { store, google: emptySeedsGoogle() });
+    expect(ctx!.currentExpression).toBe('asthma[tiab] OR wheeze[tiab]');
+  });
+
+  test('formulaEditDraft が別バージョン（stale）なら保存版にフォールバックする', async () => {
+    const store = createStore(
+      makeState({
+        currentFormulaMarkdown: VALID_MD,
+        currentFormulaVersionId: 'v-now',
+        formulaEditDraft: {
+          formulaVersionId: 'v-old',
+          markdown: '## PubMed/MEDLINE\n\n```\n#1 stale-edit[tiab]\n```\n',
+        },
+      })
+    );
+    const ctx = await getBlockImprovementContext('1', [], { store, google: emptySeedsGoogle() });
+    expect(ctx!.currentExpression).toBe('asthma[tiab]');
+  });
+
+  test('formulaEditDraft が無ければ（未編集）従来どおり保存版を使う', async () => {
+    const store = createStore(
+      makeState({
+        currentFormulaMarkdown: VALID_MD,
+        currentFormulaVersionId: 'v-now',
+        formulaEditDraft: null,
+      })
+    );
+    const ctx = await getBlockImprovementContext('1', [], { store, google: emptySeedsGoogle() });
+    expect(ctx!.currentExpression).toBe('asthma[tiab]');
+  });
 });
 
 describe('applyBlockImprovement', () => {

@@ -1,5 +1,6 @@
 import type { LLMProvider } from '@/lib/llm';
 import { parseSkillJson } from './parseSkillJson';
+import { renderPromptTemplate } from './renderPromptTemplate';
 import { arraySchema, objectSchema, stringSchema } from './schema';
 
 /**
@@ -83,13 +84,14 @@ export async function designBlock(
   const seedTitles = input.seedTitles ?? [];
   const seedTitlesBlock =
     seedTitles.length === 0 ? '(なし)' : seedTitles.map((t) => `- ${t}`).join('\n');
-  const userPrompt = BLOCK_DESIGNER_USER_PROMPT_TEMPLATE.replace(
-    '{{RQ}}',
-    input.researchQuestion
-  )
-    .replace('{{LABEL}}', input.blockLabel)
-    .replace('{{DESC}}', input.description)
-    .replace('{{SEED_TITLES}}', seedTitlesBlock);
+  // renderPromptTemplate を使う理由は improveBlock.ts と同じ（issue #92 C-1。
+  // 置換値に $ 系の特殊パターンが含まれてもテンプレートが壊れない）。
+  const userPrompt = renderPromptTemplate(BLOCK_DESIGNER_USER_PROMPT_TEMPLATE, {
+    RQ: input.researchQuestion,
+    LABEL: input.blockLabel,
+    DESC: input.description,
+    SEED_TITLES: seedTitlesBlock,
+  });
 
   const response = await provider.chat(
     [

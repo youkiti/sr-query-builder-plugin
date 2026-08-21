@@ -94,6 +94,7 @@ import {
 import { createStore, type AppState, type AppStore } from './store';
 import { buildViews, type BuildViewsOptions, type ViewContext } from './views';
 import { formatDraftProgress, formatValidationProgress } from './views/draftView';
+import { resolveInstructionDraft } from './views/editView';
 import { formatFormulaVersionShort } from './views/formatHelpers';
 
 export interface AppBootstrapOptions {
@@ -564,6 +565,10 @@ function buildDefaultViewOptions(
           blockImprovementInstruction: { formulaVersionId, blockId, instruction },
         }));
       },
+      // 「AI への指示」欄を開く時点で store の最新値を読み直す（issue #92 C-3）。
+      // resolveInstructionDraft（editView.ts）と同じ解決ロジックをそのまま再利用し、
+      // 描画時スナップショットとの解決経路のズレが生まれないようにする。
+      onGetInstructionDraft: (blockId: string) => resolveInstructionDraft(store.getState(), blockId),
       // 「提案を編集してから採用する」欄（issue #90）の未送信テキストを store
       // （blockImprovementManualEditDraft）へ反映する（issue #92 B-3）。onNoteChange /
       // onInstructionChange と同じ理由・同じ使い方（setStateSilently で再描画を起こさない）。

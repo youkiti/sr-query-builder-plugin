@@ -1,4 +1,4 @@
-import type { PubmedFormula } from './types';
+import type { FormulaBlock, PubmedFormula } from './types';
 
 const REFERENCE_PATTERN = /#([A-Za-z0-9]+)/g;
 
@@ -45,9 +45,6 @@ export function findUnreachableBlockIds(formula: PubmedFormula): string[] {
   const knownIds = new Set(formula.blocks.map((b) => b.id));
   const byId = new Map(formula.blocks.map((b) => [b.id, b.expression]));
   const entry = chooseEntryBlockId(formula);
-  if (entry === null) {
-    return formula.blocks.map((b) => b.id);
-  }
 
   const reached = new Set<string>([entry]);
   const stack: string[] = [entry];
@@ -116,14 +113,23 @@ export function wouldCreateReferenceCycle(
   return false;
 }
 
-/** expandFormula.ts の `chooseEntryBlockId`（target 未指定時）と同じ選び方。 */
-function chooseEntryBlockId(formula: PubmedFormula): string | null {
+/**
+ * expandFormula.ts の `chooseEntryBlockId`（target 未指定時）と同じ選び方。
+ *
+ * 呼び出し元 findUnreachableBlockIds が formula.blocks.length === 0 を早期 return で
+ * 弾いてから呼ぶ前提（このファイルの唯一の呼び出し元）なので、ここに到達する時点で
+ * blocks は必ず非空 → 戻り値は必ず string（旧実装は string | null で「起点が無い」
+ * 分岐を呼び出し側に持っていたが、その分岐は非空ガードにより決して実行されない
+ * 到達不能コードだった。issue #92 C-7）。
+ */
+function chooseEntryBlockId(formula: PubmedFormula): string {
   for (let i = formula.blocks.length - 1; i >= 0; i -= 1) {
     const block = formula.blocks[i];
     /* istanbul ignore next -- 添字は配列範囲内なので必ず defined */
     if (!block) continue;
     if (block.isCombination) return block.id;
   }
-  const last = formula.blocks[formula.blocks.length - 1];
-  return last ? last.id : null;
+  // 呼び出し元の非空ガードにより、この添字アクセスは必ず defined。
+  const last = formula.blocks[formula.blocks.length - 1] as FormulaBlock;
+  return last.id;
 }

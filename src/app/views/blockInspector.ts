@@ -265,7 +265,7 @@ export function buildBlockInspector(
   }
 
   // 3. 他ブロックとの重複
-  section.appendChild(buildOverlapSection(doc, params));
+  section.appendChild(buildOverlapSection(doc, params, terms));
 
   return section;
 }
@@ -1065,7 +1065,21 @@ export function computeSiblingOverlaps(
   expression: string,
   siblings: readonly SiblingBlock[]
 ): SiblingOverlap[] {
-  const terms = extractBlockTerms(expression);
+  return computeSiblingOverlapsFromTerms(extractBlockTerms(expression), siblings);
+}
+
+/**
+ * computeSiblingOverlaps の本体。自分の式の解析結果（ParsedBlockTerms）を直接受け取る版
+ * （issue #92 C-6）。buildBlockInspector は自分の式を extractBlockTerms(params.expression)
+ * で既に 1 度解析済みなので、buildOverlapSection からはこちらを呼び、
+ * computeSiblingOverlaps(expression, ...) 経由の再解析（インスペクタ再描画のたびに発生）を
+ * 避ける。editView.ts（openAiPromptForm）は式の文字列しか持たないため、従来どおり
+ * computeSiblingOverlaps(expression, siblings) を呼ぶ（シグネチャは変えない）。
+ */
+function computeSiblingOverlapsFromTerms(
+  terms: ParsedBlockTerms,
+  siblings: readonly SiblingBlock[]
+): SiblingOverlap[] {
   const myMesh = new Set(terms.meshTerms.map((t) => t.descriptor));
   const myFree = new Set(terms.freewordTerms.map((t) => t.query));
 
@@ -1088,13 +1102,19 @@ export function computeSiblingOverlaps(
   });
 }
 
-function buildOverlapSection(doc: Document, params: BlockInspectorParams): HTMLElement {
+function buildOverlapSection(
+  doc: Document,
+  params: BlockInspectorParams,
+  terms: ParsedBlockTerms
+): HTMLElement {
   const wrap = doc.createElement('div');
   wrap.className = 'bins__section bins__overlap';
 
-  // 表示は従来どおり「共有語がある兄弟だけ」に絞る（computeSiblingOverlaps 自体は
+  // 表示は従来どおり「共有語がある兄弟だけ」に絞る（computeSiblingOverlapsFromTerms 自体は
   // AI へ渡す都合上、共有語 0 件の兄弟も含めて返すため、ここで絞り込む）。
-  const overlaps = computeSiblingOverlaps(params.expression, params.siblings).filter(
+  // terms は buildBlockInspector が params.expression を既に解析済みのものを受け取り、
+  // ここで extractBlockTerms を再度走らせない（issue #92 C-6）。
+  const overlaps = computeSiblingOverlapsFromTerms(terms, params.siblings).filter(
     (o) => o.sharedTerms.length > 0
   );
 

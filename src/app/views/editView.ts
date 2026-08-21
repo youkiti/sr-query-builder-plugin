@@ -33,11 +33,10 @@ import {
   diffExpressions,
   renderDiffSideInto,
   renderExpressionInto,
-  tokenizeExpression,
   type ExpressionDiff,
 } from './formulaDisplay';
-import { dedupeOperands, operandMeshDescriptor, sortOperandsMeshFirst } from './meshExpressionEdit';
-import { appendFreeword, removeOperandAt, setOperandTerm } from './operandEdit';
+import { dedupeOperands, sortOperandsMeshFirst } from './meshExpressionEdit';
+import { analyzeOperand, appendFreeword, removeOperandAt, setOperandTerm } from './operandEdit';
 import { ROUTE_LABELS } from '../router';
 import type { AppState, BlocksDraft, BlockImprovementState, FormulaSaveState } from '../store';
 import type { RenderView } from './types';
@@ -151,6 +150,16 @@ export interface EditViewCallbacks
    * （issue #90。store.ts の BlockImprovementInstruction doc コメント参照）。
    */
   onInstructionChange?: (blockId: string, instruction: string) => void;
+  /**
+   * 「AI への指示」欄（初回）を開く時点で store の最新値を読み直す（issue #92 C-3）。
+   * buildBlockRow は行の描画時に resolveInstructionDraft を 1 度だけ評価してクロージャに
+   * 閉じ込めるため、onInstructionChange（setStateSilently で再描画を起こさない）で store が
+   * 更新された後に「パネルを閉じる→もう一度開く」をすると、描画時点の古い値（多くは空文字）が
+   * 復元されてしまう（store には残っているのに戻らない）。このコールバックがあれば、
+   * パネルを開く瞬間に常に最新値を読み直す。未配線（テスト等）では従来どおり描画時
+   * スナップショット（instructionDraft 引数）にフォールバックする。
+   */
+  onGetInstructionDraft?: (blockId: string) => string;
   /**
    * 「提案を編集してから採用する」欄（issue #90）の未送信テキストを
    * store（blockImprovementManualEditDraft）へ反映する（打鍵のたび＝input イベント）。
@@ -585,8 +594,13 @@ function renderBlockList(
  * openAiPromptForm の初回指示欄と renderProposal の「指示を追加してやり直す」欄は、同一ブロックの
  * AI パネル内で同時に表示されることが無い（status='ready' かどうかで排他的に切り替わる）ため、
  * 同じフィールドを共有する（issue #90。store.ts の BlockImprovementInstruction doc コメント参照）。
+ *
+ * export しているのは bootstrap.ts の onGetInstructionDraft コールバックが同じ解決ロジックを
+ * 再実装せずそのまま使うため（issue #92 C-3。resolveInstructionDraft(state, blockId) の
+ * 呼び出し元が render 時スナップショットと open 時の最新読み直しの 2 箇所に増えたので、
+ * ロジックが 2 箇所に分岐しないよう単一の関数へ集約する）。
  */
-function resolveInstructionDraft(state: AppState, blockId: string): string {
+export function resolveInstructionDraft(state: AppState, blockId: string): string {
   const draft = state.blockImprovementInstruction;
   if (
     draft === null ||
@@ -1005,7 +1019,9 @@ function buildBlockRow(
         inspector.aiOpenBlocks.delete(blockId);
         syncInspector();
       },
-      instructionDraft,
+      // パネルを開く瞬間に store の最新値を読み直す（issue #92 C-3）。callback 未配線
+      // （テスト等）では従来どおり行の描画時スナップショット instructionDraft を使う。
+      callbacks.onGetInstructionDraft?.(blockId) ?? instructionDraft,
       callbacks.onInstructionChange
     );
     inspector.aiOpenBlocks.add(blockId);
@@ -1940,7 +1956,7 @@ function summarizeOperandKinds(texts: readonly string[]): string {
   let freeword = 0;
   let other = 0;
   for (const text of texts) {
-    const kind = classifyOperandKind(text);
+    const kind = analyzeOperand(text).kind;
     if (kind === 'mesh') {
       mesh += 1;
     } else if (kind === 'freeword') {
@@ -1954,22 +1970,6 @@ function summarizeOperandKinds(texts: readonly string[]): string {
     parts.push(`その他 ${other}`);
   }
   return parts.join(' / ');
-}
-
-/**
- * 1 つの operand テキストを MeSH / フリーワード / その他 に分類する
- * （operandEdit.ts の analyzeOperand と同じ判定。単一の MeSH/フリーワード句だけを識別し、
- * 複合句・タグ無しはその他に寄せる）。
- */
-function classifyOperandKind(text: string): 'mesh' | 'freeword' | 'other' {
-  if (operandMeshDescriptor(text) !== null) {
-    return 'mesh';
-  }
-  const segments = tokenizeExpression(text.trim()).filter((s) => s.text.trim() !== '');
-  if (segments.length === 1 && segments[0]!.kind === 'freeword') {
-    return 'freeword';
-  }
-  return 'other';
 }
 
 function formatError(err: unknown): string {

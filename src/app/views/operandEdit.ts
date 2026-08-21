@@ -45,8 +45,14 @@ function joinTokens(tokens: DiffToken[]): string {
 /**
  * 1 つの operand 文字列を語種・編集対象語・タグへ分解する。
  * 単一の MeSH/フリーワード句のときだけ kind を確定し、複合句（`(a OR b)` 等）は 'other'。
+ *
+ * export しているのは editView.ts の diff サマリ（buildDiffSummaryLine の
+ * summarizeOperandKinds）がチップ編集の表示と同じ判定基準を使うため（issue #92 C-5）。
+ * 以前は editView.ts 側に operandMeshDescriptor(text) !== null という別基準の
+ * classifyOperandKind が独立して存在し、タグ表記によっては判定が食い違っていた
+ * （チップ編集側の判定に揃えるのが自然なので、この関数を単一の定義先にする）。
  */
-function analyzeOperand(text: string): { kind: OperandKind; term: string; tag: string | null } {
+export function analyzeOperand(text: string): { kind: OperandKind; term: string; tag: string | null } {
   const segments = tokenizeExpression(text.trim()).filter((s) => s.text.trim() !== '');
   if (segments.length === 1) {
     const seg = segments[0]!;
