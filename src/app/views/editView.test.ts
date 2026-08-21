@@ -1750,7 +1750,7 @@ describe('createEditView - 掛け合わせ行は語の編集対象外（issue #8
     const row = blockRow(container, '3');
     expect(row.querySelector('.edit__block-current')?.textContent).toBe('#1 AND #2');
     expect(row.querySelector('.edit__block-combination-note')?.textContent).toBe(
-      'この行は #1、#2 の掛け合わせです。語の編集は各ブロックで行ってください。'
+      'この行は #1、#2 の掛け合わせです。組み合わせ方は編集できますが、語の編集は各ブロックで行ってください。'
     );
   });
 
@@ -1800,8 +1800,145 @@ describe('createEditView - 掛け合わせ行は語の編集対象外（issue #8
     view(container, { state: { ...stateReady, currentFormulaMarkdown: md }, navigate: jest.fn() });
     const row = blockRow(container, '2');
     expect(row.querySelector('.edit__block-combination-note')?.textContent).toBe(
-      'この行は #1 の掛け合わせです。語の編集は各ブロックで行ってください。'
+      'この行は #1 の掛け合わせです。組み合わせ方は編集できますが、語の編集は各ブロックで行ってください。'
     );
+  });
+});
+
+describe('createEditView - 組み合わせ方の編集（issue #91）', () => {
+  test('結合行に「組み合わせ方を編集」ボタンが出る／概念ブロックには出ない', () => {
+    const view = createEditView();
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    expect(
+      blockRow(container, '3').querySelector('.edit__block-combination-toggle')
+    ).toBeTruthy();
+    expect(blockRow(container, '1').querySelector('.edit__block-combination-toggle')).toBeNull();
+    expect(blockRow(container, '2').querySelector('.edit__block-combination-toggle')).toBeNull();
+  });
+
+  test('パネルを開いて (#1 OR #2) のような有効な式を保存すると md が書き換わる', () => {
+    const onDraftChange = jest.fn();
+    const view = createEditView({ onDraftChange });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    blockRow(container, '3')
+      .querySelector<HTMLButtonElement>('.edit__block-combination-toggle')!
+      .click();
+    const input = blockRow(container, '3').querySelector<HTMLInputElement>(
+      '.edit__block-combination-input'
+    )!;
+    input.value = '(#1 OR #2)';
+    input.dispatchEvent(new Event('input'));
+    expect(
+      blockRow(container, '3').querySelector('.edit__block-combination-status')?.textContent
+    ).toBe('✓ 構文 OK');
+    blockRow(container, '3')
+      .querySelector<HTMLButtonElement>('.edit__block-combination-save')!
+      .click();
+    expect(onDraftChange).toHaveBeenCalledTimes(1);
+    expect(onDraftChange.mock.calls[0]![0]).toContain('#3 (#1 OR #2)');
+  });
+
+  test('キーワードを含む式（例 #1 AND asthma[tiab]）は検証で弾かれ、md が変わらない', () => {
+    const onDraftChange = jest.fn();
+    const view = createEditView({ onDraftChange });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    blockRow(container, '3')
+      .querySelector<HTMLButtonElement>('.edit__block-combination-toggle')!
+      .click();
+    const input = blockRow(container, '3').querySelector<HTMLInputElement>(
+      '.edit__block-combination-input'
+    )!;
+    input.value = '#1 AND asthma[tiab]';
+    input.dispatchEvent(new Event('input'));
+    const status = blockRow(container, '3').querySelector('.edit__block-combination-status');
+    expect(status?.textContent).toContain('件のエラーがあります');
+    blockRow(container, '3')
+      .querySelector<HTMLButtonElement>('.edit__block-combination-save')!
+      .click();
+    expect(onDraftChange).not.toHaveBeenCalled();
+  });
+
+  test('未定義 ID（例 #9）は弾かれる', () => {
+    const onDraftChange = jest.fn();
+    const view = createEditView({ onDraftChange });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    blockRow(container, '3')
+      .querySelector<HTMLButtonElement>('.edit__block-combination-toggle')!
+      .click();
+    const input = blockRow(container, '3').querySelector<HTMLInputElement>(
+      '.edit__block-combination-input'
+    )!;
+    input.value = '#1 AND #9';
+    input.dispatchEvent(new Event('input'));
+    const status = blockRow(container, '3').querySelector('.edit__block-combination-status');
+    expect(status?.textContent).toContain('件のエラーがあります');
+    blockRow(container, '3')
+      .querySelector<HTMLButtonElement>('.edit__block-combination-save')!
+      .click();
+    expect(onDraftChange).not.toHaveBeenCalled();
+  });
+
+  test('#Filter1 のようなフィルタブロックも参照先として有効', () => {
+    const md = [
+      '## PubMed/MEDLINE',
+      '',
+      '```',
+      '#1 asthma[tiab]',
+      '#2 children[tiab]',
+      '#Filter1 humans[mh]',
+      '#3 (#1 AND #2) AND #Filter1',
+      '```',
+      '',
+    ].join('\n');
+    const onDraftChange = jest.fn();
+    const view = createEditView({ onDraftChange });
+    const container = buildContainer();
+    view(container, { state: { ...stateReady, currentFormulaMarkdown: md }, navigate: jest.fn() });
+    blockRow(container, '3')
+      .querySelector<HTMLButtonElement>('.edit__block-combination-toggle')!
+      .click();
+    const input = blockRow(container, '3').querySelector<HTMLInputElement>(
+      '.edit__block-combination-input'
+    )!;
+    input.value = '#1 AND (#2 OR #Filter1)';
+    input.dispatchEvent(new Event('input'));
+    expect(
+      blockRow(container, '3').querySelector('.edit__block-combination-status')?.textContent
+    ).toBe('✓ 構文 OK');
+    blockRow(container, '3')
+      .querySelector<HTMLButtonElement>('.edit__block-combination-save')!
+      .click();
+    expect(onDraftChange).toHaveBeenCalledTimes(1);
+    expect(onDraftChange.mock.calls[0]![0]).toContain('#3 #1 AND (#2 OR #Filter1)');
+  });
+
+  test('キャンセルで md が変わらない', () => {
+    const onDraftChange = jest.fn();
+    const view = createEditView({ onDraftChange });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    blockRow(container, '3')
+      .querySelector<HTMLButtonElement>('.edit__block-combination-toggle')!
+      .click();
+    const input = blockRow(container, '3').querySelector<HTMLInputElement>(
+      '.edit__block-combination-input'
+    )!;
+    input.value = '(#1 OR #2)';
+    input.dispatchEvent(new Event('input'));
+    blockRow(container, '3')
+      .querySelector<HTMLButtonElement>('.edit__block-combination-cancel')!
+      .click();
+    expect(onDraftChange).not.toHaveBeenCalled();
+    expect(blockRow(container, '3').querySelector('.edit__block-combination-form')).toBeNull();
+    expect(
+      blockRow(container, '3')
+        .querySelector('.edit__block-combination-toggle')
+        ?.getAttribute('aria-expanded')
+    ).toBe('false');
   });
 });
 

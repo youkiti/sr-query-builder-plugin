@@ -404,7 +404,7 @@ export function applyBlockImprovement(
  * 生まれる。
  *
  * 置換前・置換後の両方に参照がある（掛け合わせの構造自体を書き換える）場合は許可する
- * （構造編集 UI は issue #91 で扱う）。
+ * （構造編集 UI は editView.ts の「組み合わせ方を編集」パネル。issue #91 で実装済み）。
  *
  * `parsePubmedFormulaMd` が失敗する（パース不能な md）場合はガードをスキップし、
  * 従来どおり置換する（既存の逃げ道を塞がない）。

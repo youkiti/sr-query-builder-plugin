@@ -7,6 +7,11 @@ import {
   type SaveEditedFormulaInput,
 } from '@/app/services';
 import {
+  formatCombinationError,
+  normalizeCombinationExpression,
+  validateCombinationExpression,
+} from '@/lib/combination-expression';
+import {
   extractBlockReferences,
   findUnreachableBlockIds,
   parsePubmedFormulaMd,
@@ -72,9 +77,21 @@ import type { RenderView } from './types';
  * 表示する。掛け合わせ行の語を書き換えて参照を失うと、`expandFormula.ts` の
  * `chooseEntryBlockId` が「結合行なし → 最後の行」にフォールバックし、#1/#2 が効いていない
  * 式のまま捕捉率が計算・エクスポートされてしまう（ユーザーからは見えない回帰）。
- * 参照を保ったままの構造編集（`#1 AND #2` → `#1 OR #2` 等）は本 issue の対象外
- * （後続 issue #91）。適用口 applyBlockImprovement（editService.ts）側にも同じ理由の
- * 参照整合性ガードがあり、この画面はその最初の防波堤にすぎない。
+ *
+ * 4. **組み合わせ方の編集（issue #91）**: 掛け合わせ行だけに出る「組み合わせ方を編集」
+ *    トグルで、参照と論理演算子の組み替え（`#1 AND #2` → `(#1 OR #2) AND #3` 等）だけを
+ *    許可する。キーワードは書けない（`src/lib/combination-expression` の
+ *    `validateCombinationExpression` が `#<id>` / `AND` / `OR` / `NOT` / `(` / `)`
+ *    以外のトークンをすべて拒否するため、`asthma[tiab]` のような語は構文エラーになる）。
+ *    保存は他の編集経路と同じ applyBlockImprovement を通すため、この式が必ず 1 つ以上の
+ *    参照を含む（validateGrammar が空・演算子のみを弾く）ことと合わせて、#88 の参照整合性
+ *    ガードと矛盾しない。#/blocks の結合式エディタ（blocksView.ts の
+ *    `buildCombinationEditor`）と同じ検証ロジック・同じ文言のトーンを使う。
+ *
+ * 参照を保ったままの構造編集はこの 4 番目の手段に限定され、概念ブロック側の 3 手段は
+ * 依然として掛け合わせ行の対象外のまま（キーワードの編集は各ブロックでのみ行う）。
+ * 適用口 applyBlockImprovement（editService.ts）側にも同じ理由の参照整合性ガードがあり、
+ * この画面はその最初の防波堤にすぎない。
  *
  * 検索式 Markdown 全文は `state.formulaEditDraft`、ブロック単位 AI 改善の進捗/提案/エラーは
  * `state.blockImprovement`、保存の進捗/結果/エラーは `state.formulaSave`、編集メモは
@@ -206,6 +223,11 @@ function resolveNote(state: AppState): string {
  * AI 指示フォームは独立に開閉できるため。片方の開閉判定にもう片方の集合を参照する必要が
  * 無くなる分、chunk 3a で必要だった「両方閉じていたら削除」という相互参照ロジックが要らなくなる
  * （インスペクタの表示可否は `isInspectorOpen` で両集合の OR を取る）。
+ *
+ * `combinationOpenBlocks`（issue #91）は掛け合わせ行の「組み合わせ方を編集」パネルの開閉状態。
+ * 概念ブロックにしか出ない `editOpenBlocks` / `aiOpenBlocks` とは対象ブロックの集合が排他
+ * （`isCombination` で分岐が別れる）なので、同じ ID が両方に載ることは無いが、意味が異なる
+ * ため別集合として持つ。
  */
 interface EditInspectorRuntime {
   caches: Pick<
@@ -227,6 +249,13 @@ interface EditInspectorRuntime {
    * 判定できるためここには含めない（`isInspectorOpen` 参照）。
    */
   aiOpenBlocks: Set<string>;
+  /**
+   * 掛け合わせ行の「組み合わせ方を編集」パネル（issue #91）を開いたブロック ID の集合。
+   * editOpenBlocks / aiOpenBlocks と同じ理由（他ブロックの操作起点の setState による
+   * 全ビュー再描画でパネルが閉じてしまうのを防ぐため）で、createEditView の戻り値の
+   * クロージャの外側に置いて再描画をまたいで生存させる。
+   */
+  combinationOpenBlocks: Set<string>;
 }
 
 function createInspectorRuntime(): EditInspectorRuntime {
@@ -245,6 +274,7 @@ function createInspectorRuntime(): EditInspectorRuntime {
     },
     editOpenBlocks: new Set(),
     aiOpenBlocks: new Set(),
+    combinationOpenBlocks: new Set(),
   };
 }
 
@@ -514,6 +544,11 @@ function renderBlockList(
     const combinationRefs = block.isCombination
       ? extractBlockReferences(block.expression, block.id, knownIds)
       : [];
+    // 「組み合わせ方を編集」パネル（issue #91）の参照先候補。この結合行自身の ID は
+    // 除く（自己参照は validateGrammar 上は書けてしまうが意味を持たないため）。
+    // 概念ブロックだけでなく #Filter1 のようなフィルタブロックも参照先になりうるので、
+    // isCombination で絞り込まずブロック全体の ID 集合から自分の ID だけを除く。
+    const combinationKnownIds = new Set(Array.from(knownIds).filter((id) => id !== block.id));
     ul.appendChild(
       buildBlockRow(
         doc,
@@ -521,6 +556,7 @@ function renderBlockList(
         block.expression,
         block.isCombination,
         combinationRefs,
+        combinationKnownIds,
         editor,
         callbacks,
         improvement !== null && improvement.blockId === block.id ? improvement : null,
@@ -590,6 +626,7 @@ function buildBlockRow(
   expression: string,
   isCombination: boolean,
   combinationRefs: string[],
+  combinationKnownIds: ReadonlySet<string>,
   editor: FormulaEditor,
   callbacks: EditViewCallbacks,
   improvement: BlockImprovementState | null,
@@ -615,9 +652,9 @@ function buildBlockRow(
   renderExpressionInto(currentPre, expression);
 
   // 掛け合わせ行（isCombination=true）には ✏️ / 「AI に改善させる」を出さない（issue #88）。
-  // 読み取り表示のみ出し、代わりに参照 ID を示す注記を出す。編集スロット・AI スロット・
-  // インスペクタスロットと、それらのイベント配線は作らない（この関数の残りは概念ブロック
-  // 専用として進む）。
+  // 読み取り表示 + 参照 ID を示す注記に加えて、「組み合わせ方を編集」パネル（issue #91）だけを
+  // 出す。編集スロット・AI スロット・インスペクタスロットと、それらのイベント配線は作らない
+  // （この関数の残りは概念ブロック専用として進む）。
   if (isCombination) {
     li.classList.add('edit__block-row--combination');
     li.appendChild(header);
@@ -627,9 +664,53 @@ function buildBlockRow(
     const refList = combinationRefs.map((id) => `#${id}`).join('、');
     note.textContent =
       refList === ''
-        ? 'この行は他のブロックを掛け合わせる行です。語の編集は各ブロックで行ってください。'
-        : `この行は ${refList} の掛け合わせです。語の編集は各ブロックで行ってください。`;
+        ? 'この行は他のブロックを掛け合わせる行です。組み合わせ方は編集できますが、語の編集は各ブロックで行ってください。'
+        : `この行は ${refList} の掛け合わせです。組み合わせ方は編集できますが、語の編集は各ブロックで行ってください。`;
     li.appendChild(note);
+
+    const combinationToggle = doc.createElement('button');
+    combinationToggle.type = 'button';
+    combinationToggle.className = 'edit__block-combination-toggle';
+    combinationToggle.textContent = '組み合わせ方を編集';
+    combinationToggle.setAttribute('aria-expanded', 'false');
+    li.appendChild(combinationToggle);
+
+    const combinationPanelSlot = doc.createElement('div');
+    combinationPanelSlot.className = 'edit__block-combination-panel';
+    li.appendChild(combinationPanelSlot);
+
+    /**
+     * inspector.combinationOpenBlocks に基づいてパネルを描画し直す。
+     * editSlot / aiSlot と同じ「開くべきか判定に DOM を見ない」規則（syncInspector 参照）。
+     * ESLint no-inner-declarations（if ブロック内での function 宣言）を避けるため
+     * 関数式で定義する（他の syncXxx は buildBlockRow の直下＝関数ボディの root にあるので
+     * 通常の function 宣言のままでよいが、これは isCombination 分岐の内側にあるため）。
+     */
+    const syncCombinationPanel = (): void => {
+      combinationPanelSlot.innerHTML = '';
+      const open = inspector.combinationOpenBlocks.has(blockId);
+      combinationToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (!open) {
+        return;
+      }
+      combinationPanelSlot.appendChild(
+        buildCombinationEditPanel(doc, blockId, expression, combinationKnownIds, editor, () => {
+          inspector.combinationOpenBlocks.delete(blockId);
+          syncCombinationPanel();
+        })
+      );
+    };
+    syncCombinationPanel();
+
+    combinationToggle.addEventListener('click', () => {
+      if (inspector.combinationOpenBlocks.has(blockId)) {
+        inspector.combinationOpenBlocks.delete(blockId);
+      } else {
+        inspector.combinationOpenBlocks.add(blockId);
+      }
+      syncCombinationPanel();
+    });
+
     return li;
   }
 
@@ -1033,6 +1114,120 @@ function buildRawEditForm(
 
   cancelBtn.addEventListener('click', () => {
     onCancelWhole();
+  });
+
+  return wrap;
+}
+
+/**
+ * 「組み合わせ方を編集」パネル（issue #91）。掛け合わせ行だけに出る。
+ *
+ * 参照と論理演算子の組み替え（`#1 AND #2` → `(#1 OR #2) AND #3` 等）だけを許可し、
+ * キーワードは書けない。検証は `src/lib/combination-expression` の
+ * `validateCombinationExpression` に一任する（このライブラリのトークナイザは
+ * `#<id>` / `AND` / `OR` / `NOT` / `(` / `)` 以外を受け付けず、`asthma[tiab]` のような
+ * キーワードは「不正な文字」「予期しないキーワード」として弾くため、独自の判定は作らない）。
+ * knownIds は呼び出し元（buildBlockRow）が組み立てた「この結合行自身の ID を除いた全ブロック
+ * ID」（#/blocks の結合式エディタと同じ、`#Filter1` のようなフィルタブロックも含む集合）。
+ *
+ * 文言・ステータス表示の作りは #/blocks の結合式エディタ（blocksView.ts の
+ * `buildCombinationEditor`）にできるだけ揃える。
+ *
+ * 保存時は validateCombinationExpression でエラーが 0 件のときだけ
+ * normalizeCombinationExpression を通した式で applyBlockImprovement を呼ぶ。
+ * このパネルが通す式は validateGrammar 上必ず 1 つ以上の参照を含む（被演算子として
+ * 許可されるトークンは ref のみのため）ので、applyBlockImprovement 側の参照整合性ガード
+ * （editService.ts の assertReferenceIntegrity。「参照 → 参照」の書き換えは許可）と矛盾しない。
+ * 念のため try/catch し、ガードが例外を投げたらステータスへ出す。
+ *
+ * キャンセル（onCancel）は式を変えずにパネルを閉じるだけ。入力途中のテキストはローカル DOM の
+ * まま扱う（詳細編集の `.edit__block-edit-input` と同じ挙動。再描画で現在の式に戻る）。
+ */
+function buildCombinationEditPanel(
+  doc: Document,
+  blockId: string,
+  expression: string,
+  knownIds: ReadonlySet<string>,
+  editor: FormulaEditor,
+  onCancel: () => void
+): HTMLElement {
+  const wrap = doc.createElement('div');
+  wrap.className = 'edit__block-combination-form';
+
+  const hint = doc.createElement('p');
+  hint.className = 'edit__block-combination-hint';
+  hint.textContent =
+    '使える記号: AND / OR / NOT / ( ) と #番号だけです。キーワードは各ブロック（#1〜）で編集してください。';
+  wrap.appendChild(hint);
+
+  const input = doc.createElement('input');
+  input.type = 'text';
+  input.className = 'edit__block-combination-input';
+  input.value = expression;
+  input.setAttribute('aria-label', `ブロック #${blockId} の組み合わせ方`);
+  wrap.appendChild(input);
+
+  const status = doc.createElement('p');
+  status.setAttribute('aria-live', 'polite');
+  wrap.appendChild(status);
+
+  const errorList = doc.createElement('ul');
+  errorList.className = 'edit__block-combination-errors';
+  wrap.appendChild(errorList);
+
+  /** 現在の input 値を検証し、status / errorList を更新する。呼び出し元へ結果を返す。 */
+  function refreshValidation() {
+    const validation = validateCombinationExpression(input.value, knownIds);
+    errorList.innerHTML = '';
+    if (validation.errors.length === 0) {
+      status.className = 'edit__block-combination-status edit__block-combination-status--ok';
+      status.textContent = '✓ 構文 OK';
+    } else {
+      status.className = 'edit__block-combination-status edit__block-combination-status--error';
+      status.textContent = `⚠ ${validation.errors.length} 件のエラーがあります`;
+      for (const err of validation.errors) {
+        const li = doc.createElement('li');
+        li.textContent = formatCombinationError(err);
+        errorList.appendChild(li);
+      }
+    }
+    return validation;
+  }
+  refreshValidation();
+  input.addEventListener('input', () => {
+    refreshValidation();
+  });
+
+  const actions = doc.createElement('div');
+  actions.className = 'edit__block-combination-actions';
+  const saveBtn = doc.createElement('button');
+  saveBtn.type = 'button';
+  saveBtn.className = 'edit__block-combination-save';
+  saveBtn.textContent = '保存';
+  const cancelBtn = doc.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'edit__block-combination-cancel';
+  cancelBtn.textContent = 'キャンセル';
+  actions.appendChild(saveBtn);
+  actions.appendChild(cancelBtn);
+  wrap.appendChild(actions);
+
+  saveBtn.addEventListener('click', () => {
+    const validation = refreshValidation();
+    if (validation.errors.length > 0) {
+      return;
+    }
+    const next = normalizeCombinationExpression(input.value);
+    try {
+      editor.setMd(applyBlockImprovement(editor.getMd(), blockId, next));
+    } catch (err) {
+      status.className = 'edit__block-combination-status edit__block-combination-status--error';
+      status.textContent = `保存に失敗しました: ${formatError(err)}`;
+    }
+  });
+
+  cancelBtn.addEventListener('click', () => {
+    onCancel();
   });
 
   return wrap;

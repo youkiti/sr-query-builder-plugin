@@ -481,3 +481,79 @@
   margin: var(--space-2) 0 0;
 }
 
+/* 「組み合わせ方を編集」（issue #91）。掛け合わせ行だけに出るトグルとパネル。参照と論理
+   演算子の組み替え（`#1 AND #2` → `(#1 OR #2) AND #3` 等）だけを許可し、キーワードは書けない。
+   #/blocks の結合式エディタ（blocks.css の .blocks__combination-*）とトーンを揃える。
+   パネル本体（.edit__block-combination-form）はトグルを開いたときだけ appendChild される
+   （editView.ts の syncCombinationPanel）ため、常設のスロット（.edit__block-combination-panel）
+   側には見た目を持たせない（edit__block-ai / edit__block-edit と同じ構成）。 */
+.edit__block-combination-toggle {
+  margin-top: var(--space-2);
+  font-size: var(--font-size-sm);
+  padding: 2px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  cursor: pointer;
+}
+
+.edit__block-combination-form {
+  margin-top: var(--space-2);
+  padding: var(--space-3);
+  border: 1px dashed var(--color-border);
+  border-radius: 4px;
+}
+
+.edit__block-combination-hint {
+  margin: 0 0 var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.edit__block-combination-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-sm);
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+}
+
+/* OK / エラーの区別は文字色ではなく border-left + 文頭の記号（✓ / ⚠）で示す
+   （.edit__consistency-notice と同じ考え方）。--color-success (#2e8c4f) はこの用途で文字色
+   として直書きすると白地でも実測 4.22:1 で AA（4.5:1）を割り込むため使わない。border-left は
+   非テキストのコントラスト基準（WCAG 1.4.11 の 3:1）なので success / danger どちらも余裕で
+   満たす（白地に対しそれぞれ実測 4.22:1 / 5.18:1）。 */
+.edit__block-combination-status {
+  margin: var(--space-2) 0 0;
+  padding: 2px var(--space-2);
+  border-left: 3px solid var(--color-border);
+  font-size: var(--font-size-sm);
+}
+
+.edit__block-combination-status--ok {
+  border-left-color: var(--color-success);
+}
+
+.edit__block-combination-status--error {
+  border-left-color: var(--color-danger);
+}
+
+.edit__block-combination-errors {
+  list-style: disc;
+  margin: var(--space-1) 0 0;
+  padding: 0 0 0 var(--space-4);
+  font-size: var(--font-size-sm);
+}
+
+.edit__block-combination-errors:empty {
+  display: none;
+}
+
+.edit__block-combination-actions:not([hidden]) {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+

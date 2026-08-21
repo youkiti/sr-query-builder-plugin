@@ -206,4 +206,45 @@ test.describe('app-edit (#/edit)', () => {
     const result = await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze();
     expect(result.violations, JSON.stringify(result.violations, null, 2)).toEqual([]);
   });
+
+  test('掛け合わせ行の「組み合わせ方を編集」で式を変更すると読み取り表示が更新される（issue #91）', async ({
+    page,
+  }) => {
+    await injectAppStub(page, fullStateScenario());
+    await page.goto(APP_URL);
+
+    // FULL_FORMULA_MARKDOWN の #3 が掛け合わせ行（`#1 AND #2`）。
+    const combinationRow = page.locator('.edit__block-row[data-block-id="3"]');
+    await expect(combinationRow.locator('.edit__block-current')).toHaveText('#1 AND #2');
+
+    await combinationRow.locator('.edit__block-combination-toggle').click();
+    const input = combinationRow.locator('.edit__block-combination-input');
+    // <details> で畳んでいないことの確認も兼ねる（CLAUDE.md: jsdom が green でも
+    // 「見えている」ことは保証されないため、E2E では toBeVisible / fill が通ることを確かめる）。
+    await expect(input).toBeVisible();
+    await expect(input).toHaveValue('#1 AND #2');
+
+    await input.fill('(#1 OR #2)');
+    await expect(combinationRow.locator('.edit__block-combination-status')).toHaveText(
+      '✓ 構文 OK'
+    );
+    await combinationRow.locator('.edit__block-combination-save').click();
+
+    await expect(combinationRow.locator('.edit__block-current')).toHaveText('(#1 OR #2)');
+    // 語の編集手段（✏️ / AI 改善）は依然として出ない。
+    await expect(combinationRow.locator('.edit__block-edit-toggle')).toHaveCount(0);
+    await expect(combinationRow.locator('.edit__block-improve')).toHaveCount(0);
+  });
+
+  test('a11y: axe violation zero（組み合わせ方を編集パネル展開時。issue #91）', async ({
+    page,
+  }) => {
+    await injectAppStub(page, fullStateScenario());
+    await page.goto(APP_URL);
+    const combinationRow = page.locator('.edit__block-row[data-block-id="3"]');
+    await combinationRow.locator('.edit__block-combination-toggle').click();
+    await expect(combinationRow.locator('.edit__block-combination-input')).toBeVisible();
+    const result = await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze();
+    expect(result.violations, JSON.stringify(result.violations, null, 2)).toEqual([]);
+  });
 });
