@@ -69,6 +69,7 @@ function makeStateWithDrafts(): AppState {
     blockImprovement: null,
     formulaSave: null,
     formulaEditNote: null,
+    blockImprovementInstruction: null,
     blocksDraftSavedAt: null,
     hydrateError: null,
   };

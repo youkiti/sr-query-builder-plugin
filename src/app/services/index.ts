@@ -74,7 +74,7 @@ export {
   type AnalyzeMissedSeedsDeps,
   type AnalyzeMissedSeedsResult,
 } from './validationService';
-export type { MissedSeedAnalysis } from '@/features/formula/skills';
+export type { MissedSeedAnalysis, ImproveBlockTurn } from '@/features/formula/skills';
 export {
   applyBlockImprovement,
   requestBlockImprovement,

@@ -27,6 +27,7 @@ const BLOCK_IMPROVEMENT: NonNullable<AppState['blockImprovement']> = {
     rationale: 'MeSH を追加して感度を上げる',
   },
   error: null,
+  history: [],
 };
 
 /**

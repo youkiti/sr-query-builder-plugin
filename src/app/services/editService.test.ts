@@ -97,6 +97,7 @@ function makeState(overrides: Partial<AppState> = {}): AppState {
     blockImprovement: null,
     formulaSave: null,
     formulaEditNote: null,
+    blockImprovementInstruction: null,
     blocksDraftSavedAt: null,
     hydrateError: null,
     ...overrides,

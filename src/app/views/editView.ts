@@ -2,6 +2,7 @@ import {
   applyBlockImprovement,
   type BlockImprovementContext,
   type BlockImprovementResult,
+  type ImproveBlockTurn,
   type RequestBlockImprovementInput,
   type SaveEditedFormulaInput,
 } from '@/app/services';
@@ -124,6 +125,13 @@ export interface EditViewCallbacks
    * （PR #43 の回帰対応。store.ts の FormulaEditNote doc コメント参照）。
    */
   onNoteChange?: (note: string) => void;
+  /**
+   * 「AI への指示」欄（初回・「指示を追加してやり直す」の追加指示欄の両方）を
+   * store（blockImprovementInstruction）へ反映する（打鍵のたび＝input イベント）。
+   * onNoteChange と同じく setStateSilently で受けるため、この呼び出しは再描画を誘発しない
+   * （issue #90。store.ts の BlockImprovementInstruction doc コメント参照）。
+   */
+  onInstructionChange?: (blockId: string, instruction: string) => void;
 }
 
 /** 検索式 Markdown 全文を保持し、更新時にブロック一覧を再描画する内部コントローラ。 */
@@ -421,7 +429,7 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
         editor,
         internalCallbacks,
         improvement,
-        ctx.state.blocksDraft,
+        ctx.state,
         inspector
       );
     }
@@ -455,6 +463,10 @@ function formatSaveStatus(save: FormulaSaveState | null): string {
 /**
  * editor.getMd() を parsePubmedFormulaMd でブロック分解し、各ブロックのカードを再描画する。
  * パースに失敗した場合はその旨を表示する。
+ *
+ * blocksDraft ではなく state 全体を受け取るのは、ブロックラベル解決（resolveBlockLabel）に
+ * 加えて「AI への指示」欄の未送信ドラフト（resolveInstructionDraft。issue #90）もブロックごとに
+ * state から解決する必要があるため。
  */
 function renderBlockList(
   doc: Document,
@@ -463,7 +475,7 @@ function renderBlockList(
   editor: FormulaEditor,
   callbacks: EditViewCallbacks,
   improvement: BlockImprovementState | null,
-  blocksDraft: BlocksDraft | null,
+  state: AppState,
   inspector: EditInspectorRuntime
 ): void {
   ul.innerHTML = '';
@@ -493,7 +505,11 @@ function renderBlockList(
   for (const block of formula.blocks) {
     const siblings: SiblingBlock[] = conceptBlocks
       .filter((b) => b.id !== block.id)
-      .map((b) => ({ id: b.id, label: resolveBlockLabel(blocksDraft, b.id), expression: b.expression }));
+      .map((b) => ({
+        id: b.id,
+        label: resolveBlockLabel(state.blocksDraft, b.id),
+        expression: b.expression,
+      }));
     // 掛け合わせ行のみ: 注記に出す「どのブロックの掛け合わせか」（issue #88）。
     const combinationRefs = block.isCombination
       ? extractBlockReferences(block.expression, block.id, knownIds)
@@ -509,10 +525,29 @@ function renderBlockList(
         callbacks,
         improvement !== null && improvement.blockId === block.id ? improvement : null,
         siblings,
-        inspector
+        inspector,
+        resolveInstructionDraft(state, block.id)
       )
     );
   }
+}
+
+/**
+ * state.blockImprovementInstruction を指定ブロックについて解決する（stale なら空文字）。
+ * openAiPromptForm の初回指示欄と renderProposal の「指示を追加してやり直す」欄は、同一ブロックの
+ * AI パネル内で同時に表示されることが無い（status='ready' かどうかで排他的に切り替わる）ため、
+ * 同じフィールドを共有する（issue #90。store.ts の BlockImprovementInstruction doc コメント参照）。
+ */
+function resolveInstructionDraft(state: AppState, blockId: string): string {
+  const draft = state.blockImprovementInstruction;
+  if (
+    draft === null ||
+    draft.formulaVersionId !== state.currentFormulaVersionId ||
+    draft.blockId !== blockId
+  ) {
+    return '';
+  }
+  return draft.instruction;
 }
 
 /**
@@ -559,7 +594,8 @@ function buildBlockRow(
   callbacks: EditViewCallbacks,
   improvement: BlockImprovementState | null,
   siblings: SiblingBlock[],
-  inspector: EditInspectorRuntime
+  inspector: EditInspectorRuntime,
+  instructionDraft: string
 ): HTMLElement {
   const li = doc.createElement('li');
   li.className = 'edit__block-row';
@@ -630,7 +666,17 @@ function buildBlockRow(
   aiSlot.setAttribute('aria-live', 'polite');
   li.appendChild(aiSlot);
   if (improvement) {
-    renderImprovementState(doc, aiSlot, improvement, editor, callbacks, blockId);
+    renderImprovementState(
+      doc,
+      aiSlot,
+      improvement,
+      editor,
+      callbacks,
+      blockId,
+      siblings,
+      inspector.caches,
+      instructionDraft
+    );
   }
 
   // ブロック・インスペクタ（requirements: 検索式編集の MeSH/フリーワード可視化）用スロット。
@@ -782,7 +828,9 @@ function buildBlockRow(
         // 「キャンセル」（未送信のまま閉じる）は上の分岐を通らないので個別に処理する。
         inspector.aiOpenBlocks.delete(blockId);
         syncInspector();
-      }
+      },
+      instructionDraft,
+      callbacks.onInstructionChange
     );
     inspector.aiOpenBlocks.add(blockId);
     syncInspector();
@@ -1007,6 +1055,11 @@ function buildRawEditForm(
  * という openAiPromptForm 全体の設計方針を守るため）。共有語（sharedTerms）は完全一致でしか
  * 検出できないため、共有語が 0 件の兄弟も含めて全件渡す（issue #89。表記ゆれ等で完全一致
  * しない重複のときに AI へ何も渡らず、根拠の無い推測で過剰削除するのを防ぐため）。
+ *
+ * 指示欄の内容は打鍵のたび onInstructionChange 経由で store（blockImprovementInstruction）へ
+ * 反映し、初期値も同じ場所から復元する（issue #90）。LLM コスト集計等の setState による
+ * 全ビュー再描画（editView は再描画のたびに `container.innerHTML = ''` で丸ごと作り直す）を
+ * またいでも、打鍵の途中経過が消えないようにするため（formulaEditNote と同じ理由）。
  */
 function openAiPromptForm(
   doc: Document,
@@ -1017,7 +1070,9 @@ function openAiPromptForm(
   onImproveBlock: NonNullable<EditViewCallbacks['onImproveBlock']>,
   onGetImproveContext: EditViewCallbacks['onGetImproveContext'],
   measuredCaches: EditInspectorRuntime['caches'],
-  onClosed: () => void
+  onClosed: () => void,
+  initialInstruction: string,
+  onInstructionChange: EditViewCallbacks['onInstructionChange']
 ): void {
   slot.innerHTML = '';
   const overlaps = computeSiblingOverlaps(expression, siblings);
@@ -1031,6 +1086,10 @@ function openAiPromptForm(
   instruction.className = 'edit__block-ai-instruction';
   instruction.rows = 2;
   instruction.placeholder = '例: 同義語をもっと増やして / MeSH を減らして tiab 中心に';
+  instruction.value = initialInstruction;
+  instruction.addEventListener('input', () => {
+    onInstructionChange?.(blockId, instruction.value);
+  });
   instructionLabel.appendChild(instruction);
   form.appendChild(instructionLabel);
 
@@ -1223,6 +1282,10 @@ function appendContextItem(
 /**
  * store.blockImprovement の状態（running / ready / error）を AI スロットへ復元する。
  * running: 取得中インジケータ。ready: 提案の diff 表示（renderProposal）。error: エラー表示。
+ *
+ * siblings / measuredCaches / instructionDraft は「指示を追加してやり直す」（issue #90）が
+ * 初回 submit（openAiPromptForm）と同じ文脈を再送信できるよう、ready 分岐でそのまま
+ * renderProposal へ引き渡すだけのバケツリレー。
  */
 function renderImprovementState(
   doc: Document,
@@ -1230,7 +1293,10 @@ function renderImprovementState(
   improvement: BlockImprovementState,
   editor: FormulaEditor,
   callbacks: EditViewCallbacks,
-  blockId: string
+  blockId: string,
+  siblings: SiblingBlock[],
+  measuredCaches: EditInspectorRuntime['caches'],
+  instructionDraft: string
 ): void {
   slot.innerHTML = '';
   if (improvement.status === 'running') {
@@ -1252,7 +1318,18 @@ function renderImprovementState(
   if (result === null) {
     return;
   }
-  renderProposal(doc, slot, editor, callbacks, blockId, result);
+  renderProposal(
+    doc,
+    slot,
+    editor,
+    callbacks,
+    blockId,
+    result,
+    improvement.history,
+    siblings,
+    measuredCaches,
+    instructionDraft
+  );
 }
 
 /**
@@ -1264,6 +1341,12 @@ function renderImprovementState(
  * accept は「現在の編集中 md」（editor.getMd()、他ブロックへの並行編集を含みうる）に対して
  * applyBlockImprovement を当てる。提案受信時点の md を base として握らないのは、md が
  * store 化された今それをやると他ブロックへの並行編集を巻き戻してしまうため。
+ *
+ * issue #90（会話継続）で 3 つの追加操作を持つ:
+ * - 「これまでのやり取り（N 回）」`<details>`（history が空なら出さない）
+ * - 「提案を編集してから採用する」`<details>`（textarea + applyBlockImprovement 経由の適用）
+ * - 「指示を追加してやり直す」（textarea + onImproveBlock の再送信。history / siblings /
+ *   計測済みヒット数を初回 submit と同じ形で載せ直す）
  */
 function renderProposal(
   doc: Document,
@@ -1271,7 +1354,11 @@ function renderProposal(
   editor: FormulaEditor,
   callbacks: EditViewCallbacks,
   blockId: string,
-  result: BlockImprovementResult
+  result: BlockImprovementResult,
+  history: ImproveBlockTurn[],
+  siblings: SiblingBlock[],
+  measuredCaches: EditInspectorRuntime['caches'],
+  instructionDraft: string
 ): void {
   slot.innerHTML = '';
   const rationale = doc.createElement('p');
@@ -1311,6 +1398,47 @@ function renderProposal(
     slot.appendChild(summaryLine);
   }
 
+  // 「提案を編集してから採用する」（issue #90）: AI の提案は良い方向だが細部を直したい、
+  // というケース向け。applyBlockImprovement を通す（#88 の参照整合性ガード・空文字チェックが
+  // そこにある）ので accept ボタンと同じ安全性を持つ。既存 E2E は触らない新規要素なので
+  // <details> で畳んでよい（CLAUDE.md の #/edit 注意事項参照）。
+  const manualEditDetails = doc.createElement('details');
+  manualEditDetails.className = 'edit__block-ai-manual-edit';
+  const manualEditSummary = doc.createElement('summary');
+  manualEditSummary.textContent = '提案を編集してから採用する';
+  manualEditDetails.appendChild(manualEditSummary);
+  const manualEditInput = doc.createElement('textarea');
+  manualEditInput.className = 'edit__block-ai-manual-edit-input';
+  manualEditInput.rows = 3;
+  manualEditInput.value = result.proposedExpression;
+  manualEditInput.setAttribute('aria-label', `ブロック #${blockId} の提案を編集`);
+  manualEditDetails.appendChild(manualEditInput);
+  const manualEditActions = doc.createElement('div');
+  manualEditActions.className = 'edit__block-ai-manual-edit-actions';
+  const manualEditApplyBtn = doc.createElement('button');
+  manualEditApplyBtn.type = 'button';
+  manualEditApplyBtn.className = 'edit__block-ai-manual-edit-apply';
+  manualEditApplyBtn.textContent = '編集した内容で置き換える';
+  manualEditActions.appendChild(manualEditApplyBtn);
+  manualEditDetails.appendChild(manualEditActions);
+  const manualEditError = doc.createElement('p');
+  manualEditError.className = 'edit__block-ai-manual-edit-error';
+  manualEditError.setAttribute('aria-live', 'polite');
+  manualEditDetails.appendChild(manualEditError);
+  slot.appendChild(manualEditDetails);
+
+  manualEditApplyBtn.addEventListener('click', () => {
+    try {
+      const next = applyBlockImprovement(editor.getMd(), blockId, manualEditInput.value);
+      // accept ボタンと同じ順序（先に提案を引っ込めてから setMd）。理由は下の acceptBtn の
+      // コメント参照。
+      callbacks.onClearImprovement?.();
+      editor.setMd(next);
+    } catch (err) {
+      manualEditError.textContent = `置き換えに失敗しました: ${formatError(err)}`;
+    }
+  });
+
   const actions = doc.createElement('div');
   actions.className = 'edit__block-actions';
 
@@ -1338,6 +1466,85 @@ function renderProposal(
   feedback.className = 'edit__block-feedback';
   feedback.setAttribute('aria-live', 'polite');
   slot.appendChild(feedback);
+
+  // 「これまでのやり取り（N 回）」（issue #90）: history が空なら出さない。
+  // 各 turn の指示と、それに対する提案の rationale を並べる（提案 expression 自体は
+  // 差分として見せるほど頻繁に見返すものではないため、ここでは rationale のみ）。
+  if (history.length > 0) {
+    const historyDetails = doc.createElement('details');
+    historyDetails.className = 'edit__block-ai-history';
+    const historySummary = doc.createElement('summary');
+    historySummary.textContent = `これまでのやり取り（${history.length} 回）`;
+    historyDetails.appendChild(historySummary);
+    const historyList = doc.createElement('ol');
+    historyList.className = 'edit__block-ai-history-list';
+    for (const turn of history) {
+      const item = doc.createElement('li');
+      const instructionP = doc.createElement('p');
+      instructionP.className = 'edit__block-ai-history-instruction';
+      instructionP.textContent = `指示: ${turn.instruction.trim() === '' ? '(特になし)' : turn.instruction}`;
+      item.appendChild(instructionP);
+      const rationaleP = doc.createElement('p');
+      rationaleP.className = 'edit__block-ai-history-rationale';
+      rationaleP.textContent = turn.rationale === '' ? '（改善ポイントの説明なし）' : turn.rationale;
+      item.appendChild(rationaleP);
+      historyList.appendChild(item);
+    }
+    historyDetails.appendChild(historyList);
+    slot.appendChild(historyDetails);
+  }
+
+  // 「指示を追加してやり直す」（issue #90）: 「これは違う、こうして」と続けて指示できるように、
+  // 初回 submit（openAiPromptForm）と同じ文脈（history / siblings / 計測済みヒット数）を
+  // 載せ直して onImproveBlock を再送信する。accept / reject の下に常時表示する（<details> で
+  // 畳まない）ため、既存 E2E が触る .edit__block-accept / .edit__block-reject には影響しない。
+  const redoWrap = doc.createElement('div');
+  redoWrap.className = 'edit__block-ai-redo';
+  const redoLabel = doc.createElement('label');
+  redoLabel.className = 'edit__block-ai-redo-label';
+  redoLabel.textContent = '指示を追加してやり直す:';
+  const redoInstruction = doc.createElement('textarea');
+  redoInstruction.className = 'edit__block-ai-redo-instruction';
+  redoInstruction.rows = 2;
+  redoInstruction.placeholder = '例: それは違う、代わりに MeSH を先頭に';
+  redoInstruction.value = instructionDraft;
+  redoInstruction.addEventListener('input', () => {
+    callbacks.onInstructionChange?.(blockId, redoInstruction.value);
+  });
+  redoLabel.appendChild(redoInstruction);
+  redoWrap.appendChild(redoLabel);
+  const redoActions = doc.createElement('div');
+  redoActions.className = 'edit__block-ai-redo-actions';
+  const redoBtn = doc.createElement('button');
+  redoBtn.type = 'button';
+  redoBtn.className = 'edit__block-ai-redo-submit';
+  redoBtn.textContent = 'この指示でやり直す';
+  redoActions.appendChild(redoBtn);
+  redoWrap.appendChild(redoActions);
+  slot.appendChild(redoWrap);
+
+  redoBtn.addEventListener('click', () => {
+    if (!callbacks.onImproveBlock) {
+      return;
+    }
+    // store 側が blockImprovement.status='running' を設定し、その setState が再描画を起こして
+    // このパネルごと置き換える想定（openAiPromptForm の submit と同じ思想）。
+    redoBtn.disabled = true;
+    const overlaps = computeSiblingOverlaps(result.currentExpression, siblings);
+    const measured = collectMeasuredContext(result.currentExpression, measuredCaches);
+    void callbacks.onImproveBlock({
+      blockId,
+      instruction: redoInstruction.value,
+      // history は status='ready' である以上 1 turn 以上あるはずだが、テスト用の fixture 等で
+      // 空配列が渡るケースも考慮し、他の任意項目（keywordHits 等）と同じく空なら省略する。
+      ...(history.length > 0 ? { history } : {}),
+      ...(measured.keywordHits.length > 0 ? { keywordHits: measured.keywordHits } : {}),
+      ...(measured.freewordDedupTotal !== null
+        ? { freewordDedupTotal: measured.freewordDedupTotal }
+        : {}),
+      ...(overlaps.length > 0 ? { siblings: overlaps } : {}),
+    });
+  });
 
   // accept / reject のどちらも inspector.editOpenBlocks / aiOpenBlocks は意図的に触らない。
   // 「開いたことがあるブロックのインスペクタは、明示的な鉛筆/AI ボタンのトグル close 以外では

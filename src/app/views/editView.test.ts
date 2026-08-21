@@ -416,6 +416,7 @@ describe('createEditView - AI 改善の進捗・提案・エラーは state.bloc
       status,
       result: status === 'ready' ? READY_RESULT : null,
       error: status === 'error' ? 'llm boom' : null,
+      history: [],
       ...overrides,
     };
   }
@@ -684,6 +685,7 @@ describe('createEditView - 提案 diff の削除/追加サマリ（issue #89）'
           rationale: 'r',
         },
         error: null,
+        history: [],
       },
     };
   }
@@ -1057,6 +1059,7 @@ describe('createEditView - ブロック・インスペクタの配線（issue #5
           rationale: 'r',
         },
         error: null,
+        history: [],
       },
     };
     view(container, { state: latestState, navigate: jest.fn() });
@@ -1086,6 +1089,7 @@ describe('createEditView - ブロック・インスペクタの配線（issue #5
           status: 'running',
           result: null,
           error: null,
+          history: [],
         },
       },
       navigate: jest.fn(),
@@ -1115,6 +1119,7 @@ describe('createEditView - ブロック・インスペクタの配線（issue #5
           status: 'running',
           result: null,
           error: null,
+          history: [],
         },
       },
       navigate: jest.fn(),
@@ -1432,6 +1437,7 @@ describe('createEditView - AI 改善提案は句単位で色分けされる（is
             rationale: 'MeSH 追加',
           },
           error: null,
+          history: [],
         },
       },
       navigate: jest.fn(),
@@ -1445,6 +1451,177 @@ describe('createEditView - AI 改善提案は句単位で色分けされる（is
     expect(row.querySelector('.edit__block-diff-before pre')?.textContent).toBe('asthma[tiab]');
     expect(row.querySelector('.edit__block-diff-after pre')?.textContent).toBe(
       '"Asthma"[Mesh] OR asthma[tiab]'
+    );
+  });
+});
+
+describe('createEditView - AI 改善の会話継続（指示を追加してやり直す。issue #90）', () => {
+  const RESULT: BlockImprovementResult = {
+    blockId: '1',
+    currentExpression: 'asthma[tiab]',
+    proposedExpression: '"Asthma"[Mesh]',
+    rationale: 'MeSH に寄せる',
+  };
+
+  function stateWithHistory(history: BlockImprovementState['history']): AppState {
+    return {
+      ...stateReadyFull,
+      blockImprovement: {
+        formulaVersionId: 'v1',
+        blockId: '1',
+        status: 'ready',
+        result: RESULT,
+        error: null,
+        history,
+      },
+    };
+  }
+
+  test('history が空なら「これまでのやり取り」は出ない', () => {
+    const view = createEditView({ onImproveBlock: jest.fn() });
+    const container = buildContainer();
+    view(container, { state: stateWithHistory([]), navigate: jest.fn() });
+    expect(blockRow(container, '1').querySelector('.edit__block-ai-history')).toBeNull();
+  });
+
+  test('history が非空なら「これまでのやり取り（N 回）」に各 turn の指示と rationale が並ぶ', () => {
+    const view = createEditView({ onImproveBlock: jest.fn() });
+    const container = buildContainer();
+    view(container, {
+      state: stateWithHistory([
+        { instruction: '同義語を増やして', proposedExpression: 'P1', rationale: '同義語追加' },
+        { instruction: '', proposedExpression: 'P2', rationale: 'さらに調整' },
+      ]),
+      navigate: jest.fn(),
+    });
+    const row = blockRow(container, '1');
+    const details = row.querySelector('.edit__block-ai-history')!;
+    expect(details).toBeTruthy();
+    expect(details.querySelector('summary')?.textContent).toBe('これまでのやり取り（2 回）');
+    const items = details.querySelectorAll('.edit__block-ai-history-list li');
+    expect(items).toHaveLength(2);
+    expect(items[0]?.textContent).toContain('同義語を増やして');
+    expect(items[0]?.textContent).toContain('同義語追加');
+    // 指示が空文字の turn はプレースホルダで表示
+    expect(items[1]?.textContent).toContain('(特になし)');
+    expect(items[1]?.textContent).toContain('さらに調整');
+  });
+
+  test('「指示を追加してやり直す」で onImproveBlock が history・siblings 付きで再送信される', () => {
+    const onImproveBlock = jest.fn().mockResolvedValue(undefined);
+    const view = createEditView({ onImproveBlock });
+    const container = buildContainer();
+    const history: BlockImprovementState['history'] = [
+      { instruction: '同義語を増やして', proposedExpression: '"Asthma"[Mesh]', rationale: 'MeSH に寄せる' },
+    ];
+    view(container, { state: stateWithHistory(history), navigate: jest.fn() });
+    const row = blockRow(container, '1');
+    const redoInput = row.querySelector<HTMLTextAreaElement>('.edit__block-ai-redo-instruction')!;
+    redoInput.value = 'それは違う、tiab も残して';
+    row.querySelector<HTMLButtonElement>('.edit__block-ai-redo-submit')!.click();
+    // stateReadyFull の #2（children[tiab]）は共有語 0 件だが、兄弟ブロックは存在するので
+    // sharedTerms: [] のまま渡る（issue #89 と同じ契約）。
+    expect(onImproveBlock).toHaveBeenCalledWith({
+      blockId: '1',
+      instruction: 'それは違う、tiab も残して',
+      history,
+      siblings: [{ id: '2', label: null, expression: 'children[tiab]', sharedTerms: [] }],
+    });
+  });
+
+  test('「指示を追加してやり直す」の指示欄は state.blockImprovementInstruction から復元される', () => {
+    const view = createEditView({ onImproveBlock: jest.fn() });
+    const container = buildContainer();
+    view(container, {
+      state: {
+        ...stateWithHistory([
+          { instruction: '同義語を増やして', proposedExpression: 'P1', rationale: 'R1' },
+        ]),
+        blockImprovementInstruction: { formulaVersionId: 'v1', blockId: '1', instruction: '打鍵中の追加指示' },
+      },
+      navigate: jest.fn(),
+    });
+    const redoInput = blockRow(container, '1').querySelector<HTMLTextAreaElement>(
+      '.edit__block-ai-redo-instruction'
+    )!;
+    expect(redoInput.value).toBe('打鍵中の追加指示');
+  });
+
+  test('追加指示欄の打鍵で onInstructionChange が呼ばれる', () => {
+    const onInstructionChange = jest.fn();
+    const view = createEditView({ onImproveBlock: jest.fn(), onInstructionChange });
+    const container = buildContainer();
+    view(container, { state: stateWithHistory([]), navigate: jest.fn() });
+    const redoInput = blockRow(container, '1').querySelector<HTMLTextAreaElement>(
+      '.edit__block-ai-redo-instruction'
+    )!;
+    redoInput.value = '追記中';
+    redoInput.dispatchEvent(new Event('input'));
+    expect(onInstructionChange).toHaveBeenCalledWith('1', '追記中');
+  });
+
+  test('初回指示欄（openAiPromptForm）は state.blockImprovementInstruction から復元され、打鍵で onInstructionChange が呼ばれる', () => {
+    const onInstructionChange = jest.fn();
+    const view = createEditView({ onImproveBlock: jest.fn(), onInstructionChange });
+    const container = buildContainer();
+    view(container, {
+      state: {
+        ...stateReadyFull,
+        blockImprovementInstruction: { formulaVersionId: 'v1', blockId: '1', instruction: '下書き中の指示' },
+      },
+      navigate: jest.fn(),
+    });
+    const row = blockRow(container, '1');
+    row.querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
+    const instructionInput = row.querySelector<HTMLTextAreaElement>('.edit__block-ai-instruction')!;
+    expect(instructionInput.value).toBe('下書き中の指示');
+    instructionInput.value = '下書き中の指示 続き';
+    instructionInput.dispatchEvent(new Event('input'));
+    expect(onInstructionChange).toHaveBeenCalledWith('1', '下書き中の指示 続き');
+  });
+
+  test('別ブロック（#2）の指示欄には波及しない（formulaVersionId・blockId の両方が一致するときだけ復元）', () => {
+    const view = createEditView({ onImproveBlock: jest.fn() });
+    const container = buildContainer();
+    view(container, {
+      state: {
+        ...stateReadyFull,
+        blockImprovementInstruction: { formulaVersionId: 'v1', blockId: '1', instruction: 'ブロック1向け' },
+      },
+      navigate: jest.fn(),
+    });
+    const row2 = blockRow(container, '2');
+    row2.querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
+    const instructionInput = row2.querySelector<HTMLTextAreaElement>('.edit__block-ai-instruction')!;
+    expect(instructionInput.value).toBe('');
+  });
+
+  test('「提案を編集してから採用する」: 初期値は proposedExpression で、適用すると編集内容で置き換わる', () => {
+    const onDraftChange = jest.fn();
+    const view = createEditView({ onImproveBlock: jest.fn(), onDraftChange });
+    const container = buildContainer();
+    view(container, { state: stateWithHistory([]), navigate: jest.fn() });
+    const row = blockRow(container, '1');
+    const manualInput = row.querySelector<HTMLTextAreaElement>('.edit__block-ai-manual-edit-input')!;
+    expect(manualInput.value).toBe('"Asthma"[Mesh]');
+    manualInput.value = '"Asthma"[Mesh] OR wheeze[tiab]';
+    row.querySelector<HTMLButtonElement>('.edit__block-ai-manual-edit-apply')!.click();
+    expect(onDraftChange).toHaveBeenCalledTimes(1);
+    expect(onDraftChange.mock.calls[0]![0]).toContain('#1 "Asthma"[Mesh] OR wheeze[tiab]');
+  });
+
+  test('「提案を編集してから採用する」: 空文字での適用はエラーを表示し onDraftChange は呼ばれない', () => {
+    const onDraftChange = jest.fn();
+    const view = createEditView({ onImproveBlock: jest.fn(), onDraftChange });
+    const container = buildContainer();
+    view(container, { state: stateWithHistory([]), navigate: jest.fn() });
+    const row = blockRow(container, '1');
+    const manualInput = row.querySelector<HTMLTextAreaElement>('.edit__block-ai-manual-edit-input')!;
+    manualInput.value = '   ';
+    row.querySelector<HTMLButtonElement>('.edit__block-ai-manual-edit-apply')!.click();
+    expect(onDraftChange).not.toHaveBeenCalled();
+    expect(row.querySelector('.edit__block-ai-manual-edit-error')?.textContent).toContain(
+      '空にすることはできません'
     );
   });
 });

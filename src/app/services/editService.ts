@@ -3,6 +3,7 @@ import {
   getFormulaVersionById,
   improveBlockExpression,
   type ImproveBlockProposal,
+  type ImproveBlockTurn,
 } from '@/features/formula';
 import { listSeedPapersWithRows } from '@/features/seeds';
 import { isSeedEligibleForValidation } from '@/domain/seedPaper';
@@ -128,6 +129,13 @@ export interface RequestBlockImprovementInput {
    * そのまま渡す。空・未計測なら省略。
    */
   siblings?: SiblingBlockContext[];
+  /**
+   * 直前までの会話継続（issue #90）。「指示を追加してやり直す」の再送信時に、editView.ts が
+   * store（state.blockImprovement.history）から読んだ値をそのまま転記して渡す。
+   * improve-block skill の history 引数へそのまま流すだけで、サービス層はここでは何も加工しない。
+   * 初回 submit では省略（skill 側は省略時と完全に同じ単発 2 メッセージとして扱う）。
+   */
+  history?: ImproveBlockTurn[];
 }
 
 /**
@@ -344,6 +352,8 @@ export async function requestBlockImprovement(
       // 他ブロックとの共有語（issue #89）。「#1 と重複するキーワードを消して」のような指示を
       // 根拠なしの推測にさせないための文脈。
       siblingBlocks: context.siblings,
+      // 会話継続（issue #90）。「指示を追加してやり直す」時のみ非空で渡ってくる。
+      history: input.history,
     },
     provider
   );

@@ -70,6 +70,7 @@ describe('startApp', () => {
       blockImprovement: null,
       formulaSave: null,
       formulaEditNote: null,
+      blockImprovementInstruction: null,
       blocksDraftSavedAt: null,
       hydrateError: null,
     });
@@ -120,6 +121,7 @@ describe('startApp', () => {
       blockImprovement: null,
       formulaSave: null,
       formulaEditNote: null,
+      blockImprovementInstruction: null,
       blocksDraftSavedAt: null,
       hydrateError: null,
     });
@@ -1489,6 +1491,7 @@ describe('startApp - wiring 層', () => {
       status: 'running',
       result: null,
       error: null,
+      history: [],
     });
     for (let i = 0; i < 5; i += 1) {
       await flush();
@@ -1497,6 +1500,10 @@ describe('startApp - wiring 層', () => {
     expect(improvement?.status).toBe('ready');
     expect(improvement?.result?.proposedExpression).toBe('"Asthma"[Mesh]');
     expect(improvement?.error).toBeNull();
+    // 成功時に今回の turn（指示・提案・rationale）が history へ積まれる（issue #90）。
+    expect(improvement?.history).toEqual([
+      { instruction: '', proposedExpression: '"Asthma"[Mesh]', rationale: 'MeSH に寄せる' },
+    ]);
   });
 
   test('edit view 既定 onImproveBlock は失敗時に store.blockImprovement を error にする', async () => {
@@ -1529,6 +1536,133 @@ describe('startApp - wiring 層', () => {
     expect(improvement?.status).toBe('error');
     expect(improvement?.error).toContain('API キー');
     expect(doc.querySelector('.edit__block-error')?.textContent).toContain('API キー');
+  });
+
+  test('edit view 既定 onInstructionChange は setStateSilently で store.blockImprovementInstruction を更新する（issue #90）', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+    });
+    fetchMock.mockResolvedValue(jsonResponse({}));
+    const handle = startApp(doc, {
+      getHash: () => '#/edit',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({
+      ...s,
+      currentFormulaVersionId: 'v1',
+      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 asthma[tiab]\n```\n',
+    }));
+    doc.querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
+
+    // setStateSilently は購読者へ通知しない＝再描画を誘発しない（formulaEditNote と同じ検証）。
+    const listener = jest.fn();
+    handle.store.subscribe(listener);
+
+    const instructionInput = doc.querySelector<HTMLTextAreaElement>('.edit__block-ai-instruction')!;
+    instructionInput.value = '打鍵中の指示';
+    instructionInput.dispatchEvent(new Event('input'));
+
+    expect(handle.store.getState().blockImprovementInstruction).toEqual({
+      formulaVersionId: 'v1',
+      blockId: '1',
+      instruction: '打鍵中の指示',
+    });
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  test('edit view 既定「指示を追加してやり直す」は 2 回目の LLM 呼び出しに会話履歴を積み、store.blockImprovement.history が 2 turn になる（issue #90）', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+      'apiKeys.gemini': 'KEY',
+    });
+    let geminiCallCount = 0;
+    fetchMock.mockImplementation(async (url: string) => {
+      if (typeof url === 'string' && url.includes('generativelanguage.googleapis.com')) {
+        geminiCallCount += 1;
+        const proposal =
+          geminiCallCount === 1
+            ? { proposed_expression: '"Asthma"[Mesh]', rationale: 'MeSH に寄せる' }
+            : { proposed_expression: '"Asthma"[Mesh] OR wheeze[tiab]', rationale: 'tiab も残した' };
+        return jsonResponse({
+          candidates: [{ content: { parts: [{ text: JSON.stringify(proposal) }] } }],
+        });
+      }
+      if (typeof url === 'string' && url.includes('/upload/drive/v3/files')) {
+        return jsonResponse({ id: 'f', webViewLink: '' });
+      }
+      return jsonResponse({});
+    });
+    const handle = startApp(doc, {
+      getHash: () => '#/edit',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({
+      ...s,
+      currentFormulaVersionId: 'v1',
+      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 asthma[tiab]\n```\n',
+    }));
+    doc.querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
+    for (let i = 0; i < 5; i += 1) {
+      await flush();
+    }
+    doc.querySelector<HTMLButtonElement>('.edit__block-ai-submit')!.click();
+    for (let i = 0; i < 5; i += 1) {
+      await flush();
+    }
+    expect(handle.store.getState().blockImprovement?.status).toBe('ready');
+    expect(handle.store.getState().blockImprovement?.history).toEqual([
+      { instruction: '', proposedExpression: '"Asthma"[Mesh]', rationale: 'MeSH に寄せる' },
+    ]);
+
+    // 「指示を追加してやり直す」で 2 回目を送信する。
+    const redoInput = doc.querySelector<HTMLTextAreaElement>('.edit__block-ai-redo-instruction')!;
+    redoInput.value = 'wheeze も残して';
+    doc.querySelector<HTMLButtonElement>('.edit__block-ai-redo-submit')!.click();
+    for (let i = 0; i < 5; i += 1) {
+      await flush();
+    }
+
+    const improvement = handle.store.getState().blockImprovement;
+    expect(improvement?.status).toBe('ready');
+    expect(improvement?.result?.proposedExpression).toBe('"Asthma"[Mesh] OR wheeze[tiab]');
+    // 2 turn 積まれる（1 turn 目はそのまま残り、2 turn 目に今回の指示・提案が足される）。
+    expect(improvement?.history).toEqual([
+      { instruction: '', proposedExpression: '"Asthma"[Mesh]', rationale: 'MeSH に寄せる' },
+      {
+        instruction: 'wheeze も残して',
+        proposedExpression: '"Asthma"[Mesh] OR wheeze[tiab]',
+        rationale: 'tiab も残した',
+      },
+    ]);
+
+    // 2 回目の Gemini 呼び出しには 1 turn 目の model メッセージが会話履歴として積まれている。
+    const geminiCalls = fetchMock.mock.calls.filter((c) =>
+      (c[0] as string).includes('generativelanguage.googleapis.com')
+    );
+    expect(geminiCalls).toHaveLength(2);
+    const secondBody = JSON.parse((geminiCalls[1]![1] as RequestInit).body as string) as {
+      contents: Array<{ role: string; parts: Array<{ text: string }> }>;
+    };
+    // system は systemInstruction 側へ分離されるため contents には user/model のみが並ぶ:
+    // user(文脈テンプレート) → model(1 turn 目の提案) → user(今回の指示)。
+    expect(secondBody.contents).toHaveLength(3);
+    expect(secondBody.contents[1]!.role).toBe('model');
+    const modelTurn = JSON.parse(secondBody.contents[1]!.parts[0]!.text) as {
+      proposed_expression: string;
+      rationale: string;
+    };
+    expect(modelTurn.proposed_expression).toBe('"Asthma"[Mesh]');
+    expect(modelTurn.rationale).toBe('MeSH に寄せる');
+    expect(secondBody.contents[2]!.role).toBe('user');
+    expect(secondBody.contents[2]!.parts[0]!.text).toBe('wheeze も残して');
   });
 
   test('edit view 既定 onDraftChange / onClearImprovement が store を更新する', async () => {
@@ -1573,6 +1707,7 @@ describe('startApp - wiring 層', () => {
           rationale: 'r',
         },
         error: null,
+        history: [],
       },
     }));
     doc.querySelector<HTMLButtonElement>('.edit__block-reject')!.click();

@@ -1,5 +1,5 @@
 import type { ChatMessage, LLMProvider } from '@/lib/llm';
-import { improveBlockExpression } from './improveBlock';
+import { MAX_IMPROVE_HISTORY_TURNS, improveBlockExpression, type ImproveBlockTurn } from './improveBlock';
 
 function provider(text: string): { provider: LLMProvider; calls: ChatMessage[][] } {
   const calls: ChatMessage[][] = [];
@@ -309,5 +309,119 @@ describe('improveBlockExpression', () => {
     );
     const userMsg = calls[0]!.find((m) => m.role === 'user')?.content ?? '';
     expect(userMsg).toContain('他ブロック（掛け合わせる相手）:\n(渡されていない)');
+  });
+});
+
+describe('improveBlockExpression の会話継続（issue #90）', () => {
+  const baseInput = {
+    currentExpression: 'asthma[tiab]',
+    blockLabel: 'Population',
+    blockDescription: '喘息',
+    researchQuestion: 'RQ',
+  };
+
+  test('history 省略・空配列なら従来どおり [system, user] の 2 メッセージだけになる', async () => {
+    const { provider: p, calls } = provider(JSON.stringify({}));
+    await improveBlockExpression({ ...baseInput, userInstruction: '同義語を増やして' }, p);
+    expect(calls[0]).toHaveLength(2);
+    expect(calls[0]![0]).toEqual({ role: 'system', content: expect.any(String) });
+    expect(calls[0]![1]!.role).toBe('user');
+    expect(calls[0]![1]!.content).toContain('同義語を増やして');
+
+    const { provider: p2, calls: calls2 } = provider(JSON.stringify({}));
+    await improveBlockExpression(
+      { ...baseInput, userInstruction: '同義語を増やして', history: [] },
+      p2
+    );
+    expect(calls2[0]).toHaveLength(2);
+  });
+
+  test('history 有り: 先頭 user に最初の turn の指示が載り、以後 model/user が交互に積まれる', async () => {
+    const { provider: p, calls } = provider(JSON.stringify({}));
+    const history: ImproveBlockTurn[] = [
+      { instruction: '同義語を増やして', proposedExpression: 'asthma[tiab] OR wheeze[tiab]', rationale: '同義語追加' },
+    ];
+    await improveBlockExpression(
+      { ...baseInput, userInstruction: 'wheeze はやりすぎ、消して', history },
+      p
+    );
+    const messages = calls[0]!;
+    expect(messages).toHaveLength(4);
+    expect(messages[0]).toEqual({ role: 'system', content: expect.any(String) });
+    // 文脈テンプレートは先頭側の user に 1 度だけ載り、{{INSTRUCTION}} には最初の turn の指示が入る
+    expect(messages[1]!.role).toBe('user');
+    expect(messages[1]!.content).toContain('同義語を増やして');
+    expect(messages[1]!.content).not.toContain('wheeze はやりすぎ');
+    // model には turn の提案が JSON として積まれる
+    expect(messages[2]).toEqual({
+      role: 'model',
+      content: JSON.stringify({
+        proposed_expression: 'asthma[tiab] OR wheeze[tiab]',
+        rationale: '同義語追加',
+      }),
+    });
+    // 最後の user には今回の userInstruction が積まれる
+    expect(messages[3]).toEqual({ role: 'user', content: 'wheeze はやりすぎ、消して' });
+  });
+
+  test('history 2 turn: model/user が turn ごとに交互に積まれ、末尾に今回の指示が載る', async () => {
+    const { provider: p, calls } = provider(JSON.stringify({}));
+    const history: ImproveBlockTurn[] = [
+      { instruction: '同義語を増やして', proposedExpression: 'P1', rationale: 'R1' },
+      { instruction: 'MeSH も足して', proposedExpression: 'P2', rationale: 'R2' },
+    ];
+    await improveBlockExpression({ ...baseInput, userInstruction: 'もう十分', history }, p);
+    const messages = calls[0]!;
+    // system, user(turn1指示), model(turn1提案), user(turn2指示), model(turn2提案), user(今回の指示)
+    expect(messages).toHaveLength(6);
+    expect(messages[1]!.content).toContain('同義語を増やして');
+    expect(messages[2]).toEqual({
+      role: 'model',
+      content: JSON.stringify({ proposed_expression: 'P1', rationale: 'R1' }),
+    });
+    expect(messages[3]).toEqual({ role: 'user', content: 'MeSH も足して' });
+    expect(messages[4]).toEqual({
+      role: 'model',
+      content: JSON.stringify({ proposed_expression: 'P2', rationale: 'R2' }),
+    });
+    expect(messages[5]).toEqual({ role: 'user', content: 'もう十分' });
+  });
+
+  test(`history が上限（${MAX_IMPROVE_HISTORY_TURNS} turn）を超えると新しい方から残り、文脈テンプレートは残った最古の turn の指示になる`, async () => {
+    const { provider: p, calls } = provider(JSON.stringify({}));
+    const history: ImproveBlockTurn[] = Array.from({ length: MAX_IMPROVE_HISTORY_TURNS + 2 }, (_, i) => ({
+      instruction: `指示${i + 1}`,
+      proposedExpression: `P${i + 1}`,
+      rationale: `R${i + 1}`,
+    }));
+    await improveBlockExpression({ ...baseInput, userInstruction: '最終指示', history }, p);
+    const messages = calls[0]!;
+    // system + (user, model) × MAX_IMPROVE_HISTORY_TURNS + user(最終指示)
+    expect(messages).toHaveLength(1 + MAX_IMPROVE_HISTORY_TURNS * 2 + 1);
+    // 切り詰め後、残った最古の turn（history[2]。0-indexed で「指示3」）が先頭側の user に載る
+    expect(messages[1]!.content).toContain('指示3');
+    expect(messages[1]!.content).not.toContain('指示1');
+    expect(messages[1]!.content).not.toContain('指示2');
+    // 最初に切り捨てられた turn（指示1・指示2 の提案）は model メッセージとしても出てこない
+    expect(messages.some((m) => m.role === 'model' && m.content.includes('"P1"'))).toBe(false);
+    expect(messages.some((m) => m.role === 'model' && m.content.includes('"P2"'))).toBe(false);
+    // 残った最古の turn（指示3・P3）は model として出てくる
+    expect(messages.some((m) => m.role === 'model' && m.content.includes('"P3"'))).toBe(true);
+    // 末尾は今回の指示
+    expect(messages[messages.length - 1]).toEqual({ role: 'user', content: '最終指示' });
+  });
+
+  test('指示が空文字の turn はプレースホルダに整形される（model/user とも）', async () => {
+    const { provider: p, calls } = provider(JSON.stringify({}));
+    const history: ImproveBlockTurn[] = [
+      { instruction: '  ', proposedExpression: 'P1', rationale: 'R1' },
+    ];
+    await improveBlockExpression({ ...baseInput, userInstruction: '   ', history }, p);
+    const messages = calls[0]!;
+    expect(messages[1]!.content).toContain('(特になし／おまかせで改善してよい)');
+    expect(messages[3]).toEqual({
+      role: 'user',
+      content: '(特になし／おまかせで改善してよい)',
+    });
   });
 });

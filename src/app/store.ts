@@ -1,6 +1,6 @@
 import type { CurrentProjectEntry } from '@/features/project';
 import type { FormulaCreatedBy } from '@/domain/formulaVersion';
-import type { ExcessFilterCandidate } from '@/features/formula/skills';
+import type { ExcessFilterCandidate, ImproveBlockTurn } from '@/features/formula/skills';
 import type {
   AnalyzeMissedSeedsResult,
   ValidationProgress,
@@ -198,6 +198,17 @@ export interface BlockImprovementState {
   result: BlockImprovementResult | null;
   /** status='error' のときのメッセージ。それ以外は null */
   error: string | null;
+  /**
+   * ここまでの会話継続（issue #90）。各要素は 1 turn（ユーザーの指示 → LLM の提案）を表す
+   * `{ instruction, proposedExpression, rationale }`。「これは違う、こうして」という追加指示を
+   * 積み重ねて improve-block skill（features/formula/skills/improveBlock.ts）の `history` 引数に
+   * 渡すことで、直前の提案を土台にした修正ができるようにする。
+   * status='ready' になるたびに、この呼び出しで使った history に今回の turn を足して
+   * 更新する（bootstrap.ts の runImproveBlock 参照）。onClearImprovement（accept / reject）で
+   * blockImprovement ごと null に戻るとき、history も一緒に破棄される。
+   * 初回 submit（history を渡さなかった呼び出し）の結果は turn 1 件のみの配列になる。
+   */
+  history: ImproveBlockTurn[];
 }
 
 /**
@@ -241,6 +252,30 @@ export interface FormulaSaveState {
 export interface FormulaEditNote {
   formulaVersionId: string;
   note: string;
+}
+
+/**
+ * #/edit の「AI への指示」欄（初回の指示欄・「指示を追加してやり直す」の追加指示欄の両方）の
+ * 未送信テキスト（issue #90）。
+ *
+ * これまでこの textarea はローカル DOM のままだったが、LLM コスト集計（cumulativeCostUsd）等の
+ * setState による全ビュー再描画（editView は再描画のたびに `container.innerHTML = ''` で
+ * 丸ごと作り直す）が打鍵の合間に起きると、入力途中の指示文が消えてしまう
+ * （formulaEditNote / formulaEditDraft と同型の issue #39 系の回帰）。打鍵のたび（input）に
+ * setStateSilently（購読者に通知しない＝再描画を起こさない）で書き込み、次にそのブロックの
+ * 行が再描画されたときに state から読み直す。
+ *
+ * 初回指示欄と追加指示欄を同じフィールドで共有しているのは、両者が同一ブロックの AI パネル内で
+ * 同時に表示されることが無い（status='ready' かどうかで排他的に切り替わる）ため。
+ *
+ * formulaVersionId・blockId の両方が現在の対象と一致するときだけ有効（ValidationResultEntry と
+ * 同じ stale 判定に、ブロック単位の入力である分 blockId の一致を加えたもの）。別バージョンを
+ * 読み込み直した、または別ブロックの AI パネルを開いたときは空文字にフォールバックする。
+ */
+export interface BlockImprovementInstruction {
+  formulaVersionId: string;
+  blockId: string;
+  instruction: string;
 }
 
 export interface AppState {
@@ -300,6 +335,8 @@ export interface AppState {
   formulaSave: FormulaSaveState | null;
   /** #/edit の編集メモ。未入力なら null */
   formulaEditNote: FormulaEditNote | null;
+  /** #/edit の「AI への指示」欄（初回・追加とも）の未送信テキスト。未入力なら null */
+  blockImprovementInstruction: BlockImprovementInstruction | null;
   /**
    * ブロック下書きバックアップ（chrome.storage.local）の保存時刻（ISO 8601）。
    * non-null なら「承認前の下書きが保存されている」= blocksView が未承認バナーを出す。
@@ -335,6 +372,7 @@ export const INITIAL_STATE: AppState = {
   blockImprovement: null,
   formulaSave: null,
   formulaEditNote: null,
+  blockImprovementInstruction: null,
   blocksDraftSavedAt: null,
   hydrateError: null,
 };

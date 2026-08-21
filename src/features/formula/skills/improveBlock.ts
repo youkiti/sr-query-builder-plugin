@@ -1,4 +1,4 @@
-import type { LLMProvider } from '@/lib/llm';
+import type { ChatMessage, LLMProvider } from '@/lib/llm';
 import { parseSkillJson } from './parseSkillJson';
 import { objectSchema, stringSchema } from './schema';
 
@@ -49,7 +49,33 @@ export interface ImproveBlockInput {
    * 空・未計測なら省略（editView 側に兄弟ブロックが存在しない等）。
    */
   siblingBlocks?: SiblingBlockInput[];
+  /**
+   * 直前までの会話継続（issue #90）。「これは違う、こうして」という追加指示に対応するため、
+   * 過去の turn（ユーザーの指示 → LLM の提案）を会話履歴として積む。省略・空配列なら
+   * 従来どおり `[system, user]` の単発 2 メッセージ（省略時は現在と完全に同じ挙動）。
+   * {@link MAX_IMPROVE_HISTORY_TURNS} を超える場合は新しい方からその件数だけを使う。
+   */
+  history?: ImproveBlockTurn[];
 }
+
+/**
+ * improve-block の会話継続（issue #90）で 1 往復ぶんを表す turn。
+ * ユーザーの指示と、それに対する LLM の提案（提案 expression + rationale）の組。
+ */
+export interface ImproveBlockTurn {
+  /** その turn でユーザーが入力した指示（空文字なら「おまかせ」） */
+  instruction: string;
+  /** その turn で LLM が提案した expression */
+  proposedExpression: string;
+  /** その turn の改善ポイントメモ */
+  rationale: string;
+}
+
+/**
+ * 会話継続として LLM へ渡す history の上限 turn 数（issue #90）。
+ * プロンプト肥大化を防ぐため、これを超える古い turn は切り詰める（新しい方を優先して残す）。
+ */
+export const MAX_IMPROVE_HISTORY_TURNS = 5;
 
 /** improve-block に渡す兄弟ブロック 1 件（プロンプト用）。 */
 export interface SiblingBlockInput {
@@ -129,6 +155,9 @@ export const IMPROVE_BLOCK_SYSTEM_PROMPT = `
 - プロトコルに明記されていないフィルタ（English[lang] / Humans[mh] / 年代制限）は
   絶対に付けない（filter-designer の責務）。
 - ユーザーからの追加指示がある場合は、上記ルールに反しない範囲で最優先で従う。
+- 直前の提案に対する追加の指示がある場合（会話が継続している場合）は、直前の提案を土台に
+  修正する（毎回ゼロから作り直さない）。ユーザーが「これは違う」「そうじゃない」と指摘した
+  変更は繰り返さない。
 - シード論文（捕捉すべき既知の重要論文）が与えられた場合は、それらを取りこぼさない
   ことを重視する。特に「取りこぼし PMID」がある場合は、その論文が引っかかるよう
   同義語・表記ゆれ・MeSH を補って感度を上げる（ただし無関係な語の追加で特異度を
@@ -204,6 +233,14 @@ export async function improveBlockExpression(
   input: ImproveBlockInput,
   provider: LLMProvider
 ): Promise<ImproveBlockProposal> {
+  // 会話継続（issue #90）: 新しい方から MAX_IMPROVE_HISTORY_TURNS 件だけを使う。
+  // history が空なら以下のロジックは従来と完全に同じ [system, user] 2 メッセージになる。
+  const history = (input.history ?? []).slice(-MAX_IMPROVE_HISTORY_TURNS);
+  // 文脈テンプレート（RQ・ブロック定義・現式・ヒット数・シード・検証結果等）は必ず 1 度だけ、
+  // messages の先頭側の user メッセージに載せる。{{INSTRUCTION}} には「最初に採用する turn の
+  // instruction」を入れる（history が空なら今回の userInstruction がその turn そのもの）。
+  const firstInstruction = history.length > 0 ? history[0]!.instruction : input.userInstruction;
+
   const userPrompt = IMPROVE_BLOCK_USER_PROMPT_TEMPLATE.replace('{{RQ}}', input.researchQuestion)
     .replace('{{LABEL}}', input.blockLabel)
     .replace('{{DESC}}', input.blockDescription === '' ? '(不明)' : input.blockDescription)
@@ -213,23 +250,45 @@ export async function improveBlockExpression(
     .replace('{{SIBLINGS}}', formatSiblings(input.siblingBlocks))
     .replace('{{SEEDS}}', formatSeeds(input.seedPapers))
     .replace('{{VALIDATION}}', formatValidation(input.validation))
-    .replace(
-      '{{INSTRUCTION}}',
-      input.userInstruction.trim() === '' ? '(特になし／おまかせで改善してよい)' : input.userInstruction.trim()
-    );
+    .replace('{{INSTRUCTION}}', formatInstruction(firstInstruction));
 
-  const response = await provider.chat(
-    [
-      { role: 'system', content: IMPROVE_BLOCK_SYSTEM_PROMPT },
-      { role: 'user', content: userPrompt },
-    ],
-    { responseFormat: 'json', responseSchema: IMPROVE_BLOCK_SCHEMA, temperature: 0.3 }
-  );
+  const messages: ChatMessage[] = [
+    { role: 'system', content: IMPROVE_BLOCK_SYSTEM_PROMPT },
+    { role: 'user', content: userPrompt },
+  ];
+  // history の各 turn について model（その turn の提案）→ user（次の turn の instruction）を
+  // 交互に積む。「次の turn」が history 内に無ければ（＝この turn が history の最後）、
+  // 今回の userInstruction を積む。これにより history=[] のときはループが 1 度も回らず、
+  // 上の 2 メッセージだけが最終形になる（省略時と完全に同じ挙動）。
+  history.forEach((turn, index) => {
+    messages.push({
+      role: 'model',
+      content: JSON.stringify({
+        proposed_expression: turn.proposedExpression,
+        rationale: turn.rationale,
+      }),
+    });
+    const nextInstruction =
+      index + 1 < history.length ? history[index + 1]!.instruction : input.userInstruction;
+    messages.push({ role: 'user', content: formatInstruction(nextInstruction) });
+  });
+
+  const response = await provider.chat(messages, {
+    responseFormat: 'json',
+    responseSchema: IMPROVE_BLOCK_SCHEMA,
+    temperature: 0.3,
+  });
   const raw = parseSkillJson<RawProposal>(response.text, SKILL_NAME);
   return {
     proposedExpression: (raw.proposed_expression ?? '').trim(),
     rationale: raw.rationale ?? '',
   };
+}
+
+/** 指示文を整形する。空文字（trim 後）なら「おまかせ」を表すプレースホルダにする。 */
+function formatInstruction(instruction: string): string {
+  const trimmed = instruction.trim();
+  return trimmed === '' ? '(特になし／おまかせで改善してよい)' : trimmed;
 }
 
 /** 現在のヒット数を整形する。未計測（null/undefined）なら「(未計測)」。 */

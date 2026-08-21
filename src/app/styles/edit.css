@@ -272,6 +272,46 @@
   font-size: var(--font-size-sm);
 }
 
+/* 「提案を編集してから採用する」（issue #90）。edit__block-ai-form / edit__block-ai-context の
+   既存トーンに揃える（点線ボーダーの details、summary は控えめな文字色）。 */
+.edit__block-ai-manual-edit {
+  margin-top: var(--space-2);
+  font-size: var(--font-size-sm);
+}
+
+.edit__block-ai-manual-edit summary {
+  cursor: pointer;
+  color: var(--color-text-muted);
+}
+
+.edit__block-ai-manual-edit-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: var(--space-2);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-sm);
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  resize: vertical;
+}
+
+.edit__block-ai-manual-edit-actions:not([hidden]) {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.edit__block-ai-manual-edit-error {
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+  margin: var(--space-1) 0 0;
+}
+
+.edit__block-ai-manual-edit-error:empty {
+  display: none;
+}
+
 .edit__block-actions {
   display: flex;
   gap: var(--space-2);
@@ -281,6 +321,65 @@
 .edit__block-feedback {
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
+  margin-top: var(--space-2);
+}
+
+/* 「これまでのやり取り（N 回）」（issue #90）。history が空なら要素ごと出ないため、
+   :not([hidden]) 相当のガードは不要（CLAUDE.md の注意は display 直書きに対するものであり、
+   ここは要素自体を条件付きで appendChild するため該当しない）。 */
+.edit__block-ai-history {
+  margin-top: var(--space-2);
+  font-size: var(--font-size-sm);
+}
+
+.edit__block-ai-history summary {
+  cursor: pointer;
+  color: var(--color-text-muted);
+}
+
+.edit__block-ai-history-list:not([hidden]) {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.edit__block-ai-history-instruction {
+  margin: 0;
+  font-weight: bold;
+}
+
+.edit__block-ai-history-rationale {
+  margin: 2px 0 0;
+  color: var(--color-text-muted);
+}
+
+/* 「指示を追加してやり直す」（issue #90）。accept / reject の下に常時表示する
+   （edit__block-ai-form と同じトーンだが、折りたためない主要動線なので点線ボーダーは付けない）。 */
+.edit__block-ai-redo {
+  margin-top: var(--space-3);
+}
+
+.edit__block-ai-redo-label:not([hidden]) {
+  display: block;
+  font-size: var(--font-size-sm);
+  font-weight: bold;
+}
+
+.edit__block-ai-redo-instruction {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: var(--space-1);
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  resize: vertical;
+}
+
+.edit__block-ai-redo-actions:not([hidden]) {
+  display: flex;
+  gap: var(--space-2);
   margin-top: var(--space-2);
 }
 
