@@ -3,10 +3,11 @@ import {
   getFormulaVersionById,
   improveBlockExpression,
   type ImproveBlockProposal,
+  type ImproveBlockTurn,
 } from '@/features/formula';
 import { listSeedPapersWithRows } from '@/features/seeds';
 import { isSeedEligibleForValidation } from '@/domain/seedPaper';
-import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
+import { extractBlockReferences, parsePubmedFormulaMd } from '@/lib/search-formula-md';
 import type { GoogleApiDeps } from '@/lib/google';
 import { nowIso } from '@/utils/iso8601';
 import { newUuid } from '@/utils/uuid';
@@ -121,6 +122,41 @@ export interface RequestBlockImprovementInput {
   keywordHits?: MeasuredKeywordHit[];
   /** ブロック・インスペクタが計測済みのフリーワード OR 合計（重複除去後）。未計測なら省略 */
   freewordDedupTotal?: number | null;
+  /**
+   * 兄弟ブロック（結合行を除く他の概念ブロック）のうち、自分の式と語を共有しているもの
+   * （issue #89）。「#1 と重複するキーワードを消して」のような指示を AI が根拠を持って
+   * 実行できるよう、editView.ts の computeSiblingOverlaps（views 層）が計算した結果を
+   * そのまま渡す。空・未計測なら省略。
+   */
+  siblings?: SiblingBlockContext[];
+  /**
+   * 直前までの会話継続（issue #90）。「指示を追加してやり直す」の再送信時に、editView.ts が
+   * store（state.blockImprovement.history）から読んだ値をそのまま転記して渡す。
+   * improve-block skill の history 引数へそのまま流すだけで、サービス層はここでは何も加工しない。
+   * 初回 submit では省略（skill 側は省略時と完全に同じ単発 2 メッセージとして扱う）。
+   */
+  history?: ImproveBlockTurn[];
+}
+
+/**
+ * 兄弟ブロックとの共有語 1 件。SharedTerm（views 層）と同じ形（構造的に代入可能）だが、
+ * サービス層が views 層の型へ依存しないよう、この層自身の宣言として持つ（issue #92 B-5）。
+ */
+export interface SharedTermContext {
+  term: string;
+  kind: 'mesh' | 'freeword';
+}
+
+/**
+ * ブロック・インスペクタ（src/app/views/blockInspector.ts）が計算した、兄弟ブロック 1 件との
+ * 共有語。SiblingOverlap（views 層）と同じ形（構造的に代入可能）だが、サービス層が views 層の
+ * 型へ依存しないよう、この層自身の宣言として持つ（MeasuredKeywordHit と同じ理由。issue #89）。
+ */
+export interface SiblingBlockContext {
+  id: string;
+  label: string | null;
+  expression: string;
+  sharedTerms: SharedTermContext[];
 }
 
 /** AI 改善文脈に載せるシード論文 1 件。 */
@@ -152,6 +188,8 @@ export interface BlockImprovementContext {
   seedPapers: SeedContextEntry[];
   /** 直近の検証で得た捕捉情報。現バージョンと一致する結果のみ。なければ null */
   validation: ValidationContext | null;
+  /** 呼び出し元（editView）から渡された、共有語を持つ兄弟ブロック（issue #89）。空なら空配列 */
+  siblings: SiblingBlockContext[];
 }
 
 /** プロンプト肥大化を防ぐためのシード件数上限 */
@@ -169,19 +207,36 @@ export interface BlockImprovementContextDeps {
  * 副作用なし（SeedPapers タブの読み取りのみ）。requestBlockImprovement と
  * 「AI に渡す内容を見る」開示の双方が同じ文脈を共有するための単一ビルダー。
  *
+ * siblings（他ブロックとの共有語）はここでは計算しない。views 層
+ * （blockInspector.ts の computeSiblingOverlaps）が計算した結果をそのまま受け取って
+ * context へ載せるだけ（issue #89。サービス層が views 層の計算ロジックへ依存しないため）。
+ *
  * @returns ブロックが見つからない、または式が未生成なら null
  */
 export async function getBlockImprovementContext(
   blockId: string,
+  siblings: SiblingBlockContext[],
   deps: BlockImprovementContextDeps
 ): Promise<BlockImprovementContext | null> {
   const state = deps.store.getState();
   if (state.currentFormulaMarkdown === null || state.currentFormulaMarkdown.trim() === '') {
     return null;
   }
+  // AI へ渡す現式は「保存済みの版」ではなく「ユーザーが今見ている編集中の下書き」に揃える
+  // （issue #92 C-2）。editView.ts の siblings（兄弟ブロックの式・共有語）は
+  // parsePubmedFormulaMd(editor.getMd()) 由来の下書きから計算されるため、ここで保存版から
+  // currentExpression を読むと、下書き基準で計算された共有語が保存版には存在しない語を
+  // 指しうる（「重複の根拠」が同一バージョンに存在しないことになる）。判定は
+  // editView.ts の resolveMarkdown と同じ（formulaEditDraft が現在のバージョンと一致すれば
+  // 優先し、無ければ＝未編集なら従来どおり保存版にフォールバックする）。
+  const draft = state.formulaEditDraft;
+  const markdown =
+    draft !== null && draft.formulaVersionId === state.currentFormulaVersionId
+      ? draft.markdown
+      : state.currentFormulaMarkdown;
   let formula;
   try {
-    formula = parsePubmedFormulaMd(state.currentFormulaMarkdown);
+    formula = parsePubmedFormulaMd(markdown);
   } catch {
     return null;
   }
@@ -198,6 +253,7 @@ export async function getBlockImprovementContext(
     currentExpression: target.expression,
     seedPapers,
     validation: collectValidationContext(deps.store),
+    siblings,
   };
 }
 
@@ -286,7 +342,7 @@ export async function requestBlockImprovement(
   if (state.currentFormulaMarkdown === null || state.currentFormulaMarkdown.trim() === '') {
     throw new Error('検索式がまだ生成されていません');
   }
-  const context = await getBlockImprovementContext(input.blockId, {
+  const context = await getBlockImprovementContext(input.blockId, input.siblings ?? [], {
     store: deps.store,
     google: deps.google,
   });
@@ -314,6 +370,11 @@ export async function requestBlockImprovement(
         decision: s.decision,
       })),
       validation: context.validation,
+      // 他ブロックとの共有語（issue #89）。「#1 と重複するキーワードを消して」のような指示を
+      // 根拠なしの推測にさせないための文脈。
+      siblingBlocks: context.siblings,
+      // 会話継続（issue #90）。「指示を追加してやり直す」時のみ非空で渡ってくる。
+      history: input.history,
     },
     provider
   );
@@ -329,7 +390,12 @@ export async function requestBlockImprovement(
  * 現在の formula_md の #N 行を新しい expression で差し替えた新しい Markdown を返す。
  * 保存は行わず、textarea に書き戻すだけなので副作用は無い。
  *
- * @throws {Error} 指定 blockId が見つからない
+ * この関数は AI 改善の accept・チップ編集・クイック整理・インスペクタからの編集・
+ * 生テキスト詳細編集のすべてが通る唯一の適用口（issue #88）。差し替えで
+ * 「他ブロックへの参照」を失う・新たに混入する操作は {@link assertReferenceIntegrity}
+ * が拒否するため、ここに入れることで全ての編集経路が参照整合性を守る。
+ *
+ * @throws {Error} 指定 blockId が見つからない、式が空、または参照整合性が崩れる場合
  */
 export function applyBlockImprovement(
   formulaMd: string,
@@ -340,8 +406,63 @@ export function applyBlockImprovement(
   if (!lineRegex.test(formulaMd)) {
     throw new Error(`ブロック #${blockId} の行が formula_md に見つかりません`);
   }
-  const replacement = `#${blockId} ${newExpression.trim()}`;
+  const trimmedNew = newExpression.trim();
+  if (trimmedNew === '') {
+    throw new Error(`ブロック #${blockId} を空にすることはできません。`);
+  }
+  assertReferenceIntegrity(formulaMd, blockId, trimmedNew);
+  const replacement = `#${blockId} ${trimmedNew}`;
   return formulaMd.replace(lineRegex, replacement);
+}
+
+/**
+ * 置換前後で「他ブロックへの参照」を失う・新たに混入する操作を拒否する（issue #88）。
+ *
+ * `#3 #1 AND #2` のような掛け合わせ行は参照が消えると
+ * `expandFormula.ts` の `chooseEntryBlockId` が「結合行なし → 最後の行」に
+ * フォールバックし、#1/#2 が効いていない式のまま捕捉率が計算・エクスポートされてしまう
+ * （ユーザーからは見えない）。逆に概念ブロックへ参照を混入させると意図しない結合行が
+ * 生まれる。
+ *
+ * 置換前・置換後の両方に参照がある（掛け合わせの構造自体を書き換える）場合は許可する
+ * （構造編集 UI は editView.ts の「組み合わせ方を編集」パネル。issue #91 で実装済み）。
+ *
+ * `parsePubmedFormulaMd` が失敗する（パース不能な md）場合はガードをスキップし、
+ * 従来どおり置換する（既存の逃げ道を塞がない）。
+ */
+function assertReferenceIntegrity(
+  formulaMd: string,
+  blockId: string,
+  newExpression: string
+): void {
+  let formula;
+  try {
+    formula = parsePubmedFormulaMd(formulaMd);
+  } catch {
+    return;
+  }
+  const target = formula.blocks.find((b) => b.id === blockId);
+  if (target === undefined) {
+    return;
+  }
+  const knownIds = new Set(formula.blocks.map((b) => b.id));
+  const beforeRefs = extractBlockReferences(target.expression, blockId, knownIds);
+  const afterRefs = extractBlockReferences(newExpression, blockId, knownIds);
+
+  if (beforeRefs.length > 0 && afterRefs.length === 0) {
+    throw new Error(
+      `ブロック #${blockId} は他のブロックを掛け合わせる行です（${formatRefs(beforeRefs)} を参照）。この操作で参照が失われるため適用できません。語の編集は各ブロックで行ってください。`
+    );
+  }
+  if (beforeRefs.length === 0 && afterRefs.length > 0) {
+    throw new Error(
+      `ブロック #${blockId} に他のブロックへの参照（${formatRefs(afterRefs)}）を含めることはできません。`
+    );
+  }
+}
+
+function formatRefs(ids: string[]): string {
+  return ids.map((id) => `#${id}`).join(', ');
 }
 
 function escapeRegex(raw: string): string {

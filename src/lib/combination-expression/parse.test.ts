@@ -175,4 +175,25 @@ describe('normalizeCombinationExpression', () => {
   test('連続空白を 1 つに、前後を trim', () => {
     expect(normalizeCombinationExpression('  #1   AND\n#2  ')).toBe('#1 AND #2');
   });
+
+  test('小文字 and / or / not は大文字へ正規化される（PubMed は小文字 Boolean を検索語として扱うため）', () => {
+    expect(normalizeCombinationExpression('#1 and not #2')).toBe('#1 AND NOT #2');
+    expect(normalizeCombinationExpression('#1 or #2')).toBe('#1 OR #2');
+  });
+
+  test('参照 ID の大文字小文字は変えない', () => {
+    expect(normalizeCombinationExpression('#1 and #RCTfilter')).toBe('#1 AND #RCTfilter');
+  });
+
+  test('括弧を含む式が壊れない（括弧の内側に余分な空白を入れない）', () => {
+    expect(normalizeCombinationExpression('( #1 or #2 )   and not #3')).toBe(
+      '(#1 OR #2) AND NOT #3'
+    );
+  });
+
+  test('トークナイズに失敗する入力（未知キーワード等）は空白正規化のみで情報を失わない', () => {
+    // XOR は許可されていないキーワードなのでトークナイズがエラーになる。
+    // 大文字化などの再構成をせず、従来どおり空白だけ整えて返す。
+    expect(normalizeCombinationExpression('  #1  XOR   #2  ')).toBe('#1 XOR #2');
+  });
 });

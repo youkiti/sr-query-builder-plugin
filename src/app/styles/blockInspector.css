@@ -303,6 +303,40 @@
   color: var(--color-warning-text);
 }
 
+.bins__overlap-term:not([hidden]) {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* 共有語 1 語ぶんの削除（issue #89）。.bins__group-delete と同じトーン
+   （白背景に載せ替えて --color-danger-text の 7.32:1 を確保。地の #f7f7f9 のままだと
+   --color-warning-text の親行に埋もれて読みにくいため、ボタンだけ白背景で切り離す）。 */
+.bins__overlap-remove {
+  font-size: var(--font-size-sm);
+  line-height: 1;
+  border: 1px solid rgba(214, 42, 42, 0.4);
+  border-radius: 3px;
+  padding: 0 4px;
+  background: var(--color-surface, #fff);
+  color: var(--color-danger-text);
+  cursor: pointer;
+}
+
+.bins__overlap-remove:hover,
+.bins__overlap-remove:focus-visible {
+  background: rgba(214, 42, 42, 0.08);
+}
+
+.bins__overlap-error {
+  margin: var(--space-1) 0 0;
+  color: var(--color-danger-text);
+}
+
+.bins__overlap-error:empty {
+  display: none;
+}
+
 /* ---- MeSH ブラウザ（PubMed 風インデントツリー）---- */
 /* 同じ語（descriptor）の枝をまとめるグループ */
 .bins__group {

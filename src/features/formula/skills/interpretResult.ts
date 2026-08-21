@@ -1,5 +1,6 @@
 import type { LLMProvider } from '@/lib/llm';
 import { parseSkillJson } from './parseSkillJson';
+import { renderPromptTemplate } from './renderPromptTemplate';
 import { arraySchema, objectSchema, stringSchema } from './schema';
 
 /**
@@ -122,13 +123,13 @@ export async function interpretResult(
   if (input.missedArticles.length === 0) {
     return [];
   }
-  const userPrompt = INTERPRET_RESULT_USER_PROMPT_TEMPLATE.replace(
-    '{{FINAL_QUERY}}',
-    input.finalQuery.trim() === '' ? '(未提供)' : input.finalQuery.trim()
-  )
-    .replace('{{LINES}}', formatLines(input.lines))
-    .replace('{{COUNT}}', String(input.missedArticles.length))
-    .replace('{{ARTICLES}}', formatArticles(input.missedArticles));
+  // renderPromptTemplate を使う理由は improveBlock.ts と同じ（issue #92 C-1）。
+  const userPrompt = renderPromptTemplate(INTERPRET_RESULT_USER_PROMPT_TEMPLATE, {
+    FINAL_QUERY: input.finalQuery.trim() === '' ? '(未提供)' : input.finalQuery.trim(),
+    LINES: formatLines(input.lines),
+    COUNT: String(input.missedArticles.length),
+    ARTICLES: formatArticles(input.missedArticles),
+  });
 
   const response = await provider.chat(
     [

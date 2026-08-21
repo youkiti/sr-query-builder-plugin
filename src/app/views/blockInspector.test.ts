@@ -1,6 +1,7 @@
 import {
   buildBlockInspector,
   collectMeasuredContext,
+  computeSiblingOverlaps,
   extractBlockTerms,
   type BlockInspectorParams,
 } from './blockInspector';
@@ -57,6 +58,38 @@ describe('extractBlockTerms', () => {
       { descriptor: 'Oral and Maxillofacial Surgeons', explode: true },
     ]);
     expect(terms.freewordTerms.map((t) => t.query)).toEqual(['surgeon*[tiab]']);
+  });
+});
+
+describe('computeSiblingOverlaps（issue #89）', () => {
+  test('MeSH descriptor とフリーワードの両方で共有語を検出する（MeSH → フリーワードの順）', () => {
+    const overlaps = computeSiblingOverlaps('"Asthma"[Mesh] OR cough[tiab]', [
+      { id: '2', label: 'Outcome', expression: '"Asthma"[Mesh] OR cough[tiab] OR fever[tiab]' },
+    ]);
+    expect(overlaps).toEqual([
+      {
+        id: '2',
+        label: 'Outcome',
+        expression: '"Asthma"[Mesh] OR cough[tiab] OR fever[tiab]',
+        sharedTerms: [
+          { term: 'Asthma', kind: 'mesh' },
+          { term: 'cough[tiab]', kind: 'freeword' },
+        ],
+      },
+    ]);
+  });
+
+  test('共有語が無い兄弟も sharedTerms: [] で結果に含める（issue #89 must-fix: 完全一致しない重複でも AI へ渡すため）', () => {
+    const overlaps = computeSiblingOverlaps('cough[tiab]', [
+      { id: '2', label: 'Outcome', expression: 'fever[tiab]' },
+    ]);
+    expect(overlaps).toEqual([
+      { id: '2', label: 'Outcome', expression: 'fever[tiab]', sharedTerms: [] },
+    ]);
+  });
+
+  test('siblings が空なら空配列', () => {
+    expect(computeSiblingOverlaps('cough[tiab]', [])).toEqual([]);
   });
 });
 
@@ -304,6 +337,105 @@ describe('buildBlockInspector', () => {
       })
     )!;
     expect(el.querySelector('.bins__overlap')?.textContent).toContain('重複する語はありません');
+  });
+
+  test('重複行の「削除」で共有 MeSH 句を式から外す（issue #89）', () => {
+    const doc = buildDoc();
+    const onApplyExpression = jest.fn();
+    const el = buildBlockInspector(
+      doc,
+      baseParams({
+        expression: '"Pneumonia"[Mesh] OR cough[tiab]',
+        onCountHits: jest.fn().mockResolvedValue(1),
+        onApplyExpression,
+        siblings: [{ id: '2', label: 'Outcome', expression: '"Pneumonia"[Mesh] OR fever[tiab]' }],
+      })
+    )!;
+    el.querySelector<HTMLButtonElement>('.bins__overlap-remove')!.click();
+    expect(onApplyExpression).toHaveBeenCalledWith('cough[tiab]', expect.any(Function));
+  });
+
+  test('重複行の「削除」で共有フリーワード句を式から外す（issue #89）', () => {
+    const doc = buildDoc();
+    const onApplyExpression = jest.fn();
+    const el = buildBlockInspector(
+      doc,
+      baseParams({
+        expression: '"Pneumonia"[Mesh] OR cough[tiab]',
+        onCountHits: jest.fn().mockResolvedValue(1),
+        onApplyExpression,
+        siblings: [{ id: '2', label: 'Outcome', expression: 'cough[tiab] OR fever[tiab]' }],
+      })
+    )!;
+    el.querySelector<HTMLButtonElement>('.bins__overlap-remove')!.click();
+    expect(onApplyExpression).toHaveBeenCalledWith('"Pneumonia"[Mesh]', expect.any(Function));
+  });
+
+  test('同じ重複行に MeSH とフリーワードの共有語が並んでも、それぞれの「削除」が正しい方だけを消す（issue #92 B-5）', () => {
+    // このケース自体は旧実装（削除ボタンのクリック時に `myMesh.has(term)` で MeSH か
+    // フリーワードかを再判定する書き方）でも正しく通っていたはず（MeSH descriptor の文字列と
+    // フリーワード query の文字列は現行のトークナイザの下では衝突しないため）。
+    // ここでは computeSiblingOverlaps が確定させた kind をそのまま持ち回る設計を固定する
+    // 回帰テストとして、行内のどのボタンを押してもそのボタンに紐づく語だけが正しい種別で
+    // 削除されることを確認する（SharedTerm の doc コメント参照: term の再判定はトークナイザの
+    // 挙動への暗黙の依存になるため、kind を持ち回るほうが安全という設計判断）。
+    const doc = buildDoc();
+    const onApplyExpression = jest.fn();
+    const el = buildBlockInspector(
+      doc,
+      baseParams({
+        expression: '"Asthma"[Mesh] OR fever[tiab] OR cough[tiab]',
+        onCountHits: jest.fn().mockResolvedValue(1),
+        onApplyExpression,
+        siblings: [
+          { id: '2', label: 'Outcome', expression: '"Asthma"[Mesh] OR fever[tiab] OR wheeze[tiab]' },
+        ],
+      })
+    )!;
+    const removeButtons = el.querySelectorAll<HTMLButtonElement>('.bins__overlap-remove');
+    expect(removeButtons).toHaveLength(2);
+    // 1 件目（MeSH: Asthma）を削除 → MeSH descriptor だけが消える。
+    removeButtons[0]!.click();
+    expect(onApplyExpression).toHaveBeenCalledWith('fever[tiab] OR cough[tiab]', expect.any(Function));
+    // 2 件目（フリーワード: fever[tiab]）を削除 → フリーワードだけが消える。
+    removeButtons[1]!.click();
+    expect(onApplyExpression).toHaveBeenCalledWith(
+      '"Asthma"[Mesh] OR cough[tiab]',
+      expect.any(Function)
+    );
+  });
+
+  test('onApplyExpression 未指定なら重複行に削除ボタンを出さない', () => {
+    const doc = buildDoc();
+    const el = buildBlockInspector(
+      doc,
+      baseParams({
+        expression: '"Pneumonia"[Mesh] OR cough[tiab]',
+        onCountHits: jest.fn().mockResolvedValue(1),
+        siblings: [{ id: '2', label: 'Outcome', expression: '"Pneumonia"[Mesh] OR fever[tiab]' }],
+      })
+    )!;
+    expect(el.querySelector('.bins__overlap-remove')).toBeNull();
+  });
+
+  test('重複行の削除で式が空になる場合、onError 経由のエラーがエラー行に表示される（issue #89）', () => {
+    const doc = buildDoc();
+    const onApplyExpression = jest.fn((_next: string, onError?: (msg: string) => void) => {
+      onError?.('ブロックを空にすることはできません。');
+    });
+    const el = buildBlockInspector(
+      doc,
+      baseParams({
+        expression: '"Pneumonia"[Mesh]',
+        onCountHits: jest.fn().mockResolvedValue(1),
+        onApplyExpression,
+        siblings: [{ id: '2', label: 'Outcome', expression: '"Pneumonia"[Mesh]' }],
+      })
+    )!;
+    el.querySelector<HTMLButtonElement>('.bins__overlap-remove')!.click();
+    expect(el.querySelector('.bins__overlap-error')?.textContent).toBe(
+      'ブロックを空にすることはできません。'
+    );
   });
 
   test('枝の祖先ノードを MeSH RDF 名で表示し、第1階層は ID+名前・以降は名前のみ', async () => {

@@ -1,5 +1,6 @@
 import type { LLMProvider } from '@/lib/llm';
 import { parseSkillJson, SkillResponseError } from './parseSkillJson';
+import { renderPromptTemplate } from './renderPromptTemplate';
 import { arraySchema, enumSchema, objectSchema, stringSchema } from './schema';
 
 /**
@@ -97,7 +98,11 @@ export async function extractProtocol(
   if (protocolText.trim() === '') {
     return emptyDraft();
   }
-  const userPrompt = EXTRACT_PROTOCOL_USER_PROMPT_TEMPLATE.replace('{{PROTOCOL}}', protocolText);
+  // renderPromptTemplate を使う理由は improveBlock.ts と同じ（issue #92 C-1。
+  // ユーザーが貼り付けたプロトコル本文に $ 系の特殊パターンが含まれてもテンプレートが壊れない）。
+  const userPrompt = renderPromptTemplate(EXTRACT_PROTOCOL_USER_PROMPT_TEMPLATE, {
+    PROTOCOL: protocolText,
+  });
   const response = await provider.chat(
     [
       { role: 'system', content: EXTRACT_PROTOCOL_SYSTEM_PROMPT },

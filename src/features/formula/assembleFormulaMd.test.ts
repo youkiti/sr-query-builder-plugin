@@ -134,6 +134,39 @@ describe('assembleFormulaMd', () => {
     expect(reparsed.combinationExpression).toBe('#1 AND #2 AND #RCTfilter');
   });
 
+  test('baseCombinationExpression に小文字演算子が入っていても最終行では大文字に正規化される（issue #92 B-7）', () => {
+    // #/blocks の「結合式を編集」入力は打鍵のたびに draft へ生の文字列を書き込むため、
+    // 小文字の and/or/not がそのまま baseCombinationExpression として渡ってくることがある。
+    // PubMed は小文字の and/or/not を Boolean 演算子ではなく検索語として扱うため、
+    // formula_md の最終行に紛れ込ませてはいけない。
+    const input: AssembleInput = {
+      baseCombinationExpression: '#1 and #2',
+      blocks: [blockOutputs(), blockOutputs()],
+      filterResult: defaultFilterResult,
+    };
+    const { formula, markdown } = assembleFormulaMd(input);
+    expect(formula.blocks[2]?.expression).toBe('#1 AND #2');
+    expect(formula.combinationExpression).toBe('#1 AND #2');
+    expect(markdown).toContain('#3 #1 AND #2');
+    expect(markdown).not.toMatch(/#1 and #2/);
+  });
+
+  test('小文字演算子 + フィルタ追記（appendToCombination）も最終行では大文字に正規化される（issue #92 B-7）', () => {
+    const input: AssembleInput = {
+      baseCombinationExpression: '#1 or #2',
+      blocks: [blockOutputs(), blockOutputs()],
+      filterResult: {
+        filters: [{ blockId: 'RCTfilter', expression: 'foo[tiab]', comment: '' }],
+        appendToCombination: ' and #RCTfilter',
+        excessFilterCandidates: [],
+      },
+    };
+    const { formula } = assembleFormulaMd(input);
+    expect(formula.blocks[formula.blocks.length - 1]?.expression).toBe(
+      '#1 OR #2 AND #RCTfilter'
+    );
+  });
+
   test('baseCombinationExpression が空で append のみでも落ちない', () => {
     const input: AssembleInput = {
       baseCombinationExpression: '',

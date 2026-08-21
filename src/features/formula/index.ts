@@ -22,8 +22,10 @@ export {
   improveBlockExpression,
   IMPROVE_BLOCK_SYSTEM_PROMPT,
   IMPROVE_BLOCK_USER_PROMPT_TEMPLATE,
+  MAX_IMPROVE_HISTORY_TURNS,
   type ImproveBlockInput,
   type ImproveBlockProposal,
+  type ImproveBlockTurn,
 } from './skills';
 export {
   buildBroadenedFormula,

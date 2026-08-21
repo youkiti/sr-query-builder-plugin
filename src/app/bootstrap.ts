@@ -94,6 +94,7 @@ import {
 import { createStore, type AppState, type AppStore } from './store';
 import { buildViews, type BuildViewsOptions, type ViewContext } from './views';
 import { formatDraftProgress, formatValidationProgress } from './views/draftView';
+import { resolveInstructionDraft } from './views/editView';
 import { formatFormulaVersionShort } from './views/formatHelpers';
 
 export interface AppBootstrapOptions {
@@ -477,8 +478,8 @@ function buildDefaultViewOptions(
       // view はこの Promise の解決値を使わない（expand の onFetch と同じ思想。issue #39 対応）。
       onImproveBlock: async (input: RequestBlockImprovementInput): Promise<void> =>
         runImproveBlock(store, runtime, llmFactoryDepsBase(), input),
-      onGetImproveContext: (blockId: string): Promise<BlockImprovementContext | null> =>
-        getBlockImprovementContext(blockId, { store, google: runtime.google }),
+      onGetImproveContext: (blockId, siblings): Promise<BlockImprovementContext | null> =>
+        getBlockImprovementContext(blockId, siblings, { store, google: runtime.google }),
       // ブロック・インスペクタ（src/app/views/blockInspector.ts。requirements: 検索式編集の
       // MeSH/フリーワード可視化）の計測 callback。既存の NCBI 呼び出し経路をそのまま再利用する
       // （新しい fetch 経路は増やさない。issue #58 chunk 3a）。
@@ -527,7 +528,17 @@ function buildDefaultViewOptions(
         }));
       },
       onClearImprovement: () => {
-        store.setState((s) => ({ ...s, blockImprovement: null }));
+        // 提案（blockImprovement）を引っ込めるタイミング（accept / reject / manualEditApply /
+        // AI パネルの再クリック close）は、そのブロックの「今回の提案ラウンド」が終わる瞬間
+        // でもある。手編集ドラフト（blockImprovementManualEditDraft。issue #92 B-3）を
+        // ここで一緒に消しておかないと、同じブロックで次に AI 改善を開いたとき、新しい提案の
+        // 初期値（result.proposedExpression）ではなく前ラウンドの手編集テキストが復元されてしまう
+        // （blockImprovementInstruction を送信成功時にクリアする runImproveBlock と同じ理由）。
+        store.setState((s) => ({
+          ...s,
+          blockImprovement: null,
+          blockImprovementManualEditDraft: null,
+        }));
       },
       // 編集メモを store（formulaEditNote）へ反映する。打鍵のたび（input）に呼ばれるが、
       // setStateSilently（購読者に通知しない＝再描画を起こさない）で書き込むため、
@@ -540,6 +551,37 @@ function buildDefaultViewOptions(
           return;
         }
         store.setStateSilently((s) => ({ ...s, formulaEditNote: { formulaVersionId, note } }));
+      },
+      // 「AI への指示」欄（初回・追加とも）を store（blockImprovementInstruction）へ反映する。
+      // onNoteChange と同じ理由・同じ使い方（setStateSilently で再描画を起こさない）。
+      onInstructionChange: (blockId: string, instruction: string) => {
+        const formulaVersionId = store.getState().currentFormulaVersionId;
+        /* istanbul ignore if -- guards.ts の edit: needsFormula() により #/edit 到達時点で必ず非 null */
+        if (formulaVersionId === null) {
+          return;
+        }
+        store.setStateSilently((s) => ({
+          ...s,
+          blockImprovementInstruction: { formulaVersionId, blockId, instruction },
+        }));
+      },
+      // 「AI への指示」欄を開く時点で store の最新値を読み直す（issue #92 C-3）。
+      // resolveInstructionDraft（editView.ts）と同じ解決ロジックをそのまま再利用し、
+      // 描画時スナップショットとの解決経路のズレが生まれないようにする。
+      onGetInstructionDraft: (blockId: string) => resolveInstructionDraft(store.getState(), blockId),
+      // 「提案を編集してから採用する」欄（issue #90）の未送信テキストを store
+      // （blockImprovementManualEditDraft）へ反映する（issue #92 B-3）。onNoteChange /
+      // onInstructionChange と同じ理由・同じ使い方（setStateSilently で再描画を起こさない）。
+      onManualEditChange: (blockId: string, expression: string) => {
+        const formulaVersionId = store.getState().currentFormulaVersionId;
+        /* istanbul ignore if -- guards.ts の edit: needsFormula() により #/edit 到達時点で必ず非 null */
+        if (formulaVersionId === null) {
+          return;
+        }
+        store.setStateSilently((s) => ({
+          ...s,
+          blockImprovementManualEditDraft: { formulaVersionId, blockId, expression },
+        }));
       },
     },
     expand: {
@@ -646,6 +688,9 @@ async function runImproveBlock(
   if (formulaVersionId === null) {
     return;
   }
+  // このリクエストで使った history（＝これより前の turn。issue #90）。running/error でも
+  // 保持しておく（redo のやり直し UI が失敗直後にも同じ history を再利用できるように）。
+  const historyBeforeThisTurn = input.history ?? [];
   store.setState((s) => ({
     ...s,
     blockImprovement: {
@@ -654,6 +699,7 @@ async function runImproveBlock(
       status: 'running',
       result: null,
       error: null,
+      history: historyBeforeThisTurn,
     },
   }));
   try {
@@ -675,7 +721,41 @@ async function runImproveBlock(
         status: 'ready',
         result,
         error: null,
+        // 今回の turn（指示 → 提案）を積む（issue #90）。次の「指示を追加してやり直す」は
+        // この history をそのまま onImproveBlock へ渡し、会話を継続する。
+        history: [
+          ...historyBeforeThisTurn,
+          {
+            instruction: input.instruction ?? '',
+            proposedExpression: result.proposedExpression,
+            rationale: result.rationale,
+          },
+        ],
       },
+      // 送信成功時に「AI への指示」欄の未送信テキストをクリアする（issue #92 B-4）。
+      // クリアしないと、次に renderProposal が「指示を追加してやり直す」欄の初期値として
+      // 今しがた実行済みの指示を復元してしまい、そのまま送信すると同じ指示が新しい turn
+      // として二重に history へ積まれる（テスターが実際に踏んだ回帰）。送信は非同期
+      // （fire-and-forget）なので、この間に別ブロックの指示欄を触っている場合に備えて
+      // formulaVersionId・blockId が今回の送信と一致するときだけクリアする（一致しなければ
+      // それは別ブロックの未送信ドラフトなので触らない）。
+      // 失敗時（catch 節）はあえてクリアしない: 送信が失敗しただけなら、ユーザーが打った
+      // 指示は再送信のために残しておくほうが親切なため。
+      blockImprovementInstruction:
+        s.blockImprovementInstruction !== null &&
+        s.blockImprovementInstruction.formulaVersionId === formulaVersionId &&
+        s.blockImprovementInstruction.blockId === input.blockId
+          ? null
+          : s.blockImprovementInstruction,
+      // 「提案を編集してから採用する」欄（issue #92 B-3）も同じ理由でクリアする。クリアしないと
+      // 「指示を追加してやり直す」で新しい提案が届いたとき、renderProposal が新しい
+      // result.proposedExpression ではなく前 turn の手編集テキストを初期値にしてしまう。
+      blockImprovementManualEditDraft:
+        s.blockImprovementManualEditDraft !== null &&
+        s.blockImprovementManualEditDraft.formulaVersionId === formulaVersionId &&
+        s.blockImprovementManualEditDraft.blockId === input.blockId
+          ? null
+          : s.blockImprovementManualEditDraft,
     }));
   } catch (err) {
     store.setState((s) => ({
@@ -686,6 +766,7 @@ async function runImproveBlock(
         status: 'error',
         result: null,
         error: err instanceof Error ? err.message : String(err),
+        history: historyBeforeThisTurn,
       },
     }));
   }

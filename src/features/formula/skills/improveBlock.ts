@@ -1,5 +1,6 @@
-import type { LLMProvider } from '@/lib/llm';
+import type { ChatMessage, LLMProvider } from '@/lib/llm';
 import { parseSkillJson } from './parseSkillJson';
+import { renderPromptTemplate } from './renderPromptTemplate';
 import { objectSchema, stringSchema } from './schema';
 
 /**
@@ -41,6 +42,59 @@ export interface ImproveBlockInput {
   seedPapers?: SeedPaperContext[];
   /** 直近の検証で得た捕捉情報。null なら未検証として省略 */
   validation?: ValidationContext | null;
+  /**
+   * この式と掛け合わせる他ブロック（結合行を除く。issue #89）。共有語の有無を問わず全件渡す
+   * （sharedTerms は空になりうる）。「#1 と重複するキーワードを消して」のような指示に、
+   * 完全一致で機械的に検出できた重複語を根拠として与えるとともに、完全一致しない重複
+   * （表記ゆれ・タグ違い・MeSH とフリーワードの対応等）にも式全文から判断する材料を渡す。
+   * 空・未計測なら省略（editView 側に兄弟ブロックが存在しない等）。
+   */
+  siblingBlocks?: SiblingBlockInput[];
+  /**
+   * 直前までの会話継続（issue #90）。「これは違う、こうして」という追加指示に対応するため、
+   * 過去の turn（ユーザーの指示 → LLM の提案）を会話履歴として積む。省略・空配列なら
+   * 従来どおり `[system, user]` の単発 2 メッセージ（省略時は現在と完全に同じ挙動）。
+   * {@link MAX_IMPROVE_HISTORY_TURNS} を超える場合は新しい方からその件数だけを使う。
+   */
+  history?: ImproveBlockTurn[];
+}
+
+/**
+ * improve-block の会話継続（issue #90）で 1 往復ぶんを表す turn。
+ * ユーザーの指示と、それに対する LLM の提案（提案 expression + rationale）の組。
+ */
+export interface ImproveBlockTurn {
+  /** その turn でユーザーが入力した指示（空文字なら「おまかせ」） */
+  instruction: string;
+  /** その turn で LLM が提案した expression */
+  proposedExpression: string;
+  /** その turn の改善ポイントメモ */
+  rationale: string;
+}
+
+/**
+ * 会話継続として LLM へ渡す history の上限 turn 数（issue #90）。
+ * プロンプト肥大化を防ぐため、これを超える古い turn は切り詰める（新しい方を優先して残す）。
+ */
+export const MAX_IMPROVE_HISTORY_TURNS = 5;
+
+/** 兄弟ブロックとの共有語 1 件（プロンプト用）。SharedTerm（blockInspector.ts）と同じ形（issue #92 B-5）。 */
+export interface SharedTermInput {
+  term: string;
+  kind: 'mesh' | 'freeword';
+}
+
+/** improve-block に渡す兄弟ブロック 1 件（プロンプト用）。 */
+export interface SiblingBlockInput {
+  id: string;
+  label: string | null;
+  expression: string;
+  /**
+   * 自分の式と完全一致で共有している語（MeSH descriptor とフリーワード query が混在。
+   * kind で種別を区別する）。0 件は「完全一致では見つからなかった」ことを示すだけで、
+   * 重複が無いことの証明ではない（blockInspector.ts の computeSiblingOverlaps の doc コメント参照）。
+   */
+  sharedTerms: SharedTermInput[];
 }
 
 /** キーワード 1 語の単体ヒット数 + 寄与情報（プロンプト用）。 */
@@ -108,6 +162,9 @@ export const IMPROVE_BLOCK_SYSTEM_PROMPT = `
 - プロトコルに明記されていないフィルタ（English[lang] / Humans[mh] / 年代制限）は
   絶対に付けない（filter-designer の責務）。
 - ユーザーからの追加指示がある場合は、上記ルールに反しない範囲で最優先で従う。
+- 直前の提案に対する追加の指示がある場合（会話が継続している場合）は、直前の提案を土台に
+  修正する（毎回ゼロから作り直さない）。ユーザーが「これは違う」「そうじゃない」と指摘した
+  変更は繰り返さない。
 - シード論文（捕捉すべき既知の重要論文）が与えられた場合は、それらを取りこぼさない
   ことを重視する。特に「取りこぼし PMID」がある場合は、その論文が引っかかるよう
   同義語・表記ゆれ・MeSH を補って感度を上げる（ただし無関係な語の追加で特異度を
@@ -122,6 +179,16 @@ export const IMPROVE_BLOCK_SYSTEM_PROMPT = `
 - キーワード別ヒット数が与えられた場合は、0 件の語（綴り・語形ミスの疑い）は修正または
   削除し、ヒットの多すぎる広すぎる語は絞り込みを検討する。逆に主要概念で語が不足していれば
   同義語・MeSH を補う。どの語を足し引きしたかを件数に触れて rationale に書いてよい。
+- 他ブロック（掛け合わせる相手）の式が与えられた場合:
+  - 各ブロックに添えた「共有語」は、自分の式との**完全一致**で機械的に検出できたものだけ。
+    表記ゆれ・単数複数（child/children）・フィールドタグの違い（[tiab]/[tw]）・
+    MeSH とフリーワードの対応関係（"Asthma"[Mesh] と asthma[tiab]）は含まれていない。
+    共有語が 0 件でも「重複が無い」ことの証明にはならない。
+  - 「重複を消して」「他のブロックと被る語を消して」といった指示に対して削除してよいのは、
+    (a) 共有語として明示されている語、または (b) 他ブロックの式全文と照らして明らかに
+    同義・表記ゆれの重複だと判断できる語、のうち**ユーザーの指示が指しているもの**だけに限る。
+  - 指示から対象を特定できない語を推測で削除してはならない。
+- 語を削除するときは、削除した語を rationale に列挙すること。
 - rationale は日本語 1-2 文で、何をどう変えたか書く。
 `.trim();
 
@@ -139,6 +206,9 @@ RQ: {{RQ}}
 
 キーワード別ヒット数（単体）:
 {{KEYWORD_HITS}}
+
+他ブロック（掛け合わせる相手）:
+{{SIBLINGS}}
 
 シード論文（捕捉すべき既知の重要論文）:
 {{SEEDS}}
@@ -170,31 +240,67 @@ export async function improveBlockExpression(
   input: ImproveBlockInput,
   provider: LLMProvider
 ): Promise<ImproveBlockProposal> {
-  const userPrompt = IMPROVE_BLOCK_USER_PROMPT_TEMPLATE.replace('{{RQ}}', input.researchQuestion)
-    .replace('{{LABEL}}', input.blockLabel)
-    .replace('{{DESC}}', input.blockDescription === '' ? '(不明)' : input.blockDescription)
-    .replace('{{CURRENT}}', input.currentExpression)
-    .replace('{{HITS}}', formatHits(input.currentHits))
-    .replace('{{KEYWORD_HITS}}', formatKeywordHits(input.keywordHits, input.freewordDedupTotal))
-    .replace('{{SEEDS}}', formatSeeds(input.seedPapers))
-    .replace('{{VALIDATION}}', formatValidation(input.validation))
-    .replace(
-      '{{INSTRUCTION}}',
-      input.userInstruction.trim() === '' ? '(特になし／おまかせで改善してよい)' : input.userInstruction.trim()
-    );
+  // 会話継続（issue #90）: 新しい方から MAX_IMPROVE_HISTORY_TURNS 件だけを使う。
+  // history が空なら以下のロジックは従来と完全に同じ [system, user] 2 メッセージになる。
+  const history = (input.history ?? []).slice(-MAX_IMPROVE_HISTORY_TURNS);
+  // 文脈テンプレート（RQ・ブロック定義・現式・ヒット数・シード・検証結果等）は必ず 1 度だけ、
+  // messages の先頭側の user メッセージに載せる。{{INSTRUCTION}} には「最初に採用する turn の
+  // instruction」を入れる（history が空なら今回の userInstruction がその turn そのもの）。
+  const firstInstruction = history.length > 0 ? history[0]!.instruction : input.userInstruction;
 
-  const response = await provider.chat(
-    [
-      { role: 'system', content: IMPROVE_BLOCK_SYSTEM_PROMPT },
-      { role: 'user', content: userPrompt },
-    ],
-    { responseFormat: 'json', responseSchema: IMPROVE_BLOCK_SCHEMA, temperature: 0.3 }
-  );
+  // renderPromptTemplate は split/join ベースで置換するため、値に $&・$' 等の
+  // 置換パターン特殊文字（Embase の切り捨て記法 drug$ など）が含まれてもテンプレートが
+  // 壊れない（String.prototype.replace の連鎖はこれを壊す。issue #92 C-1）。
+  const userPrompt = renderPromptTemplate(IMPROVE_BLOCK_USER_PROMPT_TEMPLATE, {
+    RQ: input.researchQuestion,
+    LABEL: input.blockLabel,
+    DESC: input.blockDescription === '' ? '(不明)' : input.blockDescription,
+    CURRENT: input.currentExpression,
+    HITS: formatHits(input.currentHits),
+    KEYWORD_HITS: formatKeywordHits(input.keywordHits, input.freewordDedupTotal),
+    SIBLINGS: formatSiblings(input.siblingBlocks),
+    SEEDS: formatSeeds(input.seedPapers),
+    VALIDATION: formatValidation(input.validation),
+    INSTRUCTION: formatInstruction(firstInstruction),
+  });
+
+  const messages: ChatMessage[] = [
+    { role: 'system', content: IMPROVE_BLOCK_SYSTEM_PROMPT },
+    { role: 'user', content: userPrompt },
+  ];
+  // history の各 turn について model（その turn の提案）→ user（次の turn の instruction）を
+  // 交互に積む。「次の turn」が history 内に無ければ（＝この turn が history の最後）、
+  // 今回の userInstruction を積む。これにより history=[] のときはループが 1 度も回らず、
+  // 上の 2 メッセージだけが最終形になる（省略時と完全に同じ挙動）。
+  history.forEach((turn, index) => {
+    messages.push({
+      role: 'model',
+      content: JSON.stringify({
+        proposed_expression: turn.proposedExpression,
+        rationale: turn.rationale,
+      }),
+    });
+    const nextInstruction =
+      index + 1 < history.length ? history[index + 1]!.instruction : input.userInstruction;
+    messages.push({ role: 'user', content: formatInstruction(nextInstruction) });
+  });
+
+  const response = await provider.chat(messages, {
+    responseFormat: 'json',
+    responseSchema: IMPROVE_BLOCK_SCHEMA,
+    temperature: 0.3,
+  });
   const raw = parseSkillJson<RawProposal>(response.text, SKILL_NAME);
   return {
     proposedExpression: (raw.proposed_expression ?? '').trim(),
     rationale: raw.rationale ?? '',
   };
+}
+
+/** 指示文を整形する。空文字（trim 後）なら「おまかせ」を表すプレースホルダにする。 */
+function formatInstruction(instruction: string): string {
+  const trimmed = instruction.trim();
+  return trimmed === '' ? '(特になし／おまかせで改善してよい)' : trimmed;
 }
 
 /** 現在のヒット数を整形する。未計測（null/undefined）なら「(未計測)」。 */
@@ -240,6 +346,28 @@ function formatKeywordHits(
     lines.push(`（フリーワード OR 合計・重複除去後: ${freewordDedupTotal.toLocaleString('en-US')} 件）`);
   }
   return lines.join('\n');
+}
+
+/**
+ * 他ブロック（掛け合わせる相手）を箇条書きへ整形する。空・未指定なら「(渡されていない)」。
+ * 各行にブロック ID・ラベル・式全文・共有語を出す（issue #89。重複削除の根拠にするため）。
+ * sharedTerms が空の兄弟も出す（共有語は完全一致でしか検出できないため、0 件は「重複が
+ * 完全一致では見つからなかった」ことを示すだけで「重複が無い」ことの証明ではない）。
+ */
+function formatSiblings(siblings: SiblingBlockInput[] | undefined): string {
+  if (!siblings || siblings.length === 0) {
+    return '(渡されていない)';
+  }
+  return siblings
+    .map((s) => {
+      const label = s.label ? ` ${s.label}` : '';
+      const shared =
+        s.sharedTerms.length > 0
+          ? s.sharedTerms.map((t) => t.term).join(', ')
+          : '(完全一致の重複なし)';
+      return [`- #${s.id}${label}: ${s.expression}`, `    共有語: ${shared}`].join('\n');
+    })
+    .join('\n');
 }
 
 /**

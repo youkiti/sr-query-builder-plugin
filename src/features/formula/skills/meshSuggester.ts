@@ -1,6 +1,7 @@
 import type { LLMProvider } from '@/lib/llm';
 import type { SeedMeshSummary } from '@/features/validation';
 import { parseSkillJson } from './parseSkillJson';
+import { renderPromptTemplate } from './renderPromptTemplate';
 import { arraySchema, objectSchema, stringSchema } from './schema';
 
 /**
@@ -87,9 +88,12 @@ export async function suggestMesh(
   const requirementsBlock = formatList(input.meshRequirements);
   const seedBlock = formatSeedMesh(input.seedMesh);
 
-  const userPrompt = MESH_SUGGESTER_USER_PROMPT_TEMPLATE.replace('{{CONCEPT}}', input.conceptSummary)
-    .replace('{{REQUIREMENTS}}', requirementsBlock)
-    .replace('{{SEED_MESH}}', seedBlock);
+  // renderPromptTemplate を使う理由は improveBlock.ts と同じ（issue #92 C-1）。
+  const userPrompt = renderPromptTemplate(MESH_SUGGESTER_USER_PROMPT_TEMPLATE, {
+    CONCEPT: input.conceptSummary,
+    REQUIREMENTS: requirementsBlock,
+    SEED_MESH: seedBlock,
+  });
 
   const response = await provider.chat(
     [

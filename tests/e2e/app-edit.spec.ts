@@ -6,7 +6,12 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { injectAppStub } from './fixtures/appStub';
-import { registerMeshRdfStub, registerNcbiStub } from './fixtures/apiStubs';
+import {
+  registerDriveStub,
+  registerGeminiStub,
+  registerMeshRdfStub,
+  registerNcbiStub,
+} from './fixtures/apiStubs';
 import { fullStateScenario, FULL_APP_STATE } from './fixtures/scenarios/fullState';
 import type { AppState } from '../../src/app/store';
 
@@ -27,6 +32,30 @@ const BLOCK_IMPROVEMENT: NonNullable<AppState['blockImprovement']> = {
     rationale: 'MeSH を追加して感度を上げる',
   },
   error: null,
+  history: [],
+};
+
+/**
+ * issue #90（AI との会話継続・提案の手編集）の実操作 E2E 用。
+ * BLOCK_IMPROVEMENT と違い history が非空（過去 1 turn）なので、「これまでのやり取り」
+ * 欄（<details>）を含めて a11y を確認できる。
+ */
+const BLOCK_IMPROVEMENT_WITH_HISTORY: NonNullable<AppState['blockImprovement']> = {
+  ...BLOCK_IMPROVEMENT,
+  history: [
+    {
+      instruction: '同義語を増やして',
+      proposedExpression: '"ARDS"[Mesh] OR "acute respiratory distress"[tiab]',
+      rationale: 'MeSH を追加して感度を上げる',
+    },
+  ],
+};
+
+/** 「指示を追加してやり直す」（issue #90）で LLM から返す 2 回目の提案。 */
+const REDO_IMPROVE_BLOCK_RESPONSE = {
+  proposed_expression:
+    '"ARDS"[Mesh] OR "acute respiratory distress"[tiab] OR "acute lung injury"[tiab]',
+  rationale: '同義語 acute lung injury を追加しました。',
 };
 
 /**
@@ -87,6 +116,120 @@ test.describe('app-edit (#/edit)', () => {
     // 改善中のブロックは「AI に改善させる」ボタン自体はまだ活性（ready 状態のため）だが、
     // 提案 UI が対象ブロックの行に紐づいて出ていることを確認する。
     await expect(firstRow.locator('.edit__block-improve')).toBeEnabled();
+  });
+
+  /**
+   * issue #90（提案を編集してから採用する）。CLAUDE.md が指摘する
+   * 「jsdom が green でも『見えている』ことは保証されない」実例そのものと同じ構造
+   * （`<details>` に畳んだ textarea）を持つ UI なので、jsdom の unit テストだけでなく
+   * 実ブラウザで開閉・fill・click が通ることを確認する。
+   */
+  test('「提案を編集してから採用する」: <details> を開いて編集し、置き換えられる（issue #90）', async ({
+    page,
+  }) => {
+    await injectAppStub(
+      page,
+      fullStateScenario({
+        preloadedState: { ...FULL_APP_STATE, blockImprovement: BLOCK_IMPROVEMENT },
+      })
+    );
+    await page.goto(APP_URL);
+
+    const firstRow = page.locator('.edit__block-row').first();
+    const manualEdit = firstRow.locator('.edit__block-ai-manual-edit');
+    const manualEditInput = manualEdit.locator('.edit__block-ai-manual-edit-input');
+
+    // <details> は既定で閉じている（manualEditDraft が無いため）。閉じたままだと
+    // Playwright の `fill()` / `toBeVisible()` は失敗する（jsdom の click/querySelector と
+    // 違って可視性を尊重するため）。summary をクリックして開く。
+    await expect(manualEditInput).toBeHidden();
+    await manualEdit.locator('summary').click();
+    await expect(manualEditInput).toBeVisible();
+    // 初期値は提案 expression（BLOCK_IMPROVEMENT.result.proposedExpression）
+    await expect(manualEditInput).toHaveValue('"ARDS"[Mesh] OR "acute respiratory distress"[tiab]');
+
+    const edited =
+      '"ARDS"[Mesh] OR "acute respiratory distress"[tiab] OR "acute lung injury"[tiab]';
+    await manualEditInput.fill(edited);
+    await manualEdit.locator('.edit__block-ai-manual-edit-apply').click();
+
+    // 適用後: ブロック #1 の読み取り表示が編集後の式に置き換わり、提案パネル（diff/accept/
+    // reject）は閉じる（applyBlockImprovement 経路は accept と同じく onClearImprovement を呼ぶ）。
+    await expect(firstRow.locator('.edit__block-current')).toHaveText(edited);
+    await expect(firstRow.locator('.edit__block-accept')).toHaveCount(0);
+    await expect(firstRow.locator('.edit__block-ai-manual-edit')).toHaveCount(0);
+  });
+
+  test('「提案を編集してから採用する」: 空にすると拒否されエラーが表示される（issue #90）', async ({
+    page,
+  }) => {
+    await injectAppStub(
+      page,
+      fullStateScenario({
+        preloadedState: { ...FULL_APP_STATE, blockImprovement: BLOCK_IMPROVEMENT },
+      })
+    );
+    await page.goto(APP_URL);
+
+    const firstRow = page.locator('.edit__block-row').first();
+    const manualEdit = firstRow.locator('.edit__block-ai-manual-edit');
+    await manualEdit.locator('summary').click();
+    await manualEdit.locator('.edit__block-ai-manual-edit-input').fill('   ');
+    await manualEdit.locator('.edit__block-ai-manual-edit-apply').click();
+
+    await expect(manualEdit.locator('.edit__block-ai-manual-edit-error')).toContainText(
+      '空にすることはできません'
+    );
+    // 拒否されているので式もパネルもそのまま残る。
+    await expect(firstRow.locator('.edit__block-current')).toContainText('ARDS');
+    await expect(firstRow.locator('.edit__block-accept')).toBeVisible();
+  });
+
+  /**
+   * issue #90（指示を追加してやり直す）。「これは違う、こうして」の会話継続を、Gemini モックを
+   * 挟んだ実操作で通す。redoWrap は `<details>` で畳んでいない常時表示 UI だが、jsdom の
+   * unit テストだけでは実際に fill/click が Playwright の実ブラウザ経路（fetch を伴う
+   * fire-and-forget の onImproveBlock 呼び出し）を通ることまでは確認できない。
+   */
+  test('「指示を追加してやり直す」: 実際に送信でき、新しい提案と履歴に反映される（issue #90）', async ({
+    page,
+  }) => {
+    await registerDriveStub(page);
+    await registerGeminiStub(page, {
+      responses: { 'improve-block': REDO_IMPROVE_BLOCK_RESPONSE },
+    });
+    await injectAppStub(
+      page,
+      fullStateScenario({
+        preloadedState: { ...FULL_APP_STATE, blockImprovement: BLOCK_IMPROVEMENT },
+        extraStorage: { 'apiKeys.gemini': 'dummy-key' },
+      })
+    );
+    await page.goto(APP_URL);
+
+    const firstRow = page.locator('.edit__block-row').first();
+    const redoInstruction = firstRow.locator('.edit__block-ai-redo-instruction');
+    await expect(redoInstruction).toBeVisible();
+    await redoInstruction.fill('acute lung injury も同義語として追加して');
+    await firstRow.locator('.edit__block-ai-redo-submit').click();
+
+    // 新しい提案が届くまで待つ（rationale が新しい応答の文言に置き換わる）。
+    await expect(firstRow.locator('.edit__block-rationale')).toContainText(
+      'acute lung injury を追加しました',
+      { timeout: 15_000 }
+    );
+    await expect(firstRow.locator('.edit__block-diff-after pre')).toContainText(
+      'acute lung injury'
+    );
+
+    // 今回の turn（指示 → 旧提案の rationale ではなく、今回送った指示とその結果）が
+    // 「これまでのやり取り」に積まれ、次回の会話継続に使われる（issue #90 の history 契約）。
+    const history = firstRow.locator('.edit__block-ai-history');
+    await expect(history.locator('summary')).toHaveText('これまでのやり取り（1 回）');
+    await history.locator('summary').click();
+    await expect(history.locator('.edit__block-ai-history-instruction')).toContainText(
+      'acute lung injury も同義語として追加して'
+    );
   });
 
   test('保存ステータスと編集メモは store から復元される（issue #42 回帰）', async ({ page }) => {
@@ -164,6 +307,28 @@ test.describe('app-edit (#/edit)', () => {
     expect(result.violations, JSON.stringify(result.violations, null, 2)).toEqual([]);
   });
 
+  test('a11y: axe violation zero（issue #90: 提案の手編集 <details> / これまでのやり取り <details> を展開時）', async ({
+    page,
+  }) => {
+    await injectAppStub(
+      page,
+      fullStateScenario({
+        preloadedState: { ...FULL_APP_STATE, blockImprovement: BLOCK_IMPROVEMENT_WITH_HISTORY },
+      })
+    );
+    await page.goto(APP_URL);
+
+    const firstRow = page.locator('.edit__block-row').first();
+    await firstRow.locator('.edit__block-ai-manual-edit summary').click();
+    await expect(firstRow.locator('.edit__block-ai-manual-edit-input')).toBeVisible();
+    await firstRow.locator('.edit__block-ai-history summary').click();
+    await expect(firstRow.locator('.edit__block-ai-history-list')).toBeVisible();
+    await expect(firstRow.locator('.edit__block-ai-redo-instruction')).toBeVisible();
+
+    const result = await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze();
+    expect(result.violations, JSON.stringify(result.violations, null, 2)).toEqual([]);
+  });
+
   test('鉛筆を開くとブロック・インスペクタが展開し、既存の NCBI スタブ経路（esearch）だけを叩く（issue #58 chunk 3a）', async ({
     page,
   }) => {
@@ -202,6 +367,47 @@ test.describe('app-edit (#/edit)', () => {
     await firstRow.locator('.edit__block-edit-toggle').click();
     await expect(firstRow.locator('.bins')).toBeVisible();
     await expect(firstRow.locator('.bins__delta-row').first()).toBeVisible();
+    const result = await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze();
+    expect(result.violations, JSON.stringify(result.violations, null, 2)).toEqual([]);
+  });
+
+  test('掛け合わせ行の「組み合わせ方を編集」で式を変更すると読み取り表示が更新される（issue #91）', async ({
+    page,
+  }) => {
+    await injectAppStub(page, fullStateScenario());
+    await page.goto(APP_URL);
+
+    // FULL_FORMULA_MARKDOWN の #3 が掛け合わせ行（`#1 AND #2`）。
+    const combinationRow = page.locator('.edit__block-row[data-block-id="3"]');
+    await expect(combinationRow.locator('.edit__block-current')).toHaveText('#1 AND #2');
+
+    await combinationRow.locator('.edit__block-combination-toggle').click();
+    const input = combinationRow.locator('.edit__block-combination-input');
+    // <details> で畳んでいないことの確認も兼ねる（CLAUDE.md: jsdom が green でも
+    // 「見えている」ことは保証されないため、E2E では toBeVisible / fill が通ることを確かめる）。
+    await expect(input).toBeVisible();
+    await expect(input).toHaveValue('#1 AND #2');
+
+    await input.fill('(#1 OR #2)');
+    await expect(combinationRow.locator('.edit__block-combination-status')).toHaveText(
+      '✓ 構文 OK'
+    );
+    await combinationRow.locator('.edit__block-combination-save').click();
+
+    await expect(combinationRow.locator('.edit__block-current')).toHaveText('(#1 OR #2)');
+    // 語の編集手段（✏️ / AI 改善）は依然として出ない。
+    await expect(combinationRow.locator('.edit__block-edit-toggle')).toHaveCount(0);
+    await expect(combinationRow.locator('.edit__block-improve')).toHaveCount(0);
+  });
+
+  test('a11y: axe violation zero（組み合わせ方を編集パネル展開時。issue #91）', async ({
+    page,
+  }) => {
+    await injectAppStub(page, fullStateScenario());
+    await page.goto(APP_URL);
+    const combinationRow = page.locator('.edit__block-row[data-block-id="3"]');
+    await combinationRow.locator('.edit__block-combination-toggle').click();
+    await expect(combinationRow.locator('.edit__block-combination-input')).toBeVisible();
     const result = await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze();
     expect(result.violations, JSON.stringify(result.violations, null, 2)).toEqual([]);
   });

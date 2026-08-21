@@ -11,6 +11,7 @@ import {
   requestBlockImprovement,
   saveEditedFormula,
   type BlockImprovementDeps,
+  type SiblingBlockContext,
 } from './editService';
 import type { LlmProviderFactory } from './llmProviderService';
 import type { LLMProvider } from '@/lib/llm';
@@ -97,6 +98,8 @@ function makeState(overrides: Partial<AppState> = {}): AppState {
     blockImprovement: null,
     formulaSave: null,
     formulaEditNote: null,
+    blockImprovementInstruction: null,
+    blockImprovementManualEditDraft: null,
     blocksDraftSavedAt: null,
     hydrateError: null,
     ...overrides,
@@ -636,18 +639,49 @@ describe('requestBlockImprovement - シード / 検証文脈', () => {
     expect(calls[0]).toContain('現在のヒット数（PubMed esearch）: (未計測)');
     expect(calls[0]).toContain('キーワード別ヒット数（単体）:\n(未計測)');
   });
+
+  test('siblings（兄弟ブロックとの共有語）が improve-block のプロンプトに転記される（issue #89）', async () => {
+    const store = createStore(makeState({ currentFormulaMarkdown: VALID_MD }));
+    const { factory, calls } = capturingFactory();
+    await requestBlockImprovement(
+      {
+        blockId: '1',
+        siblings: [
+          {
+            id: '2',
+            label: 'Outcome',
+            expression: 'children[tiab] OR asthma[tiab]',
+            sharedTerms: [{ term: 'asthma[tiab]', kind: 'freeword' }],
+          },
+        ],
+      },
+      { store, google: emptySeedsGoogle(), llmFactory: factory }
+    );
+    expect(calls[0]).toContain('#2 Outcome: children[tiab] OR asthma[tiab]');
+    expect(calls[0]).toContain('共有語: asthma[tiab]');
+  });
+
+  test('siblings 未指定なら (渡されていない)', async () => {
+    const store = createStore(makeState({ currentFormulaMarkdown: VALID_MD }));
+    const { factory, calls } = capturingFactory();
+    await requestBlockImprovement(
+      { blockId: '1' },
+      { store, google: emptySeedsGoogle(), llmFactory: factory }
+    );
+    expect(calls[0]).toContain('他ブロック（掛け合わせる相手）:\n(渡されていない)');
+  });
 });
 
 describe('getBlockImprovementContext', () => {
   test('式が未生成なら null', async () => {
     const store = createStore(makeState({ currentFormulaMarkdown: null }));
-    const ctx = await getBlockImprovementContext('1', { store, google: emptySeedsGoogle() });
+    const ctx = await getBlockImprovementContext('1', [], { store, google: emptySeedsGoogle() });
     expect(ctx).toBeNull();
   });
 
   test('存在しない blockId は null', async () => {
     const store = createStore(makeState({ currentFormulaMarkdown: VALID_MD }));
-    const ctx = await getBlockImprovementContext('99', { store, google: emptySeedsGoogle() });
+    const ctx = await getBlockImprovementContext('99', [], { store, google: emptySeedsGoogle() });
     expect(ctx).toBeNull();
   });
 
@@ -667,7 +701,7 @@ describe('getBlockImprovementContext', () => {
     const google = seedsGoogle([
       { pmid: '111', title: 'Seed A', source: 'initial', is_valid: 'true', user_decision: 'include' },
     ]);
-    const ctx = await getBlockImprovementContext('1', { store, google });
+    const ctx = await getBlockImprovementContext('1', [], { store, google });
     expect(ctx).not.toBeNull();
     expect(ctx!.researchQuestion).toBe('RQ');
     expect(ctx!.blockLabel).toBe('Population');
@@ -680,6 +714,67 @@ describe('getBlockImprovementContext', () => {
       capturedPmids: ['111'],
       missedPmids: ['222'],
     });
+    expect(ctx!.siblings).toEqual([]);
+  });
+
+  test('siblings は渡された値をそのまま context に載せる（issue #89）', async () => {
+    const store = createStore(makeState({ currentFormulaMarkdown: VALID_MD }));
+    const siblings: SiblingBlockContext[] = [
+      { id: '2', label: 'Outcome', expression: 'children[tiab]', sharedTerms: [{ term: 'Asthma', kind: 'mesh' }] },
+    ];
+    const ctx = await getBlockImprovementContext('1', siblings, {
+      store,
+      google: emptySeedsGoogle(),
+    });
+    expect(ctx!.siblings).toEqual(siblings);
+  });
+
+  test('formulaEditDraft が現バージョンと一致すれば currentExpression は下書きの内容になる（issue #92 C-2）', async () => {
+    // editView.ts の siblings（兄弟ブロックの式・共有語）は編集中の下書き
+    // （parsePubmedFormulaMd(editor.getMd())）から計算される。currentExpression が
+    // 保存版のままだと、下書き基準の共有語が「同一バージョンには存在しない語」を
+    // 指してしまう。formulaEditDraft が現在の formulaVersionId と一致する間は
+    // 下書きを優先して読むことを確認する。
+    const store = createStore(
+      makeState({
+        currentFormulaMarkdown: VALID_MD,
+        currentFormulaVersionId: 'v-now',
+        formulaEditDraft: {
+          formulaVersionId: 'v-now',
+          markdown:
+            '## PubMed/MEDLINE\n\n```\n#1 asthma[tiab] OR wheeze[tiab]\n#2 children[tiab]\n#3 #1 AND #2\n```\n',
+        },
+      })
+    );
+    const ctx = await getBlockImprovementContext('1', [], { store, google: emptySeedsGoogle() });
+    expect(ctx!.currentExpression).toBe('asthma[tiab] OR wheeze[tiab]');
+  });
+
+  test('formulaEditDraft が別バージョン（stale）なら保存版にフォールバックする', async () => {
+    const store = createStore(
+      makeState({
+        currentFormulaMarkdown: VALID_MD,
+        currentFormulaVersionId: 'v-now',
+        formulaEditDraft: {
+          formulaVersionId: 'v-old',
+          markdown: '## PubMed/MEDLINE\n\n```\n#1 stale-edit[tiab]\n```\n',
+        },
+      })
+    );
+    const ctx = await getBlockImprovementContext('1', [], { store, google: emptySeedsGoogle() });
+    expect(ctx!.currentExpression).toBe('asthma[tiab]');
+  });
+
+  test('formulaEditDraft が無ければ（未編集）従来どおり保存版を使う', async () => {
+    const store = createStore(
+      makeState({
+        currentFormulaMarkdown: VALID_MD,
+        currentFormulaVersionId: 'v-now',
+        formulaEditDraft: null,
+      })
+    );
+    const ctx = await getBlockImprovementContext('1', [], { store, google: emptySeedsGoogle() });
+    expect(ctx!.currentExpression).toBe('asthma[tiab]');
   });
 });
 
@@ -712,5 +807,37 @@ describe('applyBlockImprovement', () => {
 
   test('見つからない blockId は例外', () => {
     expect(() => applyBlockImprovement(VALID_MD, 'ZZ', 'x')).toThrow(/#ZZ/);
+  });
+
+  test('空文字への差し替えは例外', () => {
+    expect(() => applyBlockImprovement(VALID_MD, '1', '   ')).toThrow(/#1/);
+  });
+});
+
+describe('applyBlockImprovement - 参照整合性ガード（issue #88）', () => {
+  test('掛け合わせ行から参照を失う差し替えは拒否される', () => {
+    // #3 は "#1 AND #2"（掛け合わせ行）。参照を含まない式に差し替えようとすると拒否する。
+    expect(() => applyBlockImprovement(VALID_MD, '3', 'asthma[tiab]')).toThrow(
+      /#3 は他のブロックを掛け合わせる行です（#1, #2 を参照）/
+    );
+  });
+
+  test('概念ブロックへ他ブロック参照を混入させる差し替えは拒否される', () => {
+    // #1 は参照を持たない概念ブロック。#2 への参照を持ち込もうとすると拒否する。
+    expect(() => applyBlockImprovement(VALID_MD, '1', '#2 AND extra[tiab]')).toThrow(
+      /#1 に他のブロックへの参照（#2）を含めることはできません/
+    );
+  });
+
+  test('掛け合わせ行同士の構造編集（参照→参照）は許可される', () => {
+    // #1 AND #2 → #1 OR #2 のような構造の書き換えは、参照が失われないので通す。
+    const result = applyBlockImprovement(VALID_MD, '3', '#1 OR #2');
+    expect(result).toContain('#3 #1 OR #2');
+  });
+
+  test('パース不能な formula_md ではガードをスキップして従来どおり置換する', () => {
+    const brokenMd = '#1 foo\n#2 #1\n';
+    const result = applyBlockImprovement(brokenMd, '1', '#2 contaminated[tiab]');
+    expect(result).toContain('#1 #2 contaminated[tiab]');
   });
 });

@@ -156,9 +156,19 @@
 
 .edit__block-ai-context-empty,
 .edit__block-ai-context-loading,
-.edit__block-ai-context-validation {
+.edit__block-ai-context-validation,
+.edit__block-ai-context-siblings-empty {
   margin: 0;
   color: var(--color-text-muted);
+}
+
+.edit__block-ai-context-siblings {
+  margin: 0;
+  padding-left: var(--space-4);
+}
+
+.edit__block-ai-context-siblings li {
+  overflow-wrap: anywhere;
 }
 
 .edit__block-current {
@@ -255,6 +265,53 @@
   color: var(--color-text-muted);
 }
 
+/* 削除/追加サマリ行（issue #89）。文字色は既定の --color-text に委ねる
+   （警告色ではなく単なる集計情報なので、他の淡色注記と違い強調しない）。 */
+.edit__block-diff-summary {
+  margin: var(--space-1) 0 0;
+  font-size: var(--font-size-sm);
+}
+
+/* 「提案を編集してから採用する」（issue #90）。edit__block-ai-form / edit__block-ai-context の
+   既存トーンに揃える（点線ボーダーの details、summary は控えめな文字色）。 */
+.edit__block-ai-manual-edit {
+  margin-top: var(--space-2);
+  font-size: var(--font-size-sm);
+}
+
+.edit__block-ai-manual-edit summary {
+  cursor: pointer;
+  color: var(--color-text-muted);
+}
+
+.edit__block-ai-manual-edit-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: var(--space-2);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-sm);
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  resize: vertical;
+}
+
+.edit__block-ai-manual-edit-actions:not([hidden]) {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.edit__block-ai-manual-edit-error {
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+  margin: var(--space-1) 0 0;
+}
+
+.edit__block-ai-manual-edit-error:empty {
+  display: none;
+}
+
 .edit__block-actions {
   display: flex;
   gap: var(--space-2);
@@ -264,6 +321,65 @@
 .edit__block-feedback {
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
+  margin-top: var(--space-2);
+}
+
+/* 「これまでのやり取り（N 回）」（issue #90）。history が空なら要素ごと出ないため、
+   :not([hidden]) 相当のガードは不要（CLAUDE.md の注意は display 直書きに対するものであり、
+   ここは要素自体を条件付きで appendChild するため該当しない）。 */
+.edit__block-ai-history {
+  margin-top: var(--space-2);
+  font-size: var(--font-size-sm);
+}
+
+.edit__block-ai-history summary {
+  cursor: pointer;
+  color: var(--color-text-muted);
+}
+
+.edit__block-ai-history-list:not([hidden]) {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.edit__block-ai-history-instruction {
+  margin: 0;
+  font-weight: bold;
+}
+
+.edit__block-ai-history-rationale {
+  margin: 2px 0 0;
+  color: var(--color-text-muted);
+}
+
+/* 「指示を追加してやり直す」（issue #90）。accept / reject の下に常時表示する
+   （edit__block-ai-form と同じトーンだが、折りたためない主要動線なので点線ボーダーは付けない）。 */
+.edit__block-ai-redo {
+  margin-top: var(--space-3);
+}
+
+.edit__block-ai-redo-label:not([hidden]) {
+  display: block;
+  font-size: var(--font-size-sm);
+  font-weight: bold;
+}
+
+.edit__block-ai-redo-instruction {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: var(--space-1);
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  resize: vertical;
+}
+
+.edit__block-ai-redo-actions:not([hidden]) {
+  display: flex;
+  gap: var(--space-2);
   margin-top: var(--space-2);
 }
 
@@ -326,6 +442,125 @@
 }
 
 .edit__block-rawedit .edit__block-edit-form {
+  margin-top: var(--space-2);
+}
+
+/* 検索式の構造上の注意（issue #88）。ブロック一覧の直前へ出す。掛け合わせ行が 1 本も
+   無い / どの行からも参照されないブロックがあるときに出るが、保存は止めない。
+   .blocks__draft-notice（blocks.css）と同じ作り: 文字色は指定せず既定の --color-text に
+   委ねる（--color-warning をこの淡い背景に載せると 3.02:1 で AA 未満になる実測がある）。
+   警告であることはボーダーと文頭の ⚠ で示す。 */
+.edit__consistency-notice {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-warning);
+  border-left: 4px solid var(--color-warning);
+  border-radius: var(--radius-sm);
+  background: #fdf3e3;
+  font-size: var(--font-size-sm);
+  margin: 0 0 var(--space-2);
+}
+
+.edit__consistency-notice:last-child {
+  margin-bottom: var(--space-3);
+}
+
+/* 掛け合わせ行（isCombination=true。例: #3 #1 AND #2）は語の編集対象外（issue #88）。
+   ✏️ / 「AI に改善させる」は出さず、参照 ID を示す注記のみを出す。破線ボーダーで
+   概念ブロックと区別する（テキストは注記自体が既に説明しているので、ここでは
+   opacity ではなく border-style だけを変える。文字色のコントラストには影響しない）。 */
+.edit__block-row--combination {
+  border-style: dashed;
+}
+
+/* opacity ではなく color で弱める: opacity は子孫をまとめて 1 グループとして合成するため
+   （edit.css 冒頭の formula-diff__term--same と同じ理由）。--color-text-muted は
+   .edit__block-row の背景（--color-bg）の上で AA を満たす。 */
+.edit__block-combination-note {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  margin: var(--space-2) 0 0;
+}
+
+/* 参照とリテラル検索語が混在する掛け合わせ行（例: `#4 #1 AND #2 AND humans[mh]`）専用の
+   生テキスト編集スロット（issue #88 対応後の退行修正）。「組み合わせ方を編集」パネルは
+   キーワードをエラーにして保存できないため出さず、代わりに buildRawEditForm をここへ
+   常時表示する。中身（.edit__block-rawedit）が自前で margin-top を持つため、
+   このスロット自体には見た目を持たせない（.edit__block-combination-panel と同じ構成）。
+   ルールが空のためセレクタは持たず、コメントだけをここに残す。 */
+
+/* 「組み合わせ方を編集」（issue #91）。掛け合わせ行だけに出るトグルとパネル。参照と論理
+   演算子の組み替え（`#1 AND #2` → `(#1 OR #2) AND #3` 等）だけを許可し、キーワードは書けない。
+   #/blocks の結合式エディタ（blocks.css の .blocks__combination-*）とトーンを揃える。
+   パネル本体（.edit__block-combination-form）はトグルを開いたときだけ appendChild される
+   （editView.ts の syncCombinationPanel）ため、常設のスロット（.edit__block-combination-panel）
+   側には見た目を持たせない（edit__block-ai / edit__block-edit と同じ構成）。 */
+.edit__block-combination-toggle {
+  margin-top: var(--space-2);
+  font-size: var(--font-size-sm);
+  padding: 2px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  cursor: pointer;
+}
+
+.edit__block-combination-form {
+  margin-top: var(--space-2);
+  padding: var(--space-3);
+  border: 1px dashed var(--color-border);
+  border-radius: 4px;
+}
+
+.edit__block-combination-hint {
+  margin: 0 0 var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.edit__block-combination-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-sm);
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+}
+
+/* OK / エラーの区別は文字色ではなく border-left + 文頭の記号（✓ / ⚠）で示す
+   （.edit__consistency-notice と同じ考え方）。--color-success (#2e8c4f) はこの用途で文字色
+   として直書きすると白地でも実測 4.22:1 で AA（4.5:1）を割り込むため使わない。border-left は
+   非テキストのコントラスト基準（WCAG 1.4.11 の 3:1）なので success / danger どちらも余裕で
+   満たす（白地に対しそれぞれ実測 4.22:1 / 5.18:1）。 */
+.edit__block-combination-status {
+  margin: var(--space-2) 0 0;
+  padding: 2px var(--space-2);
+  border-left: 3px solid var(--color-border);
+  font-size: var(--font-size-sm);
+}
+
+.edit__block-combination-status--ok {
+  border-left-color: var(--color-success);
+}
+
+.edit__block-combination-status--error {
+  border-left-color: var(--color-danger);
+}
+
+.edit__block-combination-errors {
+  list-style: disc;
+  margin: var(--space-1) 0 0;
+  padding: 0 0 0 var(--space-4);
+  font-size: var(--font-size-sm);
+}
+
+.edit__block-combination-errors:empty {
+  display: none;
+}
+
+.edit__block-combination-actions:not([hidden]) {
+  display: flex;
+  gap: var(--space-2);
   margin-top: var(--space-2);
 }
 
