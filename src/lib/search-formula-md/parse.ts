@@ -1,3 +1,4 @@
+import { extractBlockReferences } from './references';
 import {
   PUBMED_HEADING_PATTERN,
   type FormulaBlock,
@@ -15,7 +16,6 @@ export class FormulaParseError extends Error {
 const FENCE_OPEN = /^```[^\n]*\n/m;
 const FENCE_CLOSE = /\n```\s*$/m;
 const LINE_PATTERN = /^#([A-Za-z0-9]+)\s+(.+?)\s*$/;
-const REFERENCE_PATTERN = /#([A-Za-z0-9]+)/g;
 
 /**
  * search_formula.md 互換のマークダウンから PubMed セクションを抽出してパースする。
@@ -86,14 +86,7 @@ function containsOtherReference(
   selfId: string,
   knownIds: ReadonlySet<string>
 ): boolean {
-  for (const match of expression.matchAll(REFERENCE_PATTERN)) {
-    // REFERENCE_PATTERN が 1 つのキャプチャを保証する
-    const ref = match[1] as string;
-    if (ref !== selfId && knownIds.has(ref)) {
-      return true;
-    }
-  }
-  return false;
+  return extractBlockReferences(expression, selfId, knownIds).length > 0;
 }
 
 function findCombinationExpression(blocks: FormulaBlock[]): string | null {

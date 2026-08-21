@@ -329,3 +329,39 @@
   margin-top: var(--space-2);
 }
 
+/* 検索式の構造上の注意（issue #88）。ブロック一覧の直前へ出す。掛け合わせ行が 1 本も
+   無い / どの行からも参照されないブロックがあるときに出るが、保存は止めない。
+   .blocks__draft-notice（blocks.css）と同じ作り: 文字色は指定せず既定の --color-text に
+   委ねる（--color-warning をこの淡い背景に載せると 3.02:1 で AA 未満になる実測がある）。
+   警告であることはボーダーと文頭の ⚠ で示す。 */
+.edit__consistency-notice {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-warning);
+  border-left: 4px solid var(--color-warning);
+  border-radius: var(--radius-sm);
+  background: #fdf3e3;
+  font-size: var(--font-size-sm);
+  margin: 0 0 var(--space-2);
+}
+
+.edit__consistency-notice:last-child {
+  margin-bottom: var(--space-3);
+}
+
+/* 掛け合わせ行（isCombination=true。例: #3 #1 AND #2）は語の編集対象外（issue #88）。
+   ✏️ / 「AI に改善させる」は出さず、参照 ID を示す注記のみを出す。破線ボーダーで
+   概念ブロックと区別する（テキストは注記自体が既に説明しているので、ここでは
+   opacity ではなく border-style だけを変える。文字色のコントラストには影響しない）。 */
+.edit__block-row--combination {
+  border-style: dashed;
+}
+
+/* opacity ではなく color で弱める: opacity は子孫をまとめて 1 グループとして合成するため
+   （edit.css 冒頭の formula-diff__term--same と同じ理由）。--color-text-muted は
+   .edit__block-row の背景（--color-bg）の上で AA を満たす。 */
+.edit__block-combination-note {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  margin: var(--space-2) 0 0;
+}
+

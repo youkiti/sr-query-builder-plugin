@@ -6,7 +6,7 @@ import {
 } from '@/features/formula';
 import { listSeedPapersWithRows } from '@/features/seeds';
 import { isSeedEligibleForValidation } from '@/domain/seedPaper';
-import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
+import { extractBlockReferences, parsePubmedFormulaMd } from '@/lib/search-formula-md';
 import type { GoogleApiDeps } from '@/lib/google';
 import { nowIso } from '@/utils/iso8601';
 import { newUuid } from '@/utils/uuid';
@@ -329,7 +329,12 @@ export async function requestBlockImprovement(
  * 現在の formula_md の #N 行を新しい expression で差し替えた新しい Markdown を返す。
  * 保存は行わず、textarea に書き戻すだけなので副作用は無い。
  *
- * @throws {Error} 指定 blockId が見つからない
+ * この関数は AI 改善の accept・チップ編集・クイック整理・インスペクタからの編集・
+ * 生テキスト詳細編集のすべてが通る唯一の適用口（issue #88）。差し替えで
+ * 「他ブロックへの参照」を失う・新たに混入する操作は {@link assertReferenceIntegrity}
+ * が拒否するため、ここに入れることで全ての編集経路が参照整合性を守る。
+ *
+ * @throws {Error} 指定 blockId が見つからない、式が空、または参照整合性が崩れる場合
  */
 export function applyBlockImprovement(
   formulaMd: string,
@@ -340,8 +345,63 @@ export function applyBlockImprovement(
   if (!lineRegex.test(formulaMd)) {
     throw new Error(`ブロック #${blockId} の行が formula_md に見つかりません`);
   }
-  const replacement = `#${blockId} ${newExpression.trim()}`;
+  const trimmedNew = newExpression.trim();
+  if (trimmedNew === '') {
+    throw new Error(`ブロック #${blockId} を空にすることはできません。`);
+  }
+  assertReferenceIntegrity(formulaMd, blockId, trimmedNew);
+  const replacement = `#${blockId} ${trimmedNew}`;
   return formulaMd.replace(lineRegex, replacement);
+}
+
+/**
+ * 置換前後で「他ブロックへの参照」を失う・新たに混入する操作を拒否する（issue #88）。
+ *
+ * `#3 #1 AND #2` のような掛け合わせ行は参照が消えると
+ * `expandFormula.ts` の `chooseEntryBlockId` が「結合行なし → 最後の行」に
+ * フォールバックし、#1/#2 が効いていない式のまま捕捉率が計算・エクスポートされてしまう
+ * （ユーザーからは見えない）。逆に概念ブロックへ参照を混入させると意図しない結合行が
+ * 生まれる。
+ *
+ * 置換前・置換後の両方に参照がある（掛け合わせの構造自体を書き換える）場合は許可する
+ * （構造編集 UI は issue #91 で扱う）。
+ *
+ * `parsePubmedFormulaMd` が失敗する（パース不能な md）場合はガードをスキップし、
+ * 従来どおり置換する（既存の逃げ道を塞がない）。
+ */
+function assertReferenceIntegrity(
+  formulaMd: string,
+  blockId: string,
+  newExpression: string
+): void {
+  let formula;
+  try {
+    formula = parsePubmedFormulaMd(formulaMd);
+  } catch {
+    return;
+  }
+  const target = formula.blocks.find((b) => b.id === blockId);
+  if (target === undefined) {
+    return;
+  }
+  const knownIds = new Set(formula.blocks.map((b) => b.id));
+  const beforeRefs = extractBlockReferences(target.expression, blockId, knownIds);
+  const afterRefs = extractBlockReferences(newExpression, blockId, knownIds);
+
+  if (beforeRefs.length > 0 && afterRefs.length === 0) {
+    throw new Error(
+      `ブロック #${blockId} は他のブロックを掛け合わせる行です（${formatRefs(beforeRefs)} を参照）。この操作で参照が失われるため適用できません。語の編集は各ブロックで行ってください。`
+    );
+  }
+  if (beforeRefs.length === 0 && afterRefs.length > 0) {
+    throw new Error(
+      `ブロック #${blockId} に他のブロックへの参照（${formatRefs(afterRefs)}）を含めることはできません。`
+    );
+  }
+}
+
+function formatRefs(ids: string[]): string {
+  return ids.map((id) => `#${id}`).join(', ');
 }
 
 function escapeRegex(raw: string): string {

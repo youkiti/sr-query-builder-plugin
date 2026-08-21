@@ -6,6 +6,8 @@ describe('index.ts 再エクスポート', () => {
     expect(typeof indexExports.serializePubmedFormulaMd).toBe('function');
     expect(typeof indexExports.FormulaParseError).toBe('function');
     expect(typeof indexExports.FormulaSerializeError).toBe('function');
+    expect(typeof indexExports.extractBlockReferences).toBe('function');
+    expect(typeof indexExports.findUnreachableBlockIds).toBe('function');
     expect(indexExports.BLOCK_ID_PATTERN).toBeInstanceOf(RegExp);
     expect(indexExports.PUBMED_HEADING_PATTERN).toBeInstanceOf(RegExp);
   });

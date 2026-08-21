@@ -5,7 +5,12 @@ import {
   type RequestBlockImprovementInput,
   type SaveEditedFormulaInput,
 } from '@/app/services';
-import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
+import {
+  extractBlockReferences,
+  findUnreachableBlockIds,
+  parsePubmedFormulaMd,
+  type PubmedFormula,
+} from '@/lib/search-formula-md';
 import {
   buildBlockInspector,
   collectMeasuredContext,
@@ -48,6 +53,16 @@ import type { RenderView } from './types';
  * （blockInspector.ts）を展開する。チップ・詳細編集・インスペクタの MeSH ブラウザ
  * （置換 / OR追加 / 削除）・Δ 表のいずれから編集しても、同じ純粋関数（operandEdit /
  * meshExpressionEdit）を経由した同じ結果になる。
+ *
+ * 上記 3 手段はいずれも `isCombination=false` の概念ブロックだけが対象（issue #88）。
+ * `#3 #1 AND #2` のような掛け合わせ行（他ブロック ID への参照を含む行）は検索の実体を
+ * 持たないため、✏️ / 「AI に改善させる」を出さず、読み取り表示と参照 ID を示す注記のみ
+ * 表示する。掛け合わせ行の語を書き換えて参照を失うと、`expandFormula.ts` の
+ * `chooseEntryBlockId` が「結合行なし → 最後の行」にフォールバックし、#1/#2 が効いていない
+ * 式のまま捕捉率が計算・エクスポートされてしまう（ユーザーからは見えない回帰）。
+ * 参照を保ったままの構造編集（`#1 AND #2` → `#1 OR #2` 等）は本 issue の対象外
+ * （後続 issue #91）。適用口 applyBlockImprovement（editService.ts）側にも同じ理由の
+ * 参照整合性ガードがあり、この画面はその最初の防波堤にすぎない。
  *
  * 検索式 Markdown 全文は `state.formulaEditDraft`、ブロック単位 AI 改善の進捗/提案/エラーは
  * `state.blockImprovement`、保存の進捗/結果/エラーは `state.formulaSave`、編集メモは
@@ -324,6 +339,11 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
     blocksSection.appendChild(blocksHeading);
     // MeSH / フリーワードの色分け凡例（読み取り表示・チップ編集・AI 差分の 3 か所で共通）。
     blocksSection.appendChild(buildLegend(doc));
+    // 検索式の構造上の問題（掛け合わせ行なし / 参照されないブロック）をブロック一覧の
+    // 直前に注意表示するスロット（issue #88）。保存は止めない。
+    const noticeSlot = doc.createElement('div');
+    noticeSlot.className = 'edit__consistency-notices';
+    blocksSection.appendChild(noticeSlot);
     const blocksList = doc.createElement('ul');
     blocksList.className = 'edit__block-list';
     blocksSection.appendChild(blocksList);
@@ -375,7 +395,16 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
     container.appendChild(errorBox);
 
     function rerenderBlocks(): void {
-      renderBlockList(doc, blocksList, editor, internalCallbacks, improvement, ctx.state.blocksDraft, inspector);
+      renderBlockList(
+        doc,
+        blocksList,
+        noticeSlot,
+        editor,
+        internalCallbacks,
+        improvement,
+        ctx.state.blocksDraft,
+        inspector
+      );
     }
     rerenderBlocks();
 
@@ -411,6 +440,7 @@ function formatSaveStatus(save: FormulaSaveState | null): string {
 function renderBlockList(
   doc: Document,
   ul: HTMLElement,
+  noticeSlot: HTMLElement,
   editor: FormulaEditor,
   callbacks: EditViewCallbacks,
   improvement: BlockImprovementState | null,
@@ -418,6 +448,7 @@ function renderBlockList(
   inspector: EditInspectorRuntime
 ): void {
   ul.innerHTML = '';
+  noticeSlot.innerHTML = '';
   let formula;
   try {
     formula = parsePubmedFormulaMd(editor.getMd());
@@ -435,18 +466,26 @@ function renderBlockList(
     ul.appendChild(empty);
     return;
   }
+  renderConsistencyNotices(doc, noticeSlot, formula);
   // インスペクタの「他ブロックとの重複」セクション向け。結合行（他ブロック ID を参照する行）は
   // 検索の実体を持たないので概念ブロックの比較対象から除く（requirements: ブロック編集インスペクタ）。
   const conceptBlocks = formula.blocks.filter((b) => !b.isCombination);
+  const knownIds = new Set(formula.blocks.map((b) => b.id));
   for (const block of formula.blocks) {
     const siblings: SiblingBlock[] = conceptBlocks
       .filter((b) => b.id !== block.id)
       .map((b) => ({ id: b.id, label: resolveBlockLabel(blocksDraft, b.id), expression: b.expression }));
+    // 掛け合わせ行のみ: 注記に出す「どのブロックの掛け合わせか」（issue #88）。
+    const combinationRefs = block.isCombination
+      ? extractBlockReferences(block.expression, block.id, knownIds)
+      : [];
     ul.appendChild(
       buildBlockRow(
         doc,
         block.id,
         block.expression,
+        block.isCombination,
+        combinationRefs,
         editor,
         callbacks,
         improvement !== null && improvement.blockId === block.id ? improvement : null,
@@ -457,10 +496,46 @@ function renderBlockList(
   }
 }
 
+/**
+ * ブロック一覧の直前に、検索式の構造上の問題を注意表示する（issue #88）。保存は止めない。
+ *
+ * - 掛け合わせ行が 1 本も無い: `expandFormula.ts` の `chooseEntryBlockId` は結合行が
+ *   無ければ最後の行を起点にフォールバックするため、それ以外の行が検索に反映されない。
+ * - `findUnreachableBlockIds` が非空: 起点から辿れないブロックがある（結合行の編集で
+ *   参照を書き換えた、または最初から漏れていた等）。
+ */
+function renderConsistencyNotices(doc: Document, slot: HTMLElement, formula: PubmedFormula): void {
+  const hasCombination = formula.blocks.some((b) => b.isCombination);
+  if (!hasCombination) {
+    slot.appendChild(
+      buildConsistencyNotice(
+        doc,
+        '⚠ ブロックを掛け合わせる行（例: #3 #1 AND #2）がありません。このままでは最後の行だけが検索式として扱われます。'
+      )
+    );
+  }
+  const unreachable = findUnreachableBlockIds(formula);
+  if (unreachable.length > 0) {
+    const list = unreachable.map((id) => `#${id}`).join('、');
+    slot.appendChild(
+      buildConsistencyNotice(doc, `⚠ ${list} はどの行からも参照されていません。検索に反映されません。`)
+    );
+  }
+}
+
+function buildConsistencyNotice(doc: Document, text: string): HTMLElement {
+  const p = doc.createElement('p');
+  p.className = 'edit__consistency-notice';
+  p.textContent = text;
+  return p;
+}
+
 function buildBlockRow(
   doc: Document,
   blockId: string,
   expression: string,
+  isCombination: boolean,
+  combinationRefs: string[],
   editor: FormulaEditor,
   callbacks: EditViewCallbacks,
   improvement: BlockImprovementState | null,
@@ -477,6 +552,31 @@ function buildBlockRow(
   idSpan.className = 'edit__block-id';
   idSpan.textContent = `#${blockId}`;
   header.appendChild(idSpan);
+
+  // 読み取り表示（MeSH / フリーワードを色分け。formulaDisplay.ts の renderExpressionInto）。
+  // 鉛筆編集面が開いている間は隠す（旧実装からの継続）。掛け合わせ行でも変わらず出す。
+  const currentPre = doc.createElement('pre');
+  currentPre.className = 'edit__block-current';
+  renderExpressionInto(currentPre, expression);
+
+  // 掛け合わせ行（isCombination=true）には ✏️ / 「AI に改善させる」を出さない（issue #88）。
+  // 読み取り表示のみ出し、代わりに参照 ID を示す注記を出す。編集スロット・AI スロット・
+  // インスペクタスロットと、それらのイベント配線は作らない（この関数の残りは概念ブロック
+  // 専用として進む）。
+  if (isCombination) {
+    li.classList.add('edit__block-row--combination');
+    li.appendChild(header);
+    li.appendChild(currentPre);
+    const note = doc.createElement('p');
+    note.className = 'edit__block-combination-note';
+    const refList = combinationRefs.map((id) => `#${id}`).join('、');
+    note.textContent =
+      refList === ''
+        ? 'この行は他のブロックを掛け合わせる行です。語の編集は各ブロックで行ってください。'
+        : `この行は ${refList} の掛け合わせです。語の編集は各ブロックで行ってください。`;
+    li.appendChild(note);
+    return li;
+  }
 
   const tools = doc.createElement('div');
   tools.className = 'edit__block-tools';
@@ -496,12 +596,6 @@ function buildBlockRow(
   tools.appendChild(improveBtn);
   header.appendChild(tools);
   li.appendChild(header);
-
-  // 読み取り表示（MeSH / フリーワードを色分け。formulaDisplay.ts の renderExpressionInto）。
-  // 鉛筆編集面が開いている間は隠す（旧実装からの継続）。
-  const currentPre = doc.createElement('pre');
-  currentPre.className = 'edit__block-current';
-  renderExpressionInto(currentPre, expression);
   li.appendChild(currentPre);
 
   // インライン手編集用スロット（鉛筆ボタンで開く）。中身は syncEditSlot が組む

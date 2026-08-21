@@ -1,4 +1,5 @@
 export { parsePubmedFormulaMd, FormulaParseError } from './parse';
+export { extractBlockReferences, findUnreachableBlockIds } from './references';
 export { serializePubmedFormulaMd, FormulaSerializeError } from './serialize';
 export type { SerializeOptions } from './serialize';
 export {

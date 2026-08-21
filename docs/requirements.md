@@ -493,6 +493,7 @@ LLM は検索式生成時に、プロトコルに書かれていないフィル�
 - メインビュー上でマークダウンエディタ（シンタックスハイライト）
 - 行単位で「このブロックを AI に改善させる」ボタン → 該当 skill（`block-designer` / `mesh-suggester` / `freeword-designer` / `filter-designer` のうち対応するもの）を再実行 → 差分表示 → accept / reject
 - accept 時は `FormulaVersions` に `created_by=user_edit` または `auto_optimize` で新バージョン追記
+- **掛け合わせ行（例: `#3 #1 AND #2`）は語の編集対象外**（issue #88）。他ブロック ID への参照を含む行は検索の実体を持たず、語を書き換えて参照を失うと `expandFormula.ts` の起点選択が最後の行へフォールバックし、#1/#2 抜きの式で捕捉率が計算される。参照が保たれる範囲での構造編集（`#1 AND #2` → `#1 OR #2` 等）は UI 未実装（後続 issue #91）
 
 ### 4.8 変換・エクスポート
 

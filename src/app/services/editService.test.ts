@@ -713,4 +713,36 @@ describe('applyBlockImprovement', () => {
   test('見つからない blockId は例外', () => {
     expect(() => applyBlockImprovement(VALID_MD, 'ZZ', 'x')).toThrow(/#ZZ/);
   });
+
+  test('空文字への差し替えは例外', () => {
+    expect(() => applyBlockImprovement(VALID_MD, '1', '   ')).toThrow(/#1/);
+  });
+});
+
+describe('applyBlockImprovement - 参照整合性ガード（issue #88）', () => {
+  test('掛け合わせ行から参照を失う差し替えは拒否される', () => {
+    // #3 は "#1 AND #2"（掛け合わせ行）。参照を含まない式に差し替えようとすると拒否する。
+    expect(() => applyBlockImprovement(VALID_MD, '3', 'asthma[tiab]')).toThrow(
+      /#3 は他のブロックを掛け合わせる行です（#1, #2 を参照）/
+    );
+  });
+
+  test('概念ブロックへ他ブロック参照を混入させる差し替えは拒否される', () => {
+    // #1 は参照を持たない概念ブロック。#2 への参照を持ち込もうとすると拒否する。
+    expect(() => applyBlockImprovement(VALID_MD, '1', '#2 AND extra[tiab]')).toThrow(
+      /#1 に他のブロックへの参照（#2）を含めることはできません/
+    );
+  });
+
+  test('掛け合わせ行同士の構造編集（参照→参照）は許可される', () => {
+    // #1 AND #2 → #1 OR #2 のような構造の書き換えは、参照が失われないので通す。
+    const result = applyBlockImprovement(VALID_MD, '3', '#1 OR #2');
+    expect(result).toContain('#3 #1 OR #2');
+  });
+
+  test('パース不能な formula_md ではガードをスキップして従来どおり置換する', () => {
+    const brokenMd = '#1 foo\n#2 #1\n';
+    const result = applyBlockImprovement(brokenMd, '1', '#2 contaminated[tiab]');
+    expect(result).toContain('#1 #2 contaminated[tiab]');
+  });
 });
