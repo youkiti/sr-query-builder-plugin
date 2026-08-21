@@ -184,11 +184,38 @@ export function validateCombinationExpression(
 }
 
 /**
- * combination_expression を最低限の正規化（連続空白を 1 つに）したもの。
- * UI で表示するときに使う。
+ * combination_expression を正規化する。
+ * - 連続空白を 1 つに、前後を trim
+ * - 演算子（and/or/not）を大文字（AND/OR/NOT）へ揃える。PubMed は小文字の
+ *   and/or/not を Boolean 演算子ではなく検索語として扱うため、`tokenizeCombination`
+ *   が受理した小文字演算子をここで正規化しないと、画面上は「構文 OK」に見えたまま
+ *   formula_md に小文字演算子が書き込まれ、ヒット数・捕捉率・全 DB 変換が黙って狂う。
+ * - 参照 ID（`#RCTfilter` 等）の大文字小文字は変えない（トークンの raw をそのまま使う）
+ * - 括弧の内側には空白を入れない（`(#1 AND #2)`）
+ *
+ * トークナイズ自体が失敗する入力（`tokenizeCombination` がエラーを返す入力）は
+ * トークン列から式を再構成できない（不正な文字・未知キーワードの扱いが不定になる）ため、
+ * 情報を失わないよう従来どおり空白の正規化だけを行って返す。呼び出し側は検証を通った
+ * 式でしか呼ばない設計だが、関数単体としても壊れた入力を破壊しないようにする。
  */
 export function normalizeCombinationExpression(input: string): string {
-  return input.replace(/\s+/g, ' ').trim();
+  const { tokens, errors } = tokenizeCombination(input);
+  if (errors.length > 0) {
+    return input.replace(/\s+/g, ' ').trim();
+  }
+  let result = '';
+  let prev: CombinationToken | null = null;
+  for (const tok of tokens) {
+    const text = tok.kind === 'op' ? tok.op : tok.raw;
+    if (prev === null) {
+      result = text;
+    } else {
+      const needsSpace = !(prev.kind === 'lparen' || tok.kind === 'rparen');
+      result += (needsSpace ? ' ' : '') + text;
+    }
+    prev = tok;
+  }
+  return result;
 }
 
 /**

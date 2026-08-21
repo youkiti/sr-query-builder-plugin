@@ -9,6 +9,7 @@ import {
 import {
   formatCombinationError,
   normalizeCombinationExpression,
+  tokenizeCombination,
   validateCombinationExpression,
 } from '@/lib/combination-expression';
 import {
@@ -662,6 +663,42 @@ function buildBlockRow(
     const note = doc.createElement('p');
     note.className = 'edit__block-combination-note';
     const refList = combinationRefs.map((id) => `#${id}`).join('、');
+
+    // 参照 / 演算子（AND OR NOT）/ 括弧だけで構成される「純粋な掛け合わせ行」か、
+    // `#4 #1 AND #2 AND humans[mh]` のように参照とリテラル検索語が混在する行かを判定する。
+    // 独自パーサは書かず tokenizeCombination のエラー有無だけで判定する（issue #88 の
+    // 分岐は isCombination（extractBlockReferences が 1 件でも参照を拾えば true）でしか
+    // 判定していないため、キーワード混在行も ✏️ / AI 抜きになる一方、唯一残る「組み合わせ方を
+    // 編集」パネルも validateCombinationExpression が既存のキーワードをエラーにして保存できず、
+    // この行を編集する手段が画面から消えていた。この退行を直す）。
+    const isPureCombination = tokenizeCombination(expression).errors.length === 0;
+
+    if (!isPureCombination) {
+      // リテラル語混在行: チップ編集・AI 改善は出さない（#88 の趣旨どおり。参照を失う
+      // 編集を防ぐため）。「組み合わせ方を編集」パネルも出さない（保存できないため）。
+      // 代わりに従来どおりの生テキスト編集（buildRawEditForm）を逃げ道として残す。
+      // 保存は他の編集経路と同じ applyBlockImprovement を通るため、#88 の参照整合性ガード
+      // （assertReferenceIntegrity）はここでも変わらず効く。
+      note.textContent =
+        refList === ''
+          ? 'この行には参照以外の検索語が混ざっているため「組み合わせ方を編集」は使えません。下の詳細編集（生テキスト）で式を直接書き換えてください。'
+          : `この行は ${refList} を参照していますが、参照以外の検索語も混ざっているため「組み合わせ方を編集」は使えません。下の詳細編集（生テキスト）で式を直接書き換えてください。`;
+      li.appendChild(note);
+
+      const rawEditSlot = doc.createElement('div');
+      rawEditSlot.className = 'edit__block-combination-rawedit';
+      li.appendChild(rawEditSlot);
+      // この行専用の開閉状態は持たず常時表示する（editOpenBlocks / combinationOpenBlocks は
+      // どちらもこの行の対象外）。「キャンセル」は入力中のテキストを現在の expression へ
+      // 戻すためだけに、このスロットだけを再構築する。
+      const renderRawEdit = (): void => {
+        rawEditSlot.innerHTML = '';
+        rawEditSlot.appendChild(buildRawEditForm(doc, blockId, expression, editor, renderRawEdit));
+      };
+      renderRawEdit();
+      return li;
+    }
+
     note.textContent =
       refList === ''
         ? 'この行は他のブロックを掛け合わせる行です。組み合わせ方は編集できますが、語の編集は各ブロックで行ってください。'

@@ -1942,6 +1942,80 @@ describe('createEditView - 組み合わせ方の編集（issue #91）', () => {
   });
 });
 
+describe('createEditView - 参照とリテラル語が混在する掛け合わせ行（issue #88 対応後の退行修正）', () => {
+  // #4 は #1・#2 への参照に加え、リテラル検索語（humans[mh]）が混ざった行。
+  // tokenizeCombination がこの行を「純粋な掛け合わせ行」として扱えない（humans / [ / mh / ]
+  // が不正な文字・予期しないキーワードとしてエラーになる）ため、#3（純粋な掛け合わせ行）とは
+  // 別の編集手段（生テキスト編集）が出るべきケース。
+  const MIXED_MD = [
+    '## PubMed/MEDLINE',
+    '',
+    '```',
+    '#1 asthma[tiab]',
+    '#2 children[tiab]',
+    '#3 #1 AND #2',
+    '#4 #1 AND #2 AND humans[mh]',
+    '```',
+    '',
+  ].join('\n');
+
+  test('純粋な掛け合わせ行（#3 #1 AND #2）では従来どおり ✏️・AI が無く「組み合わせ方を編集」がある', () => {
+    const view = createEditView();
+    const container = buildContainer();
+    view(container, {
+      state: { ...stateReady, currentFormulaMarkdown: MIXED_MD },
+      navigate: jest.fn(),
+    });
+    const row = blockRow(container, '3');
+    expect(row.querySelector('.edit__block-edit-toggle')).toBeNull();
+    expect(row.querySelector('.edit__block-improve')).toBeNull();
+    expect(row.querySelector('.edit__block-combination-toggle')).toBeTruthy();
+    expect(row.querySelector('.edit__block-edit-input')).toBeNull();
+  });
+
+  test('リテラル混在行（#4 #1 AND #2 AND humans[mh]）では「組み合わせ方を編集」が無く、生テキスト編集で式を保存できる', () => {
+    const onDraftChange = jest.fn();
+    const view = createEditView({ onDraftChange });
+    const container = buildContainer();
+    view(container, {
+      state: { ...stateReady, currentFormulaMarkdown: MIXED_MD },
+      navigate: jest.fn(),
+    });
+    const row = blockRow(container, '4');
+    expect(row.querySelector('.edit__block-edit-toggle')).toBeNull();
+    expect(row.querySelector('.edit__block-improve')).toBeNull();
+    expect(row.querySelector('.edit__block-combination-toggle')).toBeNull();
+    expect(row.querySelector('.edit__block-combination-note')?.textContent).toContain(
+      '「組み合わせ方を編集」は使えません'
+    );
+    const input = row.querySelector<HTMLTextAreaElement>('.edit__block-edit-input');
+    expect(input).toBeTruthy();
+    input!.value = '#1 AND #2 AND humans[mh] AND animals[mh:noexp]';
+    row.querySelector<HTMLButtonElement>('.edit__block-edit-save')!.click();
+    expect(onDraftChange).toHaveBeenCalledTimes(1);
+    expect(onDraftChange.mock.calls[0]![0]).toContain(
+      '#4 #1 AND #2 AND humans[mh] AND animals[mh:noexp]'
+    );
+  });
+
+  test('リテラル混在行から生テキストで参照を消そうとすると #88 のガードで拒否され、エラーが表示される', () => {
+    const onDraftChange = jest.fn();
+    const view = createEditView({ onDraftChange });
+    const container = buildContainer();
+    view(container, {
+      state: { ...stateReady, currentFormulaMarkdown: MIXED_MD },
+      navigate: jest.fn(),
+    });
+    const row = blockRow(container, '4');
+    const input = row.querySelector<HTMLTextAreaElement>('.edit__block-edit-input')!;
+    // #1・#2 への参照をすべて取り除き、リテラル語だけにする。
+    input.value = 'humans[mh]';
+    row.querySelector<HTMLButtonElement>('.edit__block-edit-save')!.click();
+    expect(onDraftChange).not.toHaveBeenCalled();
+    expect(row.querySelector('.edit__block-edit-error')?.textContent).toContain('参照が失われる');
+  });
+});
+
 describe('createEditView - 整合性の注意表示（issue #88）', () => {
   test('掛け合わせ行が 1 本も無ければ注意が出る', () => {
     const md = ['## PubMed/MEDLINE', '', '```', '#1 asthma[tiab]', '#2 children[tiab]', '```', ''].join(
