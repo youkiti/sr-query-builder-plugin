@@ -387,6 +387,25 @@
               back in <a href="#draft">#/draft</a>.</span
             >
           </p>
+          <p>
+            <span class="ja" lang="ja"
+              ><strong>手元にシード論文が無いとき。</strong>有効なシード論文が 0 件の状態でこの画面を実行すると、外側ではなく「内側」から初期シードの候補を探します。既定では
+              AI がプロトコルと現在の検索式から <strong>精度優先の specific な絞り込み式</strong>（MeSH は Major Topic、フリーワードはタイトル限定）を
+              1 本設計し、PubMed の関連度（Best Match）順で上位 50 件を取り、その中から組入基準に明確に合致しそうな論文を最大 5 件提示します。設計された式は候補の上に表示されるので確認できます。include
+              した論文が初期シードになり、次回の実行からは外側の探索に切り替わります。specific 式が 0 件や構文エラーのときは現在の検索式の関連度上位に自動で切り替わります。取得ボタンの下のチェックを外すと、現在の検索式そのものの上位から選びます。</span
+            >
+            <span class="en" lang="en"
+              ><strong>When you have no seed papers yet.</strong> If you run this screen with zero valid seed papers, it
+              looks <em>inside</em> the query for initial seed candidates instead of outside it. By default the AI
+              designs one <strong>precision-first, specific query</strong> from your protocol and the current strategy
+              (MeSH as Major Topic, free text restricted to titles), fetches the top 50 results in PubMed's Best Match
+              order, and proposes up to 5 papers that clearly appear to meet the inclusion criteria. The designed query is
+              shown above the candidates so you can check it. Included papers become your initial seeds, and the next
+              run switches to the outside (margin) search. If the specific query returns nothing or fails to parse, it
+              falls back to the Best Match top results of the current query. Uncheck the box below the fetch button to
+              pick from the current query itself instead.</span
+            >
+          </p>
         </section>
 
         <section id="edit">

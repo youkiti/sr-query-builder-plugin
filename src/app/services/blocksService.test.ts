@@ -73,6 +73,7 @@ function makeStateWithDrafts(): AppState {
     blockImprovementManualEditDraft: null,
     blocksDraftSavedAt: null,
     hydrateError: null,
+    expandInsideStrategy: 'specific',
   };
 }
 

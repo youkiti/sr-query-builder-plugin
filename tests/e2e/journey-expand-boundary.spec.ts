@@ -213,7 +213,24 @@ const PICK_SEED_CANDIDATES_RESPONSE = {
   picks: [{ pmid: INSIDE_PMID, reason: '組入基準に明確に合致する代表例。' }],
 };
 
-async function setupInsideExpandScenario(page: Page): Promise<void> {
+/** design-specific-query skill の応答: 精度優先の絞り込み式（issue #93） */
+const SPECIFIC_QUERY = '("Respiratory Distress Syndrome"[Majr]) AND ("Extracorporeal Membrane Oxygenation"[Majr])';
+const DESIGN_SPECIFIC_QUERY_RESPONSE = {
+  specific_query: SPECIFIC_QUERY,
+  rationale: 'MeSH を Major Topic に絞り、同義語は付けなかった。',
+};
+
+/**
+ * inside モードの外部 API 一式。既定（specific 戦略）では Gemini を 2 回
+ * （design-specific-query → pick-seed-candidates）通り、esearch は specific 式（relevance 順）と
+ * 現式（件数のみ）の 2 回。`withSpecificResponse: false` にすると設計 skill の応答を登録せず、
+ * 呼ばれたら 500 になる = 「current 戦略では設計を呼ばない」ことの否定側検証に使える。
+ */
+async function setupInsideExpandScenario(
+  page: Page,
+  options: { withSpecificResponse?: boolean; specificEsearch?: { count: string; idlist: string[] } } = {}
+): Promise<void> {
+  const withSpecificResponse = options.withSpecificResponse ?? true;
   // SeedPapers はヘッダのみ（有効 seed 0 件）→ inside モードに入る。
   await registerSheetsStub(page, {
     tabs: { SeedPapers: [SEED_PAPERS_HEADER] },
@@ -223,12 +240,18 @@ async function setupInsideExpandScenario(page: Page): Promise<void> {
 
   await registerNcbiStub(page, {
     efetchXml: INSIDE_EFETCH_XML,
-    // inside モードは現式そのものを 1 回 esearch するだけ（margin の NOT クエリは投げない）。
-    esearch: () => ({ count: '40', idlist: [INSIDE_PMID] }),
+    // margin の NOT クエリは投げない。specific 式（[Majr] を含む）と現式で応答を分ける。
+    esearch: (decodedUrl) =>
+      decodedUrl.includes('[Majr]')
+        ? (options.specificEsearch ?? { count: '12', idlist: [INSIDE_PMID] })
+        : { count: '40', idlist: [INSIDE_PMID] },
   });
 
   await registerGeminiStub(page, {
-    responses: { 'pick-seed-candidates': PICK_SEED_CANDIDATES_RESPONSE },
+    responses: {
+      'pick-seed-candidates': PICK_SEED_CANDIDATES_RESPONSE,
+      ...(withSpecificResponse ? { 'design-specific-query': DESIGN_SPECIFIC_QUERY_RESPONSE } : {}),
+    },
     usage: { promptTokenCount: 400, candidatesTokenCount: 100 },
   });
 
@@ -242,9 +265,20 @@ async function setupInsideExpandScenario(page: Page): Promise<void> {
 }
 
 test.describe('journey-expand-boundary inside モード（有効 seed 0 件のブートストラップ）', () => {
-  test('「境界事例を取得」→ inside 探索が一周して初期シード候補が並ぶ', async ({ page }) => {
+  test('「境界事例を取得」→ 既定では AI が specific 式を設計し、その relevance 上位から初期シード候補が並ぶ（issue #93）', async ({
+    page,
+  }) => {
     await setupInsideExpandScenario(page);
     await page.goto(APP_URL);
+
+    // 既定はチェック済み（AI に specific 式を設計させる）
+    const toggle = page.locator('.expand__inside-specific');
+    await expect(toggle).toBeChecked();
+
+    const esearchUrls: string[] = [];
+    page.on('request', (req) => {
+      if (req.url().includes('esearch.fcgi')) esearchUrls.push(decodeURIComponent(req.url()));
+    });
 
     const fetchBtn = page.locator('.expand__actions button');
     await fetchBtn.click();
@@ -255,9 +289,50 @@ test.describe('journey-expand-boundary inside モード（有効 seed 0 件の�
     await expect(page.locator('.expand__candidate-reason').first()).toContainText('組入基準');
     await expect(page.locator('.expand__error')).toHaveText('');
 
-    // inside モードであることを示すバナーとステータスが出る（margin 特有の文言は出ない）
+    // inside モードであることを示すバナーと、設計された specific 式が候補の上に出る
     await expect(page.locator('.expand__inside-banner')).toBeVisible();
+    await expect(page.locator('.expand__specific-query')).toHaveText(SPECIFIC_QUERY);
+    await expect(page.locator('.expand__specific-meta')).toContainText('ヒット 12 件');
+    await expect(page.locator('.expand__specific-fallback')).toHaveCount(0);
     await expect(page.locator('.expand__status')).toContainText('初期シード候補');
+    await expect(page.locator('.expand__status')).toContainText('specific 式のヒット 12 件の relevance 上位');
+
+    // specific 式は relevance 順・上位 50 件で検索されている
+    const specificSearch = esearchUrls.find((u) => u.includes('[Majr]'));
+    expect(specificSearch).toBeDefined();
+    expect(specificSearch).toContain('sort=relevance');
+    expect(specificSearch).toContain('retmax=50');
+  });
+
+  test('specific 式が 0 件なら現式へフォールバックし、その旨を表示する', async ({ page }) => {
+    await setupInsideExpandScenario(page, { specificEsearch: { count: '0', idlist: [] } });
+    await page.goto(APP_URL);
+
+    await page.locator('.expand__actions button').click();
+    await expect(page.locator('.expand__candidate')).toHaveCount(1, { timeout: 20_000 });
+    await expect(page.locator('.expand__specific-query')).toHaveText(SPECIFIC_QUERY);
+    await expect(page.locator('.expand__specific-fallback')).toContainText('ヒットが 0 件');
+    await expect(page.locator('.expand__status')).toContainText('式の内側 40 件');
+    await expect(page.locator('.expand__error')).toHaveText('');
+  });
+
+  test('チェックを外すと従来どおり現式の上位から選ぶ（設計 skill は呼ばれない）', async ({ page }) => {
+    // 設計 skill の応答を登録しない: 呼ばれたらスタブが 500 を返して取得が失敗する
+    await setupInsideExpandScenario(page, { withSpecificResponse: false });
+    await page.goto(APP_URL);
+
+    const toggle = page.locator('.expand__inside-specific');
+    await toggle.uncheck();
+    await expect(toggle).not.toBeChecked();
+
+    await page.locator('.expand__actions button').click();
+    const candidates = page.locator('.expand__candidate');
+    await expect(candidates).toHaveCount(1, { timeout: 20_000 });
+    await expect(page.locator('.expand__error')).toHaveText('');
+    await expect(page.locator('.expand__specific')).toHaveCount(0);
+    await expect(page.locator('.expand__status')).toContainText('式の内側 40 件から代表例');
+    // 取得完了の再描画後もチェックは外れたまま（store に保持している）
+    await expect(toggle).not.toBeChecked();
   });
 
   test('a11y: inside モードの結果表示でも axe violation はゼロ', async ({ page }) => {

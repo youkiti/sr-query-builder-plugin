@@ -78,6 +78,15 @@ describe('esearch', () => {
     const calledUrl = (fetch as jest.Mock).mock.calls[0][0] as string;
     expect(calledUrl).toContain('retmax=50');
     expect(calledUrl).toContain('retstart=100');
+    // sort 未指定なら NCBI 既定に任せる（パラメータを付けない）
+    expect(calledUrl).not.toContain('sort=');
+  });
+
+  test('sort オプションが URL に反映される（relevance = Best Match 順）', async () => {
+    const fetch = jest.fn().mockResolvedValue(makeJsonResponse({ esearchresult: { count: '0', idlist: [] } }));
+    await esearch('x', { fetch }, { retmax: 50, sort: 'relevance' });
+    const calledUrl = (fetch as jest.Mock).mock.calls[0][0] as string;
+    expect(calledUrl).toContain('sort=relevance');
   });
 
   test('HTTP エラーは EutilsError を throw', async () => {

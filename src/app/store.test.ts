@@ -32,6 +32,7 @@ describe('createStore', () => {
       blockImprovementManualEditDraft: null,
       blocksDraftSavedAt: null,
       hydrateError: null,
+      expandInsideStrategy: 'specific',
     });
     expect(store.getState().route).toBe('protocol');
   });

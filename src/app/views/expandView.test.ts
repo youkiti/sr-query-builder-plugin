@@ -35,8 +35,29 @@ function sampleResult(overrides: Partial<BoundaryCasesResult> = {}): BoundaryCas
     marginHits: 200,
     evaluatedCount: 20,
     additions: [],
+    insideStrategy: null,
+    specific: null,
     ...overrides,
   };
+}
+
+/** inside モード（specific 戦略）で specific 式がそのまま使えた結果 */
+function insideSpecificResult(overrides: Partial<BoundaryCasesResult> = {}): BoundaryCasesResult {
+  return sampleResult({
+    mode: 'inside',
+    broadenedHits: 500,
+    marginHits: 0,
+    additions: [],
+    insideStrategy: 'specific',
+    specific: {
+      query: '("Asthma"[Majr]) AND ("Child"[Majr])',
+      rationale: 'MeSH を Major Topic に絞った',
+      hits: 120,
+      fallback: null,
+    },
+    evaluatedCount: 50,
+    ...overrides,
+  });
 }
 
 /** status='ready'（取得完了）の expandRun を載せた state */
@@ -142,8 +163,52 @@ describe('createExpandView', () => {
       expect(btn.textContent).toBe('境界事例を取得');
       btn.click();
       expect(onFetch).toHaveBeenCalledTimes(1);
+      // 既定は specific（store.expandInsideStrategy の初期値）。チェックボックスもチェック済み
+      expect(onFetch).toHaveBeenCalledWith({ insideStrategy: 'specific' });
+      expect(container.querySelector<HTMLInputElement>('.expand__inside-specific')?.checked).toBe(
+        true
+      );
       // 保険のローカル無効化
       expect(btn.disabled).toBe(true);
+    });
+
+    test('specific チェックを外すと onInsideStrategyChange が呼ばれ、onFetch には current が渡る', () => {
+      const onFetch = jest.fn().mockResolvedValue(undefined);
+      const onInsideStrategyChange = jest.fn();
+      const view = createExpandView({ onFetch, onInsideStrategyChange });
+      const container = buildContainer();
+      view(container, { state: stateReady, navigate: jest.fn() });
+      const toggle = container.querySelector<HTMLInputElement>('.expand__inside-specific')!;
+      toggle.checked = false;
+      toggle.dispatchEvent(new Event('change', { bubbles: true }));
+      expect(onInsideStrategyChange).toHaveBeenCalledWith('current');
+      toggle.checked = true;
+      toggle.dispatchEvent(new Event('change', { bubbles: true }));
+      expect(onInsideStrategyChange).toHaveBeenLastCalledWith('specific');
+      // クリック時点の DOM の値を読む（描画時の state ではない）
+      toggle.checked = false;
+      container.querySelector<HTMLButtonElement>('.expand__actions button')!.click();
+      expect(onFetch).toHaveBeenCalledWith({ insideStrategy: 'current' });
+    });
+
+    test('store の expandInsideStrategy が current ならチェックは外れた状態で描画される', () => {
+      const view = createExpandView();
+      const container = buildContainer();
+      view(container, {
+        state: { ...stateReady, expandInsideStrategy: 'current' },
+        navigate: jest.fn(),
+      });
+      expect(container.querySelector<HTMLInputElement>('.expand__inside-specific')?.checked).toBe(
+        false
+      );
+    });
+
+    test('onInsideStrategyChange 未指定でもチェック切替で例外にならない', () => {
+      const view = createExpandView();
+      const container = buildContainer();
+      view(container, { state: stateReady, navigate: jest.fn() });
+      const toggle = container.querySelector<HTMLInputElement>('.expand__inside-specific')!;
+      expect(() => toggle.dispatchEvent(new Event('change', { bubbles: true }))).not.toThrow();
     });
 
     test('onFetch 未指定でもクリックで例外にならない', () => {
@@ -164,6 +229,10 @@ describe('createExpandView', () => {
       expect(btn.disabled).toBe(true);
       btn.click();
       expect(onFetch).not.toHaveBeenCalled();
+      // 取得中は母集団の選び方も変えられない（トラッカーの段数が実行中に変わらないように）
+      expect(container.querySelector<HTMLInputElement>('.expand__inside-specific')?.disabled).toBe(
+        true
+      );
     });
   });
 
@@ -211,11 +280,14 @@ describe('createExpandView', () => {
       expect(status.textContent).not.toContain('分');
     });
 
-    test('inside モードは 5 段階のチップを描画し、broaden を含まない', () => {
+    test('inside モード（current 戦略）は 5 段階のチップを描画し、broaden を含まない', () => {
       const view = createExpandView();
       const container = buildContainer();
       // inside-dedup（index 2）実行中: protocol/inside-esearch=done, inside-dedup=active, 残り2つ=pending
-      view(container, { state: runningState('inside-dedup'), navigate: jest.fn() });
+      view(container, {
+        state: { ...runningState('inside-dedup'), expandInsideStrategy: 'current' },
+        navigate: jest.fn(),
+      });
       const tracker = container.querySelector('.expand__tracker');
       expect(tracker).not.toBeNull();
       const chips = container.querySelectorAll('.draft__step');
@@ -230,6 +302,39 @@ describe('createExpandView', () => {
       const bar = container.querySelector<HTMLProgressElement>('.draft__progressbar')!;
       expect(bar.max).toBe(5);
       expect(container.querySelector('.draft__step-counter')?.textContent).toBe('ステップ 3 / 5');
+    });
+
+    test('inside モード（specific 戦略・既定）は specific 式の設計を含む 6 段階を描画する', () => {
+      const view = createExpandView();
+      const container = buildContainer();
+      // inside-design（index 1）実行中: protocol=done, inside-design=active, 残り 4 つ=pending
+      view(container, { state: runningState('inside-design'), navigate: jest.fn() });
+      const tracker = container.querySelector('.expand__tracker');
+      const chips = container.querySelectorAll('.draft__step');
+      expect(chips).toHaveLength(6);
+      expect(tracker?.textContent).toContain('specific 式の設計');
+      expect(tracker?.textContent).not.toContain('拡張語の提案');
+      expect(chips[0]?.classList.contains('draft__step--done')).toBe(true);
+      expect(chips[1]?.classList.contains('draft__step--active')).toBe(true);
+      expect(chips[2]?.classList.contains('draft__step--pending')).toBe(true);
+      expect(container.querySelector('.draft__step-counter')?.textContent).toBe('ステップ 2 / 6');
+      expect(container.querySelector('.expand__status')?.textContent).toContain(
+        'specific（精度優先）な絞り込み式を設計中'
+      );
+      // 後続の inside ステップでも 6 段階のまま（設計済みチップが done になる）
+      view(container, { state: runningState('inside-dedup'), navigate: jest.fn() });
+      expect(container.querySelectorAll('.draft__step')).toHaveLength(6);
+      expect(container.querySelector('.draft__step-counter')?.textContent).toBe('ステップ 4 / 6');
+    });
+
+    test('margin モードの段階では specific 設定に関わらず 6 段階（broaden 含む）を描画する', () => {
+      const view = createExpandView();
+      const container = buildContainer();
+      view(container, { state: runningState('esearch'), navigate: jest.fn() });
+      const tracker = container.querySelector('.expand__tracker');
+      expect(container.querySelectorAll('.draft__step')).toHaveLength(6);
+      expect(tracker?.textContent).toContain('拡張語の提案');
+      expect(tracker?.textContent).not.toContain('specific 式の設計');
     });
 
     test('inside モードの AI 選定ステップは専用ラベルを表示する', () => {
@@ -323,6 +428,111 @@ describe('createExpandView', () => {
       expect(status).toContain('式の内側 500 件');
       // 候補自体は通常どおり描画される
       expect(container.querySelectorAll('.expand__candidate')).toHaveLength(2);
+    });
+
+    test('inside モード（specific 戦略）は AI が設計した式・件数・設計意図を表示し、ステータスに relevance 上位と明記する', () => {
+      const view = createExpandView();
+      const container = buildContainer();
+      view(container, { state: readyState(insideSpecificResult()), navigate: jest.fn() });
+      expect(container.querySelector('.expand__inside-banner')).not.toBeNull();
+      const specific = container.querySelector('.expand__specific');
+      expect(specific).not.toBeNull();
+      expect(container.querySelector('.expand__specific-query')?.textContent).toBe(
+        '("Asthma"[Majr]) AND ("Child"[Majr])'
+      );
+      expect(container.querySelector('.expand__specific-meta')?.textContent).toContain(
+        '設計意図: MeSH を Major Topic に絞った'
+      );
+      expect(container.querySelector('.expand__specific-meta')?.textContent).toContain('ヒット 120 件');
+      expect(container.querySelector('.expand__specific-fallback')).toBeNull();
+      const status = container.querySelector('.expand__status')?.textContent ?? '';
+      expect(status).toContain('2 件の初期シード候補');
+      expect(status).toContain('specific 式のヒット 120 件の relevance 上位 50 件');
+      expect(status).toContain('現検索式は 500 件');
+      // 式の表示は候補一覧より前（ステータスの直前）に置かれる
+      const order = Array.from(container.children).map((el) => el.className);
+      expect(order.indexOf('expand__specific')).toBeLessThan(order.indexOf('expand__status'));
+      expect(order.indexOf('expand__specific')).toBeGreaterThan(order.indexOf('expand__actions'));
+    });
+
+    test('specific 式が 0 件で現式にフォールバックしたときは式を参考表示しつつ理由を添え、ステータスは内側表記に戻る', () => {
+      const view = createExpandView();
+      const container = buildContainer();
+      view(container, {
+        state: readyState(
+          insideSpecificResult({
+            evaluatedCount: 20,
+            specific: { query: 'x[ti] AND y[ti]', rationale: '', hits: 0, fallback: 'zero_hits' },
+          })
+        ),
+        navigate: jest.fn(),
+      });
+      expect(container.querySelector('.expand__specific-query')?.textContent).toBe('x[ti] AND y[ti]');
+      // rationale が空なら「設計意図:」は出さない
+      expect(container.querySelector('.expand__specific-meta')?.textContent).toBe('ヒット 0 件');
+      expect(container.querySelector('.expand__specific-fallback')?.textContent).toContain(
+        'ヒットが 0 件だったため'
+      );
+      const status = container.querySelector('.expand__status')?.textContent ?? '';
+      expect(status).toContain('式の内側 500 件から代表例 20 件を評価');
+    });
+
+    test('specific 式の設計に失敗したときは式を出さず理由だけ表示する', () => {
+      const view = createExpandView();
+      const container = buildContainer();
+      view(container, {
+        state: readyState(
+          insideSpecificResult({
+            specific: { query: null, rationale: null, hits: 0, fallback: 'design_failed' },
+          })
+        ),
+        navigate: jest.fn(),
+      });
+      expect(container.querySelector('.expand__specific')).not.toBeNull();
+      expect(container.querySelector('.expand__specific-query')).toBeNull();
+      expect(container.querySelector('.expand__specific-fallback')?.textContent).toContain(
+        '有効な specific 式を組み立てられなかった'
+      );
+    });
+
+    test('specific 式が構文エラーだったときの理由文', () => {
+      const view = createExpandView();
+      const container = buildContainer();
+      view(container, {
+        state: readyState(
+          insideSpecificResult({
+            specific: { query: 'bad[xx]', rationale: 'r', hits: 0, fallback: 'search_failed' },
+          })
+        ),
+        navigate: jest.fn(),
+      });
+      expect(container.querySelector('.expand__specific-fallback')?.textContent).toContain(
+        '構文エラー'
+      );
+    });
+
+    test('inside モード（current 戦略）では specific 式の枠を出さない', () => {
+      const view = createExpandView();
+      const container = buildContainer();
+      view(container, {
+        state: readyState(
+          sampleResult({ mode: 'inside', marginHits: 0, additions: [], insideStrategy: 'current' })
+        ),
+        navigate: jest.fn(),
+      });
+      expect(container.querySelector('.expand__specific')).toBeNull();
+    });
+
+    test('specific 式のヒットがすべて既存 seed と重複して候補 0 件のときは specific 用の空メッセージ', () => {
+      const view = createExpandView();
+      const container = buildContainer();
+      view(container, {
+        state: readyState(insideSpecificResult({ candidates: [], evaluatedCount: 0 })),
+        navigate: jest.fn(),
+      });
+      expect(container.querySelector('.expand__status')?.textContent).toContain(
+        'specific 式のヒット 120 件はすべて既存 seed と重複'
+      );
     });
 
     test('margin モードでは初期シードバナーを表示しない', () => {

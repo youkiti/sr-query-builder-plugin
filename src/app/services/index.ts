@@ -97,6 +97,9 @@ export {
   type ExpandFetchStep,
   type ExpandMode,
   type ExpandServiceDeps,
+  type InsideStrategy,
   type RecordDecisionInput,
   type RecordDecisionResult,
+  type SpecificQueryFallback,
+  type SpecificQueryOutcome,
 } from './expandService';

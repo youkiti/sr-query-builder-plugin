@@ -2,8 +2,11 @@ import type {
   BoundaryCaseView,
   BoundaryCasesResult,
   ExpandFetchStep,
+  InsideStrategy,
   RecordDecisionInput,
   RecordDecisionResult,
+  SpecificQueryFallback,
+  SpecificQueryOutcome,
   ValidationSummary,
 } from '@/app/services';
 import type { SeedUserDecision } from '@/domain/seedPaper';
@@ -30,6 +33,10 @@ import type { RenderView } from './types';
  * - 1 ラウンド（候補すべて）を判定し終えたら onRoundComplete で
  *   check_final_query 相当の再検証を自動実行し、新しい捕捉率を表示する（requirements.md §4.5）。
  *   あわせて、include した「式の外側」論文をどの拡張語が拾えたかを集計し、検索式の更新提案を出す
+ * - 有効 seed が 0 件のとき（inside モード）は「AI に specific（精度優先）な絞り込み式を作らせ、
+ *   その relevance 上位から候補を選ぶ」か「現式の上位から選ぶ」かをチェックボックスで選べる
+ *   （issue #93。既定は前者）。チェック状態は store.expandInsideStrategy に置き、
+ *   onInsideStrategyChange（bootstrap が setStateSilently でラップ）で書き戻す
  *
  * **なぜ進捗・候補を store に持たせるか**:
  * fetchBoundaryCandidates の最後の AI 選定（LLM）完了時に LLM コスト集計
@@ -61,9 +68,16 @@ import type { RenderView } from './types';
  * ラップして渡す。
  */
 
+export interface ExpandFetchOptions {
+  /** inside モード（有効 seed 0 件）で母集団に使う式の選び方。クリック時のチェック状態 */
+  insideStrategy: InsideStrategy;
+}
+
 export interface ExpandViewCallbacks {
   /** 「境界事例を取得」ボタン。進捗・取得結果は store.expandRun 経由で反映される */
-  onFetch?: () => Promise<void>;
+  onFetch?: (options: ExpandFetchOptions) => Promise<void>;
+  /** inside モードの母集団チェックボックスが切り替わったとき（store.expandInsideStrategy へ保存） */
+  onInsideStrategyChange?: (strategy: InsideStrategy) => void;
   onDecide?: (input: RecordDecisionInput) => Promise<RecordDecisionResult>;
   /** ラウンド完了時の再検証コールバック。check_final_query 相当を期待 */
   onRoundComplete?: () => Promise<ValidationSummary>;
@@ -109,7 +123,7 @@ export function createExpandView(callbacks: ExpandViewCallbacks = {}): RenderVie
     const lead = doc.createElement('p');
     lead.className = 'expand__lead';
     lead.textContent =
-      '現検索式を 2 軸（MeSH を一段広く / フリーワード追加）で緩めた拡張式を作り、その外側（拡張式 NOT 現式）から判定が迷いやすい候補を抽出します。include 判定は SeedPapers に追加され、ラウンド終了時に再検証します。現式の外側を include した場合は捕捉率が下がり、どの拡張語で拾えたか＝検索式の更新提案として表示します。';
+      '現検索式を 2 軸（MeSH を一段広く / フリーワード追加）で緩めた拡張式を作り、その外側（拡張式 NOT 現式）から判定が迷いやすい候補を抽出します。include 判定は SeedPapers に追加され、ラウンド終了時に再検証します。現式の外側を include した場合は捕捉率が下がり、どの拡張語で拾えたか＝検索式の更新提案として表示します。有効なシード論文がまだ 0 件のときは、代わりに式の内側から初期シードの候補を提示します（手元にシード論文が無いときの入口）。';
     container.appendChild(lead);
 
     const shortcuts = doc.createElement('p');
@@ -130,10 +144,30 @@ export function createExpandView(callbacks: ExpandViewCallbacks = {}): RenderVie
     actions.appendChild(fetchBtn);
     container.appendChild(actions);
 
+    // inside モード（有効 seed 0 件）の母集団の選び方（issue #93）。margin モードでは無視される
+    // ことをラベルで明示する。チェック状態は store.expandInsideStrategy から復元する
+    const optionLabel = doc.createElement('label');
+    optionLabel.className = 'expand__option';
+    const specificToggle = doc.createElement('input');
+    specificToggle.type = 'checkbox';
+    specificToggle.className = 'expand__inside-specific';
+    specificToggle.checked = ctx.state.expandInsideStrategy === 'specific';
+    specificToggle.disabled = running;
+    optionLabel.appendChild(specificToggle);
+    optionLabel.appendChild(
+      doc.createTextNode(
+        ' 有効なシード論文が 0 件のときは、AI に specific（精度優先）な絞り込み式を設計させ、その relevance 上位 50 件から最大 5 件の初期シード候補を選ぶ（外すと現検索式そのものの上位から選ぶ）'
+      )
+    );
+    specificToggle.addEventListener('change', () => {
+      callbacks.onInsideStrategyChange?.(specificToggle.checked ? 'specific' : 'current');
+    });
+    container.appendChild(optionLabel);
+
     // 取得中は「全体のどこか」を示す進捗トラッカーを出す（draft 画面と同じ見た目）。
     // 長い LLM 待ち（AI 選定）でも残りの段階が見えるようにする。
     if (running && run) {
-      container.appendChild(renderFetchTracker(doc, run));
+      container.appendChild(renderFetchTracker(doc, run, ctx.state.expandInsideStrategy));
     }
 
     const status = doc.createElement('p');
@@ -163,7 +197,11 @@ export function createExpandView(callbacks: ExpandViewCallbacks = {}): RenderVie
       // 状態遷移（expandRun の running 設定）は bootstrap 側。setState → 再描画で
       // ボタンが即座に無効化されるため、ここでのローカル無効化は保険のみ
       fetchBtn.disabled = true;
-      void callbacks.onFetch();
+      // ctx.state は描画時点のスナップショット（チェック変更は setStateSilently で再描画されない）
+      // なので、クリック時点の DOM の値を読む
+      void callbacks.onFetch({
+        insideStrategy: specificToggle.checked ? 'specific' : 'current',
+      });
     });
 
     if (running && run) {
@@ -180,11 +218,15 @@ export function createExpandView(callbacks: ExpandViewCallbacks = {}): RenderVie
       if (result.mode === 'inside') {
         // 「式の外側」を期待しているユーザーに、今回は初期シード作りだと先に伝える。
         container.insertBefore(renderInsideBanner(doc), actions);
+        if (result.specific !== null) {
+          // AI が設計した specific 式（とフォールバックの有無）を候補の上で確認できるようにする
+          container.insertBefore(renderSpecificQuery(doc, result.specific), status);
+        }
       }
       if (result.candidates.length === 0) {
         status.textContent = emptyResultText(result);
       } else if (result.mode === 'inside') {
-        status.textContent = `${result.candidates.length} 件の初期シード候補（有効 seed 0 件のため、式の内側 ${result.originalHits} 件から代表例 ${result.evaluatedCount} 件を評価）`;
+        status.textContent = insideStatusText(result);
       } else {
         status.textContent = `${result.candidates.length} 件の境界事例（現式 ${result.originalHits} 件 → 拡張式 ${result.broadenedHits} 件 / 外側 ${result.marginHits} 件から評価 ${result.evaluatedCount} 件）`;
       }
@@ -332,7 +374,7 @@ const MARGIN_FETCH_STEPS = [
   'pick-boundary',
 ] as const;
 
-/** inside モード（有効 seed 0 件の初期シードブートストラップ）のステップ。式を広げないので broaden が無い */
+/** inside モード（有効 seed 0 件の初期シードブートストラップ、現式の上位）のステップ。式を広げないので broaden が無い */
 const INSIDE_FETCH_STEPS = [
   'protocol',
   'inside-esearch',
@@ -341,8 +383,19 @@ const INSIDE_FETCH_STEPS = [
   'pick-seed',
 ] as const;
 
+/** inside モードで AI に specific 式を設計させるとき（既定）のステップ。先頭に設計が 1 段入る */
+const INSIDE_SPECIFIC_FETCH_STEPS = [
+  'protocol',
+  'inside-design',
+  'inside-esearch',
+  'inside-dedup',
+  'inside-efetch',
+  'pick-seed',
+] as const;
+
 /** inside モード固有のステップ集合（判定用）。'protocol' はモード分岐前の共通ステップなので含めない */
 const INSIDE_ONLY_STEPS = new Set<ExpandFetchStep>([
+  'inside-design',
   'inside-esearch',
   'inside-dedup',
   'inside-efetch',
@@ -353,9 +406,14 @@ const INSIDE_ONLY_STEPS = new Set<ExpandFetchStep>([
  * 現在の step からトラッカーに表示するステップ一覧を選ぶ。
  * 'protocol' はモード分岐前の共通ステップなので margin の 6 段階をデフォルトにする
  * （margin モードが従来からの既定挙動であり、'protocol' の間はまだモードが確定していない）。
+ * inside モードは母集団の選び方（チェックボックス。取得中は変更不可）で段数が変わる。
  */
-function fetchStepsFor(step: ExpandFetchStep): readonly ExpandFetchStep[] {
-  return INSIDE_ONLY_STEPS.has(step) ? INSIDE_FETCH_STEPS : MARGIN_FETCH_STEPS;
+function fetchStepsFor(
+  step: ExpandFetchStep,
+  insideStrategy: InsideStrategy
+): readonly ExpandFetchStep[] {
+  if (!INSIDE_ONLY_STEPS.has(step)) return MARGIN_FETCH_STEPS;
+  return insideStrategy === 'specific' ? INSIDE_SPECIFIC_FETCH_STEPS : INSIDE_FETCH_STEPS;
 }
 
 /** チップに出す短いラベル */
@@ -366,6 +424,7 @@ const FETCH_STEP_LABELS: Record<ExpandFetchStep, string> = {
   dedup: '重複除去',
   efetch: '候補論文の取得',
   'pick-boundary': 'AI 選定',
+  'inside-design': 'specific 式の設計',
   'inside-esearch': '内側を検索',
   'inside-dedup': '重複除去',
   'inside-efetch': '候補論文の取得',
@@ -383,7 +442,8 @@ const FETCH_STEP_ACTIVE_LABELS: Record<ExpandFetchStep | 'done', string> = {
   dedup: '既存 seed と重複を除去中',
   efetch: '候補論文のメタデータを取得中',
   'pick-boundary': 'AI が境界事例を選定中',
-  'inside-esearch': '現検索式（内側）を検索中',
+  'inside-design': 'AI が specific（精度優先）な絞り込み式を設計中',
+  'inside-esearch': '式の内側（初期シード候補の母集団）を検索中',
   'inside-dedup': '既存 seed と重複を除去中',
   'inside-efetch': '候補論文のメタデータを取得中',
   'pick-seed': 'AI が初期シード候補を選定中',
@@ -415,11 +475,15 @@ function renderStepChip(doc: Document, label: string, state: StepState): HTMLEle
   return chip;
 }
 
-function renderFetchTracker(doc: Document, run: ExpandRunState): HTMLElement {
+function renderFetchTracker(
+  doc: Document,
+  run: ExpandRunState,
+  insideStrategy: InsideStrategy
+): HTMLElement {
   // renderFetchTracker は running 中にしか呼ばれないので run.step は必ず ExpandFetchStep
   // （'done' ではない）。fetchStepsFor がモード（margin / inside）に応じたステップ一覧を選ぶ。
   const step = run.step as ExpandFetchStep;
-  const steps = fetchStepsFor(step);
+  const steps = fetchStepsFor(step, insideStrategy);
   const total = steps.length;
   const current = (steps as readonly string[]).indexOf(step);
 
@@ -441,7 +505,7 @@ function renderFetchTracker(doc: Document, run: ExpandRunState): HTMLElement {
   header.appendChild(counter);
   section.appendChild(header);
 
-  // 下段: ステッパー（margin は 6 段階、inside は 5 段階）
+  // 下段: ステッパー（margin は 6 段階、inside は 5 段階。specific 式の設計が入ると 6 段階）
   const subWrap = doc.createElement('div');
   subWrap.className = 'draft__substeps';
   steps.forEach((s, i) => {
@@ -777,9 +841,68 @@ function buildInsideRoundNote(doc: Document, includedCount: number): HTMLElement
   return note;
 }
 
+/** inside モードで候補が 1 件以上あるときのステータス文。母集団（specific 式 / 現式）を明示する。 */
+function insideStatusText(result: BoundaryCasesResult): string {
+  const specific = result.specific;
+  if (specific !== null && specific.fallback === null) {
+    return `${result.candidates.length} 件の初期シード候補（有効 seed 0 件のため、AI が設計した specific 式のヒット ${specific.hits} 件の relevance 上位 ${result.evaluatedCount} 件から選定。現検索式は ${result.originalHits} 件）`;
+  }
+  return `${result.candidates.length} 件の初期シード候補（有効 seed 0 件のため、式の内側 ${result.originalHits} 件から代表例 ${result.evaluatedCount} 件を評価）`;
+}
+
+/** specific 式にフォールバックが起きたときの案内文。 */
+const SPECIFIC_FALLBACK_TEXT: Record<SpecificQueryFallback, string> = {
+  design_failed:
+    'AI の応答から有効な specific 式を組み立てられなかったため、現検索式の relevance 上位から候補を選びました。',
+  zero_hits:
+    'specific 式のヒットが 0 件だったため、現検索式の relevance 上位から候補を選びました（式は参考として表示）。',
+  search_failed:
+    'specific 式が PubMed で構文エラーになったため、現検索式の relevance 上位から候補を選びました（式は参考として表示）。',
+};
+
+/**
+ * AI が設計した specific 式（inside モード・issue #93）を候補一覧の上に表示する。
+ * 「どの式の上位から候補を選んだか」をユーザーが確認できるようにするのが目的で、
+ * フォールバックしたときはその理由も添える。
+ */
+function renderSpecificQuery(doc: Document, specific: SpecificQueryOutcome): HTMLElement {
+  const wrap = doc.createElement('section');
+  wrap.className = 'expand__specific';
+  const title = doc.createElement('h3');
+  title.className = 'expand__specific-title';
+  title.textContent = 'AI が設計した specific 式（精度優先）';
+  wrap.appendChild(title);
+
+  if (specific.query !== null) {
+    const pre = doc.createElement('pre');
+    pre.className = 'expand__specific-query';
+    const code = doc.createElement('code');
+    code.textContent = specific.query;
+    pre.appendChild(code);
+    wrap.appendChild(pre);
+    const meta = doc.createElement('p');
+    meta.className = 'expand__specific-meta';
+    const rationale = specific.rationale ? `設計意図: ${specific.rationale} / ` : '';
+    meta.textContent = `${rationale}ヒット ${specific.hits} 件`;
+    wrap.appendChild(meta);
+  }
+  if (specific.fallback !== null) {
+    const note = doc.createElement('p');
+    note.className = 'expand__specific-fallback';
+    note.setAttribute('role', 'note');
+    note.textContent = `⚠ ${SPECIFIC_FALLBACK_TEXT[specific.fallback]}`;
+    wrap.appendChild(note);
+  }
+  return wrap;
+}
+
 /** 候補 0 件のときのステータス文（理由・モードを分けて伝える）。 */
 function emptyResultText(result: BoundaryCasesResult): string {
   if (result.mode === 'inside') {
+    const specific = result.specific;
+    if (specific !== null && specific.fallback === null) {
+      return `specific 式のヒット ${specific.hits} 件はすべて既存 seed と重複しており、新たな初期シード候補がありませんでした（現検索式は ${result.originalHits} 件）。`;
+    }
     if (result.originalHits === 0) {
       return '現検索式のヒットが 0 件のため、内側から初期シード候補を出せませんでした（式を /draft で見直してください）。';
     }

@@ -162,3 +162,62 @@
   font-size: var(--font-size-sm);
 }
 
+/* inside モード（有効 seed 0 件）の母集団の選び方（issue #93）。取得ボタンの直下に置く
+   チェックボックス 1 つ。説明が長いので通常の本文より一段小さく、muted で。 */
+.expand__option:not([hidden]) {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+
+.expand__option input[type='checkbox'] {
+  flex: 0 0 auto;
+  margin-top: 0.2em;
+}
+
+/* AI が設計した specific 式の表示枠。inside バナーと同じ primary トーンだが、式本体は
+   横に長いので pre で折り返しつつ横スクロールも許す。 */
+.expand__specific {
+  margin: var(--space-3) 0 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--color-primary);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-muted);
+}
+
+.expand__specific-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.expand__specific-query {
+  margin: 0;
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-x: auto;
+}
+
+.expand__specific-meta {
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+/* フォールバックの案内。警告色の文字は淡い背景でコントラストが足りないため（CLAUDE.md 参照）
+   文字色は既定の --color-text に委ね、警告であることは文頭の記号で示す。 */
+.expand__specific-fallback {
+  margin: var(--space-2) 0 0;
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+}
