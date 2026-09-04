@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **MVP 実装フェーズ**（2026-06 時点）。要件定義は完了し、`src/` 配下にフルページアプリ・Popup・Options・Background を含む実装と、unit 1100 件規模 / E2E 98 件のテストスイートが存在する。
 
 - ユーザーフロー全 10 ルート（home → protocol → blocks → seeds → draft → expand → edit → export → done + history）の画面実装済み。検索式の生成と検証は `draft` タブに統合され、「生成して検証する」1 操作でブロックごとのヒット数（line_hits）をライブ表示しつつ、完成後に捕捉率・MeSH 検証まで自動実行する（旧 `validate` ルートは廃止）
+- `#/expand` の inside モード（有効 seed 0 件）は既定で AI に specific（精度優先）な絞り込み式を設計させ、その relevance 上位 50 件から最大 5 件を人のレビューに回す（issue #93。`design-specific-query` skill / `purpose=design_specific_query`。チェックを外すと従来の現式上位）。specific 式が 0 件・構文エラー・設計失敗のときは現式へ自動フォールバックし、理由を画面に出す
 - P0 の検証ロジック（行ごとのヒット数 / シード捕捉率 / 全 DB 変換 / MeSH 抽出）は TypeScript へ移植済み（[src/features/validation/](src/features/validation/), [src/features/conversion/](src/features/conversion/)）
 - 未実装・残タスクは「[未実装・既知のギャップ](#未実装既知のギャップ)」を参照
 

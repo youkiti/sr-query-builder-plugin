@@ -222,6 +222,7 @@ export type GeminiSkillName =
   | 'freeword-designer'
   | 'improve-block'
   | 'expand-query-for-recall'
+  | 'design-specific-query'
   | 'pick-seed-candidates'
   | 'pick-boundary-cases';
 
@@ -238,6 +239,7 @@ const SKILL_MARKERS: ReadonlyArray<[GeminiSkillName, string]> = [
   ['freeword-designer', 'freewords'],
   ['improve-block', 'proposed_expression'],
   ['expand-query-for-recall', 'additions'],
+  ['design-specific-query', 'specific_query'],
   ['pick-seed-candidates', '<なぜ組入基準に該当しそうか（日本語）>'],
   ['pick-boundary-cases', 'picks'],
 ];

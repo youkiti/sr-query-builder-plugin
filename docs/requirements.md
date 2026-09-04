@@ -234,7 +234,7 @@ https://www.googleapis.com/auth/drive.file          # Sheets 読み書き + LLM 
 | timestamp | iso8601 | ✓ | |
 | provider | enum | ✓ | `gemini` / `openai` / `anthropic` / `openrouter` |
 | model | string | ✓ | モデル名（例: `gemini-2.5-pro`） |
-| purpose | enum | ✓ | `draft_block` / `suggest_mesh` / `expand_freeword` / `design_filter` / `pick_boundary` / `pick_seed` / `interpret_result` / `extract_protocol` / `other` |
+| purpose | enum | ✓ | `draft_block` / `suggest_mesh` / `expand_freeword` / `design_filter` / `pick_boundary` / `pick_seed` / `design_specific_query` / `expand_recall` / `interpret_result` / `extract_protocol` / `improve_block` / `other` |
 | prompt_ref | string(url) | ✓ | Drive に保存した full prompt JSON の URL |
 | response_ref | string(url) | ✓ | Drive に保存した full response JSON の URL |
 | prompt_summary | string | | 先頭 500 文字の抜粋（セル内表示用） |
@@ -476,6 +476,8 @@ LLM は検索式生成時に、プロトコルに書かれていないフィル�
 - **AI の役割と LLMApiLog**: 拡張語提案は `purpose=expand_recall`、境界事例選定は `purpose=pick_boundary` で記録する。
 
 **初期シードのブートストラップ（inside モード）**: 上記の margin 方式は「既にシードがあり、取りこぼしを顕在化させたい」局面で意味を持つが、**有効 seed（`isSeedEligibleForValidation`）が 1 件も無い段階では捕捉率の基準そのものが無く、外側を探しても判断材料にならない**。そこで有効 seed 0 件のときは式を広げず、**現式の内側**（現式ヒット集合）から「組入基準に明確に合致しそうな代表例」を AI（`pick-seed-candidates` skill。`pick-boundary-cases` と対になる skill で、迷う境界事例ではなく核となる代表例を選ぶ）が数件選ぶ `inside` モードに分岐する。include すれば初期シード集合が育ち、次回以降は margin モードへ自動的に戻る。inside モードでは `expand_recall` / `pick_boundary` は呼ばず、AI 選定は `purpose=pick_seed` で記録する。margin 特有の値（`marginHits` / 更新提案）は inside モードでは意味を持たないため画面には出さない。
+
+**inside モードの母集団: specific 式（既定）と現式（issue #93）**: 現式は感度優先でヒット数が多く、その上位（NCBI 既定の最新順）から AI に選ばせるだけでは「明確に該当する論文」が母集団に入っている保証が無い。そこで inside モードは既定で、AI（`design-specific-query` skill、`purpose=design_specific_query`）に**精度優先の specific な絞り込み式**を 1 本設計させる — 現式の概念ブロックをすべて AND で結合し、MeSH は Major Topic（`[Majr]`）、フリーワードはタイトル限定（`[ti]`）、同義語の羅列なし、研究デザインがあれば Publication Type を付加 — その式を `sort=relevance`（Best Match 順）・上位 50 件で検索した集合を母集団にし、`pick-seed-candidates` が**最大 5 件**を人のレビュー（include / exclude / maybe）に回す。設計した式・設計意図・ヒット数は候補の上に表示し、ユーザーが「どの式の上位から選んだか」を確認できるようにする。specific 式が作れない（応答が壊れている / 空 / 括弧不整合）・0 件・PubMed の構文エラーのときは**現式の relevance 上位へ自動フォールバック**し、その理由を画面に添える（API キー欠落や通信エラーはフォールバックせずエラー表示）。`#/expand` のチェックボックス「AI に specific な絞り込み式を設計させる」（`store.expandInsideStrategy`。既定 on）を外すと、従来どおり現式そのものの上位（既定順・最大 20 件を評価）を母集団にする。margin モード（有効 seed ≥ 1）ではこの設定は無視される。
 
 ### 4.6 検索式検証（CLI 移植機能、P0）
 

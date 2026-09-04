@@ -7,7 +7,11 @@ import type {
   ValidationSummary,
 } from './services/validationService';
 import type { DraftBlockHit, DraftProgress } from './services/draftService';
-import type { BoundaryCasesResult, ExpandFetchStep } from './services/expandService';
+import type {
+  BoundaryCasesResult,
+  ExpandFetchStep,
+  InsideStrategy,
+} from './services/expandService';
 import type { BlockImprovementResult } from './services/editService';
 import { DEFAULT_ROUTE, type RouteName } from './router';
 
@@ -342,6 +346,13 @@ export interface AppState {
   draftRun: DraftRunState | null;
   /** 境界事例取得（#/expand）の実行状態。未実行なら null */
   expandRun: ExpandRunState | null;
+  /**
+   * #/expand の inside モード（有効 seed 0 件）で母集団に使う式の選び方（issue #93）。
+   * 画面のチェックボックスと 1:1 で、打鍵で setStateSilently により更新する（再描画を
+   * 起こさない。expandRun の完了で全ビューが再描画されてもチェック状態が既定に戻らないよう
+   * store に置く）。既定は 'specific'（AI が精度優先の絞り込み式を設計する）
+   */
+  expandInsideStrategy: InsideStrategy;
   /** 直近の検証結果。未実行なら null */
   validationResult: ValidationResultEntry | null;
   /** 未捕捉 PMID の AI 原因分析結果。未実行なら null */
@@ -388,6 +399,7 @@ export const INITIAL_STATE: AppState = {
   currentFormulaCreatedBy: null,
   draftRun: null,
   expandRun: null,
+  expandInsideStrategy: 'specific',
   validationResult: null,
   missedAnalysis: null,
   excessFilterProposal: null,

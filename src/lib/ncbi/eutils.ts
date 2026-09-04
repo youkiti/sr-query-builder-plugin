@@ -181,6 +181,11 @@ export interface EsearchOptions {
   retmax?: number;
   /** 検索開始位置（オフセット）。既定 0 */
   retstart?: number;
+  /**
+   * 並び順。未指定なら NCBI 既定（最新順）。`relevance` は PubMed の Best Match 順で、
+   * 「上位 N 件を人が見る」用途（#/expand の初期シード候補の母集団）に使う。
+   */
+  sort?: 'relevance' | 'pub_date';
 }
 
 /**
@@ -198,6 +203,9 @@ export async function esearch(
     retmax: String(options.retmax ?? 20),
     retstart: String(options.retstart ?? 0),
   });
+  if (options.sort) {
+    params.set('sort', options.sort);
+  }
   appendCommonParams(params, deps);
   const url = `${BASE_URL}/esearch.fcgi?${params.toString()}`;
   const rateLimiter = resolveRateLimiter(deps);

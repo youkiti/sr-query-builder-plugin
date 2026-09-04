@@ -102,6 +102,7 @@ function makeState(overrides: Partial<AppState> = {}): AppState {
     blockImprovementManualEditDraft: null,
     blocksDraftSavedAt: null,
     hydrateError: null,
+    expandInsideStrategy: 'specific',
     ...overrides,
   };
 }

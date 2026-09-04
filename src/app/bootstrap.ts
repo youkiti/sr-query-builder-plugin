@@ -44,6 +44,7 @@ import {
   type LlmFactoryDeps,
   type LlmProviderFactory,
   type ProtocolSubmissionInput,
+  type InsideStrategy,
   type RecordDecisionInput,
   type RecordDecisionResult,
   type RequestBlockImprovementInput,
@@ -586,8 +587,13 @@ function buildDefaultViewOptions(
     },
     expand: {
       // 進捗・取得結果は store.expandRun 経由で反映される（draft の onGenerate と同じ思想）
-      onFetch: async (): Promise<void> =>
-        runFetchBoundary(store, runtime, llmFactoryDepsBase()),
+      onFetch: async (options): Promise<void> =>
+        runFetchBoundary(store, runtime, llmFactoryDepsBase(), options.insideStrategy),
+      // チェックボックスの状態。再描画を起こさない silent 更新（打鍵で画面を作り直さない）
+      onInsideStrategyChange: (strategy) =>
+        store.setStateSilently((s) =>
+          s.expandInsideStrategy === strategy ? s : { ...s, expandInsideStrategy: strategy }
+        ),
       onDecide: async (input: RecordDecisionInput): Promise<RecordDecisionResult> =>
         runRecordDecision(store, runtime, input),
       onRoundComplete: async (): Promise<ValidationSummary> => runValidate(store, runtime),
@@ -781,7 +787,8 @@ async function runImproveBlock(
 async function runFetchBoundary(
   store: AppStore,
   runtime: ChromeRuntimeDeps,
-  baseDeps: Omit<LlmFactoryDeps, 'llmLogFolderId' | 'spreadsheetId'>
+  baseDeps: Omit<LlmFactoryDeps, 'llmLogFolderId' | 'spreadsheetId'>,
+  insideStrategy: InsideStrategy
 ): Promise<void> {
   if (store.getState().expandRun?.status === 'running') {
     // 再描画タイミング次第でボタンが二度押せた場合の保険
@@ -816,6 +823,7 @@ async function runFetchBoundary(
       eutils,
       store,
       llmFactory: factory,
+      insideStrategy,
       onProgress: (step) => {
         store.setState((s) =>
           s.expandRun === null ? s : { ...s, expandRun: { ...s.expandRun, step } }

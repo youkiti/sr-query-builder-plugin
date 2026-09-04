@@ -55,6 +55,7 @@ function makeState(): AppState {
     blockImprovementManualEditDraft: null,
     blocksDraftSavedAt: null,
     hydrateError: null,
+    expandInsideStrategy: 'specific',
   };
 }
 

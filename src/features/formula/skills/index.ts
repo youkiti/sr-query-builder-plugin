@@ -66,6 +66,13 @@ export {
   type RecallBlockInput,
 } from './expandQueryForRecall';
 export {
+  designSpecificQuery,
+  DESIGN_SPECIFIC_QUERY_SYSTEM_PROMPT,
+  DESIGN_SPECIFIC_QUERY_USER_PROMPT_TEMPLATE,
+  type DesignSpecificQueryInput,
+  type SpecificQueryDesign,
+} from './designSpecificQuery';
+export {
   improveBlockExpression,
   IMPROVE_BLOCK_SYSTEM_PROMPT,
   IMPROVE_BLOCK_USER_PROMPT_TEMPLATE,

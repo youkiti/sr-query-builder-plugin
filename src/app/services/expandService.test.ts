@@ -85,6 +85,7 @@ function makeState(overrides: Partial<AppState> = {}): AppState {
     blockImprovementManualEditDraft: null,
     blocksDraftSavedAt: null,
     hydrateError: null,
+    expandInsideStrategy: 'specific',
     ...overrides,
   };
 }
@@ -645,8 +646,11 @@ describe('fetchBoundaryCandidates', () => {
         },
         store,
         llmFactory: { forPurpose, model: 'gemini-test' },
+        insideStrategy: 'current',
       });
       expect(result.mode).toBe('inside');
+      expect(result.insideStrategy).toBe('current');
+      expect(result.specific).toBeNull();
       expect(result.originalHits).toBe(300);
       expect(result.broadenedHits).toBe(300);
       expect(result.marginHits).toBe(0);
@@ -658,6 +662,9 @@ describe('fetchBoundaryCandidates', () => {
       expect(forPurpose).not.toHaveBeenCalledWith('pick_boundary');
       // 内側検索なので NOT を含む margin クエリは投げない
       expect(esearchUrls.some((u) => u.includes('NOT'))).toBe(false);
+      // current 戦略は従来どおり NCBI 既定順（sort を付けない）で、specific 式の設計も呼ばない
+      expect(esearchUrls.some((u) => u.includes('sort='))).toBe(false);
+      expect(forPurpose).not.toHaveBeenCalledWith('design_specific_query');
     });
 
     test('exclude / maybe だけの seed も有効 0 件として inside モードになり、判定済み PMID は再提示しない', async () => {
@@ -695,6 +702,7 @@ describe('fetchBoundaryCandidates', () => {
         },
         store,
         llmFactory: { forPurpose, model: 'gemini-test' },
+        insideStrategy: 'current',
       });
       expect(result.mode).toBe('inside');
       // 既に exclude 判定済みの 222 は除かれ、333 のみが候補
@@ -729,11 +737,417 @@ describe('fetchBoundaryCandidates', () => {
         },
         store,
         llmFactory: { forPurpose, model: 'gemini-test' },
+        insideStrategy: 'current',
       });
       expect(result.mode).toBe('inside');
       expect(result.candidates).toEqual([]);
       expect(result.originalHits).toBe(0);
       expect(forPurpose).not.toHaveBeenCalledWith('pick_seed');
+    });
+  });
+
+  describe('inside モード（specific 戦略・既定。issue #93）', () => {
+    const SPECIFIC_QUERY = '("Asthma"[Majr]) AND ("Child"[Majr]) AND "Randomized Controlled Trial"[pt]';
+
+    /** SeedPapers がヘッダのみ（有効 seed 0 件）の Google fetch */
+    function emptySeedGoogleFetch(): jest.Mock {
+      return jest.fn().mockImplementation(async (url: string) => {
+        if (url.includes('/values/SeedPapers')) {
+          return jsonResponse({ values: [SHEET_HEADERS.SeedPapers] });
+        }
+        return jsonResponse({});
+      });
+    }
+
+    /**
+     * design-specific-query（system に 'specific' を含む）と pick-seed-candidates の両方に応じる
+     * provider。user プロンプトも記録して「最大 5 件」等の指示を検証できるようにする。
+     */
+    function insideProvider(opts: {
+      designText?: string;
+      picks?: unknown[];
+      userPrompts?: string[];
+    }): LLMProvider {
+      return {
+        providerId: 'gemini',
+        model: 'test',
+        chat: async (messages: readonly { content: string }[]) => {
+          const sys = messages[0]?.content ?? '';
+          opts.userPrompts?.push(messages[1]?.content ?? '');
+          const text = sys.includes('specific')
+            ? (opts.designText ??
+              JSON.stringify({ specific_query: SPECIFIC_QUERY, rationale: 'Majr に絞った' }))
+            : JSON.stringify({ picks: opts.picks ?? [] });
+          return { text, tokensIn: null, tokensOut: null, raw: {} };
+        },
+      };
+    }
+
+    function eutilsDeps(fetchMock: jest.Mock): ExpandServiceDeps['eutils'] {
+      return {
+        fetch: fetchMock as unknown as typeof fetch,
+        sleep: async () => undefined,
+        maxRetries: 0,
+      };
+    }
+
+    test('既定で LLM に specific 式を設計させ、その relevance 上位 50 件を母集団にして最大 5 件を選ぶ', async () => {
+      const store = createStore(makeState());
+      const esearchUrls: string[] = [];
+      const eutilsFetch = jest.fn().mockImplementation(async (url: string) => {
+        if (url.includes('esearch.fcgi')) {
+          esearchUrls.push(url);
+          const decoded = decodeURIComponent(url);
+          if (decoded.includes('[Majr]')) {
+            // specific 式: 60 件中、relevance 上位 3 件を返す
+            return jsonResponse({ esearchresult: { count: '60', idlist: ['901', '902', '903'] } });
+          }
+          // 現式（件数のみ）
+          return jsonResponse({ esearchresult: { count: '3000', idlist: [] } });
+        }
+        return textResponse(
+          buildEfetchXml([
+            { pmid: '901', title: 'Core 901', abstract: 'Squarely relevant.' },
+            { pmid: '902', title: 'Core 902' },
+            { pmid: '903', title: 'Core 903' },
+          ])
+        );
+      });
+      const userPrompts: string[] = [];
+      const forPurpose = jest
+        .fn()
+        .mockReturnValue(
+          insideProvider({ picks: [{ pmid: '902', reason: '代表例' }], userPrompts })
+        );
+      const onProgress = jest.fn();
+      const result = await fetchBoundaryCandidates({
+        google: {
+          fetch: emptySeedGoogleFetch() as unknown as typeof fetch,
+          getAccessToken: jest.fn().mockResolvedValue('t'),
+        },
+        eutils: eutilsDeps(eutilsFetch),
+        store,
+        llmFactory: { forPurpose, model: 'gemini-test' },
+        onProgress,
+      });
+
+      expect(result.mode).toBe('inside');
+      expect(result.insideStrategy).toBe('specific');
+      expect(result.specific).toEqual({
+        query: SPECIFIC_QUERY,
+        rationale: 'Majr に絞った',
+        hits: 60,
+        fallback: null,
+      });
+      // originalHits は現式の件数、evaluatedCount は specific 式の上位（3 件全部）
+      expect(result.originalHits).toBe(3000);
+      expect(result.broadenedHits).toBe(3000);
+      expect(result.evaluatedCount).toBe(3);
+      expect(result.candidates.map((c) => c.pmid)).toEqual(['902']);
+      expect(result.candidates[0]?.abstract).toBeNull();
+
+      // 設計 → 選定の順に purpose を使う。式は広げない
+      expect(forPurpose.mock.calls.map((c) => c[0])).toEqual(['design_specific_query', 'pick_seed']);
+      expect(forPurpose).not.toHaveBeenCalledWith('expand_recall');
+      // 設計プロンプトには現式のブロックと研究デザインが載る
+      expect(userPrompts[0]).toContain('#1 asthma[tiab]');
+      expect(userPrompts[0]).toContain('研究デザイン: RCT');
+      // 選定は「最大 5 件」
+      expect(userPrompts[1]).toContain('最大 5 件まで');
+
+      // specific 式は relevance 順・retmax 50、現式は件数のみ（retmax 0）
+      const specificUrl = esearchUrls.find((u) => decodeURIComponent(u).includes('[Majr]'))!;
+      expect(specificUrl).toContain('sort=relevance');
+      expect(specificUrl).toContain('retmax=50');
+      const originalUrl = esearchUrls.find((u) => !decodeURIComponent(u).includes('[Majr]'))!;
+      expect(originalUrl).toContain('retmax=0');
+      expect(esearchUrls).toHaveLength(2);
+
+      // 進捗: 設計ステップが inside-esearch の前に入る
+      expect(onProgress.mock.calls.map((c) => c[0])).toEqual([
+        'protocol',
+        'inside-design',
+        'inside-esearch',
+        'inside-dedup',
+        'inside-efetch',
+        'pick-seed',
+      ]);
+    });
+
+    test('specific 式の母集団は skillCandidateLimit 未指定なら retmax と同じ件数まで渡す', async () => {
+      const store = createStore(makeState());
+      const pool = Array.from({ length: 30 }, (_, i) => String(1000 + i));
+      const eutilsFetch = jest.fn().mockImplementation(async (url: string) => {
+        if (url.includes('esearch.fcgi')) {
+          return decodeURIComponent(url).includes('[Majr]')
+            ? jsonResponse({ esearchresult: { count: '30', idlist: pool } })
+            : jsonResponse({ esearchresult: { count: '999', idlist: [] } });
+        }
+        return textResponse(buildEfetchXml(pool.map((pmid) => ({ pmid, title: `T${pmid}` }))));
+      });
+      const userPrompts: string[] = [];
+      const forPurpose = jest.fn().mockReturnValue(insideProvider({ userPrompts }));
+      const result = await fetchBoundaryCandidates({
+        google: {
+          fetch: emptySeedGoogleFetch() as unknown as typeof fetch,
+          getAccessToken: jest.fn().mockResolvedValue('t'),
+        },
+        eutils: eutilsDeps(eutilsFetch),
+        store,
+        llmFactory: { forPurpose, model: 'gemini-test' },
+      });
+      // 従来の既定 20 件で切らず 30 件すべてを評価対象にする
+      expect(result.evaluatedCount).toBe(30);
+      expect(userPrompts[1]).toContain('候補（30 件）');
+    });
+
+    test('specific 式が 0 件なら現式の relevance 上位へフォールバックし、理由を残す', async () => {
+      const store = createStore(makeState());
+      const esearchUrls: string[] = [];
+      const eutilsFetch = jest.fn().mockImplementation(async (url: string) => {
+        if (url.includes('esearch.fcgi')) {
+          esearchUrls.push(url);
+          return decodeURIComponent(url).includes('[Majr]')
+            ? jsonResponse({ esearchresult: { count: '0', idlist: [] } })
+            : jsonResponse({ esearchresult: { count: '300', idlist: ['222', '333'] } });
+        }
+        return textResponse(
+          buildEfetchXml([
+            { pmid: '222', title: 'Core 222' },
+            { pmid: '333', title: 'Core 333' },
+          ])
+        );
+      });
+      const forPurpose = jest
+        .fn()
+        .mockReturnValue(insideProvider({ picks: [{ pmid: '333', reason: 'ok' }] }));
+      const onProgress = jest.fn();
+      const result = await fetchBoundaryCandidates({
+        google: {
+          fetch: emptySeedGoogleFetch() as unknown as typeof fetch,
+          getAccessToken: jest.fn().mockResolvedValue('t'),
+        },
+        eutils: eutilsDeps(eutilsFetch),
+        store,
+        llmFactory: { forPurpose, model: 'gemini-test' },
+        onProgress,
+      });
+      expect(result.insideStrategy).toBe('specific');
+      expect(result.specific).toEqual({
+        query: SPECIFIC_QUERY,
+        rationale: 'Majr に絞った',
+        hits: 0,
+        fallback: 'zero_hits',
+      });
+      expect(result.originalHits).toBe(300);
+      expect(result.evaluatedCount).toBe(2);
+      expect(result.candidates.map((c) => c.pmid)).toEqual(['333']);
+      // フォールバック時の現式検索は母集団として使うので retmax 50・relevance 順
+      const originalUrl = esearchUrls.find((u) => !decodeURIComponent(u).includes('[Majr]'))!;
+      expect(originalUrl).toContain('retmax=50');
+      expect(originalUrl).toContain('sort=relevance');
+      // inside-esearch は specific 式と現式で 2 回通知される（トラッカーは同じ段に留まる）
+      expect(onProgress.mock.calls.map((c) => c[0])).toEqual([
+        'protocol',
+        'inside-design',
+        'inside-esearch',
+        'inside-esearch',
+        'inside-dedup',
+        'inside-efetch',
+        'pick-seed',
+      ]);
+    });
+
+    test('specific 式が PubMed の構文エラー（恒久エラー）なら現式へフォールバックする', async () => {
+      const store = createStore(makeState());
+      const eutilsFetch = jest.fn().mockImplementation(async (url: string) => {
+        if (url.includes('esearch.fcgi')) {
+          return decodeURIComponent(url).includes('[Majr]')
+            ? jsonResponse({
+                esearchresult: {
+                  count: '0',
+                  idlist: [],
+                  errorlist: { fieldsnotfound: ['Majrr'], phrasesnotfound: [] },
+                },
+              })
+            : jsonResponse({ esearchresult: { count: '10', idlist: ['222'] } });
+        }
+        return textResponse(buildEfetchXml([{ pmid: '222', title: 'Core 222' }]));
+      });
+      const forPurpose = jest
+        .fn()
+        .mockReturnValue(insideProvider({ picks: [{ pmid: '222', reason: 'ok' }] }));
+      const result = await fetchBoundaryCandidates({
+        google: {
+          fetch: emptySeedGoogleFetch() as unknown as typeof fetch,
+          getAccessToken: jest.fn().mockResolvedValue('t'),
+        },
+        eutils: eutilsDeps(eutilsFetch),
+        store,
+        llmFactory: { forPurpose, model: 'gemini-test' },
+      });
+      expect(result.specific?.fallback).toBe('search_failed');
+      expect(result.specific?.query).toBe(SPECIFIC_QUERY);
+      expect(result.specific?.hits).toBe(0);
+      expect(result.candidates.map((c) => c.pmid)).toEqual(['222']);
+    });
+
+    test('specific 式の検索が一時エラー（HTTP 5xx）なら例外として伝播する', async () => {
+      const store = createStore(makeState());
+      const eutilsFetch = jest.fn().mockImplementation(async (url: string) => {
+        if (url.includes('esearch.fcgi') && decodeURIComponent(url).includes('[Majr]')) {
+          return { ok: false, status: 503, json: async () => ({}), text: async () => '' } as Response;
+        }
+        return jsonResponse({ esearchresult: { count: '10', idlist: ['222'] } });
+      });
+      const forPurpose = jest.fn().mockReturnValue(insideProvider({}));
+      await expect(
+        fetchBoundaryCandidates({
+          google: {
+            fetch: emptySeedGoogleFetch() as unknown as typeof fetch,
+            getAccessToken: jest.fn().mockResolvedValue('t'),
+          },
+          eutils: eutilsDeps(eutilsFetch),
+          store,
+          llmFactory: { forPurpose, model: 'gemini-test' },
+        })
+      ).rejects.toThrow('esearch failed: HTTP 503');
+    });
+
+    test('LLM の応答から specific 式を組み立てられなければ現式へフォールバックする（design_failed）', async () => {
+      const store = createStore(makeState());
+      const esearchUrls: string[] = [];
+      const eutilsFetch = jest.fn().mockImplementation(async (url: string) => {
+        if (url.includes('esearch.fcgi')) {
+          esearchUrls.push(url);
+          return jsonResponse({ esearchresult: { count: '10', idlist: ['222'] } });
+        }
+        return textResponse(buildEfetchXml([{ pmid: '222', title: 'Core 222' }]));
+      });
+      const forPurpose = jest
+        .fn()
+        .mockReturnValue(
+          insideProvider({ designText: 'not json at all', picks: [{ pmid: '222', reason: 'ok' }] })
+        );
+      const result = await fetchBoundaryCandidates({
+        google: {
+          fetch: emptySeedGoogleFetch() as unknown as typeof fetch,
+          getAccessToken: jest.fn().mockResolvedValue('t'),
+        },
+        eutils: eutilsDeps(eutilsFetch),
+        store,
+        llmFactory: { forPurpose, model: 'gemini-test' },
+      });
+      expect(result.specific).toEqual({
+        query: null,
+        rationale: null,
+        hits: 0,
+        fallback: 'design_failed',
+      });
+      expect(result.candidates.map((c) => c.pmid)).toEqual(['222']);
+      // specific 式は検索しない（現式 1 回だけ）
+      expect(esearchUrls).toHaveLength(1);
+      expect(esearchUrls[0]).toContain('sort=relevance');
+      expect(forPurpose).toHaveBeenCalledWith('pick_seed');
+    });
+
+    test('設計 LLM の呼び出しが SkillResponseError 以外で失敗したら伝播する（API キー欠落等）', async () => {
+      const store = createStore(makeState());
+      const eutilsFetch = jest.fn();
+      const forPurpose = jest.fn().mockReturnValue({
+        providerId: 'gemini',
+        model: 'test',
+        chat: async () => {
+          throw new Error('Gemini の API キーが未設定です');
+        },
+      } satisfies LLMProvider);
+      await expect(
+        fetchBoundaryCandidates({
+          google: {
+            fetch: emptySeedGoogleFetch() as unknown as typeof fetch,
+            getAccessToken: jest.fn().mockResolvedValue('t'),
+          },
+          eutils: eutilsDeps(eutilsFetch),
+          store,
+          llmFactory: { forPurpose, model: 'gemini-test' },
+        })
+      ).rejects.toThrow('API キー');
+      expect(eutilsFetch).not.toHaveBeenCalled();
+    });
+
+    test('specific 式の上位がすべて既存 seed（判定済み）と重複していれば選定を呼ばず空で返す', async () => {
+      const store = createStore(makeState());
+      const excludeRow = SHEET_HEADERS.SeedPapers.map(() => '');
+      excludeRow[SHEET_HEADERS.SeedPapers.indexOf('pmid')] = '901';
+      excludeRow[SHEET_HEADERS.SeedPapers.indexOf('is_valid')] = 'true';
+      excludeRow[SHEET_HEADERS.SeedPapers.indexOf('user_decision')] = 'exclude';
+      const googleFetch = jest.fn().mockImplementation(async (url: string) => {
+        if (url.includes('/values/SeedPapers')) {
+          return jsonResponse({ values: [SHEET_HEADERS.SeedPapers, excludeRow] });
+        }
+        return jsonResponse({});
+      });
+      const eutilsFetch = jest.fn().mockImplementation(async (url: string) => {
+        return decodeURIComponent(url).includes('[Majr]')
+          ? jsonResponse({ esearchresult: { count: '1', idlist: ['901'] } })
+          : jsonResponse({ esearchresult: { count: '500', idlist: [] } });
+      });
+      const forPurpose = jest.fn().mockReturnValue(insideProvider({}));
+      const result = await fetchBoundaryCandidates({
+        google: {
+          fetch: googleFetch as unknown as typeof fetch,
+          getAccessToken: jest.fn().mockResolvedValue('t'),
+        },
+        eutils: eutilsDeps(eutilsFetch),
+        store,
+        llmFactory: { forPurpose, model: 'gemini-test' },
+      });
+      expect(result.candidates).toEqual([]);
+      expect(result.evaluatedCount).toBe(0);
+      expect(result.specific?.hits).toBe(1);
+      expect(result.specific?.fallback).toBeNull();
+      expect(result.originalHits).toBe(500);
+      expect(forPurpose).not.toHaveBeenCalledWith('pick_seed');
+    });
+
+    test('Sheet 由来 Protocol（studyDesign null）でも specific 式の設計プロンプトが組める', async () => {
+      const store = createStore(makeState({ protocolDraft: null, currentFormulaVersionId: null }));
+      const protocolRow = SHEET_HEADERS.Protocol.map(() => '');
+      protocolRow[SHEET_HEADERS.Protocol.indexOf('version')] = '1';
+      protocolRow[SHEET_HEADERS.Protocol.indexOf('research_question')] = 'Sheet RQ';
+      const googleFetch = jest.fn().mockImplementation(async (url: string) => {
+        if (url.includes('/values/SeedPapers')) {
+          return jsonResponse({ values: [SHEET_HEADERS.SeedPapers] });
+        }
+        if (url.includes('/values/Protocol')) {
+          return jsonResponse({ values: [SHEET_HEADERS.Protocol, protocolRow] });
+        }
+        return jsonResponse({});
+      });
+      const eutilsFetch = jest.fn().mockImplementation(async (url: string) => {
+        if (url.includes('esearch.fcgi')) {
+          return decodeURIComponent(url).includes('[Majr]')
+            ? jsonResponse({ esearchresult: { count: '5', idlist: ['901'] } })
+            : jsonResponse({ esearchresult: { count: '50', idlist: [] } });
+        }
+        return textResponse(buildEfetchXml([{ pmid: '901', title: 'Core 901' }]));
+      });
+      const userPrompts: string[] = [];
+      const forPurpose = jest
+        .fn()
+        .mockReturnValue(insideProvider({ picks: [{ pmid: '901', reason: 'ok' }], userPrompts }));
+      const result = await fetchBoundaryCandidates({
+        google: {
+          fetch: googleFetch as unknown as typeof fetch,
+          getAccessToken: jest.fn().mockResolvedValue('t'),
+        },
+        eutils: eutilsDeps(eutilsFetch),
+        store,
+        llmFactory: { forPurpose, model: 'gemini-test' },
+      });
+      expect(result.candidates.map((c) => c.pmid)).toEqual(['901']);
+      expect(userPrompts[0]).toContain('RQ: Sheet RQ');
+      expect(userPrompts[0]).toContain('研究デザイン: (未指定)');
     });
   });
 

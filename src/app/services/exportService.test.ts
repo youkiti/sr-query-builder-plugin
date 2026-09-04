@@ -48,6 +48,7 @@ function stateWithFormula(): AppState {
     blockImprovementManualEditDraft: null,
     blocksDraftSavedAt: null,
     hydrateError: null,
+    expandInsideStrategy: 'specific',
   };
 }
 

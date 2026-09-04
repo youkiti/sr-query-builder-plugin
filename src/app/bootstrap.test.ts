@@ -74,6 +74,7 @@ describe('startApp', () => {
       blockImprovementManualEditDraft: null,
       blocksDraftSavedAt: null,
       hydrateError: null,
+      expandInsideStrategy: 'specific',
     });
     startApp(doc, { ...noopHashOptions('#/home'), store });
     expect(doc.getElementById('app-status')?.textContent).toContain('My SR');
@@ -126,6 +127,7 @@ describe('startApp', () => {
       blockImprovementManualEditDraft: null,
       blocksDraftSavedAt: null,
       hydrateError: null,
+      expandInsideStrategy: 'specific',
     });
     startApp(doc, { ...noopHashOptions('#/home'), setHash, store });
     const protocolBtn = Array.from(
@@ -1964,21 +1966,25 @@ describe('startApp - wiring 層', () => {
         } as Response;
       }
       if (u.includes('generativelanguage.googleapis.com')) {
-        // 1 回目は expand-query-for-recall（拡張語）、2 回目は pick-boundary-cases（候補選定）。
-        // system プロンプトに 'recall' が含まれるかで返答を切り替える。
+        // SeedPapers が空（有効 seed 0 件）なので inside モード。既定の specific 戦略では
+        // 1 回目が design-specific-query（絞り込み式の設計）、2 回目が pick-seed-candidates
+        // （候補選定）。system プロンプトの語で返答を切り替える（'recall' 分岐は margin 用に残す）。
         const body = typeof init?.body === 'string' ? init.body : '';
-        const llmText = body.includes('recall')
-          ? JSON.stringify({
-              blocks: [
-                {
-                  id: '1',
-                  additions: [
-                    { term: '"Lung Diseases"[Mesh]', axis: 'mesh', rationale: '親概念へ拡張' },
-                  ],
-                },
-              ],
-            })
-          : JSON.stringify({ picks: [{ pmid: '111', reason: 'subset' }] });
+        // 設計 skill の system プロンプトは「感度（recall）優先」の語を含むので、'recall' より先に判定する
+        const llmText = body.includes('specific_query')
+          ? JSON.stringify({ specific_query: '"Asthma"[Majr]', rationale: 'Majr に絞った' })
+          : body.includes('recall')
+            ? JSON.stringify({
+                blocks: [
+                  {
+                    id: '1',
+                    additions: [
+                      { term: '"Lung Diseases"[Mesh]', axis: 'mesh', rationale: '親概念へ拡張' },
+                    ],
+                  },
+                ],
+              })
+            : JSON.stringify({ picks: [{ pmid: '111', reason: 'subset' }] });
         return jsonResponse({
           candidates: [
             {
@@ -2033,6 +2039,12 @@ describe('startApp - wiring 層', () => {
     }
     const items = doc.querySelectorAll('.expand__candidate');
     expect(items.length).toBe(1);
+    // 既定の specific 戦略: 設計した式が画面に出て、その esearch は relevance 順で投げられている
+    expect(doc.querySelector('.expand__specific-query')?.textContent).toBe('"Asthma"[Majr]');
+    const relevanceSearches = fetchMock.mock.calls.filter(
+      (c) => (c[0] as string).includes('esearch.fcgi') && (c[0] as string).includes('sort=relevance')
+    );
+    expect(relevanceSearches.length).toBeGreaterThanOrEqual(1);
     const includeBtn = items[0]!.querySelector<HTMLButtonElement>(
       'button[data-decision=include]'
     )!;
@@ -2044,6 +2056,79 @@ describe('startApp - wiring 層', () => {
       (c[0] as string).includes('SeedPapers') && (c[0] as string).includes(':append')
     );
     expect(seedAppends).toHaveLength(1);
+  });
+
+  test('expand の specific チェックを外すと store.expandInsideStrategy が silent に更新され、onFetch へ current が渡る', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+      'apiKeys.gemini': 'KEY',
+    });
+    fetchMock.mockImplementation(async (url: string) => {
+      const u = typeof url === 'string' ? url : String(url);
+      if (u.includes('/values/SeedPapers')) {
+        return jsonResponse({ values: [SHEET_HEADERS.SeedPapers] });
+      }
+      if (u.includes('esearch.fcgi')) {
+        return jsonResponse({ esearchresult: { count: '0', idlist: [] } });
+      }
+      return jsonResponse({});
+    });
+    const handle = startApp(doc, {
+      getHash: () => '#/expand',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({
+      ...s,
+      protocolDraft: {
+        frameworkType: 'pico',
+        researchQuestion: 'RQ',
+        inclusionCriteria: '',
+        exclusionCriteria: '',
+        studyDesign: 'RCT',
+        sourceType: 'manual',
+        sourceFilename: null,
+        rawTextRef: null,
+        rawTextPreview: 'p',
+        rawTextInline: '本文',
+      },
+      currentFormulaVersionId: 'v-1',
+      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 asthma[tiab]\n```\n',
+    }));
+    expect(handle.store.getState().expandInsideStrategy).toBe('specific');
+    const listener = jest.fn();
+    handle.store.subscribe(listener);
+    const toggle = doc.querySelector<HTMLInputElement>('.expand__inside-specific')!;
+    toggle.checked = false;
+    toggle.dispatchEvent(new Event('change', { bubbles: true }));
+    // silent 更新: state は変わるが購読者（再描画）は呼ばれない
+    expect(handle.store.getState().expandInsideStrategy).toBe('current');
+    expect(listener).not.toHaveBeenCalled();
+    // 同じ値をもう一度書いても state オブジェクトは変わらない
+    toggle.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(handle.store.getState().expandInsideStrategy).toBe('current');
+
+    // current で取得すると LLM の設計は呼ばず（Gemini へ到達しない）、esearch は sort 無し
+    doc.querySelector<HTMLButtonElement>('.expand__actions button')!.click();
+    for (let i = 0; i < 10; i += 1) {
+      await flush();
+    }
+    const run = handle.store.getState().expandRun;
+    expect(run?.status).toBe('ready');
+    expect(run?.result?.insideStrategy).toBe('current');
+    expect(run?.result?.specific).toBeNull();
+    const geminiCalls = fetchMock.mock.calls.filter((c) =>
+      (c[0] as string).includes('generativelanguage.googleapis.com')
+    );
+    expect(geminiCalls).toHaveLength(0);
+    const esearchCalls = fetchMock.mock.calls.filter((c) => (c[0] as string).includes('esearch.fcgi'));
+    expect(esearchCalls.length).toBeGreaterThanOrEqual(1);
+    expect(esearchCalls.every((c) => !(c[0] as string).includes('sort='))).toBe(true);
+    // 再描画後もチェックは外れたまま（store から復元される）
+    expect(doc.querySelector<HTMLInputElement>('.expand__inside-specific')?.checked).toBe(false);
   });
 
   test('境界事例取得が失敗すると expandRun=error になりエラーを表示する', async () => {

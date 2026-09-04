@@ -12,6 +12,7 @@ export type LlmPurpose =
   | 'design_filter'
   | 'pick_boundary'
   | 'pick_seed'
+  | 'design_specific_query'
   | 'expand_recall'
   | 'interpret_result'
   | 'extract_protocol'

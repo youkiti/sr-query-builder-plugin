@@ -10,6 +10,7 @@ describe('features/formula/skills index 再エクスポート', () => {
     expect(typeof mod.proposeExcessFilters).toBe('function');
     expect(typeof mod.pickBoundaryCases).toBe('function');
     expect(typeof mod.pickSeedCandidates).toBe('function');
+    expect(typeof mod.designSpecificQuery).toBe('function');
     expect(typeof mod.improveBlockExpression).toBe('function');
     expect(typeof mod.parseSkillJson).toBe('function');
     expect(typeof mod.SkillResponseError).toBe('function');
@@ -22,6 +23,7 @@ describe('features/formula/skills index 再エクスポート', () => {
     expect(mod.EXCESS_FILTER_SYSTEM_PROMPT.length).toBeGreaterThan(0);
     expect(mod.PICK_BOUNDARY_SYSTEM_PROMPT.length).toBeGreaterThan(0);
     expect(mod.PICK_SEED_SYSTEM_PROMPT.length).toBeGreaterThan(0);
+    expect(mod.DESIGN_SPECIFIC_QUERY_SYSTEM_PROMPT.length).toBeGreaterThan(0);
     expect(mod.IMPROVE_BLOCK_SYSTEM_PROMPT.length).toBeGreaterThan(0);
   });
 
@@ -44,6 +46,7 @@ describe('features/formula/skills index 再エクスポート', () => {
     expect(mod.EXCESS_FILTER_USER_PROMPT_TEMPLATE.length).toBeGreaterThan(0);
     expect(mod.PICK_BOUNDARY_USER_PROMPT_TEMPLATE.length).toBeGreaterThan(0);
     expect(mod.PICK_SEED_USER_PROMPT_TEMPLATE.length).toBeGreaterThan(0);
+    expect(mod.DESIGN_SPECIFIC_QUERY_USER_PROMPT_TEMPLATE.length).toBeGreaterThan(0);
     expect(mod.IMPROVE_BLOCK_USER_PROMPT_TEMPLATE.length).toBeGreaterThan(0);
   });
 });
