@@ -250,7 +250,7 @@ function buildBlocksSection(doc: Document, draft: BlocksDraft, store: AppStore):
   const hint = doc.createElement('p');
   hint.className = 'blocks__section-hint';
   hint.textContent =
-    '各ブロックの「ブロック名」と「説明」を確認・修正してください。説明が具体的なほど AI が良い検索語を提案できます。';
+    '各ブロックの「ブロック名」と「説明」を確認・修正してください。説明が具体的なほど AI が良い検索語を提案できます。1 ブロック = AND で掛け合わせる 1 概念です。「小児の肺炎」のように AND 条件を含む場合は「小児」「肺炎」の 2 ブロックに分けてください（ブロック内は OR で束ねられます）。';
   section.appendChild(hint);
 
   section.appendChild(buildBlockList(doc, draft, store));

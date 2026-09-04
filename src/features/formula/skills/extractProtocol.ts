@@ -7,6 +7,10 @@ import { arraySchema, enumSchema, objectSchema, stringSchema } from './schema';
  * `extract-protocol` skill — プロトコル本文から RQ・組入除外・1〜5 個の
  * 検索式ブロックドラフトを抽出する。requirements.md §4.2 で参照。
  *
+ * ブロック数はフレームワークの要素数（P/I の 2 個など）に固定しない。1 ブロック = 検索式で
+ * AND 結合する 1 概念なので、「小児の肺炎」のように P が独立概念の AND で構成されるときは
+ * 概念ごとに別ブロックへ分けるよう prompt で指示している（issue #94）。
+ *
  * 出力された draft は UI（#/blocks）でユーザーが承認 / 編集してから保存する。
  */
 
@@ -29,9 +33,15 @@ export const EXTRACT_PROTOCOL_SYSTEM_PROMPT = `
 要件:
 - フレームワーク（pico / peco / pcc / spider / custom）を本文から推定する。
   介入研究なら pico、観察研究なら peco、スコーピングレビューなら pcc、質的研究なら spider を選ぶ。
-- ブロック数は 1〜5 の範囲で、レビューの種類に応じて最小限にする。
-  介入研究 → P/I の 2 ブロック、観察研究 → P/E の 2 ブロック、スコーピング → P/C/Context の 3 ブロックなど。
-- 各ブロックには short label（英語、例: "Population", "Intervention"）と
+- ブロック数は 1〜5 の範囲。**フレームワークの要素数とブロック数は一致しなくてよい**。
+  ブロックは「検索式で AND 結合する単位（1 ブロック = 1 概念）」であり、
+  P や I が複数の独立した概念の AND 条件で構成されるなら、概念ごとに別ブロックへ分ける。
+  例: 「小児の肺炎」という P → "Children" と "Pneumonia" の 2 ブロック（結合式は "#1 AND #2"）。
+  介入研究で P が 2 概念なら P1 / P2 / I の 3 ブロック、観察研究なら P / E、
+  スコーピングなら P / Concept / Context のように、概念の数で決める。
+- 逆に、同義語・下位概念・表記ゆれの列挙（OR で束ねるもの）は 1 ブロックにまとめる。
+  Comparison や Outcome は、組入基準として必須で検索語になりうる場合だけブロックにする。
+- 各ブロックには short label（英語、例: "Population", "Intervention", 概念で分けたなら "Children", "Pneumonia"）と
   日本語の自然文 description（このブロックで捉えたい概念を 1-3 文で）を必ず付ける。
 - combination_expression は "#1 AND #2 AND #3" 形式の AND 結合を既定とする。
   特別な意図が無い限り全 AND にする。
