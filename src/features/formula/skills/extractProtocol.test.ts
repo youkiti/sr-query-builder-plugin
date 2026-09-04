@@ -1,5 +1,6 @@
 import type { ChatMessage, LLMProvider } from '@/lib/llm';
 import {
+  EXTRACT_PROTOCOL_SYSTEM_PROMPT,
   EXTRACT_PROTOCOL_USER_PROMPT_TEMPLATE,
   extractProtocol,
 } from './extractProtocol';
@@ -100,6 +101,32 @@ describe('extractProtocol', () => {
 
   test('プロンプトテンプレートにプレースホルダが定義されている', () => {
     expect(EXTRACT_PROTOCOL_USER_PROMPT_TEMPLATE).toContain('{{PROTOCOL}}');
+  });
+
+  // issue #94: 「小児の肺炎」のように P が独立概念の AND で構成されるとき、
+  // 既定の P/I 2 ブロックに押し込まれて P 内が全部 OR になる回帰を防ぐ。
+  test('system prompt はブロック数をフレームワーク要素数に固定せず、AND 概念の分割を指示する', () => {
+    expect(EXTRACT_PROTOCOL_SYSTEM_PROMPT).toContain('フレームワークの要素数とブロック数は一致しなくてよい');
+    expect(EXTRACT_PROTOCOL_SYSTEM_PROMPT).toContain('概念ごとに別ブロックへ分ける');
+    expect(EXTRACT_PROTOCOL_SYSTEM_PROMPT).toContain('小児の肺炎');
+    expect(EXTRACT_PROTOCOL_SYSTEM_PROMPT).not.toContain('最小限にする');
+    expect(EXTRACT_PROTOCOL_SYSTEM_PROMPT).not.toContain('P/I の 2 ブロック');
+  });
+
+  test('P を 2 概念に分割した 3 ブロックの出力を受け入れ、結合式は全 AND になる', async () => {
+    const json = JSON.stringify({
+      framework_type: 'pico',
+      research_question: '小児の肺炎に対する抗菌薬 X の有効性',
+      blocks: [
+        { block_label: 'Children', description: '小児' },
+        { block_label: 'Pneumonia', description: '肺炎' },
+        { block_label: 'Intervention', description: '抗菌薬 X' },
+      ],
+    });
+    const { provider: p } = provider(json);
+    const result = await extractProtocol('プロトコル本文', p);
+    expect(result.blocks.map((b) => b.blockLabel)).toEqual(['Children', 'Pneumonia', 'Intervention']);
+    expect(result.combinationExpression).toBe('#1 AND #2 AND #3');
   });
 
   test('blocks 要素のフィールドが欠けていても空文字で埋める', async () => {

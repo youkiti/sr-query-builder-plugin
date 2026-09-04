@@ -160,6 +160,7 @@ https://www.googleapis.com/auth/drive.file          # Sheets 読み書き + LLM 
 > - スコーピングレビュー → `(Population, Concept, Context)` の 3 ブロック
 > - SPIDER（質的研究レビュー）→ `(Sample, Phenomenon of Interest, Design, Evaluation, Research type)` の 5 ブロック ← **上限**
 > - 単純な有病率調査 → `(Population, Outcome)` の 2 ブロック
+> - **ブロック数はフレームワークの要素数に固定しない**（issue #94）。1 ブロック = 検索式で AND 結合する 1 概念。P が「小児の肺炎」のように独立概念の AND で構成されるなら `(Children, Pneumonia, Intervention)` の 3 ブロックに分ける（同じ P に押し込むとブロック内で OR 結合されて「小児 OR 肺炎」になってしまう）。`extract-protocol` skill の prompt もこの方針で分割を指示する
 
 #### `SeedPapers`
 
