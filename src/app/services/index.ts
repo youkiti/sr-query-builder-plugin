@@ -115,3 +115,7 @@ export {
   type SpecificQueryFallback,
   type SpecificQueryOutcome,
 } from './expandService';
+
+export * from './queryOptimizationService';
+export * from './queryOptimizationCheckpointService';
+export * from './queryOptimizationSettingsService';

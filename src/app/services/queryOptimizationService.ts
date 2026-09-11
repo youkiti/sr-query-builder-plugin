@@ -40,7 +40,30 @@ export interface QueryOptimizationInput {
   meshContext?: OptimizationMeshNode[];
 }
 
+export type QueryOptimizationStep =
+  /** bootstrap で初期式を生成・準備している段階。 */
+  | 'initial_formula'
+  /** 初期式または AI が提案した候補の実測。 */
+  | 'measuring'
+  /** 語別分析、AI の修正提案、追加 MeSH 文脈の取得。 */
+  | 'adjusting'
+  /** 条件達成候補をキャッシュに依存せず測り直す最終確認。 */
+  | 'revalidating'
+  /** 処理が終了し、人によるレビューへ渡す段階。 */
+  | 'review';
+
+export interface QueryOptimizationProgress {
+  step: QueryOptimizationStep;
+  iterations: number;
+  bestTotalHits: number | null;
+  bestCapturedSeedCount: number | null;
+  /** 試行確定時だけ設定する。段階通知では null。 */
+  trial: OptimizationTrial | null;
+}
+
 export interface QueryOptimizationDeps {
+  /** 未注入なら通知しない。表示側の例外は最適化へ伝播させない。 */
+  onProgress?: (progress: QueryOptimizationProgress) => void;
   eutils: EutilsDeps;
   /** 注入ファクトリの LLM 監査ログ保存は許容する。サービス自身は Sheets/Drive を書かない。 */
   llmFactory: LlmProviderFactory;
@@ -102,6 +125,7 @@ export interface QueryOptimizationResult {
 // 最大 5 候補＋初期・最終測定と語別分析を収めつつ、暴走を有限にする既定値。
 // NCBI の実 HTTP（リトライ含む）＋ LLM chat ＋ MeSH 追加取得の単位で 200 回、待機込み 10 分。
 // 注入プロバイダ内部の再試行・監査通信は外側から観測できないため chat 1 回に数える。
+export const DEFAULT_MAX_ITERATIONS = 5;
 const DEFAULT_MAX_API_CALLS = 200;
 const DEFAULT_MAX_ELAPSED_MS = 10 * 60 * 1000;
 // 一度に全階層を取得せず、優先する少数の枝を調べる。既定 5 反復でも追加取得は最大 15 回。
@@ -136,13 +160,27 @@ export async function runQueryOptimization(
   const meshRequestResults: OptimizationMeshRequestResult[] = [];
   const now = deps.now ?? Date.now;
   const startedAt = now();
-  const maxIterations = fixed.maxIterations ?? 5;
+  const maxIterations = fixed.maxIterations ?? DEFAULT_MAX_ITERATIONS;
   const maxApiCalls = deps.maxApiCalls ?? DEFAULT_MAX_API_CALLS;
   const maxElapsedMs = deps.maxElapsedMs ?? DEFAULT_MAX_ELAPSED_MS;
   let apiCalls = 0;
   let iterations = 0;
   let best: VerifiedOptimizationCandidate | null = null;
   const trials: OptimizationTrial[] = [];
+  let step: QueryOptimizationStep = 'measuring';
+  const notify = (trial: OptimizationTrial | null = null): void => {
+    if (!deps.onProgress) return;
+    try {
+      deps.onProgress({ step, iterations,
+        bestTotalHits: best?.measurement.totalHits ?? null,
+        bestCapturedSeedCount: best?.measurement.capturedPmids?.length ?? null,
+        // 通知先による変更が確定済み試行に戻らないよう、値として渡す。
+        trial: trial ? JSON.parse(JSON.stringify(trial)) as OptimizationTrial : null,
+      });
+    } catch {
+      // 画面の通知失敗で実測・停止判定を変えない。
+    }
+  };
   const seen = new Set<string>();
   let terminal: OptimizationStopReason | null = null;
 
@@ -225,6 +263,7 @@ export async function runQueryOptimization(
     return results.map(({ request, note }) => `${request.descriptor || '(未指定)'} / ${request.treeNumber || '(未指定)'}: ${note}`).join('\n');
   };
   const save = async () => {
+    notify(trials[trials.length - 1] ?? null);
     boundary();
     await saveQueryOptimizationCheckpoint(fixed.projectId, fixed.runId, fixed.maxHits,
       trials, deps.checkpoint, () => new Date(now()).toISOString());
@@ -271,6 +310,8 @@ export async function runQueryOptimization(
         result.unmetReasons.push(`終了記録の保存に失敗しました: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
+    step = 'review';
+    notify();
     return result;
   }
   const meetsTarget = (candidate: VerifiedOptimizationCandidate) =>
@@ -285,6 +326,7 @@ export async function runQueryOptimization(
       result.unmetReasons.push(error);
       return result;
     }
+    notify();
     const initial = await measure(fixed.initialFormula, 'initial');
     trials.push(makeTrial('initial', initial.formula, null, initial.measurement,
       initial.evaluation.status === 'success', '初期式の実測', ''));
@@ -297,6 +339,8 @@ export async function runQueryOptimization(
     let reason: OptimizationStopReason = 'iteration_limit';
     for (let round = 1; round <= maxIterations; round += 1) {
       boundary();
+      step = 'adjusting';
+      notify();
       // 初回と採用後だけ語を測る。同じ最良式の却下後は取得済み文脈を共有する。
       if (!best.measurement.terms) {
         const terms = await measureTerms(best.formula, fixed.approvedBlocks, eutils, () => boundary());
@@ -331,6 +375,8 @@ export async function runQueryOptimization(
           await save();
         } else {
           boundary();
+          step = 'measuring';
+          notify();
           const measured = await measure(candidate, candidateId);
           const failed = measured.evaluation.status === 'failure';
           measurementFailures = failed ? measurementFailures + 1 : 0;
@@ -358,6 +404,8 @@ export async function runQueryOptimization(
       if (meetsTarget(best)) {
         const invalidFinal = validateOptimizationCandidate(fixed.initialFormula, best.formula, fixed.approvedBlocks);
         if (invalidFinal) return finish('revalidation_failed');
+        step = 'revalidating';
+        notify();
         const verified = await measure(best.formula, `final-${round}`);
         const achieved = meetsTarget(verified);
         trials.push(makeTrial(`final-${round}`, best.formula, best.measurement,

@@ -1,3 +1,5 @@
+import type { QueryOptimizationProgress, QueryOptimizationResult } from './services/queryOptimizationService';
+import type { OptimizationTrial } from '@/features/formula/skills/optimizeQuery';
 import type { CurrentProjectEntry } from '@/features/project';
 import type { FormulaCreatedBy } from '@/domain/formulaVersion';
 import type { ExcessFilterCandidate, ImproveBlockTurn } from '@/features/formula/skills';
@@ -134,6 +136,32 @@ export interface DraftRunState {
   error: string | null;
   /** 生成途中に計測したブロックごとのヒット数（ライブ表示用） */
   blockHits: DraftBlockHit[];
+}
+
+/** 自動調整の実測候補を、実行終了後もレビュー用に保持する。 */
+export interface QueryOptimizationRunState {
+  status: 'running' | 'ready' | 'error';
+  runId: string;
+  projectId: string;
+  maxHits: number;
+  maxIterations: number;
+  seedCount: number | null;
+  startedAtMs: number;
+  finishedAtMs: number | null;
+  progress: QueryOptimizationProgress;
+  trials: OptimizationTrial[];
+  stopRequested: boolean;
+  result: QueryOptimizationResult | null;
+  error: string | null;
+}
+
+export interface QueryOptimizationSetupState {
+  projectId: string;
+  status: 'loading' | 'ready' | 'error';
+  maxHits: string;
+  maxIterations: string;
+  seedCount: number | null;
+  error: string | null;
 }
 
 /**
@@ -346,6 +374,9 @@ export interface AppState {
   draftRun: DraftRunState | null;
   /** 境界事例取得（#/expand）の実行状態。未実行なら null */
   expandRun: ExpandRunState | null;
+  /** 自動調整の実行状態。未実行なら null */
+  queryOptimizationRun: QueryOptimizationRunState | null;
+  queryOptimizationSetup: QueryOptimizationSetupState | null;
   /**
    * #/expand の inside モード（有効 seed 0 件）で母集団に使う式の選び方（issue #93）。
    * 画面のチェックボックスと 1:1 で、打鍵で setStateSilently により更新する（再描画を
@@ -399,6 +430,8 @@ export const INITIAL_STATE: AppState = {
   currentFormulaCreatedBy: null,
   draftRun: null,
   expandRun: null,
+  queryOptimizationRun: null,
+  queryOptimizationSetup: null,
   expandInsideStrategy: 'specific',
   validationResult: null,
   missedAnalysis: null,

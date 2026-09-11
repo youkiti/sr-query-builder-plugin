@@ -91,6 +91,8 @@ function makeState(overrides: Partial<AppState> = {}): AppState {
     currentFormulaCreatedBy: 'ai_draft',
     draftRun: null,
     expandRun: null,
+    queryOptimizationRun: null,
+    queryOptimizationSetup: null,
     validationResult: null,
     missedAnalysis: null,
     excessFilterProposal: null,

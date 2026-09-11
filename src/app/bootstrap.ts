@@ -20,6 +20,14 @@ import {
   fetchBoundaryCandidates,
   fillPmidForRisRow,
   generateDraft,
+  generateDraftFormula,
+  runQueryOptimization,
+  getQueryOptimizationSettings,
+  saveQueryOptimizationSettings,
+  validateQueryOptimizationSettings,
+  DEFAULT_QUERY_OPTIMIZATION_SETTINGS,
+  QueryOptimizationStopError,
+  type QueryOptimizationSettings,
   ingestSeeds,
   invalidateSeed,
   setSeedEnabled,
@@ -54,7 +62,11 @@ import {
   type ValidationProgress,
   type ValidationSummary,
 } from './services';
-import type { SeedPaper } from '@/domain/seedPaper';
+import { isSeedEligibleForValidation, type SeedPaper } from '@/domain/seedPaper';
+import { listSeedPapers } from '@/features/seeds';
+import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
+import { newUuid } from '@/utils/uuid';
+import type { OptimizationMeshNode } from '@/features/formula/skills/optimizeQuery';
 import {
   efetchArticles,
   esearch,
@@ -62,6 +74,7 @@ import {
   fetchMeshLabels,
   fetchMeshTreeNumbers,
   type EfetchArticle,
+  type EutilsDeps,
 } from '@/lib/ncbi';
 import {
   appendExcessFilterBlocks,
@@ -174,7 +187,9 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
   const render = (): void => {
     const route = parseRoute(opts.getHash());
     if (route !== store.getState().route) {
-      store.setState((s) => ({ ...s, route }));
+      store.setState((s) => ({ ...s, route,
+        ...(route === 'draft' ? { queryOptimizationSetup: null } : {}),
+      }));
     }
     const snapshot = store.getState();
     const guard = evaluateGuards(snapshot)[route];
@@ -235,7 +250,9 @@ async function hydrateCurrentProject(store: AppStore, runtime: ChromeRuntimeDeps
   if (!current) {
     return;
   }
-  store.setState((s) => (s.project?.projectId === current.projectId ? s : { ...s, project: current }));
+  store.setState((s) => (s.project?.projectId === current.projectId ? s : {
+    ...s, project: current, queryOptimizationRun: null, queryOptimizationSetup: null,
+  }));
 
   try {
     const [protocol, latestFormula] = await Promise.all([
@@ -405,6 +422,18 @@ function buildDefaultViewOptions(
       },
     },
     draft: {
+      onPrepareOptimization: (retry) => prepareQueryOptimization(store, runtime, retry),
+      onOptimizationSettingsInput: (values) => {
+        store.setStateSilently((s) => !s.queryOptimizationSetup ? s : {
+          ...s, queryOptimizationSetup: { ...s.queryOptimizationSetup, ...values },
+        });
+      },
+      onOptimize: (settings) => runOptimizeQuery(store, runtime, llmFactoryDepsBase(), settings),
+      onStopOptimization: () => {
+        store.setState((s) => s.queryOptimizationRun?.status !== 'running' ? s : {
+          ...s, queryOptimizationRun: { ...s.queryOptimizationRun, stopRequested: true },
+        });
+      },
       // 「生成して検証する」= 生成 → 検証 を 1 アクションで連結する。
       // 進捗・エラー・ブロックごとのヒット数は store.draftRun で管理する（LLM コスト集計の
       // setState による全ビュー再描画でローカル DOM の進捗表示が消えるため）。view は描画専任。
@@ -1028,6 +1057,153 @@ async function runApprove(store: AppStore, runtime: ChromeRuntimeDeps): Promise<
   // 承認済みになったので下書きバックアップ（未承認フラグ）は破棄する
   await clearBlocksDraftBackup(runtime.store);
   store.setState((s) => (s.blocksDraftSavedAt === null ? s : { ...s, blocksDraftSavedAt: null }));
+}
+
+/** 設定・シード件数は store に復元し、遅れて戻った準備結果も所有権を確認する。 */
+async function prepareQueryOptimization(store: AppStore, runtime: ChromeRuntimeDeps, retry = false): Promise<void> {
+  const project = store.getState().project;
+  if (!project || (!retry && store.getState().queryOptimizationSetup?.projectId === project.projectId)) return;
+  const loading = {
+    projectId: project.projectId, status: 'loading' as const,
+    maxHits: String(DEFAULT_QUERY_OPTIMIZATION_SETTINGS.maxHits),
+    maxIterations: String(DEFAULT_QUERY_OPTIMIZATION_SETTINGS.maxIterations),
+    seedCount: null, error: null,
+  };
+  store.setState((s) => ({ ...s, queryOptimizationSetup: loading }));
+  try {
+    const [settings, seeds] = await Promise.all([
+      getQueryOptimizationSettings(project.projectId, runtime.store),
+      listSeedPapers(project.spreadsheetId, runtime.google),
+    ]);
+    const seedCount = new Set(seeds.filter(isSeedEligibleForValidation)
+      .map((seed) => seed.pmid).filter((pmid): pmid is string => pmid !== null)).size;
+    store.setState((s) => s.project?.projectId !== project.projectId || s.queryOptimizationSetup !== loading ? s : {
+      ...s, queryOptimizationSetup: { ...loading, status: 'ready', seedCount,
+        maxHits: String(settings?.maxHits ?? DEFAULT_QUERY_OPTIMIZATION_SETTINGS.maxHits),
+        maxIterations: String(settings?.maxIterations ?? DEFAULT_QUERY_OPTIMIZATION_SETTINGS.maxIterations),
+      },
+    });
+  } catch (err) {
+    store.setState((s) => s.project?.projectId !== project.projectId || s.queryOptimizationSetup !== loading ? s : {
+      ...s, queryOptimizationSetup: { ...loading, status: 'error', error: err instanceof Error ? err.message : String(err) },
+    });
+  }
+}
+
+/** 自動調整の候補は実行状態だけに保持する。各非同期境界で run の所有権を確認する。 */
+export async function runOptimizeQuery(
+  store: AppStore, runtime: ChromeRuntimeDeps,
+  baseDeps: Omit<LlmFactoryDeps, 'llmLogFolderId' | 'spreadsheetId'>,
+  settings: QueryOptimizationSettings
+): Promise<void> {
+  const state = store.getState();
+  if (state.queryOptimizationRun?.status === 'running' || state.draftRun?.status === 'running') return;
+  const project = state.project;
+  if (!project) return;
+  const runId = newUuid();
+  const projectId = project.projectId;
+  const fixedSettings = { ...settings };
+  const owns = (s: AppState): boolean => s.project?.projectId === projectId
+    && s.queryOptimizationRun?.projectId === projectId && s.queryOptimizationRun.runId === runId
+    && s.queryOptimizationRun.status === 'running';
+  const update = (patch: Partial<NonNullable<AppState['queryOptimizationRun']>>): void => {
+    store.setState((s) => !owns(s) || !s.queryOptimizationRun ? s : {
+      ...s, queryOptimizationRun: { ...s.queryOptimizationRun, ...patch },
+    });
+  };
+  const shouldStop = (): boolean => !owns(store.getState()) || !!store.getState().queryOptimizationRun?.stopRequested;
+  const check = (): void => { if (shouldStop()) throw new QueryOptimizationStopError('user_stop'); };
+  store.setState((s) => ({ ...s, queryOptimizationRun: {
+    status: 'running', projectId, runId, ...fixedSettings, seedCount: null,
+    startedAtMs: Date.now(), finishedAtMs: null, progress: { step: 'initial_formula', iterations: 0,
+      bestTotalHits: null, bestCapturedSeedCount: null, trial: null },
+    trials: [], stopRequested: false, result: null, error: null,
+  } }));
+  try {
+    const invalid = validateQueryOptimizationSettings(fixedSettings);
+    if (invalid) throw new Error(invalid);
+    if (!state.protocolDraft || !state.blocksDraft?.blocks.length || !state.protocolDraftPersisted) {
+      throw new Error('プロトコルとブロックを承認してください。');
+    }
+    const seeds = (await listSeedPapers(project.spreadsheetId, runtime.google)).filter(isSeedEligibleForValidation);
+    check();
+    const seedPmids = [...new Set(seeds.map((seed) => seed.pmid).filter((pmid): pmid is string => pmid !== null))];
+    update({ seedCount: seedPmids.length });
+    const incompatible = validateQueryOptimizationSettings(fixedSettings, seedPmids.length);
+    if (incompatible) throw new Error(incompatible);
+    await saveQueryOptimizationSettings(projectId, fixedSettings, runtime.store);
+    check();
+    const factory = await buildLlmProviderFactory({ ...baseDeps,
+      llmLogFolderId: project.driveFolderId, spreadsheetId: project.spreadsheetId,
+    });
+    check();
+    const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
+    check();
+    const initialFormula = state.currentFormulaMarkdown ? parsePubmedFormulaMd(state.currentFormulaMarkdown)
+      : (await generateDraftFormula({ protocol: state.protocolDraft, blocks: state.blocksDraft,
+        seedContext: { titles: seeds.flatMap((seed) => seed.title ? [seed.title] : []).slice(0, 30),
+          samples: [], meshSummary: { seedCount: 0, concepts: [], checkTags: [] } },
+      }, { llmFactory: factory, onProgress: () => check() })).formula;
+    check();
+    const result = await runQueryOptimization({ projectId, runId, initialFormula, ...fixedSettings, seedPmids,
+      // 承認ブロックの blockIndex と組み立て式の ID は、ともに配列順の 1 始まり。
+      // BlockDraft に独立 ID がないため、id と approvedBlockId は常に同じ値になる。
+      approvedBlocks: state.blocksDraft.blocks.map((block, index) => ({
+        id: String(index + 1), approvedBlockId: String(index + 1), label: block.blockLabel,
+      })),
+      criteria: { researchQuestion: state.protocolDraft.researchQuestion,
+        inclusionCriteria: state.protocolDraft.inclusionCriteria, exclusionCriteria: state.protocolDraft.exclusionCriteria },
+      seedPapers: seeds.flatMap((seed) => seed.pmid === null ? [] : [{ pmid: seed.pmid, title: seed.title }]),
+    }, { eutils, llmFactory: factory, checkpoint: runtime.store, shouldStop,
+      fetchMeshContext: async (request) => {
+        const bounded: EutilsDeps = { ...eutils, maxRetries: 1 };
+        check();
+        const branches = request.treeNumber ? [request.treeNumber]
+          : (await fetchMeshTreeNumbers([request.descriptor], bounded)).get(request.descriptor) ?? [];
+        check();
+        const nodes = new Map<string, OptimizationMeshNode>();
+        // 追加取得は最大 3 枝の直下まで。未取得の祖先・子孫を関係として補わない。
+        for (const branch of branches.slice(0, 3)) {
+          const labels = await fetchMeshLabels([branch], bounded);
+          check();
+          const children = await fetchMeshChildren(branch, bounded);
+          check();
+          const parent = labels.get(branch);
+          for (const node of [...labels.values(), ...children]) {
+            const previous = nodes.get(node.descriptorUi);
+            const parentIds = node.treeNumber === branch || !parent ? [] : [parent.descriptorUi];
+            const childIds = node.treeNumber === branch ? children.map((child) => child.descriptorUi) : [];
+            nodes.set(node.descriptorUi, { id: node.descriptorUi, descriptor: node.label, label: node.label,
+              treeNumbers: [...new Set([...(previous?.treeNumbers ?? []), node.treeNumber])],
+              parentIds: [...new Set([...(previous?.parentIds ?? []), ...parentIds])],
+              childIds: [...new Set([...(previous?.childIds ?? []), ...childIds])], explode: true,
+              note: '最大 3 枝の直下のみ取得。その他の親子関係は未取得。',
+            });
+          }
+        }
+        return [...nodes.values()];
+      },
+      onProgress: (progress) => {
+        store.setState((s) => !owns(s) || !s.queryOptimizationRun ? s : {
+          ...s, queryOptimizationRun: { ...s.queryOptimizationRun, progress,
+            trials: progress.trial && !s.queryOptimizationRun.trials.some((trial) => trial.candidateId === progress.trial!.candidateId)
+              ? [...s.queryOptimizationRun.trials, progress.trial] : s.queryOptimizationRun.trials,
+          },
+        });
+      },
+    });
+    update({ status: result.status === 'error' ? 'error' : 'ready', finishedAtMs: Date.now(), result, trials: result.trials,
+      error: result.status === 'error' ? result.unmetReasons.join(' / ') : null });
+  } catch (err) {
+    if (err instanceof QueryOptimizationStopError && err.stopReason === 'user_stop') {
+      const run = store.getState().queryOptimizationRun;
+      update({ status: 'ready', finishedAtMs: Date.now(), result: { status: 'stopped', stopReason: 'user_stop', best: null,
+        trials: [], unmetReasons: ['初期式の実測前に停止しました。'], iterations: 0, apiCalls: 0,
+        elapsedMs: Date.now() - (run?.startedAtMs ?? Date.now()) } });
+    } else {
+      update({ status: 'error', finishedAtMs: Date.now(), error: err instanceof Error ? err.message : String(err) });
+    }
+  }
 }
 
 /**

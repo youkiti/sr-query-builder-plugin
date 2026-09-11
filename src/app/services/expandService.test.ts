@@ -74,6 +74,8 @@ function makeState(overrides: Partial<AppState> = {}): AppState {
     currentFormulaCreatedBy: null,
     draftRun: null,
     expandRun: null,
+    queryOptimizationRun: null,
+    queryOptimizationSetup: null,
     validationResult: null,
     missedAnalysis: null,
     excessFilterProposal: null,

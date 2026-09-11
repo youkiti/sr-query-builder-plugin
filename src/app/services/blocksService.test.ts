@@ -62,6 +62,8 @@ function makeStateWithDrafts(): AppState {
     currentFormulaCreatedBy: null,
     draftRun: null,
     expandRun: null,
+    queryOptimizationRun: null,
+    queryOptimizationSetup: null,
     validationResult: null,
     missedAnalysis: null,
     excessFilterProposal: null,

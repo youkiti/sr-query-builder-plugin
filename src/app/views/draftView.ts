@@ -1,3 +1,4 @@
+import { DEFAULT_QUERY_OPTIMIZATION_SETTINGS, type QueryOptimizationSettings } from '../services/queryOptimizationSettingsService';
 import type { DraftBlockHit, DraftProgress } from '@/app/services';
 import { HIT_THRESHOLD, type ExcessFilterCandidate } from '@/features/formula/skills';
 import { parsePubmedFormulaMd, type PubmedFormula } from '@/lib/search-formula-md';
@@ -38,6 +39,10 @@ import {
  */
 
 export interface DraftViewCallbacks extends ValidationResultsCallbacks {
+  onPrepareOptimization?: (retry?: boolean) => Promise<void>;
+  onOptimizationSettingsInput?: (values: { maxHits: string; maxIterations: string }) => void;
+  onOptimize?: (settings: QueryOptimizationSettings) => Promise<void>;
+  onStopOptimization?: () => void;
   /** 「生成して検証する」ボタンが押されたとき。進捗・エラーは store.draftRun 経由で反映される */
   onGenerate?: () => Promise<void>;
   /**
@@ -96,7 +101,7 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
       : existing
         ? '再生成して再検証する'
         : '生成して検証する';
-    generateBtn.disabled = running;
+    generateBtn.disabled = running || ctx.state.queryOptimizationRun?.status === 'running';
     actions.appendChild(generateBtn);
 
     // 「検証のみ再実行」(issue #40 症状 A): 検証失敗からのリカバリ導線に限定せず、
@@ -104,7 +109,8 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
     // #/edit の手編集保存後や、生成が正常終了した後の「式は変えず検証だけやり直す」
     // 入口としても使えるようにするため。生成ボタンと同じ .draft__actions の行に置く。
     const canRevalidate =
-      existing !== null && ctx.state.currentFormulaVersionId !== null && !running;
+      existing !== null && ctx.state.currentFormulaVersionId !== null && !running
+      && ctx.state.queryOptimizationRun?.status !== 'running';
     if (canRevalidate) {
       const revalidateBtn = doc.createElement('button');
       revalidateBtn.type = 'button';
@@ -120,6 +126,12 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
       actions.appendChild(revalidateBtn);
     }
     container.appendChild(actions);
+
+    renderQueryOptimization(container, ctx.state, callbacks);
+    if (!ctx.state.queryOptimizationSetup && callbacks.onPrepareOptimization) {
+      void Promise.resolve().then(() => callbacks.onPrepareOptimization?.());
+    }
+
 
     // 手を加えた版の破棄確認（issue #40 症状 B）: currentFormulaCreatedBy === 'user_edit' の
     // 版を再生成が無警告で上書きしないよう、生成ボタン押下時にインライン確認を挟む。
@@ -787,3 +799,159 @@ export function formatDraftProgress(progress: DraftProgress): string {
 }
 
 export { formatValidationProgress } from './validationResults';
+
+/** 可変回数の処理なので、全体の割合ではなく現在段階と実測済みの最良値を示す。 */
+function renderQueryOptimization(container: HTMLElement, state: AppState, callbacks: DraftViewCallbacks): void {
+  const doc = container.ownerDocument;
+  const run = state.queryOptimizationRun?.projectId === state.project?.projectId ? state.queryOptimizationRun : null;
+  const setup = state.queryOptimizationSetup?.projectId === state.project?.projectId ? state.queryOptimizationSetup : null;
+  const running = run?.status === 'running';
+  if (run) {
+    const status = doc.createElement('section');
+    status.className = 'optimization__status';
+    status.setAttribute('aria-label', '自動調整の進捗');
+    status.setAttribute('aria-live', 'polite');
+    const metrics = doc.createElement('div');
+    metrics.className = 'optimization__metrics';
+    for (const [label, value] of [
+      ['最大件数', `${run.maxHits.toLocaleString()} 件`],
+      ['現在の最良候補の件数', run.progress.bestTotalHits === null ? '未計測' : `${run.progress.bestTotalHits.toLocaleString()} 件`],
+      ['既知シード捕捉数', `${run.progress.bestCapturedSeedCount ?? '未計測'} / ${run.seedCount ?? '確認中'}`],
+      ['反復回数', `${run.progress.iterations} / ${run.maxIterations}`],
+    ]) {
+      const item = doc.createElement('span');
+      item.textContent = `${label}: ${value}`;
+      metrics.appendChild(item);
+    }
+    const elapsed = doc.createElement('span');
+    const updateElapsed = (): void => {
+      elapsed.textContent = `経過時間: ${formatElapsed((run.finishedAtMs ?? Date.now()) - run.startedAtMs)}`;
+    };
+    updateElapsed();
+    metrics.appendChild(elapsed);
+    if (running && doc.defaultView) {
+      const win = doc.defaultView;
+      const timer = win.setInterval(() => {
+        if (!status.isConnected) { win.clearInterval(timer); return; }
+        updateElapsed();
+      }, 1000);
+    }
+    status.appendChild(metrics);
+    const stages = doc.createElement('ol');
+    stages.className = 'optimization__stages';
+    for (const [step, label] of [
+      ['initial_formula', '初期式作成'], ['measuring', '実測'], ['adjusting', '調整'],
+      ['revalidating', '再検証'], ['review', 'レビュー'],
+    ]) {
+      const item = doc.createElement('li');
+      item.textContent = label!;
+      if (step === run.progress.step) item.setAttribute('aria-current', 'step');
+      stages.appendChild(item);
+    }
+    status.appendChild(stages);
+    const message = doc.createElement('p');
+    message.textContent = running ? (run.stopRequested ? '停止要求済み。処理の区切りで停止します。' : '自動調整を実行中です。')
+      : run.status === 'error' ? '自動調整を続行できませんでした。'
+        : run.result?.status === 'stopped' ? '停止しました。候補を保持しています。'
+          : run.result?.status === 'achieved' ? '完了しました。実測で条件を達成しました。'
+            : '実行が終了しました。条件未達の候補を保持しています。';
+    status.appendChild(message);
+    if (run.seedCount === 0) {
+      const warning = doc.createElement('p');
+      warning.textContent = '検証対象シードがありません。シード捕捉を確認した完了とは判定できません。';
+      status.appendChild(warning);
+    }
+    if (running) {
+      const stop = doc.createElement('button');
+      stop.type = 'button';
+      stop.className = 'optimization__stop';
+      stop.textContent = '停止して候補を確認';
+      stop.disabled = run.stopRequested;
+      stop.addEventListener('click', () => callbacks.onStopOptimization?.());
+      status.appendChild(stop);
+    }
+    container.insertBefore(status, container.children.item(1));
+  }
+  const section = doc.createElement('section');
+  section.className = 'optimization__setup';
+  const heading = doc.createElement('h3');
+  heading.textContent = '検索式の自動調整';
+  section.appendChild(heading);
+  for (const [label, value] of [
+    ['RQ', state.protocolDraft?.researchQuestion || '未設定'],
+    ['組入基準', state.protocolDraft?.inclusionCriteria || '未設定'],
+    ['除外基準', state.protocolDraft?.exclusionCriteria || '未設定'],
+    ['承認済みブロック', state.protocolDraftPersisted
+      ? state.blocksDraft?.blocks.map((block, index) => `#${index + 1} ${block.blockLabel}`).join(' / ') : '未承認'],
+    ['検証対象シード件数', setup?.seedCount == null ? '確認中' : `${setup.seedCount} 件`],
+  ]) {
+    const line = doc.createElement('p');
+    line.textContent = `${label}: ${value}`;
+    section.appendChild(line);
+  }
+  if (setup?.seedCount === 0 && !running) {
+    const warning = doc.createElement('p');
+    warning.textContent = 'シードなしで実行できますが、シード捕捉を確認した完了とは判定できません。';
+    section.appendChild(warning);
+  }
+  const form = doc.createElement('form');
+  form.noValidate = true;
+  const makeInput = (labelText: string, value: string): HTMLLabelElement => {
+    const label = doc.createElement('label');
+    label.textContent = labelText;
+    const input = doc.createElement('input');
+    input.type = 'number';
+    input.min = '1';
+    input.step = '1';
+    input.required = true;
+    input.value = value;
+    input.disabled = running || setup?.status !== 'ready';
+    label.appendChild(input);
+    return label;
+  };
+  const hitsLabel = makeInput('最大件数', setup?.maxHits ?? String(DEFAULT_QUERY_OPTIMIZATION_SETTINGS.maxHits));
+  const iterationsLabel = makeInput('反復上限', setup?.maxIterations ?? String(DEFAULT_QUERY_OPTIMIZATION_SETTINGS.maxIterations));
+  const hits = hitsLabel.querySelector('input')!;
+  const iterations = iterationsLabel.querySelector('input')!;
+  const details = doc.createElement('details');
+  const summary = doc.createElement('summary');
+  summary.textContent = '詳細設定';
+  details.append(summary, iterationsLabel);
+  const inputChanged = (): void => callbacks.onOptimizationSettingsInput?.({ maxHits: hits.value, maxIterations: iterations.value });
+  hits.addEventListener('input', inputChanged);
+  iterations.addEventListener('input', inputChanged);
+  const start = doc.createElement('button');
+  start.type = 'submit';
+  start.className = 'optimization__start';
+  start.textContent = '検索式を作成・自動調整する';
+  start.disabled = running || setup?.status !== 'ready' || state.draftRun?.status === 'running' || !state.protocolDraftPersisted;
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (start.disabled || !callbacks.onOptimize) return;
+    start.disabled = true;
+    void callbacks.onOptimize({ maxHits: Number(hits.value), maxIterations: Number(iterations.value) });
+  });
+  form.append(hitsLabel, details, start);
+  section.appendChild(form);
+  const error = run?.error ?? setup?.error;
+  if (error) {
+    const alert = doc.createElement('p');
+    alert.setAttribute('role', 'alert');
+    alert.textContent = error;
+    section.appendChild(alert);
+  }
+  if (setup?.status === 'loading') {
+    const loading = doc.createElement('p');
+    loading.setAttribute('aria-live', 'polite');
+    loading.textContent = '設定と検証対象シードを読み込んでいます。';
+    section.appendChild(loading);
+  }
+  if (setup?.status === 'error') {
+    const retry = doc.createElement('button');
+    retry.type = 'button';
+    retry.textContent = '開始設定を再読み込み';
+    retry.addEventListener('click', () => { void callbacks.onPrepareOptimization?.(true); });
+    section.appendChild(retry);
+  }
+  container.appendChild(section);
+}
