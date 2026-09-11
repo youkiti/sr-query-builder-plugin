@@ -61,6 +61,8 @@ src/
 ├── app/                           # メインビュー（chrome.tabs.create で開くフルページ）
 │   ├── app.html
 │   ├── app.ts                     # エントリ。ハッシュルーティングの起動のみ
+│   ├── services/                  # 画面とドメインロジックの仲介（以下は抜粋。実体は 10 本以上ある）
+│   │   └── queryEvaluationService.ts # 保存なしの検索式評価（厳密な件数・固定シード捕捉）
 │   ├── styles/                    # ビュー単位に分割した CSS（app.html が <link> で個別に読み込む）
 │   │   ├── shell.css               # ヘッダー / サイドバー / ナビゲーション等の共通外枠
 │   │   ├── home.css
@@ -133,6 +135,8 @@ src/
 │   │   ├── checkFinalQuery.ts
 │   │   ├── extractMesh.ts
 │   │   ├── blockMeshTree.ts       # check_mesh / check_mesh_overlap 相当（UI 未接続）
+│   │   ├── blockTerms.ts          # 語抽出・共有語・計測済みの寄与文脈
+│   │   ├── meshContext.ts         # ブロックの MeSH 文脈と祖先経路の組み立て
 │   │   └── freewordDelta.ts       # check_block_overlap 相当（UI 未接続）
 │   ├── conversion/
 │   │   ├── toCentral.ts
@@ -161,6 +165,7 @@ src/
 │   │   └── secretsStore.ts        # API キー保存
 │   └── search-formula-md/
 │       ├── tokenize.ts
+│       ├── expression.ts          # 検索式の分類・語分解・句単位の差分
 │       ├── parse.ts
 │       └── serialize.ts
 │

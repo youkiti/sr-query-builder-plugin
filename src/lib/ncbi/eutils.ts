@@ -10,6 +10,8 @@ import { retryWithBackoff, TokenBucket, type RateLimiter } from './rateLimit';
  */
 export interface EutilsDeps {
   fetch: typeof fetch;
+  /** 件数と要求した PMID 一覧の欠落・不正値を恒久エラーにする。省略時は従来の補完を維持する。 */
+  strictCounts?: boolean;
   /** NCBI API key（BYOK、未設定でも可） */
   apiKey?: string;
   /** NCBI が推奨する識別子。既定 `sr-query-builder-plugin` */
@@ -196,11 +198,12 @@ export async function esearch(
   deps: EutilsDeps,
   options: EsearchOptions = {}
 ): Promise<EsearchResult> {
+  const retmax = options.retmax ?? 20;
   const params = new URLSearchParams({
     db: 'pubmed',
     term: query,
     retmode: 'json',
-    retmax: String(options.retmax ?? 20),
+    retmax: String(retmax),
     retstart: String(options.retstart ?? 0),
   });
   if (options.sort) {
@@ -226,6 +229,22 @@ export async function esearch(
         throw new EutilsError(`esearch エラー: ${body.error}`, res.status);
       }
       assertNoInbandError(body);
+      if (deps.strictCounts) {
+        const count = body.esearchresult?.count;
+        // parseInt の部分一致や丸めを許さず、非負の安全な整数だけを実測値として扱う。
+        if (typeof count !== 'string' || !/^\d+$/.test(count) || !Number.isSafeInteger(Number(count))) {
+          throw new EutilsError('esearch の件数が欠落しているか、不正な値です', res.status, true);
+        }
+        // retmax=0 は件数だけの要求なので ID の欠落も許容する。
+        // ID を要求した場合（省略時は20件）の欠落・破損は、未捕捉と誤認しないよう失敗にする。
+        if (retmax > 0) {
+          // PMID は先頭ゼロのない正の整数文字列。将来の桁数増加は制限しない。
+          const ids = body.esearchresult?.idlist;
+          if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string' || !/^[1-9]\d*$/.test(id))) {
+            throw new EutilsError('esearch の PMID 一覧が欠落しているか、不正な値です', res.status, true);
+          }
+        }
+      }
       return body;
     },
     { sleep: deps.sleep, maxRetries: deps.maxRetries ?? 5, shouldRetry: shouldRetryEutils }

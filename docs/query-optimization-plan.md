@@ -1,6 +1,6 @@
 # 件数・MeSH ツリー・シード捕捉を使う検索式の自動調整案
 
-2026-09-11。Issue [#97](https://github.com/youkiti/sr-query-builder-plugin/issues/97) に関連する設計案。調査対象は `59e1dfa`。機能は未実装。
+2026-09-11。Issue [#97](https://github.com/youkiti/sr-query-builder-plugin/issues/97) に関連する設計案。調査対象は `59e1dfa`。**分割 1（保存なし生成・評価、厳密な計測、語の寄与と MeSH 文脈）は実装済み。分割 2・3 は未実装で、自動調整は画面からまだ開始できない。**
 
 ## 目指す体験
 
@@ -182,4 +182,6 @@ flowchart TD
 - 実行中の状態・結果・履歴が再描画で失われず、最終レビューまで各試行の理由を追える。
 - 通常の lint、型チェック、単体テスト、dev ビルド、E2E 全体を通す。
 
-この設計作業ではアプリ実装は変更していない。直前の #97 調査では関連する既存テスト3スイート・79件が通過しているが、上記の新しい反復動作はまだ検証されていない。
+分割 1 は実装済み。`generateDraftFormula`（保存なし生成）、`queryEvaluationService`（保存なし評価。測定失敗を実測 0 件と区別する）、`EutilsDeps.strictCounts`（件数の欠落・不正値を恒久エラーにする厳密な ESearch）、`blockTerms` / `meshContext`（語抽出・寄与・周辺 MeSH をビュー層の外へ）を追加した。既存の `generateDraft` / `runValidation` の挙動は変えていない。
+
+分割 2・3（AI 反復制御と画面接続）は未実装で、上記の新しい反復動作はまだ検証されていない。分割 1 の追加分は単体テストで固定してあるが、`queryEvaluationService` を呼ぶ画面がまだ無いため、厳密な計測の挙動は手動確認の対象にできない。

@@ -104,3 +104,28 @@ describe('checkFinalQuery', () => {
     expect(secondUrl).toContain('term=%28%28diabetes%29+AND+%28metformin%29%29+AND+%28111%5Buid%5D+OR+222%5Buid%5D%29');
   });
 });
+
+describe('計測済み最終件数の再利用', () => {
+  const f = formula([['1', 'a[tiab]'], ['2', '#1', true]]);
+
+  test('展開文字列が一致すれば総件数を再利用し、シード捕捉だけ計測する', async () => {
+    const fetch = jest.fn().mockResolvedValue(jsonResponse({ esearchresult: { count: '0', idlist: [] } }));
+    const result = await checkFinalQuery(f, ['11'], { fetch, rateLimiter: { acquire: async () => {} } }, {
+      expandedQuery: '(a[tiab])', hitCount: 0,
+    });
+    expect(result.totalHits).toBe(0);
+    expect(result.captureRate).toBe(0);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(new URL(fetch.mock.calls[0]![0] as string).searchParams.get('term')).toContain('11[uid]');
+  });
+
+  test('展開文字列が異なれば渡された件数を使わず再計測する', async () => {
+    const fetch = jest.fn().mockResolvedValue(jsonResponse({ esearchresult: { count: '3', idlist: [] } }));
+    const result = await checkFinalQuery(f, [], { fetch, rateLimiter: { acquire: async () => {} } }, {
+      expandedQuery: '(b[tiab])', hitCount: 99,
+    });
+    expect(result.totalHits).toBe(3);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(new URL(fetch.mock.calls[0]![0] as string).searchParams.get('term')).toBe('(a[tiab])');
+  });
+});
