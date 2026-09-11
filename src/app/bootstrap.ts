@@ -8,6 +8,8 @@ declare const __BUILD_DATE__: string;
  * store に反映し、protocol / blocks view の callback に services を結び付ける。
  */
 
+import { adoptQueryOptimization, editQueryOptimization } from './services/queryOptimizationAdoptionService';
+
 import {
   approveBlocks,
   buildEutilsDeps,
@@ -430,6 +432,8 @@ function buildDefaultViewOptions(
         });
       },
       onOptimize: (settings) => runOptimizeQuery(store, runtime, llmFactoryDepsBase(), settings),
+      onAdoptOptimization: () => adoptQueryOptimization({ store, google: runtime.google }),
+      onEditOptimization: () => { if (editQueryOptimization(store)) navigate('edit'); },
       onStopOptimization: () => {
         store.setState((s) => s.queryOptimizationRun?.status !== 'running' ? s : {
           ...s, queryOptimizationRun: { ...s.queryOptimizationRun, stopRequested: true },
@@ -546,10 +550,7 @@ function buildDefaultViewOptions(
       // 両方から呼ばれる（editView.ts の FormulaEditor.setMd）。
       onDraftChange: (markdown: string) => {
         const formulaVersionId = store.getState().currentFormulaVersionId;
-        /* istanbul ignore if -- guards.ts の edit: needsFormula() により #/edit 到達時点で必ず非 null */
-        if (formulaVersionId === null) {
-          return;
-        }
+        if (formulaVersionId === null && !store.getState().formulaEditDraft) return;
         // md を触った時点で直前の保存ステータス（保存しました / エラー）は現在の内容を
         // 説明しなくなるので消す。未保存の編集があることが見た目でも分かる。
         store.setState((s) => ({
@@ -668,10 +669,7 @@ async function runSaveEditedFormula(
     return;
   }
   const formulaVersionId = store.getState().currentFormulaVersionId;
-  /* istanbul ignore if -- guards.ts の edit: needsFormula() により #/edit 到達時点で必ず非 null */
-  if (formulaVersionId === null) {
-    return;
-  }
+  if (formulaVersionId === null && !store.getState().formulaEditDraft) return;
   store.setState((s) => ({
     ...s,
     formulaSave: { formulaVersionId, status: 'saving', error: null },
@@ -1106,7 +1104,8 @@ export async function runOptimizeQuery(
   settings: QueryOptimizationSettings
 ): Promise<void> {
   const state = store.getState();
-  if (state.queryOptimizationRun?.status === 'running' || state.draftRun?.status === 'running') return;
+  if (state.queryOptimizationRun?.status === 'running' || state.queryOptimizationRun?.save?.status === 'saving'
+    || state.draftRun?.status === 'running') return;
   const project = state.project;
   if (!project) return;
   const runId = newUuid();
@@ -1169,6 +1168,9 @@ export async function runOptimizeQuery(
           samples: [], meshSummary: { seedCount: 0, concepts: [], checkTags: [] } },
       }, { llmFactory: factory, onProgress: () => check() })).formula;
     check();
+    update({ inputSnapshot: { researchQuestion: state.protocolDraft.researchQuestion,
+      inclusionCriteria: state.protocolDraft.inclusionCriteria, exclusionCriteria: state.protocolDraft.exclusionCriteria,
+      blocks: { ...state.blocksDraft, blocks: state.blocksDraft.blocks.map((block) => ({ ...block })) }, seedPmids: [...seedPmids], model: factory.model } });
     const result = await runQueryOptimization({ projectId, runId, initialFormula, ...fixedSettings, seedPmids,
       // 承認ブロックの blockIndex と組み立て式の ID は、ともに配列順の 1 始まり。
       // BlockDraft に独立 ID がないため、id と approvedBlockId は常に同じ値になる。

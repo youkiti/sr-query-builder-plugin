@@ -1,3 +1,4 @@
+import { renderOptimizationReview } from './queryOptimizationReview';
 import { DEFAULT_QUERY_OPTIMIZATION_SETTINGS, type QueryOptimizationSettings } from '../services/queryOptimizationSettingsService';
 import type { DraftBlockHit, DraftProgress } from '@/app/services';
 import { HIT_THRESHOLD, type ExcessFilterCandidate } from '@/features/formula/skills';
@@ -44,6 +45,10 @@ export interface DraftViewCallbacks extends ValidationResultsCallbacks {
   onOptimizationSettingsInput?: (values: { maxHits: string; maxIterations: string }) => void;
   onOptimize?: (settings: QueryOptimizationSettings) => Promise<void>;
   onStopOptimization?: () => void;
+  /** 採用保存を提供しない描画用途では省略する。 */
+  onAdoptOptimization?: () => Promise<void>;
+  /** 編集導線を提供しない描画用途では省略する。 */
+  onEditOptimization?: () => void;
   /** 「生成して検証する」ボタンが押されたとき。進捗・エラーは store.draftRun 経由で反映される */
   onGenerate?: () => Promise<void>;
   /**
@@ -139,6 +144,9 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
     renderHistory(container,
       ctx.state.queryOptimizationRun?.projectId === ctx.state.project.projectId ? ctx.state.queryOptimizationRun : null,
       ctx.state.queryOptimizationSetup?.projectId === ctx.state.project.projectId ? ctx.state.queryOptimizationSetup : null);
+    renderOptimizationReview(container,
+      ctx.state.queryOptimizationRun?.projectId === ctx.state.project.projectId ? ctx.state.queryOptimizationRun : null,
+      { adopt: callbacks.onAdoptOptimization, edit: callbacks.onEditOptimization });
     if (!ctx.state.queryOptimizationSetup && callbacks.onPrepareOptimization) {
       void Promise.resolve().then(() => callbacks.onPrepareOptimization?.());
     }
@@ -978,7 +986,7 @@ function renderQueryOptimization(container: HTMLElement, state: AppState, callba
   start.type = 'submit';
   start.className = 'optimization__start';
   start.textContent = '検索式を作成・自動調整する';
-  start.disabled = running || setup?.status !== 'ready' || state.draftRun?.status === 'running' || !state.protocolDraftPersisted;
+  start.disabled = running || run?.save?.status === 'saving' || setup?.status !== 'ready' || state.draftRun?.status === 'running' || !state.protocolDraftPersisted;
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     if (start.disabled || !callbacks.onOptimize) return;

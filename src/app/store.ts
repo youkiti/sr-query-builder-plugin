@@ -141,6 +141,17 @@ export interface DraftRunState {
 
 /** 自動調整の実測候補を、実行終了後もレビュー用に保持する。 */
 export interface QueryOptimizationRunState {
+  /** 未指定は人がまだ採用保存を要求していない状態。 */
+  save?: FormulaSaveState;
+  /** 初期式の準備が完了した時点で固定する。準備前は存在しない。 */
+  inputSnapshot?: {
+    researchQuestion: string;
+    inclusionCriteria: string;
+    exclusionCriteria: string;
+    blocks: BlocksDraft;
+    seedPmids: string[];
+    model: string;
+  };
   meshContext: OptimizationMeshNode[];
   costUsd?: number;
   status: 'running' | 'ready' | 'error';
@@ -209,7 +220,8 @@ export interface ExpandRunState {
  * （別バージョンを読み込み直した後に古い draft を表示しないため。ValidationResultEntry と同じ判定）。
  */
 export interface FormulaEditDraft {
-  formulaVersionId: string;
+  /** null は、まだ保存版のない式の編集下書き。 */
+  formulaVersionId: string | null;
   markdown: string;
 }
 
@@ -264,7 +276,8 @@ export interface BlockImprovementState {
  * 別バージョンを履歴から読み込み直すと一致しなくなり、stale として表示されなくなる。
  */
 export interface FormulaSaveState {
-  formulaVersionId: string;
+  /** 初回の手編集保存中・失敗時は null。 */
+  formulaVersionId: string | null;
   status: 'saving' | 'saved' | 'error';
   /** status='error' のときのメッセージ。それ以外は null */
   error: string | null;

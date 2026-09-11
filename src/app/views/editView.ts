@@ -346,7 +346,7 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
       container.appendChild(warn);
       return;
     }
-    if (!ctx.state.currentFormulaMarkdown) {
+    if (!resolveMarkdown(ctx.state, ctx.state.currentFormulaMarkdown ?? '')) {
       const warn = doc.createElement('p');
       warn.className = 'view__placeholder';
       warn.textContent = '先に /draft で検索式を生成するか、/history で読み込んでください。';
@@ -362,7 +362,7 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
 
     // 表示する md は store（formulaEditDraft）優先、無ければ現在の formula。
     // テキストエリアは表示せず、この変数を単一の真実とする。
-    let currentMd = resolveMarkdown(ctx.state, ctx.state.currentFormulaMarkdown);
+    let currentMd = resolveMarkdown(ctx.state, ctx.state.currentFormulaMarkdown ?? '');
     const editor: FormulaEditor = {
       getMd: () => currentMd,
       setMd: (next: string) => {

@@ -25,7 +25,8 @@
  *
  * ## skill の判別キー
  * skill の判別キー（プロンプトに載るスキーマのキー名）: block-designer=`concept_summary` /
- * mesh-suggester=`tag_syntax` / freeword-designer=`freewords` / improve-block=`proposed_expression` /
+ * mesh-suggester=`tag_syntax` / freeword-designer=`freewords` / optimize-query=`target_block_id` /
+ * improve-block=`proposed_expression` /
  * expand-query-for-recall=`additions` / pick-boundary-cases=`picks`。
  * pick-boundary-cases と pick-seed-candidates は応答スキーマが同じ（どちらも `picks`）ため、
  * pick-seed-candidates は `reason` フィールドのプレースホルダ文言（
@@ -199,8 +200,8 @@ export async function registerNcbiStub(page: Page, options: NcbiStubOptions = {}
 
 /**
  * `https://id.nlm.nih.gov/mesh/sparql` 宛（MeSH ツリー UI が使う `fetchMeshChildren` /
- * `fetchMeshLabels`）を空の SPARQL JSON で返すだけ。現状 UI からは呼ばれないが、
- * ルートが無いと将来 UI 接続時（#58）に E2E が実エンドポイントへ抜けるため先に登録しておく。
+ * `fetchMeshLabels`）を空の SPARQL JSON で返すだけ。自動調整の追加 MeSH 取得も
+ * このエンドポイントを使うため、実エンドポイントへ抜けないよう登録する。
  */
 export async function registerMeshRdfStub(page: Page): Promise<void> {
   await page.route('**/id.nlm.nih.gov/**', async (route) => {
@@ -220,6 +221,7 @@ export type GeminiSkillName =
   | 'block-designer'
   | 'mesh-suggester'
   | 'freeword-designer'
+  | 'optimize-query'
   | 'improve-block'
   | 'expand-query-for-recall'
   | 'design-specific-query'
@@ -237,6 +239,8 @@ const SKILL_MARKERS: ReadonlyArray<[GeminiSkillName, string]> = [
   ['block-designer', 'concept_summary'],
   ['mesh-suggester', 'tag_syntax'],
   ['freeword-designer', 'freewords'],
+  // optimize-query も proposed_expression を持つため、固有キーで先に判別する。
+  ['optimize-query', 'target_block_id'],
   ['improve-block', 'proposed_expression'],
   ['expand-query-for-recall', 'additions'],
   ['design-specific-query', 'specific_query'],

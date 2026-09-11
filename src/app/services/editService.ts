@@ -12,7 +12,7 @@ import type { GoogleApiDeps } from '@/lib/google';
 import { nowIso } from '@/utils/iso8601';
 import { newUuid } from '@/utils/uuid';
 import type { LlmProviderFactory } from './llmProviderService';
-import type { AppStore } from '../store';
+import type { AppState, AppStore } from '../store';
 
 /**
  * /edit 画面で手編集された formula_md を新しい FormulaVersion として保存するサービス。
@@ -498,11 +498,11 @@ function findBlockContext(
   return { label: entry.blockLabel, description: entry.description };
 }
 
-async function resolveProtocolContext(
-  deps: EditServiceDeps
+export async function resolveProtocolContext(
+  deps: EditServiceDeps,
+  state: AppState = deps.store.getState()
 ): Promise<{ protocolVersion: number; protocolSnapshotRef: string }> {
-  const state = deps.store.getState();
-  /* istanbul ignore if -- saveEditedFormula が呼び出し前に project を検証済み */
+  /* istanbul ignore if -- 保存サービスが呼び出し前に project を検証済み */
   if (state.project === null) {
     throw new Error('プロジェクトが選択されていません');
   }
