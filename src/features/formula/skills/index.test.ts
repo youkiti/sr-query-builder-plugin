@@ -12,6 +12,7 @@ describe('features/formula/skills index 再エクスポート', () => {
     expect(typeof mod.pickSeedCandidates).toBe('function');
     expect(typeof mod.designSpecificQuery).toBe('function');
     expect(typeof mod.improveBlockExpression).toBe('function');
+    expect(typeof mod.optimizeQuery).toBe('function');
     expect(typeof mod.parseSkillJson).toBe('function');
     expect(typeof mod.SkillResponseError).toBe('function');
     expect(typeof mod.HIT_THRESHOLD).toBe('number');
@@ -25,6 +26,7 @@ describe('features/formula/skills index 再エクスポート', () => {
     expect(mod.PICK_SEED_SYSTEM_PROMPT.length).toBeGreaterThan(0);
     expect(mod.DESIGN_SPECIFIC_QUERY_SYSTEM_PROMPT.length).toBeGreaterThan(0);
     expect(mod.IMPROVE_BLOCK_SYSTEM_PROMPT.length).toBeGreaterThan(0);
+    expect(mod.OPTIMIZE_QUERY_SYSTEM_PROMPT.length).toBeGreaterThan(0);
   });
 
   test('SkillResponseError がインスタンス化できる', () => {
@@ -48,5 +50,6 @@ describe('features/formula/skills index 再エクスポート', () => {
     expect(mod.PICK_SEED_USER_PROMPT_TEMPLATE.length).toBeGreaterThan(0);
     expect(mod.DESIGN_SPECIFIC_QUERY_USER_PROMPT_TEMPLATE.length).toBeGreaterThan(0);
     expect(mod.IMPROVE_BLOCK_USER_PROMPT_TEMPLATE.length).toBeGreaterThan(0);
+    expect(mod.OPTIMIZE_QUERY_USER_PROMPT_TEMPLATE.length).toBeGreaterThan(0);
   });
 });

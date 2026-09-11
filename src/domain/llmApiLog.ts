@@ -17,6 +17,7 @@ export type LlmPurpose =
   | 'interpret_result'
   | 'extract_protocol'
   | 'improve_block'
+  | 'optimize_query'
   | 'other';
 
 export interface LlmApiLogEntry {

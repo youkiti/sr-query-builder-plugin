@@ -140,7 +140,9 @@ Chrome ウェブストア審査・利用者向けに公開する静的ページ 
 src/
 ├── app/            # メインビュー（フルページタブ）。app.html + hash ルーティング
 │   ├── router.ts   # ルート定義（ROUTE_LABELS。home〜history + settings）
-│   ├── store.ts    # in-memory ストア（currentProject のみ chrome.storage.local へ永続化）
+│   ├── store.ts    # in-memory ストア（store 自身は永続化しない）
+│                   # chrome.storage.local へ書くのは各 service（currentProject / recentProjects /
+│                   # blocksDraftBackup / queryOptimizationCheckpoint / 各 API キー / llm.selectedModel）
 │   ├── guards.ts   # 前提条件ガード（プロトコル未入力なら #/blocks へ入れない等）
 │   ├── bootstrap.ts# DI 配線（views × services × navigate）
 │   ├── services/   # 画面とドメインロジックの仲介（protocolService / blocksService / ...）

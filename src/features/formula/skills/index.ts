@@ -90,4 +90,11 @@ export {
   type FormulaLineInput,
   type MissedSeedAnalysis,
 } from './interpretResult';
+export {
+  optimizeQuery,
+  OPTIMIZE_QUERY_SYSTEM_PROMPT,
+  OPTIMIZE_QUERY_USER_PROMPT_TEMPLATE,
+  type OptimizeQueryInput,
+  type OptimizeQueryProposal,
+} from './optimizeQuery';
 export { parseSkillJson, SkillResponseError } from './parseSkillJson';

@@ -62,7 +62,9 @@ src/
 │   ├── app.html
 │   ├── app.ts                     # エントリ。ハッシュルーティングの起動のみ
 │   ├── services/                  # 画面とドメインロジックの仲介（以下は抜粋。実体は 10 本以上ある）
-│   │   └── queryEvaluationService.ts # 保存なしの検索式評価（厳密な件数・固定シード捕捉）
+│   │   ├── queryEvaluationService.ts # 保存なしの検索式評価（厳密な件数・固定シード捕捉）
+│   │   ├── queryOptimizationService.ts # 検索式の自動調整ループ（候補の検査・採否・停止。UI 未接続）
+│   │   └── queryOptimizationCheckpointService.ts # 自動調整の試行要約を chrome.storage.local へ
 │   ├── styles/                    # ビュー単位に分割した CSS（app.html が <link> で個別に読み込む）
 │   │   ├── shell.css               # ヘッダー / サイドバー / ナビゲーション等の共通外枠
 │   │   ├── home.css
@@ -126,6 +128,7 @@ src/
 │   │   │   ├── pickBoundaryCases.ts     # 対話的拡張: 境界事例選定
 │   │   │   ├── expandQueryForRecall.ts  # 対話的拡張: 2 軸の拡張語提案（MeSH 一段上 / フリーワード）
 │   │   │   ├── improveBlock.ts
+│   │   │   ├── optimizeQuery.ts   # 自動調整ループ用。全式・測定・試行履歴を渡して 1 ブロックの変更案を得る
 │   │   │   └── interpretResult.ts
 │   │   ├── recallExpansion.ts     # margin 探索の純粋ロジック（拡張式生成 / margin / 更新提案）
 │   │   ├── assembleFormulaMd.ts
