@@ -11,6 +11,7 @@ import type {
 } from '../store';
 import { tokenizeExpression } from './formulaDisplay';
 import type { RenderView } from './types';
+import { createOptimizationHistoryRenderer, optimizationApiLabel } from './queryOptimizationHistory';
 import {
   readStoredAnalysis,
   readStoredSummary,
@@ -57,12 +58,19 @@ export interface DraftViewCallbacks extends ValidationResultsCallbacks {
 }
 
 export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView {
+  const renderHistory = createOptimizationHistoryRenderer();
   return (container, ctx) => {
-    container.innerHTML = '';
+    const optimization = ctx.state.queryOptimizationRun;
+    const runKey = optimization?.projectId === ctx.state.project?.projectId && optimization
+      ? `${optimization.projectId}:${optimization.runId}` : null;
+    // 実行中の履歴と通知領域は接続を保ち、開いている詳細や停止ボタンのフォーカスを失わない。
+    for (const child of Array.from(container.children)) {
+      if (!runKey || (child as HTMLElement).dataset.optimizationRun !== runKey) child.remove();
+    }
     const doc = container.ownerDocument;
     const heading = doc.createElement('h2');
     heading.textContent = ROUTE_LABELS.draft;
-    container.appendChild(heading);
+    container.insertBefore(heading, container.firstChild);
 
     if (!ctx.state.project) {
       const warn = doc.createElement('p');
@@ -128,6 +136,9 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
     container.appendChild(actions);
 
     renderQueryOptimization(container, ctx.state, callbacks);
+    renderHistory(container,
+      ctx.state.queryOptimizationRun?.projectId === ctx.state.project.projectId ? ctx.state.queryOptimizationRun : null,
+      ctx.state.queryOptimizationSetup?.projectId === ctx.state.project.projectId ? ctx.state.queryOptimizationSetup : null);
     if (!ctx.state.queryOptimizationSetup && callbacks.onPrepareOptimization) {
       void Promise.resolve().then(() => callbacks.onPrepareOptimization?.());
     }
@@ -807,17 +818,24 @@ function renderQueryOptimization(container: HTMLElement, state: AppState, callba
   const setup = state.queryOptimizationSetup?.projectId === state.project?.projectId ? state.queryOptimizationSetup : null;
   const running = run?.status === 'running';
   if (run) {
-    const status = doc.createElement('section');
+    const status = container.querySelector<HTMLElement>('.optimization__status') ?? doc.createElement('section');
     status.className = 'optimization__status';
+    status.dataset.optimizationRun = `${run.projectId}:${run.runId}`;
+    for (const child of Array.from(status.children)) {
+      if (!child.matches('.optimization__announcement, .optimization__stop')) child.remove();
+    }
     status.setAttribute('aria-label', '自動調整の進捗');
     status.setAttribute('aria-live', 'polite');
+    status.setAttribute('aria-atomic', 'false');
+    status.setAttribute('aria-relevant', 'text');
     const metrics = doc.createElement('div');
     metrics.className = 'optimization__metrics';
+    metrics.setAttribute('aria-live', 'off');
     for (const [label, value] of [
       ['最大件数', `${run.maxHits.toLocaleString()} 件`],
       ['現在の最良候補の件数', run.progress.bestTotalHits === null ? '未計測' : `${run.progress.bestTotalHits.toLocaleString()} 件`],
       ['既知シード捕捉数', `${run.progress.bestCapturedSeedCount ?? '未計測'} / ${run.seedCount ?? '確認中'}`],
-      ['反復回数', `${run.progress.iterations} / ${run.maxIterations}`],
+      ['試行回数', `${run.progress.evaluatedTrials ?? run.trials.filter((trial) => trial.kind === 'proposal').length} / 最大 ${run.maxIterations}`],
     ]) {
       const item = doc.createElement('span');
       item.textContent = `${label}: ${value}`;
@@ -832,13 +850,14 @@ function renderQueryOptimization(container: HTMLElement, state: AppState, callba
     if (running && doc.defaultView) {
       const win = doc.defaultView;
       const timer = win.setInterval(() => {
-        if (!status.isConnected) { win.clearInterval(timer); return; }
+        if (!elapsed.isConnected) { win.clearInterval(timer); return; }
         updateElapsed();
       }, 1000);
     }
-    status.appendChild(metrics);
+    status.insertBefore(metrics, status.querySelector('.optimization__announcement'));
     const stages = doc.createElement('ol');
     stages.className = 'optimization__stages';
+    stages.setAttribute('aria-live', 'off');
     for (const [step, label] of [
       ['initial_formula', '初期式作成'], ['measuring', '実測'], ['adjusting', '調整'],
       ['revalidating', '再検証'], ['review', 'レビュー'],
@@ -848,29 +867,64 @@ function renderQueryOptimization(container: HTMLElement, state: AppState, callba
       if (step === run.progress.step) item.setAttribute('aria-current', 'step');
       stages.appendChild(item);
     }
-    status.appendChild(stages);
-    const message = doc.createElement('p');
-    message.textContent = running ? (run.stopRequested ? '停止要求済み。処理の区切りで停止します。' : '自動調整を実行中です。')
+    status.insertBefore(stages, status.querySelector('.optimization__announcement'));
+    const message = status.querySelector<HTMLElement>('.optimization__announcement') ?? doc.createElement('p');
+    message.className = 'optimization__announcement';
+    const messageText = running ? (run.stopRequested ? '停止要求済み。処理の区切りで停止します。' : '自動調整を実行中です。')
       : run.status === 'error' ? '自動調整を続行できませんでした。'
         : run.result?.status === 'stopped' ? '停止しました。候補を保持しています。'
           : run.result?.status === 'achieved' ? '完了しました。実測で条件を達成しました。'
             : '実行が終了しました。条件未達の候補を保持しています。';
-    status.appendChild(message);
+    const currentStage = stages.querySelector('[aria-current=step]')?.textContent;
+    const announcement = `${messageText} 現在: ${currentStage}。履歴 ${run.trials.length}件。`;
+    if (message.textContent !== announcement) message.textContent = announcement;
+    if (!message.parentElement) status.appendChild(message);
+    if (run.progress.task) {
+      const task = run.progress.task;
+      const detail = doc.createElement('p');
+      detail.setAttribute('aria-live', 'off');
+      detail.textContent = `${task.kind === 'terms' ? '語別件数' : 'シード確認'} ${task.completed}/${task.total}${task.kind === 'terms' ? '語' : '件'}`;
+      status.insertBefore(detail, status.querySelector('.optimization__stop'));
+    }
+    if (run.progress.apiWaiting && running) {
+      const api = doc.createElement('p');
+      api.setAttribute('aria-live', 'off');
+      api.textContent = optimizationApiLabel(run.progress.apiWaiting);
+      status.insertBefore(api, status.querySelector('.optimization__stop'));
+    }
+    for (const event of run.progress.apiEvents?.filter((event) => event.status === 'failure') ?? []) {
+      const failure = doc.createElement('p');
+      failure.setAttribute('aria-live', 'off');
+      failure.textContent = optimizationApiLabel(event);
+      status.insertBefore(failure, status.querySelector('.optimization__stop'));
+    }
+    if (run.costUsd !== undefined && Number.isFinite(run.costUsd)) {
+      const cost = doc.createElement('p');
+      cost.setAttribute('aria-live', 'off');
+      cost.textContent = `この実行の概算 AI 費用（取得分）: $${run.costUsd.toFixed(4)}`;
+      status.insertBefore(cost, status.querySelector('.optimization__stop'));
+    }
     if (run.seedCount === 0) {
       const warning = doc.createElement('p');
+      warning.setAttribute('aria-live', 'off');
       warning.textContent = '検証対象シードがありません。シード捕捉を確認した完了とは判定できません。';
-      status.appendChild(warning);
+      status.insertBefore(warning, status.querySelector('.optimization__stop'));
     }
     if (running) {
-      const stop = doc.createElement('button');
+      const existingStop = status.querySelector<HTMLButtonElement>('.optimization__stop');
+      const stop = existingStop ?? doc.createElement('button');
       stop.type = 'button';
       stop.className = 'optimization__stop';
       stop.textContent = '停止して候補を確認';
       stop.disabled = run.stopRequested;
-      stop.addEventListener('click', () => callbacks.onStopOptimization?.());
-      status.appendChild(stop);
+      if (!existingStop) {
+        stop.addEventListener('click', () => callbacks.onStopOptimization?.());
+        status.appendChild(stop);
+      }
+    } else {
+      status.querySelector('.optimization__stop')?.remove();
     }
-    container.insertBefore(status, container.children.item(1));
+    if (container.children.item(1) !== status) container.insertBefore(status, container.children.item(1));
   }
   const section = doc.createElement('section');
   section.className = 'optimization__setup';

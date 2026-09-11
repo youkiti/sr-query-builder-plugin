@@ -9,6 +9,7 @@ function setup() {
     write: async (items) => { Object.assign(data, items); },
   };
   const trial: OptimizationTrial = {
+    kind: 'initial', apiEvents: [],
     candidateId: 'initial', formula: { blocks: [{ id: '1', expression: 'a[tiab]', isCombination: false }], combinationExpression: null },
     accepted: true, reason: '初期式', rationale: 'AI 文脈は保存しない', before: null,
     after: { id: 'measurement', fingerprint: 'hash', measuredAt: 'date', totalHits: 0,

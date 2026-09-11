@@ -10,7 +10,7 @@ function state(): AppState {
     queryOptimizationRun: { status: 'running', projectId: 'p', runId: 'r', maxHits: 123, maxIterations: 2,
       seedCount: 0, startedAtMs: 1000, finishedAtMs: null, progress: { step: 'revalidating', iterations: 1,
         bestTotalHits: 140, bestCapturedSeedCount: 0, trial: null },
-      trials: [], stopRequested: false, result: null, error: null },
+      trials: [], meshContext: [], stopRequested: false, result: null, error: null },
   };
 }
 afterEach(() => { jest.restoreAllMocks(); jest.useRealTimers(); document.body.innerHTML = ''; });

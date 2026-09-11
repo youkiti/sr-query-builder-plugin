@@ -1,5 +1,6 @@
 import type { QueryOptimizationProgress, QueryOptimizationResult } from './services/queryOptimizationService';
-import type { OptimizationTrial } from '@/features/formula/skills/optimizeQuery';
+import type { OptimizationMeshNode, OptimizationTrial } from '@/features/formula/skills/optimizeQuery';
+import type { CompletedQueryOptimization, InterruptedQueryOptimization } from './services/queryOptimizationCheckpointService';
 import type { CurrentProjectEntry } from '@/features/project';
 import type { FormulaCreatedBy } from '@/domain/formulaVersion';
 import type { ExcessFilterCandidate, ImproveBlockTurn } from '@/features/formula/skills';
@@ -140,6 +141,8 @@ export interface DraftRunState {
 
 /** 自動調整の実測候補を、実行終了後もレビュー用に保持する。 */
 export interface QueryOptimizationRunState {
+  meshContext: OptimizationMeshNode[];
+  costUsd?: number;
   status: 'running' | 'ready' | 'error';
   runId: string;
   projectId: string;
@@ -156,6 +159,7 @@ export interface QueryOptimizationRunState {
 }
 
 export interface QueryOptimizationSetupState {
+  checkpoint?: CompletedQueryOptimization | InterruptedQueryOptimization | null;
   projectId: string;
   status: 'loading' | 'ready' | 'error';
   maxHits: string;

@@ -67,6 +67,7 @@ import { listSeedPapers } from '@/features/seeds';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
 import { newUuid } from '@/utils/uuid';
 import type { OptimizationMeshNode } from '@/features/formula/skills/optimizeQuery';
+import { getQueryOptimizationCheckpoint } from './services/queryOptimizationCheckpointService';
 import {
   efetchArticles,
   esearch,
@@ -1070,22 +1071,30 @@ async function prepareQueryOptimization(store: AppStore, runtime: ChromeRuntimeD
     seedCount: null, error: null,
   };
   store.setState((s) => ({ ...s, queryOptimizationSetup: loading }));
+  let checkpoint: Awaited<ReturnType<typeof getQueryOptimizationCheckpoint>> = null;
   try {
-    const [settings, seeds] = await Promise.all([
+    const [settingsResult, seedsResult, checkpointResult] = await Promise.allSettled([
       getQueryOptimizationSettings(project.projectId, runtime.store),
       listSeedPapers(project.spreadsheetId, runtime.google),
+      getQueryOptimizationCheckpoint(project.projectId, runtime.store),
     ]);
+    if (checkpointResult.status === 'fulfilled') checkpoint = checkpointResult.value;
+    else throw checkpointResult.reason;
+    if (settingsResult.status === 'rejected') throw settingsResult.reason;
+    if (seedsResult.status === 'rejected') throw seedsResult.reason;
+    const settings = settingsResult.value;
+    const seeds = seedsResult.value;
     const seedCount = new Set(seeds.filter(isSeedEligibleForValidation)
       .map((seed) => seed.pmid).filter((pmid): pmid is string => pmid !== null)).size;
     store.setState((s) => s.project?.projectId !== project.projectId || s.queryOptimizationSetup !== loading ? s : {
-      ...s, queryOptimizationSetup: { ...loading, status: 'ready', seedCount,
+      ...s, queryOptimizationSetup: { ...loading, status: 'ready', seedCount, checkpoint,
         maxHits: String(settings?.maxHits ?? DEFAULT_QUERY_OPTIMIZATION_SETTINGS.maxHits),
         maxIterations: String(settings?.maxIterations ?? DEFAULT_QUERY_OPTIMIZATION_SETTINGS.maxIterations),
       },
     });
   } catch (err) {
     store.setState((s) => s.project?.projectId !== project.projectId || s.queryOptimizationSetup !== loading ? s : {
-      ...s, queryOptimizationSetup: { ...loading, status: 'error', error: err instanceof Error ? err.message : String(err) },
+      ...s, queryOptimizationSetup: { ...loading, checkpoint, status: 'error', error: err instanceof Error ? err.message : String(err) },
     });
   }
 }
@@ -1117,7 +1126,7 @@ export async function runOptimizeQuery(
     status: 'running', projectId, runId, ...fixedSettings, seedCount: null,
     startedAtMs: Date.now(), finishedAtMs: null, progress: { step: 'initial_formula', iterations: 0,
       bestTotalHits: null, bestCapturedSeedCount: null, trial: null },
-    trials: [], stopRequested: false, result: null, error: null,
+    trials: [], meshContext: [], stopRequested: false, result: null, error: null,
   } }));
   try {
     const invalid = validateQueryOptimizationSettings(fixedSettings);
@@ -1135,6 +1144,21 @@ export async function runOptimizeQuery(
     check();
     const factory = await buildLlmProviderFactory({ ...baseDeps,
       llmLogFolderId: project.driveFolderId, spreadsheetId: project.spreadsheetId,
+      onCostAccumulate: (costUsd) => {
+        baseDeps.onCostAccumulate?.(costUsd);
+        if (!Number.isFinite(costUsd) || costUsd < 0) return;
+        const run = store.getState().queryOptimizationRun;
+        update({ costUsd: (run?.costUsd ?? 0) + costUsd });
+      },
+      onRequestState: (status) => {
+        const run = store.getState().queryOptimizationRun;
+        if (!run || run.progress.step !== 'initial_formula') return;
+        const event = status === 'idle' ? null : { source: 'AI' as const, status };
+        const events = run.progress.apiEvents ?? [];
+        update({ progress: { ...run.progress, apiWaiting: status === 'retry' ? event : null,
+          apiEvents: event && !events.some((item) => item.source === event.source && item.status === event.status)
+            ? [...events, event] : events } });
+      },
     });
     check();
     const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
@@ -1154,9 +1178,10 @@ export async function runOptimizeQuery(
       criteria: { researchQuestion: state.protocolDraft.researchQuestion,
         inclusionCriteria: state.protocolDraft.inclusionCriteria, exclusionCriteria: state.protocolDraft.exclusionCriteria },
       seedPapers: seeds.flatMap((seed) => seed.pmid === null ? [] : [{ pmid: seed.pmid, title: seed.title }]),
-    }, { eutils, llmFactory: factory, checkpoint: runtime.store, shouldStop,
-      fetchMeshContext: async (request) => {
-        const bounded: EutilsDeps = { ...eutils, maxRetries: 1 };
+    }, { eutils, llmFactory: factory, checkpoint: runtime.store, shouldStop, measureTermDetails: true,
+      onMeshContext: (meshContext) => update({ meshContext }),
+      fetchMeshContext: async (request, observedEutils) => {
+        const bounded: EutilsDeps = { ...(observedEutils ?? eutils), maxRetries: 1 };
         check();
         const branches = request.treeNumber ? [request.treeNumber]
           : (await fetchMeshTreeNumbers([request.descriptor], bounded)).get(request.descriptor) ?? [];

@@ -117,7 +117,7 @@ test('二重起動を防ぎ、確定済み試行の重複通知を履歴に重�
   await flush();
   expect(fixture.run).toHaveBeenCalledTimes(1);
   const progress: optimization.QueryOptimizationProgress = { step: 'adjusting', iterations: 1, bestTotalHits: 120,
-    bestCapturedSeedCount: 1, trial: { candidateId: 'initial', formula, before: null, after: null, accepted: true, reason: '実測', rationale: '' } };
+    bestCapturedSeedCount: 1, trial: { kind: 'initial', apiEvents: [], candidateId: 'initial', formula, before: null, after: null, accepted: true, reason: '実測', rationale: '' } };
   fixture.run.mock.calls[0]![1].onProgress!(progress);
   fixture.run.mock.calls[0]![1].onProgress!(progress);
   expect(fixture.store.getState().queryOptimizationRun?.trials).toHaveLength(1);

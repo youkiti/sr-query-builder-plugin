@@ -24,7 +24,7 @@ export interface OptimizationMeasurement {
   capturedPmids: string[] | null;
   missedPmids: string[] | null;
   blocks: { id: string; hits: number | null; error: string | null }[];
-  terms?: { blockId: string; query: string; hits: number | null; delta: number | null }[];
+  terms?: { blockId: string; query: string; hits: number | null; delta: number | null; finalContribution?: number | null }[];
 }
 
 export interface OptimizationMeshNode {
@@ -53,6 +53,12 @@ export interface OptimizationMeshRequestResult {
 }
 
 export interface OptimizationTrial {
+  kind: 'initial' | 'proposal' | 'information' | 'final';
+  /** 変更案の生成時は必須。MeSH の変更語も run の文脈への参照として使う。 */
+  changes?: Pick<OptimizeQueryProposal, 'targetBlockId' | 'addedTerms' | 'removedTerms' | 'replacedTerms'>;
+  /** 情報要求の対象だけを保持し、ノード本体は run の文脈から引く。 */
+  meshRequests?: OptimizationMeshRequest[];
+  apiEvents: OptimizationApiEvent[];
   candidateId: string;
   formula: PubmedFormula;
   accepted: boolean;
@@ -60,6 +66,11 @@ export interface OptimizationTrial {
   rationale: string;
   before: OptimizationMeasurement | null;
   after: OptimizationMeasurement | null;
+}
+
+export interface OptimizationApiEvent {
+  status: 'rate_limit' | 'retry' | 'failure';
+  source: 'PubMed' | 'MeSH' | 'AI';
 }
 
 export interface OptimizeQueryInput {

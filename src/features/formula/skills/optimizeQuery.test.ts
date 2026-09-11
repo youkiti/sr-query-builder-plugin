@@ -41,9 +41,9 @@ test('測定・書誌・MeSH の全枝と採否履歴を欠測を補完せず渡
   input.meshContext = [{ id: 'D001', descriptor: 'Asthma', label: 'Asthma',
     treeNumbers: ['C01.100', 'C02.200'], parentIds: ['D000'], childIds: ['D002'], explode: false, note: '子は一段のみ取得' }];
   input.trials = [
-    { candidateId: 'rejected', formula: input.formula, accepted: false, reason: 'シード喪失', rationale: '下位化',
+    { kind: 'proposal', apiEvents: [], candidateId: 'rejected', formula: input.formula, accepted: false, reason: 'シード喪失', rationale: '下位化',
       before: measurement(), after: { ...measurement(), totalHits: null, capturedPmids: null, missedPmids: null, terms: undefined } },
-    { candidateId: 'unmeasured', formula: input.formula, accepted: false, reason: '構文不正', rationale: '', before: null, after: null },
+    { kind: 'proposal', apiEvents: [], candidateId: 'unmeasured', formula: input.formula, accepted: false, reason: '構文不正', rationale: '', before: null, after: null },
   ];
   await optimizeQuery(input, provider);
   const prompt = chat.mock.calls[0]![0][1].content as string;
