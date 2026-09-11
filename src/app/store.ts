@@ -220,6 +220,8 @@ export interface ExpandRunState {
  * （別バージョンを読み込み直した後に古い draft を表示しないため。ValidationResultEntry と同じ判定）。
  */
 export interface FormulaEditDraft {
+  /** 自動調整から持ち込んだ下書きだけが持つ由来。手入力の下書きでは省略する。 */
+  optimizationOrigin?: { projectId: string; runId: string; model: string | null };
   /** null は、まだ保存版のない式の編集下書き。 */
   formulaVersionId: string | null;
   markdown: string;
@@ -239,7 +241,8 @@ export interface FormulaEditDraft {
  * （別バージョンの stale な提案を表示しないため。ValidationResultEntry と同じ判定）。
  */
 export interface BlockImprovementState {
-  formulaVersionId: string;
+  /** null は保存版のない編集下書きに対応する。 */
+  formulaVersionId: string | null;
   blockId: string;
   status: 'running' | 'ready' | 'error';
   /** status='ready' のときの提案。それ以外は null */
@@ -299,7 +302,8 @@ export interface FormulaSaveState {
  * メモは自動的に空へ戻る（＝次の編集に前回のメモが残らない）。
  */
 export interface FormulaEditNote {
-  formulaVersionId: string;
+  /** null は保存版のない編集下書きに対応する。 */
+  formulaVersionId: string | null;
   note: string;
 }
 
@@ -322,7 +326,8 @@ export interface FormulaEditNote {
  * 読み込み直した、または別ブロックの AI パネルを開いたときは空文字にフォールバックする。
  */
 export interface BlockImprovementInstruction {
-  formulaVersionId: string;
+  /** null は保存版のない編集下書きに対応する。 */
+  formulaVersionId: string | null;
   blockId: string;
   instruction: string;
 }
@@ -343,7 +348,8 @@ export interface BlockImprovementInstruction {
  * 呼び出し側（editView.ts の renderProposal）は result.proposedExpression を初期値にする。
  */
 export interface BlockImprovementManualEditDraft {
-  formulaVersionId: string;
+  /** null は保存版のない編集下書きに対応する。 */
+  formulaVersionId: string | null;
   blockId: string;
   expression: string;
 }

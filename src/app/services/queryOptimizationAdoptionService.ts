@@ -88,7 +88,9 @@ export function editQueryOptimization(store: AppStore): boolean {
   const best = run?.result?.best;
   if (!best || run?.projectId !== state.project?.projectId || run.status === 'running' || run.save?.status === 'saving') return false;
   store.setState((s) => ({ ...s,
-    formulaEditDraft: { formulaVersionId: s.currentFormulaVersionId, markdown: serializePubmedFormulaMd(best.formula) },
+    formulaEditDraft: { formulaVersionId: s.currentFormulaVersionId, markdown: serializePubmedFormulaMd(best.formula),
+      optimizationOrigin: { projectId: run.projectId, runId: run.runId, model: run.inputSnapshot?.model ?? s.currentFormulaModel },
+    },
     formulaSave: null, blockImprovement: null,
   }));
   return true;

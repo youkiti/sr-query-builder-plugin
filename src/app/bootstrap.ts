@@ -9,6 +9,7 @@ declare const __BUILD_DATE__: string;
  */
 
 import { adoptQueryOptimization, editQueryOptimization } from './services/queryOptimizationAdoptionService';
+import { createOptimizationProgressPublisher } from './services/queryOptimizationProgressPublisher';
 
 import {
   approveBlocks,
@@ -555,7 +556,10 @@ function buildDefaultViewOptions(
         // 説明しなくなるので消す。未保存の編集があることが見た目でも分かる。
         store.setState((s) => ({
           ...s,
-          formulaEditDraft: { formulaVersionId, markdown },
+          formulaEditDraft: {
+            ...(s.formulaEditDraft?.formulaVersionId === formulaVersionId ? s.formulaEditDraft : {}),
+            formulaVersionId, markdown,
+          },
           formulaSave: null,
         }));
       },
@@ -578,20 +582,16 @@ function buildDefaultViewOptions(
       // doc コメント参照。PR #43 の回帰対応）。
       onNoteChange: (note: string) => {
         const formulaVersionId = store.getState().currentFormulaVersionId;
-        /* istanbul ignore if -- guards.ts の edit: needsFormula() により #/edit 到達時点で必ず非 null */
-        if (formulaVersionId === null) {
-          return;
-        }
+        // 保存版がなくても、対応する編集下書きがあれば入力を保持する。
+        if (formulaVersionId === null && !store.getState().formulaEditDraft) return;
         store.setStateSilently((s) => ({ ...s, formulaEditNote: { formulaVersionId, note } }));
       },
       // 「AI への指示」欄（初回・追加とも）を store（blockImprovementInstruction）へ反映する。
       // onNoteChange と同じ理由・同じ使い方（setStateSilently で再描画を起こさない）。
       onInstructionChange: (blockId: string, instruction: string) => {
         const formulaVersionId = store.getState().currentFormulaVersionId;
-        /* istanbul ignore if -- guards.ts の edit: needsFormula() により #/edit 到達時点で必ず非 null */
-        if (formulaVersionId === null) {
-          return;
-        }
+        // 保存版がなくても、対応する編集下書きがあれば入力を保持する。
+        if (formulaVersionId === null && !store.getState().formulaEditDraft) return;
         store.setStateSilently((s) => ({
           ...s,
           blockImprovementInstruction: { formulaVersionId, blockId, instruction },
@@ -606,10 +606,8 @@ function buildDefaultViewOptions(
       // onInstructionChange と同じ理由・同じ使い方（setStateSilently で再描画を起こさない）。
       onManualEditChange: (blockId: string, expression: string) => {
         const formulaVersionId = store.getState().currentFormulaVersionId;
-        /* istanbul ignore if -- guards.ts の edit: needsFormula() により #/edit 到達時点で必ず非 null */
-        if (formulaVersionId === null) {
-          return;
-        }
+        // 保存版がなくても、対応する編集下書きがあれば入力を保持する。
+        if (formulaVersionId === null && !store.getState().formulaEditDraft) return;
         store.setStateSilently((s) => ({
           ...s,
           blockImprovementManualEditDraft: { formulaVersionId, blockId, expression },
@@ -718,10 +716,8 @@ async function runImproveBlock(
     return;
   }
   const formulaVersionId = store.getState().currentFormulaVersionId;
-  /* istanbul ignore if -- guards.ts の edit: needsFormula() により #/edit 到達時点で必ず非 null */
-  if (formulaVersionId === null) {
-    return;
-  }
+  // 自動調整から渡した未保存の下書きも AI 改善の対象にする。
+  if (formulaVersionId === null && !store.getState().formulaEditDraft) return;
   // このリクエストで使った history（＝これより前の turn。issue #90）。running/error でも
   // 保持しておく（redo のやり直し UI が失敗直後にも同じ history を再利用できるように）。
   const historyBeforeThisTurn = input.history ?? [];
@@ -1108,9 +1104,18 @@ export async function runOptimizeQuery(
     || state.draftRun?.status === 'running') return;
   const project = state.project;
   if (!project) return;
-  const runId = newUuid();
   const projectId = project.projectId;
   const fixedSettings = { ...settings };
+  const setupError = (error: string): void => {
+    store.setState((s) => s.project?.projectId !== projectId ? s : { ...s,
+      queryOptimizationSetup: { projectId, status: 'ready',
+        maxHits: String(fixedSettings.maxHits), maxIterations: String(fixedSettings.maxIterations),
+        seedCount: null, ...s.queryOptimizationSetup, error },
+    });
+  };
+  const invalid = validateQueryOptimizationSettings(fixedSettings);
+  if (invalid) { setupError(invalid); return; }
+  const runId = newUuid();
   const owns = (s: AppState): boolean => s.project?.projectId === projectId
     && s.queryOptimizationRun?.projectId === projectId && s.queryOptimizationRun.runId === runId
     && s.queryOptimizationRun.status === 'running';
@@ -1119,17 +1124,18 @@ export async function runOptimizeQuery(
       ...s, queryOptimizationRun: { ...s.queryOptimizationRun, ...patch },
     });
   };
+  const publisher = createOptimizationProgressPublisher(store, owns);
   const shouldStop = (): boolean => !owns(store.getState()) || !!store.getState().queryOptimizationRun?.stopRequested;
   const check = (): void => { if (shouldStop()) throw new QueryOptimizationStopError('user_stop'); };
-  store.setState((s) => ({ ...s, queryOptimizationRun: {
+  store.setState((s) => ({ ...s,
+    queryOptimizationSetup: s.queryOptimizationSetup ? { ...s.queryOptimizationSetup, error: null } : null,
+    queryOptimizationRun: {
     status: 'running', projectId, runId, ...fixedSettings, seedCount: null,
     startedAtMs: Date.now(), finishedAtMs: null, progress: { step: 'initial_formula', iterations: 0,
       bestTotalHits: null, bestCapturedSeedCount: null, trial: null },
     trials: [], meshContext: [], stopRequested: false, result: null, error: null,
   } }));
   try {
-    const invalid = validateQueryOptimizationSettings(fixedSettings);
-    if (invalid) throw new Error(invalid);
     if (!state.protocolDraft || !state.blocksDraft?.blocks.length || !state.protocolDraftPersisted) {
       throw new Error('プロトコルとブロックを承認してください。');
     }
@@ -1138,7 +1144,12 @@ export async function runOptimizeQuery(
     const seedPmids = [...new Set(seeds.map((seed) => seed.pmid).filter((pmid): pmid is string => pmid !== null))];
     update({ seedCount: seedPmids.length });
     const incompatible = validateQueryOptimizationSettings(fixedSettings, seedPmids.length);
-    if (incompatible) throw new Error(incompatible);
+    if (incompatible) {
+      // シード取得後の入力不整合も実行結果ではない。開始前の履歴を保持して設定欄へ戻す。
+      store.setState((s) => !owns(s) ? s : { ...s, queryOptimizationRun: state.queryOptimizationRun });
+      setupError(incompatible);
+      return;
+    }
     await saveQueryOptimizationSettings(projectId, fixedSettings, runtime.store);
     check();
     const factory = await buildLlmProviderFactory({ ...baseDeps,
@@ -1210,18 +1221,13 @@ export async function runOptimizeQuery(
         }
         return [...nodes.values()];
       },
-      onProgress: (progress) => {
-        store.setState((s) => !owns(s) || !s.queryOptimizationRun ? s : {
-          ...s, queryOptimizationRun: { ...s.queryOptimizationRun, progress,
-            trials: progress.trial && !s.queryOptimizationRun.trials.some((trial) => trial.candidateId === progress.trial!.candidateId)
-              ? [...s.queryOptimizationRun.trials, progress.trial] : s.queryOptimizationRun.trials,
-          },
-        });
-      },
+      onProgress: publisher.publish,
     });
+    publisher.flush();
     update({ status: result.status === 'error' ? 'error' : 'ready', finishedAtMs: Date.now(), result, trials: result.trials,
       error: result.status === 'error' ? result.unmetReasons.join(' / ') : null });
   } catch (err) {
+    publisher.flush();
     if (err instanceof QueryOptimizationStopError && err.stopReason === 'user_stop') {
       const run = store.getState().queryOptimizationRun;
       update({ status: 'ready', finishedAtMs: Date.now(), result: { status: 'stopped', stopReason: 'user_stop', best: null,
@@ -1230,6 +1236,8 @@ export async function runOptimizeQuery(
     } else {
       update({ status: 'error', finishedAtMs: Date.now(), error: err instanceof Error ? err.message : String(err) });
     }
+  } finally {
+    publisher.dispose();
   }
 }
 

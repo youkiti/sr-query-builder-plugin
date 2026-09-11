@@ -65,6 +65,7 @@ src/
 │   ├── services/                  # 画面とドメインロジックの仲介（以下は抜粋。実体は 10 本以上ある）
 │   │   ├── queryEvaluationService.ts # 保存なしの検索式評価（厳密な件数・固定シード捕捉）
 │   │   ├── queryOptimizationService.ts # 検索式の自動調整ループ（候補の検査・採否・停止。draft 画面から実行）
+│   │   ├── queryOptimizationProgressPublisher.ts # 進捗通知の間引き・段階遷移と試行確定の即時反映
 │   │   ├── queryOptimizationSettingsService.ts # プロジェクト別の最大件数・反復上限
 │   │   ├── queryOptimizationAdoptionService.ts # 人の採用保存・最終検証と実行ログの関連づけ・編集下書き
 │   │   └── queryOptimizationCheckpointService.ts # 自動調整の試行要約を chrome.storage.local へ

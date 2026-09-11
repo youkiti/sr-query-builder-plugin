@@ -66,3 +66,23 @@ test('停止は callback を呼び、停止要求済みならボタンを無効�
   render(container, { state: current, navigate: jest.fn() });
   expect(container.querySelector<HTMLButtonElement>('.optimization__stop')!.disabled).toBe(true);
 });
+
+
+test('密な再描画でも経過時間のタイマーは1つだけで、完了時には解除する', () => {
+  jest.useFakeTimers({ now: 1000 });
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const current = state();
+  const render = createDraftView();
+  for (let i = 0; i < 100; i += 1) {
+    render(container, { state: current, navigate: jest.fn() });
+    expect(jest.getTimerCount()).toBe(1);
+  }
+  jest.advanceTimersByTime(2000);
+  expect(container.textContent).toContain('経過時間: 2秒');
+  current.queryOptimizationRun!.status = 'ready';
+  current.queryOptimizationRun!.finishedAtMs = 3000;
+  render(container, { state: current, navigate: jest.fn() });
+  expect(jest.getTimerCount()).toBe(0);
+  expect(container.textContent).toContain('経過時間: 2秒');
+});

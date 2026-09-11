@@ -61,6 +61,12 @@ export async function saveEditedFormula(
   const createdAt = (deps.now ?? nowIso)();
   const parentVersionId = state.currentFormulaVersionId;
   const protocolContext = await resolveProtocolContext(deps);
+  const draft = state.formulaEditDraft;
+  const origin = draft?.formulaVersionId === state.currentFormulaVersionId
+    && draft.optimizationOrigin?.projectId === state.project.projectId ? draft.optimizationOrigin : null;
+  const model = origin?.model ?? state.currentFormulaModel;
+  const note = [input.note.trim(), ...(origin ? [`自動調整 run: ${origin.runId} から編集`] : [])]
+    .filter(Boolean).join('\n');
 
   await appendFormulaVersion(
     state.project.spreadsheetId,
@@ -72,9 +78,9 @@ export async function saveEditedFormula(
       formulaMd: input.formulaMd,
       createdBy: 'user_edit',
       createdAt,
-      note: input.note.trim() === '' ? null : input.note.trim(),
-      // 手編集では AI を使わないので、元ドラフトを支援したモデルをそのまま引き継ぐ
-      model: state.currentFormulaModel,
+      note: note || null,
+      // 自動調整由来ならそのモデル、それ以外は元の保存版を支援したモデルを引き継ぐ。
+      model,
     },
     deps.google
   );
@@ -84,6 +90,7 @@ export async function saveEditedFormula(
     currentFormulaVersionId: versionId,
     currentFormulaMarkdown: input.formulaMd,
     currentFormulaCreatedBy: 'user_edit',
+    currentFormulaModel: model,
   }));
 
   return { versionId, parentVersionId };
@@ -220,9 +227,7 @@ export async function getBlockImprovementContext(
   deps: BlockImprovementContextDeps
 ): Promise<BlockImprovementContext | null> {
   const state = deps.store.getState();
-  if (state.currentFormulaMarkdown === null || state.currentFormulaMarkdown.trim() === '') {
-    return null;
-  }
+
   // AI へ渡す現式は「保存済みの版」ではなく「ユーザーが今見ている編集中の下書き」に揃える
   // （issue #92 C-2）。editView.ts の siblings（兄弟ブロックの式・共有語）は
   // parsePubmedFormulaMd(editor.getMd()) 由来の下書きから計算されるため、ここで保存版から
@@ -235,6 +240,7 @@ export async function getBlockImprovementContext(
     draft !== null && draft.formulaVersionId === state.currentFormulaVersionId
       ? draft.markdown
       : state.currentFormulaMarkdown;
+  if (!markdown?.trim()) return null;
   let formula;
   try {
     formula = parsePubmedFormulaMd(markdown);
@@ -336,16 +342,16 @@ export interface BlockImprovementDeps {
  * getBlockImprovementContext と同じビルダーで組み立て、「AI に渡す内容を見る」開示と
  * 実際にプロンプトへ載る内容が一致するようにする。
  *
- * @throws {Error} currentFormulaMarkdown が空、または blockId が見つからない場合
+ * @throws {Error} 対応する下書きも保存式も空、または blockId が見つからない場合
  */
 export async function requestBlockImprovement(
   input: RequestBlockImprovementInput,
   deps: BlockImprovementDeps
 ): Promise<BlockImprovementResult> {
   const state = deps.store.getState();
-  if (state.currentFormulaMarkdown === null || state.currentFormulaMarkdown.trim() === '') {
-    throw new Error('検索式がまだ生成されていません');
-  }
+  const draft = state.formulaEditDraft;
+  const markdown = draft?.formulaVersionId === state.currentFormulaVersionId ? draft.markdown : state.currentFormulaMarkdown;
+  if (!markdown?.trim()) throw new Error('検索式がまだ生成されていません');
   const context = await getBlockImprovementContext(input.blockId, input.siblings ?? [], {
     store: deps.store,
     google: deps.google,

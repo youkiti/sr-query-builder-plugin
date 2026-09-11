@@ -64,7 +64,11 @@ export interface DraftViewCallbacks extends ValidationResultsCallbacks {
 
 export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView {
   const renderHistory = createOptimizationHistoryRenderer();
+  let stopElapsedTimer = (): void => {};
   return (container, ctx) => {
+    // 同じビューの再描画では古いタイマーを即時解除し、次の tick まで重ねない。
+    stopElapsedTimer();
+    stopElapsedTimer = () => {};
     const optimization = ctx.state.queryOptimizationRun;
     const runKey = optimization?.projectId === ctx.state.project?.projectId && optimization
       ? `${optimization.projectId}:${optimization.runId}` : null;
@@ -140,7 +144,7 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
     }
     container.appendChild(actions);
 
-    renderQueryOptimization(container, ctx.state, callbacks);
+    renderQueryOptimization(container, ctx.state, callbacks, (stop) => { stopElapsedTimer = stop; });
     renderHistory(container,
       ctx.state.queryOptimizationRun?.projectId === ctx.state.project.projectId ? ctx.state.queryOptimizationRun : null,
       ctx.state.queryOptimizationSetup?.projectId === ctx.state.project.projectId ? ctx.state.queryOptimizationSetup : null);
@@ -820,7 +824,8 @@ export function formatDraftProgress(progress: DraftProgress): string {
 export { formatValidationProgress } from './validationResults';
 
 /** 可変回数の処理なので、全体の割合ではなく現在段階と実測済みの最良値を示す。 */
-function renderQueryOptimization(container: HTMLElement, state: AppState, callbacks: DraftViewCallbacks): void {
+function renderQueryOptimization(container: HTMLElement, state: AppState, callbacks: DraftViewCallbacks,
+  setTimerCleanup: (stop: () => void) => void): void {
   const doc = container.ownerDocument;
   const run = state.queryOptimizationRun?.projectId === state.project?.projectId ? state.queryOptimizationRun : null;
   const setup = state.queryOptimizationSetup?.projectId === state.project?.projectId ? state.queryOptimizationSetup : null;
@@ -861,6 +866,7 @@ function renderQueryOptimization(container: HTMLElement, state: AppState, callba
         if (!elapsed.isConnected) { win.clearInterval(timer); return; }
         updateElapsed();
       }, 1000);
+      setTimerCleanup(() => win.clearInterval(timer));
     }
     status.insertBefore(metrics, status.querySelector('.optimization__announcement'));
     const stages = doc.createElement('ol');

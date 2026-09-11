@@ -102,7 +102,9 @@ test.each([true, false])('編集導線は保存せず下書きを表示できる
   const f = setup();
   if (!hasParent) f.store.setState((s) => ({ ...s, currentFormulaVersionId: null, currentFormulaMarkdown: null }));
   expect(editQueryOptimization(f.store)).toBe(true);
-  expect(f.store.getState().formulaEditDraft).toEqual({ formulaVersionId: hasParent ? 'parent' : null, markdown: md });
+  expect(f.store.getState().formulaEditDraft).toEqual({ formulaVersionId: hasParent ? 'parent' : null, markdown: md,
+    optimizationOrigin: { projectId: 'p', runId: 'r', model: 'model' },
+  });
   expect(evaluateGuards(f.store.getState()).edit.enabled).toBe(true);
   const container = document.createElement('div');
   createEditView()(container, { state: f.store.getState(), navigate: jest.fn() });
@@ -148,4 +150,30 @@ test('親版のない下書きも手編集保存は user_edit として初回版
   editQueryOptimization(f.store);
   await saveEditedFormula({ formulaMd: f.store.getState().formulaEditDraft!.markdown, note: '' }, { ...f, newUuid: () => 'first' });
   expect(f.append).toHaveBeenCalledWith('s', expect.objectContaining({ parentVersionId: null, createdBy: 'user_edit', protocolSnapshotRef: '本文' }), f.google);
+});
+
+
+test.each([null, 'parent'])('編集保存は自動調整のモデルとrunを引き継ぎ、user_editのままにする（親版=%s）', async (parent) => {
+  const f = setup();
+  f.run.inputSnapshot = { researchQuestion: 'RQ', inclusionCriteria: '', exclusionCriteria: '',
+    blocks: { blocks: [], combinationExpression: '' }, seedPmids: ['1'], model: 'optimization-model' };
+  f.store.setState((s) => ({ ...s, currentFormulaVersionId: parent, currentFormulaMarkdown: parent ? md : null,
+    currentFormulaModel: parent ? 'older-model' : null }));
+  editQueryOptimization(f.store);
+  expect(f.append).not.toHaveBeenCalled();
+  expect(f.upload).not.toHaveBeenCalled();
+  await saveEditedFormula({ formulaMd: md, note: '人による変更' }, { ...f, newUuid: () => 'edited' });
+  expect(f.append).toHaveBeenCalledWith('s', expect.objectContaining({ createdBy: 'user_edit', parentVersionId: parent,
+    model: 'optimization-model', note: '人による変更\n自動調整 run: r から編集' }), f.google);
+  expect(f.store.getState().currentFormulaModel).toBe('optimization-model');
+});
+
+test.each(['project', 'version'])('対応しない編集下書きの由来を保存へ混入しない: %s', async (mismatch) => {
+  const f = setup();
+  f.store.setState((s) => ({ ...s, formulaEditDraft: {
+    formulaVersionId: mismatch === 'version' ? 'other' : 'parent', markdown: md,
+    optimizationOrigin: { projectId: mismatch === 'project' ? 'other' : 'p', runId: 'other-run', model: 'other-model' },
+  } }));
+  await saveEditedFormula({ formulaMd: md, note: '' }, { ...f, newUuid: () => 'edited' });
+  expect(f.append).toHaveBeenCalledWith('s', expect.objectContaining({ model: 'model', note: null }), f.google);
 });

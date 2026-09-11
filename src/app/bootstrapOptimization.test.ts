@@ -10,6 +10,7 @@ import * as mesh from '@/lib/ncbi/mesh';
 import * as meshRdf from '@/lib/ncbi/meshRdf';
 import * as protocolRepository from '@/features/protocol/protocolRepository';
 import * as formulaRepository from '@/features/formula/formulaRepository';
+import * as improveSkill from '@/features/formula/skills/improveBlock';
 import { getQueryOptimizationSettings } from './services/queryOptimizationSettingsService';
 import type { SeedPaper } from '@/domain/seedPaper';
 import { serializePubmedFormulaMd } from '@/lib/search-formula-md';
@@ -162,7 +163,8 @@ test('最大件数がシード数未満なら LLM 準備・最適化・設定保
   const fixture = setup();
   fixture.list.mockResolvedValue([seed('11'), seed('22')]);
   await fixture.invoke(1);
-  expect(fixture.store.getState().queryOptimizationRun).toMatchObject({ status: 'error', error: expect.stringContaining('シード数') });
+  expect(fixture.store.getState().queryOptimizationRun).toBeNull();
+  expect(fixture.store.getState().queryOptimizationSetup?.error).toContain('シード数');
   expect(fixture.buildFactory).not.toHaveBeenCalled();
   expect(fixture.run).not.toHaveBeenCalled();
   expect(fixture.runtime.store.write).not.toHaveBeenCalled();
@@ -173,7 +175,8 @@ test.each([0, 1.5, -1])('不正な最大件数 %s はシードの読み込み前
   await fixture.invoke(maxHits);
   expect(fixture.list).not.toHaveBeenCalled();
   expect(fixture.run).not.toHaveBeenCalled();
-  expect(fixture.store.getState().queryOptimizationRun?.status).toBe('error');
+  expect(fixture.store.getState().queryOptimizationRun).toBeNull();
+  expect(fixture.store.getState().queryOptimizationSetup?.error).toContain('正の整数');
 });
 
 test('シードなし・式なしは保存なし生成を経て実行する', async () => {
@@ -263,4 +266,74 @@ test.each(['setState', 'setStateSilently'] as const)('クリアを伴わない %
   pending.resolve(result);
   await running;
   expect(fixture.store.getState()).toBe(before);
+});
+
+
+test('保存版なしでもメモ・指示・提案の手編集を保持し、下書きに対する AI 改善を実行する', async () => {
+  const f = setup();
+  jest.spyOn(seeds, 'listSeedPapersWithRows').mockResolvedValue([]);
+  const pending = deferred<improveSkill.ImproveBlockProposal>();
+  const improve = jest.spyOn(improveSkill, 'improveBlockExpression').mockReturnValue(pending.promise);
+  const origin = { projectId: 'p', runId: 'optimization-run', model: 'optimization-model' };
+  f.store.setState((s) => ({ ...s, currentFormulaVersionId: null, currentFormulaMarkdown: null,
+    formulaEditDraft: { formulaVersionId: null, markdown: serializePubmedFormulaMd(formula), optimizationOrigin: origin } }));
+  document.body.innerHTML = '<section id="app-content"></section>';
+  const app = startApp(document, { store: f.store, runtime: f.runtime,
+    getHash: () => '#/edit', onHashChange: () => () => undefined, setHash: jest.fn() });
+  await flush();
+  const type = (selector: string, value: string) => {
+    const input = document.querySelector<HTMLTextAreaElement>(selector)!;
+    input.value = value;
+    input.dispatchEvent(new Event('input'));
+  };
+  type('.edit__note-input', '手編集のメモ');
+  document.querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
+  type('.edit__block-ai-instruction', '疾患名を限定');
+  expect(f.store.getState().formulaEditNote).toEqual({ formulaVersionId: null, note: '手編集のメモ' });
+  expect(f.store.getState().blockImprovementInstruction).toEqual({ formulaVersionId: null, blockId: '1', instruction: '疾患名を限定' });
+  document.querySelector<HTMLButtonElement>('.edit__block-ai-submit')!.click();
+  expect(f.store.getState().blockImprovement?.status).toBe('running');
+  await flush();
+  expect(improve).toHaveBeenCalledWith(expect.objectContaining({ currentExpression: 'a[tiab]', userInstruction: '疾患名を限定' }), undefined);
+  pending.resolve({ proposedExpression: 'b[tiab]', rationale: '対象を限定' });
+  await flush();
+  expect(f.store.getState().blockImprovement).toMatchObject({ formulaVersionId: null, status: 'ready', error: null });
+  type('.edit__block-ai-manual-edit-input', 'c[tiab]');
+  expect(f.store.getState().blockImprovementManualEditDraft).toEqual({ formulaVersionId: null, blockId: '1', expression: 'c[tiab]' });
+  f.store.setState((s) => ({ ...s }));
+  expect(document.querySelector<HTMLTextAreaElement>('.edit__note-input')!.value).toBe('手編集のメモ');
+  expect(document.querySelector<HTMLTextAreaElement>('.edit__block-ai-manual-edit-input')!.value).toBe('c[tiab]');
+  document.querySelector<HTMLButtonElement>('.edit__block-ai-manual-edit-apply')!.click();
+  expect(f.store.getState().formulaEditDraft?.markdown).toContain('c[tiab]');
+  expect(f.store.getState().formulaEditDraft?.optimizationOrigin).toEqual(origin);
+  app.dispose();
+});
+
+test.each(['', '1e400', 'seed-mismatch'])('入力不整合 %s は設定欄のエラーだけを表示し、最終レビューを作らない', async (value) => {
+  const f = setup();
+  if (value === 'seed-mismatch') f.list.mockResolvedValue([seed('11'), seed('22')]);
+  document.body.innerHTML = '<section id="app-content"></section>';
+  const app = startApp(document, { store: f.store, runtime: f.runtime,
+    getHash: () => '#/draft', onHashChange: () => () => undefined, setHash: jest.fn() });
+  await flush();
+  const input = document.querySelector<HTMLInputElement>('.optimization__setup input')!;
+  input.value = value === 'seed-mismatch' ? '1' : value;
+  input.dispatchEvent(new Event('input'));
+  document.querySelector<HTMLButtonElement>('.optimization__start')!.click();
+  await flush();
+  expect(f.store.getState().queryOptimizationRun).toBeNull();
+  expect(f.store.getState().queryOptimizationSetup?.error).toBeTruthy();
+  expect(document.querySelector('.optimization__review')).toBeNull();
+  expect(document.querySelectorAll('.optimization__setup [role=alert]')).toHaveLength(1);
+  expect(Array.from(document.querySelectorAll('[role=alert]')).filter((node) => node.textContent?.trim())).toHaveLength(1);
+  expect(f.run).not.toHaveBeenCalled();
+  app.dispose();
+});
+
+test('数値に変換済みの Infinity も run を作る前に拒否する', async () => {
+  const f = setup();
+  await f.invoke(Number('1e400'));
+  expect(f.store.getState().queryOptimizationRun).toBeNull();
+  expect(f.store.getState().queryOptimizationSetup?.error).toContain('正の整数');
+  expect(f.list).not.toHaveBeenCalled();
 });
