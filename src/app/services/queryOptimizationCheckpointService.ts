@@ -2,6 +2,7 @@ import type { ProjectStoreDeps } from '@/features/project';
 import type { OptimizationTrial } from '@/features/formula/skills/optimizeQuery';
 import type { PubmedFormula } from '@/lib/search-formula-md';
 import { nowIso } from '@/utils/iso8601';
+import type { OptimizationStopReason, QueryOptimizationResult } from './queryOptimizationService';
 
 const CHECKPOINT_KEY = 'queryOptimizationCheckpoint';
 
@@ -15,16 +16,30 @@ export interface OptimizationTrialSummary {
   fingerprint: string | null;
 }
 
+export interface QueryOptimizationCompletion {
+  status: QueryOptimizationResult['status'];
+  stopReason: OptimizationStopReason;
+  unmetReasons: string[];
+}
+
 export interface QueryOptimizationCheckpoint {
   projectId: string;
   runId: string;
   savedAt: string;
   maxHits: number;
   trials: OptimizationTrialSummary[];
+  /** 未指定は実行途中（旧形式のチェックポイントも含む）。 */
+  completion?: QueryOptimizationCompletion;
 }
 
 export interface InterruptedQueryOptimization extends QueryOptimizationCheckpoint {
   status: 'interrupted';
+  needsRevalidation: true;
+}
+
+export interface CompletedQueryOptimization extends QueryOptimizationCheckpoint {
+  status: 'completed';
+  completion: QueryOptimizationCompletion;
   needsRevalidation: true;
 }
 
@@ -35,10 +50,14 @@ export async function saveQueryOptimizationCheckpoint(
   maxHits: number,
   trials: readonly OptimizationTrial[],
   deps: ProjectStoreDeps,
-  now: () => string = nowIso
+  now: () => string = nowIso,
+  completion?: QueryOptimizationCompletion
 ): Promise<QueryOptimizationCheckpoint> {
   const checkpoint: QueryOptimizationCheckpoint = {
     projectId, runId, maxHits, savedAt: now(),
+    ...(completion ? { completion: {
+      status: completion.status, stopReason: completion.stopReason, unmetReasons: [...completion.unmetReasons],
+    } } : {}),
     trials: trials.map((trial) => ({
       candidateId: trial.candidateId,
       formula: {
@@ -56,13 +75,14 @@ export async function saveQueryOptimizationCheckpoint(
   return checkpoint;
 }
 
-/** 復元は中断ログであり、再開には固定入力の照合と新しい測定が必要。 */
+/** 終了記録がない run だけを中断として復元する。完了済みでも新しい測定は必要。 */
 export async function getQueryOptimizationCheckpoint(
   projectId: string,
   deps: ProjectStoreDeps
-): Promise<InterruptedQueryOptimization | null> {
+): Promise<InterruptedQueryOptimization | CompletedQueryOptimization | null> {
   const checkpoint = await deps.read<QueryOptimizationCheckpoint | null>(CHECKPOINT_KEY);
   if (!checkpoint || checkpoint.projectId !== projectId) return null;
+  if (checkpoint.completion) return { ...checkpoint, completion: checkpoint.completion, status: 'completed', needsRevalidation: true };
   return { ...checkpoint, status: 'interrupted', needsRevalidation: true };
 }
 

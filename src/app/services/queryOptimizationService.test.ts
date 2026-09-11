@@ -3,6 +3,8 @@ import * as evaluation from './queryEvaluationService';
 import * as skill from '@/features/formula/skills/optimizeQuery';
 import * as checkpoint from './queryOptimizationCheckpointService';
 import type { LLMProvider } from '@/lib/llm';
+import { sharedEutilsRateLimiters } from '@/lib/ncbi';
+import { validateCombinationExpression } from '@/lib/combination-expression';
 import { runQueryOptimization, validateOptimizationCandidate, QueryOptimizationStopError, type QueryOptimizationInput, type QueryOptimizationDeps } from './queryOptimizationService';
 
 interface Outcome { hits: number; captured: string[] }
@@ -67,7 +69,7 @@ test('初期式が目標内でも AI を呼び、同じ式をキャッシュな�
   expect(evaluate).toHaveBeenCalledTimes(3);
   expect(result.trials.map((trial) => trial.candidateId)).toEqual(['initial', 'candidate-1', 'final-1']);
   expect(result.trials[1]?.accepted).toBe(false);
-  expect(write).toHaveBeenCalledTimes(3);
+  expect(write).toHaveBeenCalledTimes(4);
   expect(result.apiCalls).toBe(fetch.mock.calls.length + 1);
   for (const [, options] of fetch.mock.calls) expect(options).toEqual({ cache: 'no-store' });
   expect(append).not.toHaveBeenCalled();
@@ -240,7 +242,7 @@ test.each(['user', 'time'])('AI 待機中の %s 停止後に遅れた応答で�
   expect(result.best?.formula.blocks[0]?.expression).toBe('a[tiab]');
   expect(result.trials).toHaveLength(1);
   expect(result.iterations).toBe(0);
-  expect(write).toHaveBeenCalledTimes(1);
+  expect(write).toHaveBeenCalledTimes(2);
 });
 
 test.each(['user', 'time'])('候補測定中の %s 停止で遅い測定結果を破棄する', async (kind) => {
@@ -267,7 +269,7 @@ test.each(['user', 'time'])('候補測定中の %s 停止で遅い測定結果�
   const result = await pending;
   expect(result.stopReason).toBe(kind === 'user' ? 'user_stop' : 'time_budget');
   expect(result.trials).toHaveLength(1);
-  expect(write).toHaveBeenCalledTimes(1);
+  expect(write).toHaveBeenCalledTimes(2);
 });
 
 test('通信数上限で次の実リクエストを止め、途中評価を採用しない', async () => {
@@ -346,6 +348,7 @@ test('最終再検証で条件が崩れたら達成にしない', async () => {
   const result = await runQueryOptimization(input, deps);
   expect(result).toMatchObject({ status: 'needs_review', stopReason: 'revalidation_failed' });
   expect(result.trials[2]?.after?.totalHits).toBe(120);
+  expect(result.unmetReasons.join(' ')).toContain('最大件数 100 件を超えています（実測 120 件）');
   expect(result.best?.measurement.totalHits).toBe(80);
 });
 
@@ -435,7 +438,7 @@ test('AI が通信予算の最後の呼び出しなら遅い応答を破棄す�
   const result = await pending;
   expect(result).toMatchObject({ stopReason: 'api_budget', apiCalls: 8, iterations: 0 });
   expect(fetch).toHaveBeenCalledTimes(7);
-  expect(write).toHaveBeenCalledTimes(1);
+  expect(write).toHaveBeenCalledTimes(2);
   expect(result.trials).toHaveLength(1);
   expect(result.best?.formula.blocks[0]?.expression).toBe('a[tiab]');
 });
@@ -458,7 +461,7 @@ test('最終再検証中の停止は達成状態とチェックポイントを�
   const result = await runQueryOptimization(input, deps);
   expect(result.status).toBe('stopped');
   expect(result.trials).toHaveLength(2);
-  expect(write).toHaveBeenCalledTimes(2);
+  expect(write).toHaveBeenCalledTimes(3);
 });
 
 test('途中で改善があれば連続改善なし回数をリセットする', async () => {
@@ -495,6 +498,8 @@ test('最終再検証でシードを失ったら要確認へ戻す', async () =>
   const result = await runQueryOptimization(input, deps);
   expect(result.stopReason).toBe('revalidation_failed');
   expect(result.trials[2]?.accepted).toBe(false);
+  expect(result.unmetReasons).toContain('未捕捉シード: 22');
+  expect(result.best?.measurement.capturedPmids).toEqual(['11', '22']);
 });
 
 function requestMesh(chat: ReturnType<typeof setup>['chat'], requests: skill.OptimizationMeshRequest[]) {
@@ -583,7 +588,7 @@ test.each(['success', 'failure'])('追加取得が予算を使い切った場合
   expect(fetchMeshContext).toHaveBeenCalledTimes(1);
   expect(chat).toHaveBeenCalledTimes(1);
   expect(fetch).toHaveBeenCalledTimes(7);
-  expect(write).toHaveBeenCalledTimes(1);
+  expect(write).toHaveBeenCalledTimes(2);
   expect(result.trials).toHaveLength(1);
 });
 
@@ -711,4 +716,178 @@ test('通常の NCBI 再試行は注入した待機を使い、停止制御と�
   expect(result.stopReason).toBe('iteration_limit');
   expect(sleep).toHaveBeenCalledWith(1000);
   expect(result.best).not.toBeNull();
+});
+
+test.each([
+  'asthma[tiab] NOT pediatric[tiab]',
+  '(asthma[tiab] OR wheeze[tiab]) NOT (pediatric[tiab] OR child[tiab])',
+  'asthma[tiab] AND NOT pediatric[tiab]',
+])('概念式の NOT を検査用にだけ正規化し、原文を実測する: %s', async (expression) => {
+  const { input, deps, fetch } = setup({ a: { hits: 200, captured: ['11', '22'] },
+    asthma: { hits: 90, captured: ['11', '22'] } }, [expression]);
+  const result = await runQueryOptimization(input, deps);
+  expect(result.status).toBe('achieved');
+  expect(result.best?.formula.blocks[0]!.expression).toBe(expression);
+  expect(fetch.mock.calls.some(([url]) => new URL(url as string).searchParams.get('term') === expression)).toBe(true);
+});
+
+test('二項 NOT の結合行は従来の文法で拒否し、概念式の末尾 NOT も拒否する', () => {
+  const { input } = setup();
+  expect(validateCombinationExpression('#1 NOT #2', new Set(['1', '2'])).errors.length).toBeGreaterThan(0);
+  const formula = { ...input.initialFormula, blocks: input.initialFormula.blocks.map((block) => ({ ...block })) };
+  formula.blocks[3]!.expression = '(#1 NOT #2) AND #RCTfilter';
+  formula.combinationExpression = formula.blocks[3]!.expression;
+  expect(validateOptimizationCandidate(formula, formula, input.approvedBlocks)).toContain('結合構文');
+  const proposal: skill.OptimizeQueryProposal = { targetBlockId: '1', proposedExpression: 'a[tiab] NOT',
+    addedTerms: [], removedTerms: [], replacedTerms: [], rationale: '', measurementIds: [], meshRequests: [] };
+  const candidate = { ...input.initialFormula, blocks: input.initialFormula.blocks.map((block) => ({ ...block })) };
+  candidate.blocks[0]!.expression = proposal.proposedExpression;
+  expect(validateOptimizationCandidate(input.initialFormula, candidate, input.approvedBlocks, proposal)).toContain('不正');
+});
+
+test('候補の in-band エラーは却下して実測理由を次の AI へ渡し、最良式から続ける', async () => {
+  const { input, deps, fetch, chat } = setup({ a: { hits: 200, captured: ['11', '22'] },
+    c: { hits: 90, captured: ['11', '22'] } }, ['"Misspelled disease"[Mesh]', 'c[tiab]']);
+  const original = fetch.getMockImplementation()!;
+  fetch.mockImplementation(async (url: string) => {
+    if (new URL(url).searchParams.get('term')!.includes('Misspelled disease')) {
+      return { ok: true, status: 200, json: async () => ({ esearchresult: {
+        errorlist: { phrasesnotfound: ['Misspelled disease'] },
+      } }) };
+    }
+    return original(url);
+  });
+  const optimize = jest.spyOn(skill, 'optimizeQuery');
+  const result = await runQueryOptimization(input, deps);
+  expect(result).toMatchObject({ status: 'achieved', iterations: 2 });
+  expect(result.trials[1]).toMatchObject({ accepted: false, reason: expect.stringContaining('Misspelled disease') });
+  expect(optimize.mock.calls[1]![0].formula.blocks[0]!.expression).toBe('a[tiab]');
+  expect(optimize.mock.calls[1]![0].measurement!.totalHits).toBe(200);
+  expect(chat.mock.calls[1]![0][1].content).toContain('候補の測定に失敗したため却下しました');
+  expect(chat.mock.calls[1]![0][1].content).toContain('Misspelled disease');
+  expect(result.best?.measurement.totalHits).toBe(90);
+});
+
+test('同じ候補で測定が連続して失敗したら、回帰より API エラーを優先する', async () => {
+  const { input, deps, fetch, chat } = setup();
+  const original = fetch.getMockImplementation()!;
+  fetch.mockImplementation(async (url: string) => {
+    if (new URL(url).searchParams.get('term')!.includes('b[tiab]')) throw new Error('一時的な通信障害');
+    return original(url);
+  });
+  const result = await runQueryOptimization(input, deps);
+  expect(result).toMatchObject({ status: 'error', stopReason: 'api_error', iterations: 2 });
+  expect(chat).toHaveBeenCalledTimes(2);
+  expect(result.trials.slice(1).every((trial) => !trial.accepted)).toBe(true);
+  expect(result.best?.measurement.totalHits).toBe(200);
+});
+
+test('成功測定を挟めば連続失敗数をリセットする', async () => {
+  const { input, deps, fetch } = setup({ a: { hits: 400, captured: ['11', '22'] },
+    c: { hits: 200, captured: ['11', '22'] }, e: { hits: 90, captured: ['11', '22'] } },
+  ['b[tiab]', 'c[tiab]', 'd[tiab]', 'e[tiab]']);
+  const original = fetch.getMockImplementation()!;
+  fetch.mockImplementation(async (url: string) => {
+    if (/\b[bd]\[tiab\]/.test(new URL(url).searchParams.get('term')!)) throw new Error('候補の測定失敗');
+    return original(url);
+  });
+  const result = await runQueryOptimization(input, deps);
+  expect(result).toMatchObject({ status: 'achieved', iterations: 4 });
+});
+
+test.each(['achieved', 'needs_review', 'stopped', 'error'] as const)('終了状態 %s の復元は中断ではなく完了済みになる', async (status) => {
+  const { input, deps, chat, write } = setup({ a: { hits: status === 'achieved' ? 80 : 200, captured: ['11', '22'] } }, ['a[tiab]']);
+  const data: Record<string, unknown> = {};
+  let stop = false;
+  deps.shouldStop = () => stop;
+  deps.checkpoint.read = async <T>(key: string) => data[key] as T | undefined;
+  write.mockImplementation(async (items: Record<string, unknown>) => {
+    Object.assign(data, items);
+    if (status === 'stopped') stop = true;
+  });
+  if (status === 'error') chat.mockRejectedValue(new Error('LLM 通信障害'));
+  const result = await runQueryOptimization(input, deps);
+  expect(result.status).toBe(status);
+  const restored = await checkpoint.getQueryOptimizationCheckpoint(input.projectId, deps.checkpoint);
+  expect(restored).toMatchObject({ status: 'completed', needsRevalidation: true,
+    completion: { status, stopReason: result.stopReason } });
+  expect(restored?.trials.length).toBe(result.trials.length);
+  expect(JSON.stringify(restored)).not.toContain('"terms"');
+});
+
+test('終了状態の保存に失敗しても結果を失わず、その事実を返す', async () => {
+  const { input, deps, write } = setup({ a: { hits: 80, captured: ['11', '22'] } }, ['a[tiab]']);
+  write.mockImplementation(async (items: Record<string, checkpoint.QueryOptimizationCheckpoint>) => {
+    if (Object.values(items)[0]?.completion) throw new Error('容量不足');
+  });
+  const result = await runQueryOptimization(input, deps);
+  expect(result.status).toBe('achieved');
+  expect(result.unmetReasons).toContain('終了記録の保存に失敗しました: 容量不足');
+  expect(result.best?.measurement.totalHits).toBe(80);
+});
+
+test.each([1, 5])('目標内で MeSH 要求を返しても、反復上限 %s の範囲で最終再検証へ進む', async (limit) => {
+  const { input, deps, chat } = setup({ a: { hits: 80, captured: ['11', '22'] } });
+  input.maxIterations = limit;
+  requestMesh(chat, [meshRequest]);
+  const evaluate = jest.spyOn(evaluation, 'evaluateQuery');
+  const result = await runQueryOptimization(input, deps);
+  expect(result).toMatchObject({ status: 'achieved', stopReason: 'conditions_met', iterations: 1 });
+  expect(chat).toHaveBeenCalledTimes(1);
+  expect(evaluate).toHaveBeenCalledTimes(2);
+  expect(result.trials[1]!.after).toBeNull();
+  expect(result.trials[2]!.candidateId).toBe('final-1');
+});
+
+test('非承認ブロックと研究デザインフィルタの語別計測をしない', async () => {
+  const { input, deps, fetch } = setup({ a: { hits: 80, captured: ['11', '22'] } }, ['a[tiab]']);
+  input.approvedBlocks = [input.approvedBlocks[0]!];
+  input.initialFormula.blocks[1]!.expression = 'unapproved[tiab] OR "Other concept"[Mesh]';
+  input.initialFormula.blocks[2]!.expression = 'filterword[tiab] OR "Filter heading"[Mesh]';
+  const optimize = jest.spyOn(skill, 'optimizeQuery');
+  const result = await runQueryOptimization(input, deps);
+  expect(result.status).toBe('achieved');
+  expect(optimize.mock.calls[0]![0].measurement!.terms!.map((term) => term.blockId)).toEqual(['1']);
+  const queries = fetch.mock.calls.map(([url]) => new URL(url as string).searchParams.get('term'));
+  for (const term of ['unapproved[tiab]', '"Other concept"[Mesh]', 'filterword[tiab]', '"Filter heading"[Mesh]']) {
+    expect(queries).not.toContain(term);
+  }
+  expect(queries).toContain(input.initialFormula.blocks[1]!.expression);
+  expect(queries).toContain(input.initialFormula.blocks[2]!.expression);
+});
+
+test('停止後は残りの行や最終式のレート制限待機を開始しない', async () => {
+  const { input, deps, fetch } = setup();
+  let stop = false;
+  deps.shouldStop = () => stop;
+  const acquire = jest.fn().mockResolvedValue(undefined);
+  deps.eutils.rateLimiter = { acquire };
+  const original = fetch.getMockImplementation()!;
+  fetch.mockImplementationOnce(async (url: string) => { stop = true; return original(url); });
+  expect((await runQueryOptimization(input, deps)).stopReason).toBe('user_stop');
+  expect(acquire).toHaveBeenCalledTimes(1);
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+test('レート制限待機中に停止した場合も fetch と後続 acquire を開始しない', async () => {
+  const { input, deps, fetch } = setup();
+  let stop = false;
+  deps.shouldStop = () => stop;
+  const acquire = jest.fn(async () => { stop = true; });
+  deps.eutils.rateLimiter = { acquire };
+  const result = await runQueryOptimization(input, deps);
+  expect(result.status).toBe('stopped');
+  expect(acquire).toHaveBeenCalledTimes(1);
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+test.each([false, true])('リミッタ未注入時は API キー有無 %s に応じた共有リミッタを維持する', async (hasKey) => {
+  const { input, deps, fetch } = setup({ a: { hits: 80, captured: ['11', '22'] } }, ['a[tiab]']);
+  delete deps.eutils.rateLimiter;
+  if (hasKey) deps.eutils.apiKey = 'test-key';
+  const withoutKey = jest.spyOn(sharedEutilsRateLimiters.withoutApiKey, 'acquire').mockResolvedValue(undefined);
+  const withKey = jest.spyOn(sharedEutilsRateLimiters.withApiKey, 'acquire').mockResolvedValue(undefined);
+  expect((await runQueryOptimization(input, deps)).status).toBe('achieved');
+  expect(hasKey ? withKey : withoutKey).toHaveBeenCalledTimes(fetch.mock.calls.length);
+  expect(hasKey ? withoutKey : withKey).not.toHaveBeenCalled();
 });

@@ -56,3 +56,26 @@ test('保存失敗を呼び出し側へ返す', async () => {
   deps.write = async () => { throw new Error('容量不足'); };
   await expect(saveQueryOptimizationCheckpoint('p', 'r', 100, [trial], deps)).rejects.toThrow('容量不足');
 });
+
+test('終了状態・理由・未達理由を要約へ保存し、完了済みでも再検証を要求する', async () => {
+  const { deps, trial } = setup();
+  const completion = { status: 'needs_review' as const, stopReason: 'revalidation_failed' as const,
+    unmetReasons: ['最大件数 100 件を超えています（実測 120 件）', '未捕捉シード: 11'] };
+  const saved = await saveQueryOptimizationCheckpoint('p', 'run', 100, [trial], deps, () => 'finished-at', completion);
+  completion.unmetReasons.push('変更後');
+  expect(saved.completion!.unmetReasons).toHaveLength(2);
+  expect(await getQueryOptimizationCheckpoint('p', deps)).toEqual({ ...saved,
+    status: 'completed', needsRevalidation: true });
+  expect(await getQueryOptimizationCheckpoint('other', deps)).toBeNull();
+  expect(saved).not.toHaveProperty('measurement');
+  expect(saved.trials[0]).not.toHaveProperty('terms');
+});
+
+test('新しい実行の途中保存では前回の終了記録を持ち越さない', async () => {
+  const { deps, trial } = setup();
+  await saveQueryOptimizationCheckpoint('p', 'old', 100, [trial], deps, undefined,
+    { status: 'achieved', stopReason: 'conditions_met', unmetReasons: [] });
+  await saveQueryOptimizationCheckpoint('p', 'new', 100, [trial], deps);
+  expect(await getQueryOptimizationCheckpoint('p', deps)).toMatchObject({ runId: 'new', status: 'interrupted', needsRevalidation: true });
+  expect(await getQueryOptimizationCheckpoint('p', deps)).not.toHaveProperty('completion');
+});
