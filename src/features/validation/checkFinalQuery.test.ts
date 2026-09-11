@@ -71,7 +71,7 @@ describe('checkFinalQuery', () => {
     expect(result).toEqual({
       finalQuery: '(diabetes) AND (metformin)',
       totalHits: 1000,
-      captureRate: 0,
+      captureRate: null,
       capturedPmids: [],
       missedPmids: [],
     });
@@ -92,6 +92,17 @@ describe('checkFinalQuery', () => {
     expect(result.missedPmids).toEqual(['222']);
     // seed 外の 999 は capturedPmids に含まれない
     expect(result.capturedPmids).not.toContain('999');
+  });
+
+  test('シードがあるが捕捉できなかった場合は未計測ではなく 0 を返す', async () => {
+    const fetch = jest.fn().mockResolvedValue(
+      jsonResponse({ esearchresult: { count: '0', idlist: [] } })
+    );
+    const result = await checkFinalQuery(f, ['111', '222'], { fetch });
+    expect(result.captureRate).toBe(0);
+    expect(result.capturedPmids).toEqual([]);
+    expect(result.missedPmids).toEqual(['111', '222']);
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 
   test('capturedQuery には seed PMID が [uid] 形式で入る', async () => {

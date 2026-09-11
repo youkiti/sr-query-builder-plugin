@@ -1584,6 +1584,8 @@ function buildContextBody(
   valBody.className = 'edit__block-ai-context-validation';
   if (validation === null) {
     valBody.textContent = '(未検証)';
+  } else if (validation.captureRate === null) {
+    valBody.textContent = '捕捉率: （有効シード 0 件のため未計測）';
   } else {
     const ratePct = Math.round(validation.captureRate * 1000) / 10;
     const total = validation.capturedPmids.length + validation.missedPmids.length;

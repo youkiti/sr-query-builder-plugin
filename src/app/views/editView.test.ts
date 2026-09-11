@@ -882,6 +882,28 @@ describe('createEditView - AI に渡す内容を見る（文脈開示）', () =>
     expect(row.querySelector('.edit__block-ai-context-validation')?.textContent).toContain('222');
   });
 
+  test.each([
+    { captureRate: null, missedPmids: [], expected: '有効シード 0 件のため未計測' },
+    { captureRate: 0, missedPmids: ['111'], expected: '捕捉率 0%（0/1）' },
+  ])('開示で捕捉率 $captureRate を区別する', async ({ captureRate, missedPmids, expected }) => {
+    const onGetImproveContext = jest.fn().mockResolvedValue({
+      ...context,
+      seedPapers: [],
+      validation: { captureRate, capturedPmids: [], missedPmids },
+    });
+    const view = createEditView({ onImproveBlock: jest.fn(), onGetImproveContext });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    const row = blockRow(container, '1');
+    row.querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
+    await flushAsync();
+    await flushAsync();
+    const text = row.querySelector('.edit__block-ai-context-validation')!.textContent;
+    expect(text).toContain(expected);
+    if (captureRate === null) expect(text).not.toMatch(/0(?:\.0)?%/);
+    else expect(text).not.toContain('未計測');
+  });
+
   test('兄弟ブロックとの共有語がある場合、開示の「他ブロック」に出て submit でも onImproveBlock に載る（issue #89）', async () => {
     const onImproveBlock = jest.fn().mockResolvedValue(undefined);
     const contextWithSiblings: BlockImprovementContext = {

@@ -170,7 +170,8 @@ export interface SeedContextEntry {
 
 /** 直近の検証で得た捕捉情報（現バージョンの結果のみ）。 */
 export interface ValidationContext {
-  captureRate: number;
+  /** null は有効シードが 0 件による未計測。検証失敗の結果は文脈に含めない。 */
+  captureRate: number | null;
   capturedPmids: string[];
   missedPmids: string[];
 }
@@ -298,6 +299,9 @@ function collectValidationContext(store: AppStore): ValidationContext | null {
     return null;
   }
   if (vr.formulaVersionId !== state.currentFormulaVersionId) {
+    return null;
+  }
+  if (vr.summary.finalQueryError != null) {
     return null;
   }
   const fq = vr.summary.finalQuery;

@@ -17,7 +17,8 @@ import { expandFormula } from './expandFormula';
 export interface FinalQueryResult {
   finalQuery: string;
   totalHits: number;
-  captureRate: number;
+  /** 検証成功時の null は、シードが 0 件のため未計測であることだけを表す。 */
+  captureRate: number | null;
   capturedPmids: string[];
   missedPmids: string[];
 }
@@ -38,7 +39,7 @@ export async function checkFinalQuery(
     return {
       finalQuery,
       totalHits,
-      captureRate: 0,
+      captureRate: null,
       capturedPmids: [],
       missedPmids: [],
     };

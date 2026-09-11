@@ -127,6 +127,61 @@ function setupDeps(seedValuesBody?: { values: string[][] }): {
 }
 
 describe('runValidation', () => {
+  test.each([
+    { hasSeed: false, fails: false, expectedRate: null },
+    { hasSeed: true, fails: false, expectedRate: 0 },
+    { hasSeed: false, fails: true, expectedRate: null },
+    { hasSeed: true, fails: true, expectedRate: null },
+  ])('シード $hasSeed・検証失敗 $fails を結果・Sheets・Drive で区別する', async ({ hasSeed, fails, expectedRate }) => {
+    const { sheetsFetchMock, eutilsFetchMock, deps } = setupDeps();
+    sheetsFetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.includes('/values/SeedPapers')) {
+        return jsonResponse({ values: hasSeed ? [seedHeader, seedRow()] : [seedHeader] });
+      }
+      if (url.includes('/upload/drive/v3/files')) {
+        return jsonResponse({ id: 'detail', webViewLink: 'https://drive/detail.json' });
+      }
+      if (url.includes('/drive/v3/files')) {
+        return jsonResponse(init?.method === 'POST' ? { id: 'folder' } : { files: [] });
+      }
+      return jsonResponse({});
+    });
+    for (let i = 0; i < 3; i += 1) {
+      eutilsFetchMock.mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '10', idlist: [] } }));
+    }
+    if (fails) eutilsFetchMock.mockRejectedValueOnce(new Error('NCBI down'));
+    else {
+      eutilsFetchMock.mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '10', idlist: [] } }));
+      if (hasSeed) eutilsFetchMock.mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '0', idlist: [] } }));
+    }
+    if (hasSeed) eutilsFetchMock.mockResolvedValueOnce(xmlResponse('<PubmedArticleSet></PubmedArticleSet>'));
+    const summary = await runValidation(deps);
+    expect(summary.finalQuery.captureRate).toBe(expectedRate);
+    expect(summary.finalQueryError).toBe(fails ? 'NCBI down' : null);
+
+    const appendCalls = sheetsFetchMock.mock.calls.filter((c) => (c[0] as string).includes(':append'));
+    const rows = appendCalls.map((c) => {
+      const body = JSON.parse((c[1] as RequestInit).body as string) as { values: (string | number)[][] };
+      return body.values[0]!;
+    });
+    const finalRow = rows.find((row) => row[SHEET_HEADERS.ValidationLog.indexOf('check_type')] === 'final_query')!;
+    expect(finalRow[SHEET_HEADERS.ValidationLog.indexOf('capture_rate')]).toBe(expectedRate ?? '');
+    expect(finalRow[SHEET_HEADERS.ValidationLog.indexOf('total_hits')]).toBe(fails ? '' : 10);
+    expect(finalRow[SHEET_HEADERS.ValidationLog.indexOf('detail_ref')]).toBe('https://drive/detail.json');
+
+    const upload = sheetsFetchMock.mock.calls.find((c) => (c[0] as string).includes('/upload/drive/v3/files'))!;
+    const multipart = (upload[1] as RequestInit).body as string;
+    const payload = multipart.split('\r\n\r\n')[2]!.split('\r\n--')[0]!;
+    const detail = JSON.parse(payload) as { final_query: unknown };
+    expect(detail.final_query).toEqual(fails ? { error: 'NCBI down' } : {
+      final_query: summary.finalQuery.finalQuery,
+      total_hits: 10,
+      capture_rate: expectedRate,
+      captured_pmids: [],
+      missed_pmids: hasSeed ? ['111'] : [],
+    });
+  });
+
   test('3 種類の検証を走らせ、ValidationLog に 5 行（行ヒット 3 + final + mesh）追記する', async () => {
     const { sheetsFetchMock, eutilsFetchMock, deps } = setupDeps();
     // esearch x3（行ヒット）

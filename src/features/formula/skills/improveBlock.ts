@@ -133,8 +133,8 @@ export interface SeedPaperContext {
 
 /** 直近の検証捕捉情報。 */
 export interface ValidationContext {
-  /** 0〜1 */
-  captureRate: number;
+  /** 実測値は 0〜1。null は有効シードが 0 件による未計測。 */
+  captureRate: number | null;
   capturedPmids: string[];
   /** この式で取りこぼしているシード PMID。改善の主目的 */
   missedPmids: string[];
@@ -397,6 +397,9 @@ function formatSeeds(seeds: SeedPaperContext[] | undefined): string {
 function formatValidation(validation: ValidationContext | null | undefined): string {
   if (!validation) {
     return '(未検証)';
+  }
+  if (validation.captureRate === null) {
+    return '捕捉率: (未計測)';
   }
   const ratePct = Math.round(validation.captureRate * 1000) / 10;
   const missed =

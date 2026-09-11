@@ -392,10 +392,20 @@ describe('buildValidationWarning（fix-plan 2-3）', () => {
     const state = stateWithDraft({
       validationResult: {
         formulaVersionId: 'v-1',
-        summary: summaryWith({ captureRate: 0, capturedPmids: [], missedPmids: [] }),
+        summary: summaryWith({ captureRate: null, capturedPmids: [], missedPmids: [] }),
       },
     });
     expect(buildValidationWarning(state)).toBeNull();
+  });
+
+  test('シードがあるが捕捉 0 件の場合は 0.0% の警告を出す', () => {
+    const state = stateWithDraft({
+      validationResult: {
+        formulaVersionId: 'v-1',
+        summary: summaryWith({ captureRate: 0, capturedPmids: [], missedPmids: ['1'] }),
+      },
+    });
+    expect(buildValidationWarning(state)).toContain('0.0%（0/1 件）');
   });
 
   test('検証済み・捕捉率 100% は警告なし', () => {

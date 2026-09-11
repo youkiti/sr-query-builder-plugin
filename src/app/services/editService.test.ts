@@ -524,6 +524,31 @@ describe('requestBlockImprovement - シード / 検証文脈', () => {
     return { calls, factory: { forPurpose: () => provider, model: 'gemini-test' } };
   }
 
+  test.each([
+    { captureRate: null, finalQueryError: null, expected: '捕捉率: (未計測)' },
+    { captureRate: 0, finalQueryError: null, expected: '捕捉率: 0%（0/1 件捕捉）' },
+    { captureRate: null, finalQueryError: 'NCBI down', expected: '(未検証)' },
+    { captureRate: null, finalQueryError: '', expected: '(未検証)' },
+  ])('捕捉率 $captureRate・エラー $finalQueryError の文脈とプロンプトを区別する', async ({ captureRate, finalQueryError, expected }) => {
+    const validation = { captureRate, capturedPmids: [], missedPmids: captureRate === 0 ? ['111'] : [] };
+    const store = createStore(makeState({
+      currentFormulaMarkdown: VALID_MD,
+      currentFormulaVersionId: 'v-now',
+      validationResult: {
+        formulaVersionId: 'v-now',
+        summary: { finalQuery: validation, finalQueryError },
+      } as unknown as AppState['validationResult'],
+    }));
+    const google = emptySeedsGoogle();
+    const ctx = await getBlockImprovementContext('1', [], { store, google });
+    expect(ctx!.validation).toEqual(finalQueryError === null ? validation : null);
+    const { factory, calls } = capturingFactory();
+    await requestBlockImprovement({ blockId: '1' }, { store, google, llmFactory: factory });
+    expect(calls[0]).toContain(expected);
+    if (finalQueryError !== null) expect(calls[0]).not.toContain('捕捉率:');
+    if (captureRate === null) expect(calls[0]).not.toMatch(/0(?:\.0)?%/);
+  });
+
   test('SeedPapers の include / 初期シードがプロンプトに載り、exclude は除外される', async () => {
     const store = createStore(makeState({ currentFormulaMarkdown: VALID_MD }));
     const google = seedsGoogle([

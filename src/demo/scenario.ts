@@ -378,7 +378,7 @@ export function buildValidationSummary(
   const matchedSet = new Set(evaluateQuery(finalQuery, corpus).map((p) => p.pmid));
   const capturedPmids = eligibleSeedPmids.filter((p) => matchedSet.has(p));
   const missedPmids = eligibleSeedPmids.filter((p) => !matchedSet.has(p));
-  const captureRate = eligibleSeedPmids.length === 0 ? 0 : capturedPmids.length / eligibleSeedPmids.length;
+  const captureRate = eligibleSeedPmids.length === 0 ? null : capturedPmids.length / eligibleSeedPmids.length;
 
   const mesh: MeshForSeed[] = eligibleSeedPmids.map((pmid) => {
     const paper = DEMO_CORPUS_BY_PMID.get(pmid);

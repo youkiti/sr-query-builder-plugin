@@ -1069,14 +1069,14 @@ describe('createExpandView', () => {
       expect(summary?.textContent).toContain('NCBI down');
     });
 
-    test('有効 seed が 0 件のときは「計算不能」と表示', async () => {
+    test('有効 seed が 0 件のときは「未計測」と表示', async () => {
       const onDecide = jest.fn().mockResolvedValue({ seed: {} });
       const onRoundComplete = jest.fn().mockResolvedValue(
         buildValidationSummary({
           finalQuery: {
             finalQuery: '#1',
             totalHits: 0,
-            captureRate: 0,
+            captureRate: null,
             capturedPmids: [],
             missedPmids: [],
           },
@@ -1092,7 +1092,31 @@ describe('createExpandView', () => {
       pressKey(list, 'i');
       await flushAsync();
       await flushAsync();
-      expect(container.querySelector('.expand__round-summary')?.textContent).toContain('計算不能');
+      expect(container.querySelector('.expand__round-summary')?.textContent).toContain('有効シード 0 件のため未計測');
+      expect(container.querySelector('.expand__round-summary')?.textContent).not.toContain('0.0%');
+    });
+
+    test.each([
+      { captureRate: 0, finalQueryError: null, expected: '捕捉率: 0.0% (0/1)' },
+      { captureRate: null, finalQueryError: 'NCBI down', expected: 'final_query 取得に失敗: NCBI down' },
+    ])('捕捉率 $captureRate・エラー $finalQueryError を未計測と区別する', async ({ captureRate, finalQueryError, expected }) => {
+      const onRoundComplete = jest.fn().mockResolvedValue(buildValidationSummary({
+        finalQuery: { finalQuery: '#1', totalHits: 0, captureRate, capturedPmids: [], missedPmids: ['111'] },
+        finalQueryError,
+      }));
+      const view = createExpandView({ onDecide: jest.fn().mockResolvedValue({ seed: {} }), onRoundComplete });
+      const container = buildContainer();
+      view(container, {
+        state: readyState(sampleResult({ candidates: sampleResult().candidates.slice(0, 1) })),
+        navigate: jest.fn(),
+      });
+      pressKey(container.querySelector<HTMLElement>('.expand__candidates')!, 'i');
+      await flushAsync();
+      await flushAsync();
+      const text = container.querySelector('.expand__round-summary')!.textContent;
+      expect(text).toContain(expected);
+      expect(text).not.toContain('未計測');
+      if (finalQueryError !== null) expect(text).not.toContain('0.0%');
     });
 
     test('inside モードのラウンド完了は初期シードの補足を表示する', async () => {
