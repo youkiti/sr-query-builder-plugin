@@ -41,6 +41,10 @@ export {
 } from './blocksDraftBackupService';
 export {
   generateDraft,
+  generateDraftFormula,
+  type DraftGeneration,
+  type DraftGenerationInput,
+  type DraftGenerationDeps,
   type DraftProgress,
   type DraftBlockHit,
   type DraftResult,
@@ -74,6 +78,14 @@ export {
   type AnalyzeMissedSeedsDeps,
   type AnalyzeMissedSeedsResult,
 } from './validationService';
+export {
+  evaluateQuery,
+  type QueryEvaluation,
+  type QueryEvaluationDeps,
+  type EvaluatedLine,
+  type EvaluatedFinalQuery,
+  type MeasurementStatus,
+} from './queryEvaluationService';
 export type { MissedSeedAnalysis, ImproveBlockTurn } from '@/features/formula/skills';
 export {
   applyBlockImprovement,

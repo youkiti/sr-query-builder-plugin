@@ -36,7 +36,7 @@ test('既存の行計測・最終式検証を再利用し、捕捉とブロッ�
   const checkLines = jest.spyOn(lines, 'checkSearchLines');
   const checkFinal = jest.spyOn(final, 'checkFinalQuery');
   const { fetch, acquire, deps } = setup([
-    response('12'), response('8'), response('3'), response('3'), response('1', ['11']),
+    response('12'), response('8'), response('3'), response('1', ['11']),
   ]);
   const setState = jest.fn();
   const result = await evaluateQuery(formula(), ['11', '22', '11'], { ...deps, ...{ store: { setState } } });
@@ -49,12 +49,14 @@ test('既存の行計測・最終式検証を再利用し、捕捉とブロッ�
   expect(result.fingerprint).toMatch(/^[a-f0-9]{64}$/);
   expect(result.measuredAt).toBe('2026-09-11T12:00:00.000Z');
   expect(checkLines).toHaveBeenCalledWith(formula(), expect.objectContaining({ strictCounts: true }));
-  expect(checkFinal).toHaveBeenCalledWith(formula(), ['11', '22'], expect.objectContaining({ strictCounts: true }));
+  expect(checkFinal).toHaveBeenCalledWith(formula(), ['11', '22'], expect.objectContaining({ strictCounts: true }), {
+    expandedQuery: '(a[tiab]) AND (b[tiab])', hitCount: 3,
+  });
   expect(append).not.toHaveBeenCalled();
   expect(upload).not.toHaveBeenCalled();
   expect(setState).not.toHaveBeenCalled();
-  expect(fetch).toHaveBeenCalledTimes(5);
-  expect(acquire).toHaveBeenCalledTimes(5);
+  expect(fetch).toHaveBeenCalledTimes(4);
+  expect(acquire).toHaveBeenCalledTimes(4);
   for (const [url] of fetch.mock.calls) {
     expect(new URL(url as string).hostname).toBe('eutils.ncbi.nlm.nih.gov');
   }
@@ -66,12 +68,12 @@ test('実測 0 件と空シードは成功として返し、既定の時刻を�
   const result = await evaluateQuery(formula(), [], { eutils: deps.eutils });
   expect(result.status).toBe('success');
   expect(result.lineHits.every((line) => line.status === 'success' && line.hitCount === 0)).toBe(true);
-  expect(result.finalQuery).toMatchObject({ totalHits: 0, capturedPmids: [], missedPmids: [] });
+  expect(result.finalQuery).toMatchObject({ totalHits: 0, captureRate: null, capturedPmids: [], missedPmids: [] });
   expect(Number.isNaN(Date.parse(result.measuredAt))).toBe(false);
 });
 
 test('件数欠落・不正値を null と失敗状態で返し、他行の実測 0 件を維持する', async () => {
-  const { deps } = setup([{}, response('0'), response('0'), response('NaN')]);
+  const { deps } = setup([{}, response('0'), response('NaN'), response('NaN')]);
   const result = await evaluateQuery(formula(), [], deps);
   expect(result.status).toBe('failure');
   expect(result.lineHits[0]).toMatchObject({ status: 'failure', hitCount: null, error: expect.any(String) });
@@ -80,7 +82,7 @@ test('件数欠落・不正値を null と失敗状態で返し、他行の実�
 });
 
 test('シード捕捉計測が失敗しても、未捕捉や総件数 0 とは報告しない', async () => {
-  const { deps } = setup([response('1'), response('1'), response('1'), response('1'), {}]);
+  const { deps } = setup([response('1'), response('1'), response('1'), {}]);
   const result = await evaluateQuery(formula(), ['11'], deps);
   expect(result.finalQuery).toMatchObject({ status: 'failure', totalHits: null, captureRate: null, missedPmids: null });
 });
@@ -113,4 +115,76 @@ test('fingerprint は同じ式で安定し、式の変更で変わり、待機�
   expect(fixed.fingerprint).not.toBe(changed.fingerprint);
   expect(fixed.lineHits[0]!.expression).toBe('a[tiab]');
   expect(fixed.seedPmids).toEqual(['11']);
+});
+
+test('シードがある実測 0 件は未計測と区別して捕捉率 0 を返す', async () => {
+  const { deps } = setup();
+  const result = await evaluateQuery(formula(), ['11'], deps);
+  expect(result.seedPmids).toEqual(['11']);
+  expect(result.finalQuery).toMatchObject({ status: 'success', totalHits: 0, captureRate: 0, capturedPmids: [], missedPmids: ['11'] });
+});
+
+test.each([undefined, '11', [11]].map((idlist) => ({ idlist })))('捕捉応答の idlist が欠落・不正なら、全シード未捕捉とは扱わない: %j', async ({ idlist }) => {
+  const { deps } = setup([response('1'), response('1'), response('1'), { esearchresult: { count: '1', idlist } }]);
+  const result = await evaluateQuery(formula(), ['11'], deps);
+  expect(result.finalQuery).toMatchObject({
+    status: 'failure', finalQuery: '(a[tiab]) AND (b[tiab])', totalHits: null, captureRate: null,
+    capturedPmids: null, missedPmids: null,
+  });
+});
+
+test('末尾行の展開文字列が一致しなければ最終件数を再計測する', async () => {
+  const checkLines = lines.checkSearchLines;
+  jest.spyOn(lines, 'checkSearchLines').mockImplementation(async (...args) => {
+    const measured = await checkLines(...args);
+    measured[measured.length - 1]!.expandedQuery = 'different[tiab]';
+    return measured;
+  });
+  const { fetch, deps } = setup([response('12'), response('8'), response('99'), response('3'), response('1', ['11'])]);
+  const result = await evaluateQuery(formula(), ['11'], deps);
+  expect(result.finalQuery).toMatchObject({ status: 'success', totalHits: 3 });
+  expect(fetch).toHaveBeenCalledTimes(5);
+  expect(new URL(fetch.mock.calls[3]![0] as string).searchParams.get('term')).toBe('(a[tiab]) AND (b[tiab])');
+});
+
+test('末尾が結合行でなければ文字列が一致しても再計測する', async () => {
+  const input = formula();
+  input.blocks[2]!.isCombination = false;
+  const { fetch, deps } = setup([response('12'), response('8'), response('99'), response('3'), response('0')]);
+  const result = await evaluateQuery(input, ['11'], deps);
+  expect(result.finalQuery).toMatchObject({ status: 'success', totalHits: 3 });
+  expect(fetch).toHaveBeenCalledTimes(5);
+});
+
+test('末尾行の計測が失敗したら最終件数を再計測し、成功値を保持する', async () => {
+  const { fetch, deps } = setup([response('12'), response('8'), {}, response('3'), response('0')]);
+  const result = await evaluateQuery(formula(), ['11'], deps);
+  expect(result.status).toBe('failure');
+  expect(result.lineHits[2]).toMatchObject({ status: 'failure', hitCount: null });
+  expect(result.finalQuery).toMatchObject({ status: 'success', totalHits: 3 });
+  expect(fetch).toHaveBeenCalledTimes(5);
+});
+
+test('通信が失敗しても展開済みの最終式を保持する', async () => {
+  const { deps } = setup();
+  deps.eutils.fetch.mockRejectedValue(new Error('通信失敗'));
+  const result = await evaluateQuery(formula(), [], deps);
+  expect(result.finalQuery).toMatchObject({ status: 'failure', finalQuery: '(a[tiab]) AND (b[tiab])', totalHits: null });
+});
+
+test('式の展開自体が失敗した場合だけ最終式を null とする', async () => {
+  const input = formula();
+  input.blocks[0]!.expression = '#3';
+  const { fetch, deps } = setup();
+  const result = await evaluateQuery(input, [], deps);
+  expect(result.finalQuery).toMatchObject({ status: 'failure', finalQuery: null, error: expect.stringContaining('循環'), totalHits: null });
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+test('行がない式は行件数を再利用せず総件数を問い合わせる', async () => {
+  const { fetch, deps } = setup();
+  const result = await evaluateQuery({ blocks: [], combinationExpression: null }, [], deps);
+  expect(result.lineHits).toEqual([]);
+  expect(result.finalQuery).toMatchObject({ status: 'success', finalQuery: '', totalHits: 0, captureRate: null });
+  expect(fetch).toHaveBeenCalledTimes(1);
 });

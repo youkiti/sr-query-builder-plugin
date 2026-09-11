@@ -568,12 +568,44 @@ describe('esearch の厳密な件数検査', () => {
 
   test('厳密モードでも一時障害は既存のバックオフとレート制御で再試行する', async () => {
     const fetch = jest.fn().mockResolvedValueOnce(makeErrorResponse(503))
-      .mockResolvedValueOnce(makeJsonResponse({ esearchresult: { count: '2' } }));
+      .mockResolvedValueOnce(makeJsonResponse({ esearchresult: { count: '2', idlist: [] } }));
     const sleep = jest.fn().mockResolvedValue(undefined);
     const acquire = jest.fn().mockResolvedValue(undefined);
     await expect(esearch('x', { fetch, strictCounts: true, sleep, rateLimiter: { acquire } }))
       .resolves.toEqual({ count: 2, pmids: [] });
     expect(acquire).toHaveBeenCalledTimes(2);
     expect(sleep).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('厳密モードの PMID 一覧検査', () => {
+  test.each([undefined, null, '123', {}, [123], [null], [''], ['abc'], ['0'], ['01'], ['-1']].map((idlist) => ({ idlist })))(
+    'ID を要求した応答の欠落・不正な一覧を恒久エラーにする: %j', async ({ idlist }) => {
+      const fetch = jest.fn().mockResolvedValue(makeJsonResponse({ esearchresult: { count: '1', idlist } }));
+      const sleep = jest.fn();
+      const acquire = jest.fn().mockResolvedValue(undefined);
+      await expect(esearch('x', { fetch, strictCounts: true, sleep, rateLimiter: { acquire } }, { retmax: 1 }))
+        .rejects.toMatchObject({ name: 'EutilsError', permanent: true, status: 200 });
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(acquire).toHaveBeenCalledTimes(1);
+      expect(sleep).not.toHaveBeenCalled();
+    }
+  );
+
+  test('retmax 省略時も既定の 20 件を要求するので欠落を検査する', async () => {
+    const fetch = jest.fn().mockResolvedValue(makeJsonResponse({ esearchresult: { count: '1' } }));
+    await expect(esearch('x', { fetch, strictCounts: true })).rejects.toMatchObject({ permanent: true });
+    expect(new URL(fetch.mock.calls[0]![0] as string).searchParams.get('retmax')).toBe('20');
+  });
+
+  test.each([undefined, [], '不正な一覧', [123]].map((idlist) => ({ idlist })))('retmax=0 は ID を要求しないため一覧を検査しない: %j', async ({ idlist }) => {
+    const fetch = jest.fn().mockResolvedValue(makeJsonResponse({ esearchresult: { count: '2', idlist } }));
+    await expect(esearch('x', { fetch, strictCounts: true }, { retmax: 0 })).resolves.toMatchObject({ count: 2 });
+  });
+
+  test.each([[], ['123', '456']].map((idlist) => ({ idlist })))('ID を要求した場合も空配列と正しい PMID 配列は正常: %j', async ({ idlist }) => {
+    const fetch = jest.fn().mockResolvedValue(makeJsonResponse({ esearchresult: { count: String(idlist.length), idlist } }));
+    await expect(esearch('x', { fetch, strictCounts: true }, { retmax: 2 }))
+      .resolves.toEqual({ count: idlist.length, pmids: idlist });
   });
 });

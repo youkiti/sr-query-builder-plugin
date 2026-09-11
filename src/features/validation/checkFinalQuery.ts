@@ -25,10 +25,14 @@ export interface FinalQueryResult {
 export async function checkFinalQuery(
   formula: PubmedFormula,
   seedPmids: readonly string[],
-  deps: EutilsDeps
+  deps: EutilsDeps,
+  precomputed?: { expandedQuery: string; hitCount: number }
 ): Promise<FinalQueryResult> {
   const finalQuery = expandFormula(formula);
-  const { count: totalHits } = await esearch(finalQuery, deps, { retmax: 0 });
+  // 展開後の式が一致する測定だけ再利用する。未指定の既存呼び出しは毎回計測する。
+  const totalHits = precomputed?.expandedQuery === finalQuery
+    ? precomputed.hitCount
+    : (await esearch(finalQuery, deps, { retmax: 0 })).count;
 
   if (seedPmids.length === 0) {
     return {

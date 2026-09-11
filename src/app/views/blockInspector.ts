@@ -43,7 +43,7 @@ export {
   type SiblingBlock, type SharedTerm, type SiblingOverlap,
 } from '@/features/validation/blockTerms';
 import {
-  buildBlockMeshContext, buildMeshBranchPath, buildMeshBranchContext, buildMeshChildrenContext,
+  buildBlockMeshContext, buildMeshBranchPath,
 } from '@/features/validation/meshContext';
 import {
   addMeshDescriptor,
@@ -404,8 +404,8 @@ function buildMeshBranch(
     loading.className = 'bins__loading';
     loading.textContent = '枝の名前を取得中…';
     branch.appendChild(loading);
-    buildMeshBranchContext(path, (treeNumbers) => fetchMeshLabelsCached(params, treeNumbers))
-      .then(({ labels }) => renderAll(labels))
+    fetchMeshLabelsCached(params, ancestors)
+      .then((labels) => renderAll(labels))
       .catch(() => renderAll(new Map()));
   } else {
     renderAll(new Map());
@@ -429,8 +429,8 @@ function renderChildren(
   loading.textContent = '下位語を取得中…';
   host.appendChild(loading);
 
-  buildMeshChildrenContext(treeNumber, (tn) => fetchMeshChildrenCached(params, tn))
-    .then(({ children }) => {
+  fetchMeshChildrenCached(params, treeNumber)
+    .then((children) => {
       host.innerHTML = '';
       if (children.length === 0) {
         const none = muted(doc, '（最下層）');

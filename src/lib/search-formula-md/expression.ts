@@ -256,52 +256,6 @@ export function diffExpressions(before: string, after: string): ExpressionDiff {
   return { beforeTokens, afterTokens, removed, added };
 }
 
-/** ブロック式から取り出した「単体で件数計測できるキーワード」。 */
-export interface KeywordQuery {
-  /** 表示用ラベル（MeSH descriptor or フリーワードのテキスト） */
-  display: string;
-  /** 単体 esearch にかけるクエリ。ブロック・インスペクタと同じ文字列にしてキャッシュを共有する */
-  query: string;
-  kind: 'mesh' | 'freeword';
-}
-
-/**
- * ブロック式を「単体ヒット数を測れるキーワード」へ分解する。MeSH は descriptor を
- * `"X"[Mesh]`（explode）/ `"X"[Mesh:NoExp]`（noexp）に、フリーワードはタグ込みのテキストを
- * そのままクエリにする。MeSH は descriptor、フリーワードは query で重複除去する。
- *
- * クエリ文字列は blockInspector の個別件数計測と一致させてあるので、同じヒット数キャッシュを共有し、
- * 「編集画面に入ったときに計測した実数」をそのまま AI 文脈に流用できる。
- */
-export function deriveKeywordQueries(expression: string): KeywordQuery[] {
-  const meshByDescriptor = new Map<string, KeywordQuery>();
-  const freewordByQuery = new Map<string, KeywordQuery>();
-  for (const segment of tokenizeExpression(expression)) {
-    if (segment.kind === 'mesh') {
-      const descriptor = extractMeshTerm(segment.text);
-      if (descriptor === '') {
-        continue;
-      }
-      const tag = segment.text.match(/\[([^\]]+)\]\s*$/)?.[1] ?? '';
-      const explode = !/:\s*noexp/i.test(tag);
-      const query = explode ? `"${descriptor}"[Mesh]` : `"${descriptor}"[Mesh:NoExp]`;
-      const existing = meshByDescriptor.get(descriptor);
-      if (!existing) {
-        meshByDescriptor.set(descriptor, { display: descriptor, query, kind: 'mesh' });
-      } else if (explode && existing.query.endsWith('[Mesh:NoExp]')) {
-        // 同じ descriptor が explode/noexp 両方で出たら explode を優先（インスペクタと同じ寄せ方）
-        existing.query = query;
-      }
-    } else if (segment.kind === 'freeword') {
-      const query = segment.text.trim();
-      if (query !== '' && !freewordByQuery.has(query)) {
-        freewordByQuery.set(query, { display: query, query, kind: 'freeword' });
-      }
-    }
-  }
-  return [...meshByDescriptor.values(), ...freewordByQuery.values()];
-}
-
 /** slice 内で最後に現れる（引用符の外の）演算子・括弧の直後（＝語の開始位置）を返す */
 function findTermStart(slice: string): number {
   let start = 0;

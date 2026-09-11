@@ -1,5 +1,6 @@
 import { checkSearchLines, type LineHitResult } from '@/features/validation/checkSearchLines';
 import { checkFinalQuery, type FinalQueryResult } from '@/features/validation/checkFinalQuery';
+import { expandFormula } from '@/features/validation/expandFormula';
 import type { EutilsDeps } from '@/lib/ncbi';
 import type { PubmedFormula } from '@/lib/search-formula-md';
 import { nowIso } from '@/utils/iso8601';
@@ -12,11 +13,17 @@ export type EvaluatedLine = Omit<LineHitResult, 'hitCount' | 'error'> & (
 );
 
 export type EvaluatedFinalQuery =
-  | (FinalQueryResult & { status: 'success'; error: null })
+  | (Omit<FinalQueryResult, 'captureRate'> & {
+      status: 'success';
+      error: null;
+      /** 成功時の null はシード 0 件による未計測だけを表す。 */
+      captureRate: number | null;
+    })
   | {
       status: 'failure';
       error: string;
-      finalQuery: null;
+      /** 展開自体が失敗した場合だけ null。通信失敗時は展開済みの式を保持する。 */
+      finalQuery: string | null;
       totalHits: null;
       captureRate: null;
       capturedPmids: null;
@@ -63,13 +70,27 @@ export async function evaluateQuery(
     ? { ...line, status: 'success', error: null }
     : { ...line, status: 'failure', hitCount: null, error: line.error });
   let finalQuery: EvaluatedFinalQuery;
+  let expandedQuery: string | null = null;
   try {
-    finalQuery = { ...await checkFinalQuery(fixedFormula, fixedSeeds, eutils), status: 'success', error: null };
+    expandedQuery = expandFormula(fixedFormula);
+    const lastBlock = fixedFormula.blocks[fixedFormula.blocks.length - 1];
+    const lastLine = lines[lines.length - 1];
+    const precomputed = lastBlock?.isCombination && lastLine?.blockId === lastBlock.id
+      && lastLine.error === null && lastLine.expandedQuery === expandedQuery
+      ? { expandedQuery: lastLine.expandedQuery, hitCount: lastLine.hitCount }
+      : undefined;
+    const measured = await checkFinalQuery(fixedFormula, fixedSeeds, eutils, precomputed);
+    finalQuery = {
+      ...measured,
+      captureRate: fixedSeeds.length === 0 ? null : measured.captureRate,
+      status: 'success',
+      error: null,
+    };
   } catch (err) {
     finalQuery = {
       status: 'failure',
       error: err instanceof Error ? err.message : String(err),
-      finalQuery: null,
+      finalQuery: expandedQuery,
       totalHits: null,
       captureRate: null,
       capturedPmids: null,

@@ -1,7 +1,6 @@
 import {
   MESH_BROWSER_BASE,
   classifyFieldTag,
-  deriveKeywordQueries,
   diffExpressions,
   extractMeshTerm,
   normalizeOperand,
@@ -214,29 +213,6 @@ describe('diffExpressions', () => {
       'orthopaedic surgeon*[tiab]',
     ]);
     expect(diff.added).toEqual([]);
-  });
-});
-
-describe('deriveKeywordQueries', () => {
-  test('MeSH は explode/noexp で単体クエリを作り、フリーワードはタグ込みのまま', () => {
-    const expr = '("Asthma"[Mesh] OR "Lung"[Mesh:NoExp] OR wheeze[tiab] OR "cough"[tiab])';
-    expect(deriveKeywordQueries(expr)).toEqual([
-      { display: 'Asthma', query: '"Asthma"[Mesh]', kind: 'mesh' },
-      { display: 'Lung', query: '"Lung"[Mesh:NoExp]', kind: 'mesh' },
-      { display: 'wheeze[tiab]', query: 'wheeze[tiab]', kind: 'freeword' },
-      { display: '"cough"[tiab]', query: '"cough"[tiab]', kind: 'freeword' },
-    ]);
-  });
-
-  test('同一語の重複は 1 つにまとめる', () => {
-    const expr = '(asthma[tiab] OR asthma[tiab])';
-    expect(deriveKeywordQueries(expr)).toEqual([
-      { display: 'asthma[tiab]', query: 'asthma[tiab]', kind: 'freeword' },
-    ]);
-  });
-
-  test('タグ無し結合行はキーワード 0', () => {
-    expect(deriveKeywordQueries('#1 AND #2')).toEqual([]);
   });
 });
 

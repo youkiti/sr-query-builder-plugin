@@ -28,3 +28,8 @@ describe('app/services index 再エクスポート', () => {
     expect(typeof mod.applyBlockImprovement).toBe('function');
   });
 });
+
+test('保存なし生成・評価の API を再公開する', () => {
+  expect(typeof mod.generateDraftFormula).toBe('function');
+  expect(typeof mod.evaluateQuery).toBe('function');
+});
