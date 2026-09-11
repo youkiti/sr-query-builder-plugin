@@ -123,3 +123,44 @@ describe('evaluateGuards', () => {
     }
   });
 });
+
+describe('自動調整から渡した編集下書きのガード', () => {
+  const markdown = '## PubMed/MEDLINE\n\n```\n#1 x\n```\n';
+
+  test('保存版がなく null 向けの下書きがあれば edit だけを許可する', () => {
+    const g = evaluateGuards(buildState({
+      project,
+      currentFormulaVersionId: null,
+      formulaEditDraft: { formulaVersionId: null, markdown },
+    }));
+    expect(g.edit).toEqual({ enabled: true, reason: '' });
+    for (const route of ['expand', 'export', 'done'] as const) {
+      expect(g[route]).toEqual({ enabled: false, reason: '先に検索式を生成または読み込んでください' });
+    }
+  });
+
+  test('保存版も下書きもなければ従来どおり edit を拒否する', () => {
+    const g = evaluateGuards(buildState({ project, currentFormulaVersionId: null, formulaEditDraft: null }));
+    expect(g.edit).toEqual({ enabled: false, reason: '先に検索式を生成または読み込んでください' });
+  });
+
+  test.each([null, 'current-version'])('別版向けの下書きなら保存版の有無で判定する（現在の版: %s）', (currentFormulaVersionId) => {
+    const g = evaluateGuards(buildState({
+      project,
+      currentFormulaVersionId,
+      formulaEditDraft: { formulaVersionId: 'other-version', markdown },
+    }));
+    expect(g.edit).toEqual(currentFormulaVersionId === null
+      ? { enabled: false, reason: '先に検索式を生成または読み込んでください' }
+      : { enabled: true, reason: '' });
+  });
+
+  test('null 向けの下書きがあってもプロジェクト未選択なら edit を拒否する', () => {
+    const g = evaluateGuards(buildState({
+      project: null,
+      currentFormulaVersionId: null,
+      formulaEditDraft: { formulaVersionId: null, markdown },
+    }));
+    expect(g.edit).toEqual({ enabled: false, reason: 'プロジェクトを選択してください' });
+  });
+});

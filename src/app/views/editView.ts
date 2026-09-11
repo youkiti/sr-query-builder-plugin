@@ -346,7 +346,7 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
       container.appendChild(warn);
       return;
     }
-    if (!ctx.state.currentFormulaMarkdown) {
+    if (!resolveMarkdown(ctx.state, ctx.state.currentFormulaMarkdown ?? '')) {
       const warn = doc.createElement('p');
       warn.className = 'view__placeholder';
       warn.textContent = '先に /draft で検索式を生成するか、/history で読み込んでください。';
@@ -362,7 +362,7 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
 
     // 表示する md は store（formulaEditDraft）優先、無ければ現在の formula。
     // テキストエリアは表示せず、この変数を単一の真実とする。
-    let currentMd = resolveMarkdown(ctx.state, ctx.state.currentFormulaMarkdown);
+    let currentMd = resolveMarkdown(ctx.state, ctx.state.currentFormulaMarkdown ?? '');
     const editor: FormulaEditor = {
       getMd: () => currentMd,
       setMd: (next: string) => {
@@ -1584,6 +1584,8 @@ function buildContextBody(
   valBody.className = 'edit__block-ai-context-validation';
   if (validation === null) {
     valBody.textContent = '(未検証)';
+  } else if (validation.captureRate === null) {
+    valBody.textContent = '捕捉率: （有効シード 0 件のため未計測）';
   } else {
     const ratePct = Math.round(validation.captureRate * 1000) / 10;
     const total = validation.capturedPmids.length + validation.missedPmids.length;

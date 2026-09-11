@@ -62,7 +62,11 @@ export function evaluateGuards(state: AppState): Record<RouteName, RouteGuard> {
     seeds: needsProject(),
     draft: needsBlocks(),
     expand: needsFormula(),
-    edit: needsFormula(),
+    // 自動調整の「編集して確認」で、保存版がまだない最終候補も手編集できるようにする。
+    // 新しく許可するのは currentFormulaVersionId が null で、同じく null 向けの下書きが
+    // 存在する場合だけ。下書きなし・別版向けなら従来の needsFormula() で判定する。
+    edit: hasProject && state.formulaEditDraft?.formulaVersionId === state.currentFormulaVersionId
+      ? allow() : needsFormula(),
     export: needsFormula(),
     done: needsFormula(),
     history: needsProject(),

@@ -1,3 +1,6 @@
+import type { QueryOptimizationProgress, QueryOptimizationResult } from './services/queryOptimizationService';
+import type { OptimizationMeshNode, OptimizationTrial } from '@/features/formula/skills/optimizeQuery';
+import type { CompletedQueryOptimization, InterruptedQueryOptimization } from './services/queryOptimizationCheckpointService';
 import type { CurrentProjectEntry } from '@/features/project';
 import type { FormulaCreatedBy } from '@/domain/formulaVersion';
 import type { ExcessFilterCandidate, ImproveBlockTurn } from '@/features/formula/skills';
@@ -136,6 +139,46 @@ export interface DraftRunState {
   blockHits: DraftBlockHit[];
 }
 
+/** 自動調整の実測候補を、実行終了後もレビュー用に保持する。 */
+export interface QueryOptimizationRunState {
+  /** 未指定は人がまだ採用保存を要求していない状態。 */
+  save?: FormulaSaveState;
+  /** 初期式の準備が完了した時点で固定する。準備前は存在しない。 */
+  inputSnapshot?: {
+    researchQuestion: string;
+    inclusionCriteria: string;
+    exclusionCriteria: string;
+    blocks: BlocksDraft;
+    seedPmids: string[];
+    model: string;
+  };
+  meshContext: OptimizationMeshNode[];
+  costUsd?: number;
+  status: 'running' | 'ready' | 'error';
+  runId: string;
+  projectId: string;
+  maxHits: number;
+  maxIterations: number;
+  seedCount: number | null;
+  startedAtMs: number;
+  finishedAtMs: number | null;
+  progress: QueryOptimizationProgress;
+  trials: OptimizationTrial[];
+  stopRequested: boolean;
+  result: QueryOptimizationResult | null;
+  error: string | null;
+}
+
+export interface QueryOptimizationSetupState {
+  checkpoint?: CompletedQueryOptimization | InterruptedQueryOptimization | null;
+  projectId: string;
+  status: 'loading' | 'ready' | 'error';
+  maxHits: string;
+  maxIterations: string;
+  seedCount: number | null;
+  error: string | null;
+}
+
 /**
  * 対話的 seed 拡張（#/expand）の「境界事例を取得」実行状態。
  *
@@ -177,7 +220,10 @@ export interface ExpandRunState {
  * （別バージョンを読み込み直した後に古い draft を表示しないため。ValidationResultEntry と同じ判定）。
  */
 export interface FormulaEditDraft {
-  formulaVersionId: string;
+  /** 自動調整から持ち込んだ下書きだけが持つ由来。手入力の下書きでは省略する。 */
+  optimizationOrigin?: { projectId: string; runId: string; model: string | null };
+  /** null は、まだ保存版のない式の編集下書き。 */
+  formulaVersionId: string | null;
   markdown: string;
 }
 
@@ -195,7 +241,8 @@ export interface FormulaEditDraft {
  * （別バージョンの stale な提案を表示しないため。ValidationResultEntry と同じ判定）。
  */
 export interface BlockImprovementState {
-  formulaVersionId: string;
+  /** null は保存版のない編集下書きに対応する。 */
+  formulaVersionId: string | null;
   blockId: string;
   status: 'running' | 'ready' | 'error';
   /** status='ready' のときの提案。それ以外は null */
@@ -232,7 +279,8 @@ export interface BlockImprovementState {
  * 別バージョンを履歴から読み込み直すと一致しなくなり、stale として表示されなくなる。
  */
 export interface FormulaSaveState {
-  formulaVersionId: string;
+  /** 初回の手編集保存中・失敗時は null。 */
+  formulaVersionId: string | null;
   status: 'saving' | 'saved' | 'error';
   /** status='error' のときのメッセージ。それ以外は null */
   error: string | null;
@@ -254,7 +302,8 @@ export interface FormulaSaveState {
  * メモは自動的に空へ戻る（＝次の編集に前回のメモが残らない）。
  */
 export interface FormulaEditNote {
-  formulaVersionId: string;
+  /** null は保存版のない編集下書きに対応する。 */
+  formulaVersionId: string | null;
   note: string;
 }
 
@@ -277,7 +326,8 @@ export interface FormulaEditNote {
  * 読み込み直した、または別ブロックの AI パネルを開いたときは空文字にフォールバックする。
  */
 export interface BlockImprovementInstruction {
-  formulaVersionId: string;
+  /** null は保存版のない編集下書きに対応する。 */
+  formulaVersionId: string | null;
   blockId: string;
   instruction: string;
 }
@@ -298,7 +348,8 @@ export interface BlockImprovementInstruction {
  * 呼び出し側（editView.ts の renderProposal）は result.proposedExpression を初期値にする。
  */
 export interface BlockImprovementManualEditDraft {
-  formulaVersionId: string;
+  /** null は保存版のない編集下書きに対応する。 */
+  formulaVersionId: string | null;
   blockId: string;
   expression: string;
 }
@@ -346,6 +397,9 @@ export interface AppState {
   draftRun: DraftRunState | null;
   /** 境界事例取得（#/expand）の実行状態。未実行なら null */
   expandRun: ExpandRunState | null;
+  /** 自動調整の実行状態。未実行なら null */
+  queryOptimizationRun: QueryOptimizationRunState | null;
+  queryOptimizationSetup: QueryOptimizationSetupState | null;
   /**
    * #/expand の inside モード（有効 seed 0 件）で母集団に使う式の選び方（issue #93）。
    * 画面のチェックボックスと 1:1 で、打鍵で setStateSilently により更新する（再描画を
@@ -399,6 +453,8 @@ export const INITIAL_STATE: AppState = {
   currentFormulaCreatedBy: null,
   draftRun: null,
   expandRun: null,
+  queryOptimizationRun: null,
+  queryOptimizationSetup: null,
   expandInsideStrategy: 'specific',
   validationResult: null,
   missedAnalysis: null,

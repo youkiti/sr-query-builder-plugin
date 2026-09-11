@@ -71,7 +71,7 @@ export async function retryWithBackoff<T>(
  */
 export interface RateLimiter {
   /** トークンが 1 つ空くまで待ってから消費する */
-  acquire(): Promise<void>;
+  acquire(onWait?: () => void): Promise<void>;
 }
 
 export interface TokenBucketOptions {
@@ -118,10 +118,10 @@ export class TokenBucket implements RateLimiter {
     this.lastRefillMs = this.now();
   }
 
-  acquire(): Promise<void> {
+  acquire(onWait?: () => void): Promise<void> {
     // 前の acquire() の完了（成功・失敗いずれも）を待ってから自分の番を実行する。
     // 呼び出し順を保証しつつ、途中の呼び出しが例外を投げてもキュー自体は途切れさせない。
-    const turn = this.queue.then(() => this.take());
+    const turn = this.queue.then(() => this.take(onWait));
     this.queue = turn.then(
       () => undefined,
       () => undefined
@@ -136,7 +136,7 @@ export class TokenBucket implements RateLimiter {
     this.queue = Promise.resolve();
   }
 
-  private async take(): Promise<void> {
+  private async take(onWait?: () => void): Promise<void> {
     for (;;) {
       this.refill();
       if (this.tokens >= 1 - TOKEN_EPSILON) {
@@ -145,6 +145,7 @@ export class TokenBucket implements RateLimiter {
       }
       const deficit = 1 - this.tokens;
       const waitMs = (deficit / this.ratePerSecond) * 1000;
+      try { onWait?.(); } catch { /* 表示側の例外でレート制御を変えない。 */ }
       await this.sleep(Math.max(waitMs, 0));
     }
   }

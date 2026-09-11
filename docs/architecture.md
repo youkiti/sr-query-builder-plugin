@@ -20,7 +20,8 @@ sr-query-builder-plugin/
 ├── src/                           # 全ソース（HTML / CSS / TS が同居。webpack がコピー）
 ├── tests/
 │   ├── setup/                     # jest 共通セットアップ（chrome モック等）
-│   └── integration/               # 複数機能をまたぐシナリオテスト
+│   ├── integration/               # 複数機能をまたぐシナリオテスト
+│   └── e2e/                       # Playwright。自動調整の通し・採用保存・状態別 axe を含む
 ├── experiments/                   # LLM プロンプト検証用スクリプト（実装フェーズで追加）
 ├── search-formula-developper/     # サブモジュール（参照実装）
 ├── tiab-review-plugin/            # サブモジュール（技術スタック参照）
@@ -63,7 +64,10 @@ src/
 │   ├── app.ts                     # エントリ。ハッシュルーティングの起動のみ
 │   ├── services/                  # 画面とドメインロジックの仲介（以下は抜粋。実体は 10 本以上ある）
 │   │   ├── queryEvaluationService.ts # 保存なしの検索式評価（厳密な件数・固定シード捕捉）
-│   │   ├── queryOptimizationService.ts # 検索式の自動調整ループ（候補の検査・採否・停止。UI 未接続）
+│   │   ├── queryOptimizationService.ts # 検索式の自動調整ループ（候補の検査・採否・停止。draft 画面から実行）
+│   │   ├── queryOptimizationProgressPublisher.ts # 進捗通知の間引き・段階遷移と試行確定の即時反映
+│   │   ├── queryOptimizationSettingsService.ts # プロジェクト別の最大件数・反復上限
+│   │   ├── queryOptimizationAdoptionService.ts # 人の採用保存・最終検証と実行ログの関連づけ・編集下書き
 │   │   └── queryOptimizationCheckpointService.ts # 自動調整の試行要約を chrome.storage.local へ
 │   ├── styles/                    # ビュー単位に分割した CSS（app.html が <link> で個別に読み込む）
 │   │   ├── shell.css               # ヘッダー / サイドバー / ナビゲーション等の共通外枠
@@ -72,6 +76,7 @@ src/
 │   │   ├── expand.css
 │   │   ├── validate.css
 │   │   ├── blocks.css
+│   │   ├── queryOptimization.css # 自動調整の設定・進捗・履歴・最終レビュー
 │   │   ├── draft.css
 │   │   ├── edit.css
 │   │   ├── seeds.css
@@ -84,6 +89,8 @@ src/
 │   │   ├── blocksView.ts
 │   │   ├── seedsView.ts
 │   │   ├── draftView.ts            # 検索式の生成 + 検証を統合（旧 validateView を吸収）
+│   │   ├── queryOptimizationHistory.ts # ライブ履歴・変更詳細・チェックポイントのログ表示
+│   │   ├── queryOptimizationReview.ts # 4 状態の最終レビュー・最終差分・採用と編集の導線
 │   │   ├── validationResults.ts    # 検証結果（捕捉率 / MeSH / 原因分析）の描画ユーティリティ
 │   │   ├── expandView.ts
 │   │   ├── editView.ts
@@ -294,7 +301,7 @@ coverageThreshold: {
 - **ユニットテスト**: 各実装ファイルと同階層に `*.test.ts` を配置
 - **統合テスト**: `tests/integration/` に配置（複数 features をまたぐシナリオ）
 - **DOM テスト**: jsdom 環境でビュー関数の `render()` 出力を検証
-- **E2E**: MVP では割愛（実ブラウザ動作確認は手動）
+- **E2E**: `tests/e2e/` の Playwright + axe。外部 API は stub で検証する
 
 ### 4.3 モック戦略
 

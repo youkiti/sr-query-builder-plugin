@@ -7,11 +7,13 @@ import {
   type OptimizationMeshRequest,
   type OptimizationMeshRequestResult,
   type OptimizationTrial,
+  type OptimizationApiEvent,
   type OptimizeQueryProposal,
 } from '@/features/formula/skills/optimizeQuery';
 import type { ProjectStoreDeps } from '@/features/project';
 import { extractBlockTerms } from '@/features/validation/blockTerms';
 import { analyzeFreewordDelta } from '@/features/validation/freewordDelta';
+import { expandFormula } from '@/features/validation/expandFormula';
 import { tokenizeExpression } from '@/lib/search-formula-md/expression';
 import {
   extractBlockReferences, findUnreachableBlockIds, wouldCreateReferenceCycle,
@@ -40,7 +42,44 @@ export interface QueryOptimizationInput {
   meshContext?: OptimizationMeshNode[];
 }
 
+export type QueryOptimizationStep =
+  /** bootstrap で初期式を生成・準備している段階。 */
+  | 'initial_formula'
+  /** 初期式または AI が提案した候補の実測。 */
+  | 'measuring'
+  /** 語別分析、AI の修正提案、追加 MeSH 文脈の取得。 */
+  | 'adjusting'
+  /** 条件達成候補をキャッシュに依存せず測り直す最終確認。 */
+  | 'revalidating'
+  /** 処理が終了し、人によるレビューへ渡す段階。 */
+  | 'review';
+
+export interface QueryOptimizationProgress {
+  /** 情報要求と通信リトライを含まない、修正案の評価数。 */
+  evaluatedTrials?: number;
+  task?: { kind: 'terms' | 'seeds'; completed: number; total: number } | null;
+  apiEvents?: OptimizationApiEvent[];
+  apiWaiting?: OptimizationApiEvent | null;
+  step: QueryOptimizationStep;
+  iterations: number;
+  bestTotalHits: number | null;
+  bestCapturedSeedCount: number | null;
+  /** 試行確定時だけ設定する。段階通知では null。 */
+  trial: OptimizationTrial | null;
+}
+
 export interface QueryOptimizationDeps {
+  /**
+   * 詳細表示用の追加計測。単独件数・累積 OR は run 共通のクエリキャッシュを使う。
+   * 全概念行が OR の初回は 3F − B + M 回（F: フリーワード数、B: そのブロック数、M: MeSH 数）。
+   * 語別計測全体を run あたり最大 100 HTTP に制限し、候補の実測・最終再検証の予算を残す。
+   * 上限後の未取得値は null。固有寄与は最終式を含むクエリで区別する。
+   */
+  measureTermDetails?: boolean;
+  /** run 共通の MeSH 文脈。初期化・追加取得時だけ通知し、表示側の例外は隔離する。 */
+  onMeshContext?: (nodes: OptimizationMeshNode[]) => void;
+  /** 未注入なら通知しない。表示側の例外は最適化へ伝播させない。 */
+  onProgress?: (progress: QueryOptimizationProgress) => void;
   eutils: EutilsDeps;
   /** 注入ファクトリの LLM 監査ログ保存は許容する。サービス自身は Sheets/Drive を書かない。 */
   llmFactory: LlmProviderFactory;
@@ -50,7 +89,7 @@ export interface QueryOptimizationDeps {
    * 1 回の追加取得を通信予算の 1 単位として数える。内部の通信・再試行は取得側で制限する。
    * fetchMeshTreeNumbers / fetchMeshChildren / fetchMeshLabels の組立ては注入側が担う。
    */
-  fetchMeshContext?: (request: Readonly<OptimizationMeshRequest>) => Promise<OptimizationMeshNode[]>;
+  fetchMeshContext?: (request: Readonly<OptimizationMeshRequest>, eutils?: EutilsDeps) => Promise<OptimizationMeshNode[]>;
   shouldStop?: () => boolean;
   now?: () => number;
   maxApiCalls?: number;
@@ -102,7 +141,12 @@ export interface QueryOptimizationResult {
 // 最大 5 候補＋初期・最終測定と語別分析を収めつつ、暴走を有限にする既定値。
 // NCBI の実 HTTP（リトライ含む）＋ LLM chat ＋ MeSH 追加取得の単位で 200 回、待機込み 10 分。
 // 注入プロバイダ内部の再試行・監査通信は外側から観測できないため chat 1 回に数える。
+export const DEFAULT_MAX_ITERATIONS = 5;
 const DEFAULT_MAX_API_CALLS = 200;
+export const MAX_TERM_API_CALLS = 100;
+
+/** 追加分析の予算切れは、候補評価全体を停止する理由にはしない。 */
+class TermAnalysisBudgetError extends Error {}
 const DEFAULT_MAX_ELAPSED_MS = 10 * 60 * 1000;
 // 一度に全階層を取得せず、優先する少数の枝を調べる。既定 5 反復でも追加取得は最大 15 回。
 const MAX_MESH_REQUESTS_PER_ITERATION = 3;
@@ -133,16 +177,52 @@ export async function runQueryOptimization(
     meshContext: input.meshContext?.map(copyMeshNode),
   };
   let meshContext = fixed.meshContext;
+  const notifyMeshContext = (): void => {
+    try { deps.onMeshContext?.((meshContext ?? []).map(copyMeshNode)); } catch {
+      // 表示側の失敗で取得済み文脈や反復処理を変えない。
+    }
+  };
   const meshRequestResults: OptimizationMeshRequestResult[] = [];
   const now = deps.now ?? Date.now;
   const startedAt = now();
-  const maxIterations = fixed.maxIterations ?? 5;
+  const maxIterations = fixed.maxIterations ?? DEFAULT_MAX_ITERATIONS;
   const maxApiCalls = deps.maxApiCalls ?? DEFAULT_MAX_API_CALLS;
   const maxElapsedMs = deps.maxElapsedMs ?? DEFAULT_MAX_ELAPSED_MS;
   let apiCalls = 0;
+  let termApiCalls = 0;
+  let termBudgetExhausted = false;
+  const termCache = new Map<string, number>();
   let iterations = 0;
+  let evaluatedTrials = 0;
+  let task: QueryOptimizationProgress['task'] = null;
+  let apiWaiting: OptimizationApiEvent | null = null;
+  let apiEvents: OptimizationApiEvent[] = [];
+  let apiSource: OptimizationApiEvent['source'] = 'PubMed';
   let best: VerifiedOptimizationCandidate | null = null;
   const trials: OptimizationTrial[] = [];
+  let step: QueryOptimizationStep = 'measuring';
+  const notify = (trial: OptimizationTrial | null = null): void => {
+    if (!deps.onProgress) return;
+    try {
+      deps.onProgress({ step, iterations,
+        evaluatedTrials, task: task ? { ...task } : null,
+        apiWaiting: apiWaiting ? { ...apiWaiting } : null,
+        apiEvents: apiEvents.map((event) => ({ ...event })),
+        bestTotalHits: best?.measurement.totalHits ?? null,
+        bestCapturedSeedCount: best?.measurement.capturedPmids?.length ?? null,
+        // 通知先による変更が確定済み試行に戻らないよう、値として渡す。
+        trial: trial ? JSON.parse(JSON.stringify(trial)) as OptimizationTrial : null,
+      });
+    } catch {
+      // 画面の通知失敗で実測・停止判定を変えない。
+    }
+  };
+  const apiEvent = (status: OptimizationApiEvent['status']): void => {
+    const event = { status, source: apiSource };
+    apiWaiting = status === 'failure' ? null : event;
+    if (!apiEvents.some((item) => item.status === status && item.source === apiSource)) apiEvents.push(event);
+    notify();
+  };
   const seen = new Set<string>();
   let terminal: OptimizationStopReason | null = null;
 
@@ -161,14 +241,19 @@ export async function runQueryOptimization(
     rateLimiter: {
       acquire: async () => {
         boundary();
-        await rateLimiter.acquire();
+        await (deps.onProgress ? rateLimiter.acquire(() => apiEvent('rate_limit')) : rateLimiter.acquire());
+        apiWaiting = null;
+        notify();
         boundary();
       },
     },
     // 制御用例外は NCBI のリトライ判定を変更しない。待機の境界で停止を再送出する。
     sleep: async (ms) => {
       boundary();
+      apiEvent('retry');
       await (deps.eutils.sleep ? deps.eutils.sleep(ms) : new Promise<void>((resolve) => setTimeout(resolve, ms)));
+      apiWaiting = null;
+      notify();
       boundary();
     },
     fetch: async (resource, init) => {
@@ -177,6 +262,39 @@ export async function runQueryOptimization(
       const response = await deps.eutils.fetch(resource, { ...init, cache: 'no-store' });
       boundary();
       return response;
+    },
+  };
+  const termEutils: EutilsDeps = { ...eutils, fetch: async (resource, init) => {
+    if (termApiCalls >= MAX_TERM_API_CALLS) {
+      termBudgetExhausted = true;
+      throw new TermAnalysisBudgetError('語別計測の通信上限');
+    }
+    termApiCalls += 1;
+    return eutils.fetch(resource, init);
+  } };
+  const termOptions = {
+    eutils: termEutils, cache: termCache, check: boundary,
+    canMeasure: () => {
+      if (termApiCalls < MAX_TERM_API_CALLS) return true;
+      termBudgetExhausted = true;
+      return false;
+    },
+    onProgress: (completed: number, total: number) => { task = { kind: 'terms', completed, total }; notify(); },
+    onFailure: () => apiEvent('failure'),
+  };
+  // MeSH 取得は従来どおり外側で一単位に数える。内部通信は表示だけを観測する。
+  const meshEutils: EutilsDeps = {
+    ...deps.eutils,
+    rateLimiter: { acquire: async () => {
+      await (deps.onProgress ? rateLimiter.acquire(() => apiEvent('rate_limit')) : rateLimiter.acquire());
+      apiWaiting = null;
+      notify();
+    } },
+    sleep: async (ms) => {
+      apiEvent('retry');
+      await (deps.eutils.sleep ? deps.eutils.sleep(ms) : new Promise<void>((resolve) => setTimeout(resolve, ms)));
+      apiWaiting = null;
+      notify();
     },
   };
   const expandMesh = async (requests: readonly OptimizationMeshRequest[], canContinue: boolean) => {
@@ -196,7 +314,10 @@ export async function runQueryOptimization(
         boundary();
         apiCalls += 1;
         try {
-          const nodes = await deps.fetchMeshContext({ ...request });
+          apiSource = 'MeSH';
+          const nodes = await (deps.onProgress
+            ? deps.fetchMeshContext({ ...request }, meshEutils)
+            : deps.fetchMeshContext({ ...request }));
           boundary();
           // 取得した関係だけを統合する。未取得理由を実在ノードとして捏造しない。
           const merged = new Map((meshContext ?? []).map((node) => [node.id, node]));
@@ -211,12 +332,16 @@ export async function runQueryOptimization(
             } : added);
           }
           meshContext = [...merged.values()];
+          notifyMeshContext();
           note = nodes.length > 0 ? '追加取得した周辺ノードを文脈へ反映しました。'
             : '未取得: 取得結果が空のため追加の親子関係は確認できませんでした。';
         } catch (err) {
           if (err instanceof QueryOptimizationStopError) throw err;
           boundary();
+          apiEvent('failure');
           note = `未取得: MeSH 取得に失敗しました。理由: ${err instanceof Error ? err.message : String(err)}`;
+        } finally {
+          apiSource = 'PubMed';
         }
       }
       results.push({ request: { ...request }, note });
@@ -225,6 +350,10 @@ export async function runQueryOptimization(
     return results.map(({ request, note }) => `${request.descriptor || '(未指定)'} / ${request.treeNumber || '(未指定)'}: ${note}`).join('\n');
   };
   const save = async () => {
+    const latest = trials[trials.length - 1];
+    if (latest) latest.apiEvents = apiEvents.map((event) => ({ ...event }));
+    task = null;
+    notify(trials[trials.length - 1] ?? null);
     boundary();
     await saveQueryOptimizationCheckpoint(fixed.projectId, fixed.runId, fixed.maxHits,
       trials, deps.checkpoint, () => new Date(now()).toISOString());
@@ -232,8 +361,13 @@ export async function runQueryOptimization(
   };
   const measure = async (formula: PubmedFormula, candidateId: string) => {
     boundary();
+    task = fixed.seedPmids.length ? { kind: 'seeds', completed: 0, total: fixed.seedPmids.length } : null;
+    notify();
     const evaluation = await evaluateQuery(formula, fixed.seedPmids, { eutils });
     boundary();
+    if (task && evaluation.finalQuery.status === 'success') task = { ...task, completed: fixed.seedPmids.length };
+    if (evaluation.status === 'failure') apiEvent('failure');
+    notify();
     const measurement: OptimizationMeasurement = {
       id: `${fixed.runId}:${candidateId}`, fingerprint: evaluation.fingerprint,
       measuredAt: evaluation.measuredAt, totalHits: evaluation.finalQuery.totalHits,
@@ -247,6 +381,7 @@ export async function runQueryOptimization(
     terminal = reason;
     const unmetReasons: string[] = [];
     if (!best) unmetReasons.push('検証済み候補がありません');
+    if (termBudgetExhausted) unmetReasons.push(`語別計測は ${MAX_TERM_API_CALLS} 通信の上限に達しました。追加取得していない語別件数・固有寄与は未測定です。`);
     if (fixed.seedPmids.length === 0) unmetReasons.push('シードが未指定です');
     // 最良候補は保持し、最終再検証で崩れた値だけを未達理由の根拠に切り替える。
     if (latestMeasurement?.missedPmids?.length) unmetReasons.push(`未捕捉シード: ${latestMeasurement.missedPmids.join(', ')}`);
@@ -271,6 +406,10 @@ export async function runQueryOptimization(
         result.unmetReasons.push(`終了記録の保存に失敗しました: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
+    step = 'review';
+    task = null;
+    apiWaiting = null;
+    notify();
     return result;
   }
   const meetsTarget = (candidate: VerifiedOptimizationCandidate) =>
@@ -285,9 +424,12 @@ export async function runQueryOptimization(
       result.unmetReasons.push(error);
       return result;
     }
+    notifyMeshContext();
+    notify();
     const initial = await measure(fixed.initialFormula, 'initial');
-    trials.push(makeTrial('initial', initial.formula, null, initial.measurement,
-      initial.evaluation.status === 'success', '初期式の実測', ''));
+    trials.push(makeTrial({ kind: 'initial', candidateId: 'initial', formula: initial.formula,
+      before: null, after: initial.measurement, accepted: initial.evaluation.status === 'success',
+      reason: '初期式の実測', rationale: '' }));
     if (initial.evaluation.status === 'success') best = initial;
     seen.add(initial.evaluation.fingerprint);
     await save();
@@ -297,15 +439,27 @@ export async function runQueryOptimization(
     let reason: OptimizationStopReason = 'iteration_limit';
     for (let round = 1; round <= maxIterations; round += 1) {
       boundary();
+      apiEvents = [];
+      step = 'adjusting';
+      notify();
       // 初回と採用後だけ語を測る。同じ最良式の却下後は取得済み文脈を共有する。
       if (!best.measurement.terms) {
-        const terms = await measureTerms(best.formula, fixed.approvedBlocks, eutils, () => boundary());
+        const terms = await measureTerms(best.formula, fixed.approvedBlocks, {
+          ...termOptions, finalHits: deps.measureTermDetails ? best.measurement.totalHits : undefined,
+        });
         boundary();
         // 記録済み試行が参照する測定は不変とし、AI 文脈を付加した新しい測定へ差し替える。
         best = { ...best, measurement: { ...best.measurement, terms } };
       }
+      task = null;
+      notify();
       boundary();
-      const provider = deps.llmFactory.forPurpose('optimize_query');
+      const provider = deps.onProgress ? deps.llmFactory.forPurpose('optimize_query', (state) => {
+        if (state === 'idle') { apiWaiting = null; notify(); return; }
+        apiSource = 'AI';
+        apiEvent(state);
+        apiSource = 'PubMed';
+      }) : deps.llmFactory.forPurpose('optimize_query');
       apiCalls += 1;
       const proposal = await optimizeQuery({
         formula: best.formula, approvedBlocks: fixed.approvedBlocks, criteria: fixed.criteria,
@@ -320,18 +474,40 @@ export async function runQueryOptimization(
         // 情報要求だけの回は候補評価を保留する。同一式回帰とせず、未達なら次の AI が取得結果を読む。
         // この回も反復上限に数え、情報要求だけが続いても無限に継続しない。
         const note = await expandMesh(proposal.meshRequests, round < maxIterations);
-        trials.push(makeTrial(candidateId, best.formula, best.measurement, null, false, note, proposal.rationale));
+        trials.push(makeTrial({ kind: 'information', candidateId, formula: best.formula,
+          before: best.measurement, after: null, accepted: false, reason: note, rationale: proposal.rationale,
+          meshRequests: proposal.meshRequests.map((request) => ({ ...request })) }));
         await save();
       } else {
+        evaluatedTrials += 1;
+        const details = {
+          kind: 'proposal' as const,
+          changes: { targetBlockId: proposal.targetBlockId, addedTerms: [...proposal.addedTerms],
+            removedTerms: [...proposal.removedTerms], replacedTerms: proposal.replacedTerms.map((term) => ({ ...term })) },
+        };
         const candidate = applyProposal(best.formula, proposal);
         const invalid = validateOptimizationCandidate(fixed.initialFormula, candidate, fixed.approvedBlocks, proposal);
         if (invalid) {
-          trials.push(makeTrial(candidateId, candidate, best.measurement, null, false, invalid, proposal.rationale));
+          trials.push(makeTrial({ ...details, candidateId, formula: candidate, before: best.measurement,
+            after: null, accepted: false, reason: invalid, rationale: proposal.rationale }));
           noImprovement += 1;
           await save();
         } else {
           boundary();
+          step = 'measuring';
+          notify();
           const measured = await measure(candidate, candidateId);
+          let detailStop: QueryOptimizationStopError | null = null;
+          if (deps.measureTermDetails && measured.evaluation.status === 'success') {
+            try {
+              measured.measurement = { ...measured.measurement, terms: await measureTerms(candidate, fixed.approvedBlocks, {
+                ...termOptions, finalHits: measured.measurement.totalHits,
+              }) };
+            } catch (err) {
+              if (err instanceof QueryOptimizationStopError) detailStop = err;
+              else apiEvent('failure');
+            }
+          }
           const failed = measured.evaluation.status === 'failure';
           measurementFailures = failed ? measurementFailures + 1 : 0;
           // 失敗測定は回帰判定の根拠にしない。次の候補で再び測定する機会を残す。
@@ -344,10 +520,13 @@ export async function runQueryOptimization(
           const rejection = failed ? describeMeasurementFailure(measured.evaluation)
             : lostSeeds.length > 0 ? `捕捉済みシードを失う: ${lostSeeds.join(', ')}`
               : repeated ? '評価済みの同一式への回帰' : '局面の指標に改善がありません';
-          trials.push(makeTrial(candidateId, candidate, before, measured.measurement,
-            improved && !repeated, improved && !repeated ? '局面の指標が改善しました' : rejection, proposal.rationale));
+          trials.push(makeTrial({ ...details, candidateId, formula: candidate, before, after: measured.measurement,
+            accepted: improved && !repeated, reason: improved && !repeated ? '局面の指標が改善しました' : rejection,
+            rationale: proposal.rationale }));
           if (improved && !repeated) best = measured;
           noImprovement = improved && !repeated ? 0 : noImprovement + 1;
+          // 追加詳細の停止でも、実測済み候補と採否を履歴へ残してから終了する。
+          if (detailStop) throw detailStop;
           await save();
           if (measurementFailures >= MAX_CONSECUTIVE_MEASUREMENT_FAILURES) return finish('api_error');
           if (repeated) reason = 'repeated_formula';
@@ -358,10 +537,14 @@ export async function runQueryOptimization(
       if (meetsTarget(best)) {
         const invalidFinal = validateOptimizationCandidate(fixed.initialFormula, best.formula, fixed.approvedBlocks);
         if (invalidFinal) return finish('revalidation_failed');
+        step = 'revalidating';
+        apiEvents = [];
+        notify();
         const verified = await measure(best.formula, `final-${round}`);
         const achieved = meetsTarget(verified);
-        trials.push(makeTrial(`final-${round}`, best.formula, best.measurement,
-          verified.measurement, achieved, achieved ? '最終再検証で条件達成' : '最終再検証で条件未達', ''));
+        trials.push(makeTrial({ kind: 'final', candidateId: `final-${round}`, formula: best.formula,
+          before: best.measurement, after: verified.measurement, accepted: achieved,
+          reason: achieved ? '最終再検証で条件達成' : '最終再検証で条件未達', rationale: '' }));
         if (achieved) best = verified;
         await save();
         if (verified.evaluation.status === 'failure') return finish('api_error', verified.measurement);
@@ -406,9 +589,14 @@ function isImprovement(before: OptimizationMeasurement, after: OptimizationMeasu
   return Math.max(0, after.totalHits! - maxHits) < Math.max(0, before.totalHits! - maxHits);
 }
 
-function makeTrial(candidateId: string, formula: PubmedFormula, before: OptimizationMeasurement | null,
-  after: OptimizationMeasurement | null, accepted: boolean, reason: string, rationale: string): OptimizationTrial {
-  return { candidateId, formula, before, after, accepted, reason, rationale };
+type TrialInput = Omit<OptimizationTrial, 'kind' | 'changes' | 'meshRequests' | 'apiEvents'> & (
+  | { kind: 'initial' | 'final' }
+  | { kind: 'proposal'; changes: NonNullable<OptimizationTrial['changes']> }
+  | { kind: 'information'; meshRequests: OptimizationMeshRequest[] }
+);
+
+function makeTrial(input: TrialInput): OptimizationTrial {
+  return { ...input, apiEvents: [] };
 }
 
 function applyProposal(formula: PubmedFormula, proposal: OptimizeQueryProposal): PubmedFormula {
@@ -482,20 +670,42 @@ function normalizeConceptNotForValidation(syntax: string): string {
   }).join(' ');
 }
 
+interface MeasureTermsOptions {
+  cache: Map<string, number>;
+  canMeasure: () => boolean;
+  eutils: EutilsDeps;
+  check: () => void;
+  onProgress?: (completed: number, total: number) => void;
+  finalHits?: number | null;
+  onFailure?: () => void;
+}
+
 /** 原タグを保持した単独件数と累積 OR の純増。最終式の固有寄与と混同しない。 */
-async function measureTerms(formula: PubmedFormula, approvedBlocks: readonly ApprovedOptimizationBlock[], eutils: EutilsDeps, check: () => void): Promise<NonNullable<OptimizationMeasurement['terms']>> {
+async function measureTerms(formula: PubmedFormula, approvedBlocks: readonly ApprovedOptimizationBlock[],
+  { eutils, cache, canMeasure, check, onProgress, finalHits, onFailure }: MeasureTermsOptions): Promise<NonNullable<OptimizationMeasurement['terms']>> {
   const terms: NonNullable<OptimizationMeasurement['terms']> = [];
-  const cache = new Map<string, number>();
   const count = async (query: string) => {
     check();
     const cached = cache.get(query);
     if (cached !== undefined) return cached;
-    const value = (await esearch(query, eutils, { retmax: 0 })).count;
-    cache.set(query, value);
-    return value;
+    if (!canMeasure()) throw new TermAnalysisBudgetError('語別計測の通信上限');
+    try {
+      const value = (await esearch(query, eutils, { retmax: 0 })).count;
+      cache.set(query, value);
+      return value;
+    } catch (err) {
+      check();
+      if (canMeasure()) onFailure?.();
+      throw err;
+    }
   };
   const approvedIds = new Set(approvedBlocks.map((block) => block.id));
-  for (const block of formula.blocks.filter((item) => !item.isCombination && approvedIds.has(item.id))) {
+  const blocks = formula.blocks.filter((item) => !item.isCombination && approvedIds.has(item.id));
+  const total = blocks.reduce((sum, block) => sum + new Set(extractBlockTerms(block.expression).freewordTerms
+    .map((term) => term.query.trim()).filter(Boolean)).size
+    + tokenizeExpression(block.expression).filter((item) => item.kind === 'mesh').length, 0);
+  onProgress?.(0, total);
+  for (const block of blocks) {
     check();
     const freewords = extractBlockTerms(block.expression).freewordTerms;
     const delta = await analyzeFreewordDelta(freewords, count);
@@ -504,11 +714,36 @@ async function measureTerms(formula: PubmedFormula, approvedBlocks: readonly App
     for (const row of delta.rows) {
       uncertain = uncertain || row.clamped || row.individualError;
       terms.push({ blockId: block.id, query: row.query, hits: row.individualError ? null : row.individual,
-        delta: uncertain ? null : row.delta });
+        delta: uncertain ? null : row.delta,
+        ...(finalHits !== undefined ? { finalContribution: null } : {}) });
+      onProgress?.(terms.length, total);
     }
     for (const segment of tokenizeExpression(block.expression).filter((item) => item.kind === 'mesh')) {
-      const hits = await count(segment.text);
+      let hits: number | null = null;
+      try { hits = await count(segment.text); }
+      catch (err) {
+        check();
+        if (!(err instanceof TermAnalysisBudgetError) && canMeasure()) throw err;
+      }
       terms.push({ blockId: block.id, query: segment.text, hits, delta: null });
+      onProgress?.(terms.length, total);
+    }
+  }
+  if (finalHits != null) {
+    for (const term of terms.filter((item) => 'finalContribution' in item && item.hits !== null)) {
+      const block = blocks.find((item) => item.id === term.blockId)!;
+      const segments = tokenizeExpression(block.expression);
+      if (!segments.every((segment) => segment.kind !== 'plain'
+        || /^[\s()]*$/.test(segment.text.replace(/\bOR\b/gi, '')))) continue;
+      const without: PubmedFormula = { ...formula, blocks: formula.blocks.map((item) => item.id !== block.id ? item : {
+        ...item, expression: segments.map((segment) => segment.kind === 'freeword'
+          && segment.text.trim() === term.query ? `(${segment.text} NOT ${segment.text})` : segment.text).join(''),
+      }) };
+      try {
+        // キャッシュキーには最終式全体と除去後の式を含める。語だけでは再利用しない。
+        const value = await count(`(${expandFormula(formula)}) NOT (${expandFormula(without)})`);
+        if (value <= finalHits) term.finalContribution = value;
+      } catch { check(); }
     }
   }
   return terms;

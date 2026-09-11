@@ -51,6 +51,18 @@ flowchart TD
     History --> Validate
 ```
 
+### 検索式の自動調整（実装済み）
+
+`#/draft` の「検索式の自動調整」で最大件数・研究基準・承認ブロック・既知シード数を確認する。反復上限は「詳細設定」で変更できる。「検索式を作成・自動調整する」で開始し、実行中は固定 5 指標・現在段階・試行履歴を表示する。「停止して候補を確認」で処理の区切りに停止できる。内部試行ごとの承認は求めない。
+
+最終レビューは「条件達成」「要確認」「停止」「エラー」を区別し、最終式、上限と実測件数、既知シード N/N 件捕捉、初期式からの変更、残った懸念、同じ試行履歴を表示する。既知シードの捕捉は、未知の適格研究の網羅性を保証しない。
+
+- 「採用して保存」: run ごとに一度だけ `auto_optimize` の版を作り、現在の親版・最終検証・実行ログを関連づける。保存後もレビューと履歴が残る。
+- 「編集して確認」: 新しい保存を行わず、最終式を編集下書きとして `#/edit` へ渡す。最初の保存版がまだなくても手編集できる。編集画面で保存する場合は `user_edit` になる。
+- リロード後は中断／完了済みのログを表示する。処理は継続しておらず、復元だけでは再検証済みにならない。
+
+通常の生成と検証も `#/draft` に統合済みで、旧 `#/validate` ルートは廃止されている。以下の旧モックにある検証画面は現在の `#/draft` に相当する。
+
 ### 各画面の責務
 
 | ハッシュ | 画面名 | 主な操作 | 主要 Sheets タブ |
@@ -62,7 +74,7 @@ flowchart TD
 | `#/draft` | 検索式ドラフト生成 | 4 skill を順次実行する進捗ビュー（block-designer → mesh-suggester → freeword-designer → filter-designer） | `FormulaVersions`（`ai_draft`）, `LLMApiLog` |
 | `#/validate` | 検証 | 行ごとヒット数バッジ、シード捕捉率サマリ、MeSH ダイアグラム（Mermaid）、ブロック重複（P1） | `ValidationLog` |
 | `#/expand` | 対話的シード拡張（margin 探索・**dev**） | 現式を 2 軸で拡張 → 外側（拡張式 NOT 現式）を検索 → 境界事例提示 → include/exclude/maybe 判定 → 再検証＋更新提案。有効 seed 0 件なら inside モード: 既定で AI が specific（精度優先）な絞り込み式を設計 → relevance 上位 50 件 → 最大 5 件を提示（issue #93。チェックを外すと現式の上位） | `SeedPapers`（`source=interactive`）, 自動再検証 |
-| `#/edit` | 検索式編集 | ブロックカード一覧（textarea は廃止）。ホバーの鉛筆ボタンで各ブロックをインライン手編集／「AI に改善させる」で指示文入力＋文脈開示（RQ・ブロック定義・シード論文・直近検証の捕捉率/取りこぼし）→ improve-block skill 実行 → diff → accept/reject | `FormulaVersions`（`user_edit` / `auto_optimize`） |
+| `#/edit` | 検索式編集 | ブロックカード一覧（textarea は廃止）。ホバーの鉛筆ボタンで各ブロックをインライン手編集／「AI に改善させる」で指示文入力＋文脈開示（RQ・ブロック定義・シード論文・直近検証の捕捉率/取りこぼし）→ improve-block skill 実行 → diff → accept/reject | `FormulaVersions`（`user_edit`） |
 | `#/export` | 4 DB 変換 | ワンクリックで CENTRAL / Embase / CT.gov / ICTRP に変換、`.md` ダウンロード | `Conversions` |
 | `#/done` | 完了案内 | PubMed 検索ページを新規タブで開くリンク、CT.gov / ICTRP リンク、nbib ダウンロード手順 | （読み取りのみ） |
 | `#/history` | バージョン履歴 | `FormulaVersions` 一覧。各バージョンの protocol_version / capture_rate / 作成種別を表示。クリックで `#/validate` に該当 version を読み込む | `FormulaVersions` / `ValidationLog` |

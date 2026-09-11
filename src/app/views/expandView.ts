@@ -935,8 +935,8 @@ function buildRoundSummary(doc: Document, summary: ValidationSummary): HTMLEleme
   } else {
     const captured = summary.finalQuery.capturedPmids.length;
     const total = captured + summary.finalQuery.missedPmids.length;
-    if (total === 0) {
-      rate.textContent = '捕捉率: （有効 seed 0 件のため計算不能）';
+    if (summary.finalQuery.captureRate === null) {
+      rate.textContent = '捕捉率: （有効シード 0 件のため未計測）';
     } else {
       const percent = (summary.finalQuery.captureRate * 100).toFixed(1);
       rate.textContent = `捕捉率: ${percent}% (${captured}/${total})`;

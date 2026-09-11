@@ -318,10 +318,11 @@ export async function analyzeMissedSeeds(
 }
 
 function buildEmptyFinalQuery(): FinalQueryResult {
+  // 検証失敗時のプレースホルダ。成功時の未計測とは finalQueryError で区別する。
   return {
     finalQuery: '',
     totalHits: 0,
-    captureRate: 0,
+    captureRate: null,
     capturedPmids: [],
     missedPmids: [],
   };

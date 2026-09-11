@@ -17,7 +17,11 @@ import {
 /** 再試行対象の HTTP ステータス（一時的エラーのみ） */
 export const RETRYABLE_STATUSES: ReadonlySet<number> = new Set([429, 500, 502, 503, 504]);
 
+export type LlmRequestState = 'retry' | 'failure' | 'idle';
+
 export interface RetryOptions {
+  /** 任意の表示通知。未注入時の再試行回数・待機は変えない。 */
+  onRequestState?: (state: LlmRequestState) => void;
   /** 最大試行回数（初回を含む）。既定 3 回 */
   maxAttempts?: number;
   /** バックオフの基準待ち時間（ms）。試行 n 回目の失敗後に baseDelayMs * 2^(n-1) 待つ。既定 1000 */
@@ -43,6 +47,9 @@ export function withRetry(provider: LLMProvider, options: RetryOptions = {}): LL
   const baseDelayMs = options.baseDelayMs ?? 1000;
   const sleep = options.sleep ?? defaultSleep;
   const isRetryable = options.isRetryable ?? defaultIsRetryable;
+  const notify = (state: LlmRequestState): void => {
+    try { options.onRequestState?.(state); } catch { /* 表示側の失敗は通信へ伝播させない。 */ }
+  };
 
   return {
     providerId: provider.providerId,
@@ -53,9 +60,12 @@ export function withRetry(provider: LLMProvider, options: RetryOptions = {}): LL
           return await provider.chat(messages, opts);
         } catch (err) {
           if (attempt >= maxAttempts || !isRetryable(err)) {
+            notify('failure');
             throw err;
           }
+          notify('retry');
           await sleep(baseDelayMs * 2 ** (attempt - 1));
+          notify('idle');
         }
       }
     },

@@ -126,11 +126,10 @@ function renderFinalQuery(
   const rate = doc.createElement('p');
   const captured = summary.finalQuery.capturedPmids.length;
   const seedTotal = captured + summary.finalQuery.missedPmids.length;
-  const ratePercent = (summary.finalQuery.captureRate * 100).toFixed(1);
   rate.textContent =
-    seedTotal === 0
-      ? '捕捉率: （有効 seed 0 件のため計算不能）'
-      : `捕捉率: ${ratePercent}% (${captured}/${seedTotal})`;
+    summary.finalQuery.captureRate === null
+      ? '捕捉率: （有効シード 0 件のため未計測）'
+      : `捕捉率: ${(summary.finalQuery.captureRate * 100).toFixed(1)}% (${captured}/${seedTotal})`;
   section.appendChild(rate);
 
   if (summary.finalQuery.missedPmids.length > 0) {

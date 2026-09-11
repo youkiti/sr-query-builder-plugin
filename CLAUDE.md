@@ -8,6 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - ユーザーフロー全 10 ルート（home → protocol → blocks → seeds → draft → expand → edit → export → done + history）の画面実装済み。検索式の生成と検証は `draft` タブに統合され、「生成して検証する」1 操作でブロックごとのヒット数（line_hits）をライブ表示しつつ、完成後に捕捉率・MeSH 検証まで自動実行する（旧 `validate` ルートは廃止）
 - `#/expand` の inside モード（有効 seed 0 件）は既定で AI に specific（精度優先）な絞り込み式を設計させ、その relevance 上位 50 件から最大 5 件を人のレビューに回す（issue #93。`design-specific-query` skill / `purpose=design_specific_query`。チェックを外すと従来の現式上位）。specific 式が 0 件・構文エラー・設計失敗のときは現式へ自動フォールバックし、理由を画面に出す
+- `#/draft` から検索式の自動調整を実行できる。最大件数と反復上限を指定し、実測・変更理由をライブ履歴で確認する。最終レビューは条件達成／要確認／停止／エラーを区別し、最後に一度だけ `auto_optimize` として採用保存、または未保存のまま `#/edit` へ渡せる。既知シードの捕捉は未知の適格研究の網羅性を保証しない
 - P0 の検証ロジック（行ごとのヒット数 / シード捕捉率 / 全 DB 変換 / MeSH 抽出）は TypeScript へ移植済み（[src/features/validation/](src/features/validation/), [src/features/conversion/](src/features/conversion/)）
 - 未実装・残タスクは「[未実装・既知のギャップ](#未実装既知のギャップ)」を参照
 
@@ -169,7 +170,8 @@ src/
 
 ## 未実装・既知のギャップ
 
-- **P1 ロジック層は移植済み・UI 未接続**: `check_mesh` / `check_mesh_overlap` 相当（[src/features/validation/blockMeshTree.ts](src/features/validation/blockMeshTree.ts) + [src/lib/ncbi/meshRdf.ts](src/lib/ncbi/meshRdf.ts)）と `check_block_overlap` 相当の寄与度分析（[src/features/validation/freewordDelta.ts](src/features/validation/freewordDelta.ts)）は TypeScript へ移植済みだが、画面への接続（#58）と NCBI 側のレート制御（#59）が残タスク。**ブロック編集 UI 部品 3 点**（[src/app/views/editableBlock.ts](src/app/views/editableBlock.ts) / [meshExpressionEdit.ts](src/app/views/meshExpressionEdit.ts) / [operandEdit.ts](src/app/views/operandEdit.ts)）も同様に移植済みだが、どのビューからも参照されていない（`editView` への組み込みは #58）。移植計画全体の進捗表は [docs/fix-plan-2026-07.md](docs/fix-plan-2026-07.md) 冒頭の注記にある
+- **自動調整の復元はログ表示まで**: リロード後はチェックポイントを中断／完了済みの記録として表示する。途中からの自動再開や復元ログからの採用保存は行わず、新しく実行して測り直す。シード 0 件では捕捉確認済みの条件達成にはしない。設計・実装状況は [docs/query-optimization-plan.md](docs/query-optimization-plan.md) を参照
+- **P1 の画面接続は実装済み**: `editView` はチップ編集部品を使用し、`blockInspector` が語の寄与と MeSH 文脈を表示する。自動調整も語別計測・MeSH の追加取得を利用する。NCBI 通信は `eutils.ts` の共有レート制御を通る。画面未接続・レート制御未実装という旧記述は解消済み
 - **OpenAI / Anthropic Claude への直接連携は未実装**: 実装済みなのは Gemini と OpenRouter の 2 プロバイダ（`src/lib/llm/GeminiProvider.ts` / `OpenRouterProvider.ts`。既定モデルは `gemini-3.5-flash`）。Options 画面で OpenRouter の API キーとカスタムモデル ID（最大 20 件）を追加登録できるため OpenRouter 経由で多くのモデルに到達できるが、OpenAI / Anthropic の API を直接叩く `LLMProvider` 実装は無い（`LlmProviderId` 型に `openai` / `anthropic` の値はあるが対応実装が無い）
 - E2E ジャーニー J1（新規作成→export 貫通）は draft 生成〜検証の主要経路を journey-draft-generate.spec.ts で回帰確認済み。J4（expand キーボード判定）/ J5 の API エラー系は残タスク（[docs/ui-deep-test-plan.md](docs/ui-deep-test-plan.md) Phase D/E）
 

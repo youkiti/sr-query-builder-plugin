@@ -134,7 +134,7 @@ export function buildValidationWarning(state: AppState): string | null {
   }
   const captured = summary.finalQuery.capturedPmids.length;
   const seedTotal = captured + summary.finalQuery.missedPmids.length;
-  if (seedTotal > 0 && summary.finalQuery.captureRate < 1) {
+  if (seedTotal > 0 && summary.finalQuery.captureRate !== null && summary.finalQuery.captureRate < 1) {
     const percent = (summary.finalQuery.captureRate * 100).toFixed(1);
     return `⚠ シード捕捉率が ${percent}%（${captured}/${seedTotal} 件）です。未捕捉シードの原因を #/draft で確認してからのエクスポートを推奨します。`;
   }

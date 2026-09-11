@@ -1,4 +1,5 @@
 import type { LlmApiLogEntry, LlmPurpose } from '@/domain/llmApiLog';
+import type { LlmRequestState } from '@/lib/llm/retry';
 import { SHEET_HEADERS } from '@/domain/sheetsSchema';
 import type { ProjectStoreDeps } from '@/features/project';
 import {
@@ -53,11 +54,13 @@ export interface LlmFactoryDeps {
   model?: string;
   /** 任意: LLM 呼び出しごとに概算コストを通知するコールバック（§ cumulativeCostUsd 集計用）。 */
   onCostAccumulate?: (costUsd: number) => void;
+  /** 初期式生成など、呼び出し単位で通知先を指定しない場合の表示通知。 */
+  onRequestState?: (state: LlmRequestState) => void;
 }
 
 export interface LlmProviderFactory {
   /** 指定 purpose 用のロガー付きプロバイダを返す */
-  forPurpose: (purpose: LlmPurpose) => LLMProvider;
+  forPurpose: (purpose: LlmPurpose, onRequestState?: (state: LlmRequestState) => void) => LLMProvider;
   /** このファクトリが解決したモデル ID（FormulaVersions.model への記録用） */
   model: string;
 }
@@ -109,7 +112,7 @@ export async function buildLlmProviderFactory(deps: LlmFactoryDeps): Promise<Llm
   // （503 等の失敗試行も監査ログに見える状態を保つ）。
   return {
     model: selectedModel,
-    forPurpose: (purpose) =>
+    forPurpose: (purpose, onRequestState) =>
       withRetry(
         withLogging(baseProvider, purpose, {
           uploadJson: async ({ filename, content }) => {
@@ -130,7 +133,8 @@ export async function buildLlmProviderFactory(deps: LlmFactoryDeps): Promise<Llm
               deps.onCostAccumulate?.(entry.costEstimateUsd);
             }
           },
-        })
+        }),
+        { onRequestState: onRequestState ?? deps.onRequestState }
       ),
   };
 }

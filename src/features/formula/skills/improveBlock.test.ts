@@ -17,6 +17,29 @@ function provider(text: string): { provider: LLMProvider; calls: ChatMessage[][]
 }
 
 describe('improveBlockExpression', () => {
+  test.each([
+    { captureRate: null, missedPmids: [], expected: '捕捉率: (未計測)' },
+    { captureRate: 0, missedPmids: ['111'], expected: '捕捉率: 0%（0/1 件捕捉）' },
+  ])('捕捉率 $captureRate を未計測と実測 0 に区別する', async ({ captureRate, missedPmids, expected }) => {
+    const { provider: p, calls } = provider('{}');
+    await improveBlockExpression({
+      currentExpression: 'asthma[tiab]',
+      blockLabel: 'Population',
+      blockDescription: '喘息',
+      researchQuestion: 'RQ',
+      userInstruction: '',
+      validation: { captureRate, capturedPmids: [], missedPmids },
+    }, p);
+    const userMsg = calls[0]!.find((m) => m.role === 'user')!.content;
+    expect(userMsg).toContain(expected);
+    if (captureRate === null) {
+      expect(userMsg).not.toMatch(/0(?:\.0)?%/);
+      expect(userMsg).not.toContain('0/0');
+    } else {
+      expect(userMsg).not.toContain('捕捉率: (未計測)');
+    }
+  });
+
   test('提案 expression と rationale を返す（前後空白を trim）', async () => {
     const json = JSON.stringify({
       proposed_expression: '  "diabetes mellitus"[Mesh] OR diabetic*[tiab]  ',
