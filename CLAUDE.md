@@ -146,6 +146,9 @@ src/
 │   ├── services/   # 画面とドメインロジックの仲介（protocolService / blocksService / ...）
 │   ├── styles/     # ビュー単位に分割した CSS（app.html が <link> で個別に読み込む）
 │   └── views/      # 各ルートの描画関数（DOM 直組み。RenderView 型）
+│                   # 検索式のトークナイザ等の純粋関数は lib/search-formula-md/expression.ts
+│                   # にあり、views/formulaDisplay.ts はそれを再公開しているだけ（features
+│                   # から views を import させないため。import 元は formulaDisplay のままでよい）
 ├── features/       # ドメインロジック（protocol / seeds / formula / validation / conversion / project）
 ├── lib/            # 横断ライブラリ（google: OAuth+Sheets+Drive / llm: LLMProvider 抽象+Gemini / ncbi: E-utilities / combination-expression / search-formula-md）
 ├── popup/          # 認証・プロジェクト作成/選択の入口
