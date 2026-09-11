@@ -1,4 +1,4 @@
-import type { AppStore } from '../store';
+import type { AppStore, ProtocolDraft, BlocksDraft } from '../store';
 import {
   assembleFormulaMd,
   buildBlockExpression,
@@ -97,8 +97,7 @@ export interface DraftServiceDeps {
   now?: () => string;
 }
 
-export interface DraftResult {
-  versionId: string;
+export interface DraftGeneration {
   formula: AssembledFormula['formula'];
   markdown: string;
   filter: FilterDesignerResult;
@@ -108,6 +107,23 @@ export interface DraftResult {
   /** 生成途中に計測した概念ブロックごとのヒット数。countBlockHits 未注入なら空配列 */
   blockHits: DraftBlockHit[];
 }
+
+/** 保存時にだけ版 ID を付与する。 */
+export interface DraftResult extends DraftGeneration {
+  versionId: string;
+}
+
+/** 保存先やストアを持たない生成入力。シード文脈は呼び出し側で固定する。 */
+export interface DraftGenerationInput {
+  protocol: ProtocolDraft;
+  blocks: BlocksDraft;
+  seedContext: SeedContext;
+}
+
+/** LLM と計測・進捗の副作用は注入元が管理する。保存なし用途ではロガーなしの LLM を渡す。 */
+export type DraftGenerationDeps = Pick<
+  DraftServiceDeps, 'llmFactory' | 'onProgress' | 'countBlockHits' | 'onBlockCounted'
+>;
 
 const noopProgress: (p: DraftProgress) => void = () => undefined;
 
@@ -132,14 +148,57 @@ export async function generateDraft(deps: DraftServiceDeps): Promise<DraftResult
   const notifyProgress = deps.onProgress ?? noopProgress;
 
   const blockCount = blocks.blocks.length;
+  const seedContext = await collectSeedContext(project.spreadsheetId, deps);
+  const generated = await generateDraftFormula({ protocol, blocks, seedContext }, deps);
+
+  notifyProgress({ step: 'save', blockCount });
+  const versionId = (deps.newUuid ?? newUuid)();
+  const createdAt = (deps.now ?? nowIso)();
+  // 生成に実際に使ったモデル ID を版に記録する（export 画面の Methods 文案用）
+  const model = deps.llmFactory.model;
+  await appendFormulaVersion(
+    project.spreadsheetId,
+    {
+      versionId,
+      parentVersionId: state.currentFormulaVersionId,
+      protocolVersion: state.currentProtocolVersion ?? 0,
+      protocolSnapshotRef: protocol.rawTextRef ?? protocol.rawTextInline ?? '',
+      formulaMd: generated.markdown,
+      createdBy: 'ai_draft',
+      createdAt,
+      note: null,
+      model,
+    },
+    deps.google
+  );
+
+  deps.store.setState((s) => ({
+    ...s,
+    currentFormulaVersionId: versionId,
+    currentFormulaMarkdown: generated.markdown,
+    currentFormulaModel: model,
+    currentFormulaCreatedBy: 'ai_draft',
+  }));
+
+  notifyProgress({ step: 'done', blockCount });
+  return { versionId, ...generated };
+}
+
+/** 検索式を生成する。Sheets / Drive への書き込みや store 更新、版の採番は行わない。 */
+export async function generateDraftFormula(
+  input: DraftGenerationInput,
+  deps: DraftGenerationDeps
+): Promise<DraftGeneration> {
+  const { protocol, blocks, seedContext } = input;
+  if (blocks.blocks.length === 0) {
+    throw new Error('blocksDraft が未設定です。ブロック承認を先に行ってください');
+  }
+  const notifyProgress = deps.onProgress ?? noopProgress;
+  const blockCount = blocks.blocks.length;
   const skeletons: BlockSkeleton[] = [];
   const meshes: MeshSuggestion[][] = [];
   const freewords: FreewordSuggestion[][] = [];
   const blockHits: DraftBlockHit[] = [];
-
-  // seed 論文のタイトル・抄録・MeSH を各 skill へ渡す（requirements.md §4.4）。
-  // 取得に失敗しても／seed 0 件でもドラフト生成は止めず、空のコンテクストで続行する。
-  const seedContext = await collectSeedContext(project.spreadsheetId, deps);
 
   for (let i = 0; i < blockCount; i += 1) {
     const block = blocks.blocks[i];
@@ -228,38 +287,7 @@ export async function generateDraft(deps: DraftServiceDeps): Promise<DraftResult
     filterResult: filter,
   });
 
-  notifyProgress({ step: 'save', blockCount });
-  const versionId = (deps.newUuid ?? newUuid)();
-  const createdAt = (deps.now ?? nowIso)();
-  // 生成に実際に使ったモデル ID を版に記録する（export 画面の Methods 文案用）
-  const model = deps.llmFactory.model;
-  await appendFormulaVersion(
-    project.spreadsheetId,
-    {
-      versionId,
-      parentVersionId: state.currentFormulaVersionId,
-      protocolVersion: state.currentProtocolVersion ?? 0,
-      protocolSnapshotRef: protocol.rawTextRef ?? protocol.rawTextInline ?? '',
-      formulaMd: assembled.markdown,
-      createdBy: 'ai_draft',
-      createdAt,
-      note: null,
-      model,
-    },
-    deps.google
-  );
-
-  deps.store.setState((s) => ({
-    ...s,
-    currentFormulaVersionId: versionId,
-    currentFormulaMarkdown: assembled.markdown,
-    currentFormulaModel: model,
-    currentFormulaCreatedBy: 'ai_draft',
-  }));
-
-  notifyProgress({ step: 'done', blockCount });
   return {
-    versionId,
     formula: assembled.formula,
     markdown: assembled.markdown,
     filter,

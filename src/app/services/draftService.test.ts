@@ -1,7 +1,7 @@
 import { SHEET_HEADERS } from '@/domain/sheetsSchema';
 import type { ChatMessage, ChatResponse, LLMProvider } from '@/lib/llm';
 import { createStore, type AppState } from '../store';
-import { generateDraft, type DraftProgress } from './draftService';
+import { generateDraft, generateDraftFormula, type DraftProgress } from './draftService';
 
 function jsonResponse(body: unknown): Response {
   return {
@@ -412,5 +412,37 @@ describe('generateDraft', () => {
     delete (overridden as { now?: unknown }).now;
     await generateDraft(overridden);
     expect(store.getState().currentFormulaVersionId).toBeDefined();
+  });
+});
+
+
+describe('generateDraftFormula', () => {
+  const seedContext = { titles: [], samples: [], meshSummary: { seedCount: 0, concepts: [], checkTags: [] } };
+
+  test('保存先・store を使わず生成し、版の採番も保存進捗の通知もしない', async () => {
+    const progress: DraftProgress[] = [];
+    const { deps, store, fetchMock } = setupDeps({ onProgress: (p) => progress.push(p) });
+    const state = store.getState();
+    const update = jest.spyOn(store, 'setState');
+    const uuid = jest.fn();
+    const result = await generateDraftFormula({ protocol: state.protocolDraft!, blocks: state.blocksDraft!, seedContext }, {
+      ...deps, ...{ newUuid: uuid },
+    });
+    expect(result.markdown).toContain('## PubMed/MEDLINE');
+    expect(result).not.toHaveProperty('versionId');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+    expect(uuid).not.toHaveBeenCalled();
+    expect(store.getState()).toBe(state);
+    expect(progress.map((p) => p.step)).not.toContain('save');
+    expect(progress.map((p) => p.step)).not.toContain('done');
+  });
+
+  test('空の承認ブロックは生成前に拒否する', async () => {
+    const { deps, store, fetchMock } = setupDeps();
+    await expect(generateDraftFormula({ protocol: store.getState().protocolDraft!, blocks: {
+      blocks: [], combinationExpression: '',
+    }, seedContext }, deps)).rejects.toThrow('ブロック承認');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

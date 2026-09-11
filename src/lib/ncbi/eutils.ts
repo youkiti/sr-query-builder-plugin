@@ -10,6 +10,8 @@ import { retryWithBackoff, TokenBucket, type RateLimiter } from './rateLimit';
  */
 export interface EutilsDeps {
   fetch: typeof fetch;
+  /** 件数の欠落・不正値を恒久エラーにする。省略時は従来どおり 0 件へ補完する。 */
+  strictCounts?: boolean;
   /** NCBI API key（BYOK、未設定でも可） */
   apiKey?: string;
   /** NCBI が推奨する識別子。既定 `sr-query-builder-plugin` */
@@ -226,6 +228,13 @@ export async function esearch(
         throw new EutilsError(`esearch エラー: ${body.error}`, res.status);
       }
       assertNoInbandError(body);
+      if (deps.strictCounts) {
+        const count = body.esearchresult?.count;
+        // parseInt の部分一致や丸めを許さず、非負の安全な整数だけを実測値として扱う。
+        if (typeof count !== 'string' || !/^\d+$/.test(count) || !Number.isSafeInteger(Number(count))) {
+          throw new EutilsError('esearch の件数が欠落しているか、不正な値です', res.status, true);
+        }
+      }
       return body;
     },
     { sleep: deps.sleep, maxRetries: deps.maxRetries ?? 5, shouldRetry: shouldRetryEutils }
