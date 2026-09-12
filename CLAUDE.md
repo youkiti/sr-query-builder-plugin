@@ -54,6 +54,8 @@ export default {
 };
 ```
 
+**codex（`codex exec`）のサンドボックスからは E2E を実行できない**: `--sandbox workspace-write` で走らせた実装エージェントに `npm run test:e2e` を回させると、[playwright.config.ts](playwright.config.ts) の `webServer` が `localhost:4400` を bind しようとして `listen EPERM` で落ちる（サンドボックスがネットワークの bind を許さない。**実装の回帰ではない**）。実装を codex へ委譲するときは、**ブリーフの「あなたが通すコマンド」から E2E を外し**（`npm run typecheck` / `npm run lint` / `npm run lint:css` / `npm test` までにする）、**E2E は親セッションで回すこと**。E2E のテストコード自体を codex に書かせるのは構わない（実行だけを親が引き受ける）。ブリーフに書き忘れると、実装側が `listen EPERM` を自分の変更の失敗として調べ直す往復が 1 回増える（実際に 3 回踏んだ）。
+
 **複数の worktree で並行作業するとき、E2E を同時に走らせてはいけない**: [playwright.config.ts](playwright.config.ts) は `webServer` を `localhost:4400`（`E2E_PORT` 未設定時）に立て、`reuseExistingServer: !process.env.CI` を指定している。したがって **2 つ目の worktree で `npm run test:e2e` を始めると、1 つ目が立てたサーバを「既にレディ」とみなして再利用し、別 worktree の `dist/` を配信したままテストが走る**（`tools/playwright-server.js` は起動時の作業ディレクトリ配下の `dist/` を配信する）。自分の変更が反映されていない画面を検証することになり、**しかも普通に green になるので気づけない**。並行させるなら worktree ごとに別ポートを渡す（`E2E_PORT=4401 npm run test:e2e`）。ポートを分けないなら、E2E を回す worktree を 1 つに決めて他では実行しないこと。
 
 worktree を追加したら `node_modules` は親から symlink すれば足りる（`npm install` を worktree ごとに走らせなくてよい）。ただし **symlink にすると `git status` に `?? node_modules` として出る**: `.gitignore` の指定が `node_modules/` と末尾スラッシュ付きでディレクトリにしか一致せず、symlink は「ファイル」なので無視されない。コミットはパス指定（`git add -- <file>`）で行い、`git add -A` を使わないこと。
