@@ -37,6 +37,28 @@ function setup(callbacks: DraftViewCallbacks = {}) {
 beforeEach(() => jest.useFakeTimers({ now: 1000 }));
 afterEach(() => { document.body.innerHTML = ''; jest.useRealTimers(); jest.restoreAllMocks(); });
 
+test.each([150, null])('保留の削除影響 %s と書誌を表示し未測定を 0 にしない', (lostHits) => {
+  const f = setup();
+  Object.assign(f.state.queryOptimizationRun!.trials[0]!, { held: true, impact: {
+    lostHits, gainedHits: 0, error: lostHits === null ? 'HTTP 414' : null,
+    inspected: lostHits === null ? [] : [{ pmid: '901', title: '研究1', year: 2024 }, { pmid: '902', title: '研究2', year: 2023 }],
+  } });
+  f.render();
+  const history = f.container.querySelector('.optimization__history')!;
+  expect(history.textContent).toContain('/ 保留:');
+  const group = Array.from(history.querySelectorAll('section')).find((item) => item.querySelector('h4')?.textContent === '削除影響')!;
+  expect(group.textContent).toContain(`失う集合: ${lostHits ?? '未測定'} 件`);
+  expect(group.textContent).toContain(`確認した書誌: ${lostHits === null ? 0 : 2} 件`);
+  expect(group.querySelectorAll('a')).toHaveLength(lostHits === null ? 0 : 2);
+  if (lostHits !== null) {
+    const link = group.querySelector('a')!;
+    expect(link.href).toBe(buildPubmedSearchUrl('901[uid]'));
+    expect(link.textContent).toBe('PMID 901（2024）研究1');
+    expect(link.target).toBe('_blank');
+    expect(link.rel).toBe('noopener noreferrer');
+  } else expect(group.textContent).toContain('実測・取得の失敗: HTTP 414');
+});
+
 test('却下試行をライブ表示し、候補の前後値と最良値を分離する', () => {
   const f = setup();
   const focus = jest.spyOn(HTMLElement.prototype, 'focus');
@@ -52,14 +74,15 @@ test('却下試行をライブ表示し、候補の前後値と最良値を分�
   expect(focus).not.toHaveBeenCalled();
 });
 
-test('4種類の変更詳細、ツリー、書誌リンク、語の単独件数と固有寄与を表示する', () => {
+test('変更詳細、ツリー、書誌リンク、語の単独件数と固有寄与を表示する', () => {
   const f = setup();
   f.state.queryOptimizationRun!.trials[0]!.before!.terms = [
     { blockId: '1', query: 'old[tiab]', hits: 50, delta: 9, finalContribution: 3 },
   ];
   f.render();
   const details = f.container.querySelector('.optimization__history details')!;
-  expect(Array.from(details.querySelectorAll('h4')).map((h) => h.textContent)).toEqual(['MeSH', 'フリーワード', 'シード', 'API 待機']);
+  expect(Array.from(details.querySelectorAll('h4')).map((h) => h.textContent)).toEqual(['MeSH', 'フリーワード', 'シード', '削除影響', 'API 待機']);
+  expect(details.textContent).toContain('差集合は実測していません');
   expect(details.textContent).toContain('Parent → Child');
   expect(details.textContent).toContain('C01.001 / explode: なし / 子は未取得');
   expect(details.textContent).toContain('単独件数（変更前 → 変更後）: 50 件 → 未測定');
@@ -317,4 +340,20 @@ test('再開した run の最初の試行が届くまでは復元ログを読め
   f.state.queryOptimizationRun.trials = [trial('initial')];
   f.render();
   expect(f.container.querySelector('.optimization__restored')).toBeNull();
+});
+
+test.each([150, null, undefined])('復元した削除影響 %s は保留と欠測を区別する', (lostHits) => {
+  const f = setup();
+  const candidate = f.state.queryOptimizationRun!.trials[0]!;
+  f.state.queryOptimizationRun = null;
+  f.state.queryOptimizationSetup = { projectId: 'p', status: 'ready', maxHits: '10', maxIterations: '5', seedCount: 2, error: null,
+    checkpoint: { projectId: 'p', runId: 'old', savedAt: '2026-09-10', maxHits: 10, status: 'interrupted', needsRevalidation: true,
+      trials: [{ candidateId: candidate.candidateId, formula: candidate.formula, totalHits: 50, capturedSeedCount: 2,
+        accepted: false, held: true, lostHits, reason: '要確認', fingerprint: 'f' }] },
+  };
+  f.render();
+  const restored = f.container.querySelector('.optimization__restored')!;
+  expect(restored.textContent).toContain('保留: 要確認');
+  if (lostHits === undefined) expect(restored.textContent).not.toContain('/ 失う');
+  else expect(restored.textContent).toContain(`/ 失う ${lostHits ?? '未測定'} 件`);
 });

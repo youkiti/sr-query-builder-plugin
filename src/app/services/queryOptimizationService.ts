@@ -7,6 +7,7 @@ import {
   type OptimizationMeshRequest,
   type OptimizationMeshRequestResult,
   type OptimizationTrial,
+  type OptimizationImpact,
   type OptimizationApiEvent,
   type OptimizeQueryProposal,
   type PreviousOptimizationRejection,
@@ -21,7 +22,7 @@ import {
 } from '@/lib/search-formula-md/references';
 import { tokenizeCombination, validateCombinationExpression, validateReferences } from '@/lib/combination-expression';
 import type { PubmedFormula } from '@/lib/search-formula-md';
-import { esearch, type EutilsDeps } from '@/lib/ncbi';
+import { esearch, efetchArticles, type EutilsDeps } from '@/lib/ncbi';
 import { resolveRateLimiter } from '@/lib/ncbi/eutils';
 import type { LlmProviderFactory } from './llmProviderService';
 import { evaluateQuery, type QueryEvaluation } from './queryEvaluationService';
@@ -151,6 +152,8 @@ export const DEFAULT_MAX_API_CALLS = 200;
 export const MAX_TERM_API_CALLS = 100;
 // 保存回数を約1/10に抑えつつ、中断時に払い戻されうる通信を最大9回に留める。
 const CHECKPOINT_API_CALL_INTERVAL = 10;
+// 先頭 N 件の書誌は確認対象の提示であって、集合全体を安全と判断する根拠にしない。
+const INSPECT_LIMIT = 20;
 
 /** 追加分析の予算切れは、候補評価全体を停止する理由にはしない。 */
 class TermAnalysisBudgetError extends Error {}
@@ -422,6 +425,35 @@ export async function runQueryOptimization(
     };
     return { formula, evaluation, measurement };
   };
+  const measureImpact = async (before: PubmedFormula, after: PubmedFormula): Promise<OptimizationImpact> => {
+    task = null;
+    notify();
+    const impact: OptimizationImpact = { lostHits: null, gainedHits: null, inspected: [], error: null };
+    const failure = (err: unknown): void => {
+      if (err instanceof QueryOptimizationStopError) throw err;
+      boundary();
+      apiEvent('failure');
+      const message = err instanceof Error ? err.message : String(err);
+      impact.error = impact.error ? `${impact.error} / ${message}` : message;
+    };
+    const original = expandFormula(before);
+    const candidate = expandFormula(after);
+    let pmids: string[] = [];
+    try {
+      const lost = await esearch(`(${original}) NOT (${candidate})`, eutils, { retmax: INSPECT_LIMIT });
+      impact.lostHits = lost.count;
+      pmids = lost.pmids.slice(0, INSPECT_LIMIT);
+    } catch (err) { failure(err); }
+    try {
+      impact.gainedHits = (await esearch(`(${candidate}) NOT (${original})`, eutils, { retmax: 0 })).count;
+    } catch (err) { failure(err); }
+    if (impact.lostHits !== null && impact.lostHits > 0) {
+      try {
+        impact.inspected = (await efetchArticles(pmids, eutils)).map(({ pmid, title, year }) => ({ pmid, title, year }));
+      } catch (err) { failure(err); }
+    }
+    return impact;
+  };
   async function finish(reason: OptimizationStopReason,
     latestMeasurement: OptimizationMeasurement | undefined = best?.measurement): Promise<QueryOptimizationResult> {
     terminal = reason;
@@ -435,6 +467,11 @@ export async function runQueryOptimization(
       unmetReasons.push(`最大件数 ${fixed.maxHits} 件を超えています（実測 ${latestMeasurement.totalHits} 件）`);
     }
     if (reason !== 'conditions_met') unmetReasons.push(`終了理由: ${reason}`);
+    if (reason !== 'conditions_met') {
+      for (const trial of trials.filter((item) => item.held)) {
+        unmetReasons.push(`レビュー候補として保留: ${trial.candidateId}（失う ${trial.impact?.lostHits ?? '未測定'} 件・増える ${trial.impact?.gainedHits ?? '未測定'} 件）`);
+      }
+    }
     const result: QueryOptimizationResult = {
       status: reason === 'conditions_met' ? 'achieved' : reason === 'user_stop' ? 'stopped'
         : reason === 'api_error' || reason === 'invalid_input' ? 'error' : 'needs_review',
@@ -544,17 +581,6 @@ export async function runQueryOptimization(
           step = 'measuring';
           notify();
           const measured = await measure(candidate, candidateId);
-          let detailStop: QueryOptimizationStopError | null = null;
-          if (deps.measureTermDetails && measured.evaluation.status === 'success') {
-            try {
-              measured.measurement = { ...measured.measurement, terms: await measureTerms(candidate, fixed.approvedBlocks, {
-                ...termOptions, finalHits: measured.measurement.totalHits,
-              }) };
-            } catch (err) {
-              if (err instanceof QueryOptimizationStopError) detailStop = err;
-              else apiEvent('failure');
-            }
-          }
           const failed = measured.evaluation.status === 'failure';
           measurementFailures = failed ? measurementFailures + 1 : 0;
           // 失敗測定は回帰判定の根拠にしない。次の候補で再び測定する機会を残す。
@@ -567,11 +593,33 @@ export async function runQueryOptimization(
           const rejection = failed ? describeMeasurementFailure(measured.evaluation)
             : lostSeeds.length > 0 ? `捕捉済みシードを失う: ${lostSeeds.join(', ')}`
               : repeated ? '評価済みの同一式への回帰' : '局面の指標に改善がありません';
+          // 採否に要る差集合を先に測る。追加詳細（語別計測）の途中で停止しても採否は確定している。
+          const impact: OptimizationImpact | undefined = improved && !repeated
+            ? await measureImpact(best.formula, candidate)
+            : undefined;
+          const accepted = impact?.lostHits === 0 && impact.gainedHits !== null;
+          const held = impact !== undefined && !accepted;
+          const impactReason = impact && (accepted
+            ? `局面の指標が改善しました（失う集合 0 件、増える集合 ${impact.gainedHits} 件）`
+            : impact.lostHits !== null && impact.lostHits > 0
+              ? `失う集合 ${impact.lostHits} 件のためレビュー候補に留めました（書誌を確認した件数 ${impact.inspected.length} / 全体 ${impact.lostHits}、増える集合 ${impact.gainedHits ?? '未測定'} 件）`
+              : `${impact.lostHits === null ? '失う集合' : '増える集合'}を実測できなかったためレビュー候補に留めました: ${impact.error}`);
+          let detailStop: QueryOptimizationStopError | null = null;
+          if (deps.measureTermDetails && measured.evaluation.status === 'success') {
+            try {
+              measured.measurement = { ...measured.measurement, terms: await measureTerms(candidate, fixed.approvedBlocks, {
+                ...termOptions, finalHits: measured.measurement.totalHits,
+              }) };
+            } catch (err) {
+              if (err instanceof QueryOptimizationStopError) detailStop = err;
+              else apiEvent('failure');
+            }
+          }
           trials.push(makeTrial({ ...details, candidateId, formula: candidate, before, after: measured.measurement,
-            accepted: improved && !repeated, reason: improved && !repeated ? '局面の指標が改善しました' : rejection,
+            accepted, ...(impact ? { held, impact } : {}), reason: impactReason ?? rejection,
             rationale: proposal.rationale }));
-          if (improved && !repeated) best = measured;
-          noImprovement = improved && !repeated ? 0 : noImprovement + 1;
+          if (accepted) best = measured;
+          noImprovement = accepted ? 0 : noImprovement + 1;
           // 追加詳細の停止でも、実測済み候補と採否を履歴へ残してから終了する。
           if (detailStop) throw detailStop;
           await save();

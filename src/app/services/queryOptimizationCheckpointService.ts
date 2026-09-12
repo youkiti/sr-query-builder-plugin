@@ -74,6 +74,9 @@ export interface OptimizationTrialSummary {
   totalHits: number | null;
   capturedSeedCount: number | null;
   accepted: boolean;
+  held?: boolean;
+  lostHits?: number | null;
+  gainedHits?: number | null;
   reason: string;
   fingerprint: string | null;
 }
@@ -137,6 +140,9 @@ export async function saveQueryOptimizationCheckpoint(
       totalHits: trial.after?.totalHits ?? null,
       capturedSeedCount: trial.after?.capturedPmids?.length ?? null,
       accepted: trial.accepted,
+      held: trial.held ?? false,
+      lostHits: trial.impact?.lostHits ?? null,
+      gainedHits: trial.impact?.gainedHits ?? null,
       reason: trial.reason,
       fingerprint: trial.after?.fingerprint ?? null,
     })),

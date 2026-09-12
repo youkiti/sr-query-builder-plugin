@@ -2,6 +2,7 @@ import {
   createFolder,
   ensureChildFolder,
   ensureRootFolder,
+  findChildFile,
   getFileText,
   moveFileToFolder,
   uploadTextFile,
@@ -106,6 +107,41 @@ describe('ensureChildFolder', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
     const createBody = JSON.parse((fetch.mock.calls[1][1] as RequestInit).body as string);
     expect(createBody.name).toBe('skipped_seeds');
+  });
+});
+
+describe('findChildFile', () => {
+  test('親フォルダ配下の既存ファイルを返す', async () => {
+    const fetch = jest
+      .fn()
+      .mockResolvedValueOnce(okJson({ files: [{ id: 'FILE1', webViewLink: 'https://drive/existing' }] }));
+    const deps = { fetch, getAccessToken: jest.fn().mockResolvedValue('t') };
+    await expect(findChildFile('run.json', 'PARENT', deps)).resolves.toEqual({
+      id: 'FILE1',
+      webViewLink: 'https://drive/existing',
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [url, init] = fetch.mock.calls[0] as [string, RequestInit];
+    expect(init.method).toBe('GET');
+    const decoded = decodeURIComponent(url);
+    expect(decoded).toContain('/drive/v3/files?fields=files(id,webViewLink)&pageSize=1&q=');
+    expect(decoded).toContain("name='run.json' and 'PARENT' in parents and trashed=false");
+    expect(decoded).not.toContain('mimeType');
+  });
+
+  test.each([{ files: [] }, {}])('既存ファイルが無ければ null を返す（応答=%j）', async (body) => {
+    const fetch = jest.fn().mockResolvedValueOnce(okJson(body));
+    const deps = { fetch, getAccessToken: jest.fn().mockResolvedValue('t') };
+    await expect(findChildFile('run.json', 'PARENT', deps)).resolves.toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test('名前に含まれるシングルクォートをエスケープする', async () => {
+    const fetch = jest.fn().mockResolvedValueOnce(okJson({ files: [] }));
+    const deps = { fetch, getAccessToken: jest.fn().mockResolvedValue('t') };
+    await findChildFile("run's'log.json", 'PARENT', deps);
+    const [url] = fetch.mock.calls[0] as [string, RequestInit];
+    expect(decodeURIComponent(url)).toContain("name='run\\'s\\'log.json'");
   });
 });
 

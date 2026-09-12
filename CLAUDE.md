@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - ユーザーフロー全 10 ルート（home → protocol → blocks → seeds → draft → expand → edit → export → done + history）の画面実装済み。検索式の生成と検証は `draft` タブに統合され、「生成して検証する」1 操作でブロックごとのヒット数（line_hits）をライブ表示しつつ、完成後に捕捉率・MeSH 検証まで自動実行する（旧 `validate` ルートは廃止）
 - `#/expand` の inside モード（有効 seed 0 件）は既定で AI に specific（精度優先）な絞り込み式を設計させ、その relevance 上位 50 件から最大 5 件を人のレビューに回す（issue #93。`design-specific-query` skill / `purpose=design_specific_query`。チェックを外すと従来の現式上位）。specific 式が 0 件・構文エラー・設計失敗のときは現式へ自動フォールバックし、理由を画面に出す
-- `#/draft` から検索式の自動調整を実行できる。最大件数と反復上限を指定し、実測・変更理由をライブ履歴で確認する。最終レビューは条件達成／要確認／停止／エラーを区別し、最後に一度だけ `auto_optimize` として採用保存、または未保存のまま `#/edit` へ渡せる。既知シードの捕捉は未知の適格研究の網羅性を保証しない
+- `#/draft` から検索式の自動調整を実行できる。最大件数と反復上限を指定し、実測・変更理由をライブ履歴で確認する。最終レビューは条件達成／要確認／停止／エラーを区別し、最後に一度だけ `auto_optimize` として採用保存、または未保存のまま `#/edit` へ渡せる。既知シードの捕捉は未知の適格研究の網羅性を保証しない。候補は採用直前に差集合（変更前 NOT 変更後）を実測し、失う集合が 1 件でもあれば自動採用せず保留してレビューに回す（issue #106）。**自動調整のテストで `esearch` をスタブするときは、差集合クエリ（`term` に `) NOT (` を含む）を先に判定して 0 件を返すこと**。既定の件数を返すと採用されるはずの候補がすべて「保留」になり、`achieved` 期待のテストが `needs_review` で落ちる（unit 3 ファイル・E2E 1 ファイルで実際に踏んだ）
 - P0 の検証ロジック（行ごとのヒット数 / シード捕捉率 / 全 DB 変換 / MeSH 抽出）は TypeScript へ移植済み（[src/features/validation/](src/features/validation/), [src/features/conversion/](src/features/conversion/)）
 - 未実装・残タスクは「[未実装・既知のギャップ](#未実装既知のギャップ)」を参照
 
@@ -53,6 +53,8 @@ export default {
   use: { ...base.use, launchOptions: { executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' } },
 };
 ```
+
+**codex（`codex exec`）のサンドボックスからは E2E を実行できない**: `--sandbox workspace-write` で走らせた実装エージェントに `npm run test:e2e` を回させると、[playwright.config.ts](playwright.config.ts) の `webServer` が `localhost:4400` を bind しようとして `listen EPERM` で落ちる（サンドボックスがネットワークの bind を許さない。**実装の回帰ではない**）。実装を codex へ委譲するときは、**ブリーフの「あなたが通すコマンド」から E2E を外し**（`npm run typecheck` / `npm run lint` / `npm run lint:css` / `npm test` までにする）、**E2E は親セッションで回すこと**。E2E のテストコード自体を codex に書かせるのは構わない（実行だけを親が引き受ける）。ブリーフに書き忘れると、実装側が `listen EPERM` を自分の変更の失敗として調べ直す往復が 1 回増える（実際に 3 回踏んだ）。
 
 **複数の worktree で並行作業するとき、E2E を同時に走らせてはいけない**: [playwright.config.ts](playwright.config.ts) は `webServer` を `localhost:4400`（`E2E_PORT` 未設定時）に立て、`reuseExistingServer: !process.env.CI` を指定している。したがって **2 つ目の worktree で `npm run test:e2e` を始めると、1 つ目が立てたサーバを「既にレディ」とみなして再利用し、別 worktree の `dist/` を配信したままテストが走る**（`tools/playwright-server.js` は起動時の作業ディレクトリ配下の `dist/` を配信する）。自分の変更が反映されていない画面を検証することになり、**しかも普通に green になるので気づけない**。並行させるなら worktree ごとに別ポートを渡す（`E2E_PORT=4401 npm run test:e2e`）。ポートを分けないなら、E2E を回す worktree を 1 つに決めて他では実行しないこと。
 
@@ -173,7 +175,7 @@ src/
 - **自動調整の復元と再開**: リロード後はチェックポイントを中断／完了済みの記録として表示する。入力（研究基準・承認ブロック・シード・最大件数）が一致し、通信・時間・評価試行の残予算がある中断記録だけ、利用者の操作で最良候補を初期式にした新しい run を開始できる。実測はすべてやり直し、過去の却下式・理由・fingerprint は未再検証の AI 文脈だけに使う。予算は元の上限から累積消費分を引く。復元したログは state に保持し、再開した run の最初の試行が届くまでは画面で読める。バックグラウンドでの自動再開や復元ログからの採用保存は行わない。旧形式で再開情報が不足する記録はログ表示に留める。シード 0 件では捕捉確認済みの条件達成にはしない。設計・実装状況は [docs/query-optimization-plan.md](docs/query-optimization-plan.md) を参照
 - **P1 の画面接続は実装済み**: `editView` はチップ編集部品を使用し、`blockInspector` が語の寄与と MeSH 文脈を表示する。自動調整も語別計測・MeSH の追加取得を利用する。NCBI 通信は `eutils.ts` の共有レート制御を通る。画面未接続・レート制御未実装という旧記述は解消済み
 - **OpenAI / Anthropic Claude への直接連携は未実装**: 実装済みなのは Gemini と OpenRouter の 2 プロバイダ（`src/lib/llm/GeminiProvider.ts` / `OpenRouterProvider.ts`。既定モデルは `gemini-3.5-flash`）。Options 画面で OpenRouter の API キーとカスタムモデル ID（最大 20 件）を追加登録できるため OpenRouter 経由で多くのモデルに到達できるが、OpenAI / Anthropic の API を直接叩く `LLMProvider` 実装は無い（`LlmProviderId` 型に `openai` / `anthropic` の値はあるが対応実装が無い）
-- E2E ジャーニー J1（新規作成→export 貫通）は draft 生成〜検証の主要経路を journey-draft-generate.spec.ts で回帰確認済み。J4（expand キーボード判定）/ J5 の API エラー系は残タスク（[docs/ui-deep-test-plan.md](docs/ui-deep-test-plan.md) Phase D/E）
+- E2E ジャーニー J1（新規作成→export 貫通）は draft 生成〜検証の主要経路を journey-draft-generate.spec.ts で回帰確認済み。J4（expand の i/e/m 判定・n/p 移動・Sheets append 録音）と J5（expand 取得時の Sheets 403 / NCBI 429 / LLM 500 のエラー表示・再取得）は実装済み。Phase E の target UI との差分は drift 注記を参照（[docs/ui-deep-test-plan.md](docs/ui-deep-test-plan.md) Phase D/E）
 
 ## 目的（ゴール）
 

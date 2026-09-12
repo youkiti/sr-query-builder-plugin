@@ -52,7 +52,22 @@ export interface OptimizationMeshRequestResult {
   note: string;
 }
 
+export interface OptimizationImpact {
+  /** 変更前 NOT 変更後 の実測件数。失敗時は null（未測定を 0 件として扱わない）。 */
+  lostHits: number | null;
+  /** 変更後 NOT 変更前 の実測件数。失敗時は null。 */
+  gainedHits: number | null;
+  /** 失う集合のうち書誌を取得した先頭の数件。集合全体を安全と判断する根拠にはしない。 */
+  inspected: { pmid: string; title: string | null; year: number | null }[];
+  /** 実測・書誌取得の失敗理由。成功時は null。 */
+  error: string | null;
+}
+
 export interface OptimizationTrial {
+  /** 採用判定を通ったが削除影響の確認が必要なため、レビュー候補として保留した試行。 */
+  held?: boolean;
+  /** 採用判定の直前に実測した差集合。判定前に却下した試行には無い。 */
+  impact?: OptimizationImpact;
   kind: 'initial' | 'proposal' | 'information' | 'final';
   /** 変更案の生成時は必須。MeSH の変更語も run の文脈への参照として使う。 */
   changes?: Pick<OptimizeQueryProposal, 'targetBlockId' | 'addedTerms' | 'removedTerms' | 'replacedTerms'>;
@@ -119,6 +134,9 @@ export const OPTIMIZE_QUERY_SYSTEM_PROMPT = `
 - 未計測・失敗は不明であり 0 件ではありません。単独件数と累積 OR の純増 Δ は
   最終式での固有寄与とは異なります。少数でも必要な概念やシードを拾う語は保持します。
 - 冗長・低寄与を削除の確証とせず、変更案全体を制御側が再実測します。
+- 変更前に当たって変更後に当たらない文献（失う集合）が 1 件でもある変更案は自動採用されず保留になります。
+  削除・置換を提案するときは、失う集合が 0 件になる冗長整理か、
+  失う理由を rationale で説明できる変更に限ってください。
 - MeSH は提供された実在ノードと親子関係を根拠にし、未取得の関係を推測しません。
   NoExp・qualifier・MajorTopic の変更は別の操作として理由を示します。
 - 周辺の外を調べる必要があれば mesh_requests に descriptor / tree_number を指定します。
@@ -205,7 +223,8 @@ export async function optimizeQuery(
     PREVIOUS_REJECTIONS: formatContext(input.previousRejectedTrials ?? []),
     TRIALS: input.trials?.length ? input.trials.map((trial) => [
       formatContext({ candidateId: trial.candidateId, formula: trial.formula,
-        accepted: trial.accepted, reason: trial.reason, rationale: trial.rationale }),
+        accepted: trial.accepted, reason: trial.reason, rationale: trial.rationale,
+        held: trial.held ?? false, impact: trial.impact ?? null }),
       `変更前: ${trial.before ? formatMeasurement(trial.before) : '(未計測)'}`,
       `変更後: ${trial.after ? formatMeasurement(trial.after) : '(未計測)'}`,
     ].join('\n')).join('\n') : '(なし)',

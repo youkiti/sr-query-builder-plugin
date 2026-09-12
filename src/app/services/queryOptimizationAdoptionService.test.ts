@@ -38,8 +38,9 @@ function setup() {
   const validation = jest.spyOn(validationRepository, 'appendValidationLog').mockResolvedValue();
   jest.spyOn(googleApi, 'getSheetValues').mockResolvedValue([]);
   jest.spyOn(googleApi, 'ensureChildFolder').mockResolvedValue({ id: 'folder', webViewLink: 'https://drive.example/folder' });
+  const find = jest.spyOn(googleApi, 'findChildFile').mockResolvedValue(null);
   const upload = jest.spyOn(googleApi, 'uploadTextFile').mockResolvedValue({ id: 'log', webViewLink: 'https://drive.example/log' });
-  return { store, google, run, versions, append, validation, upload };
+  return { store, google, run, versions, append, validation, find, upload };
 }
 afterEach(() => { jest.restoreAllMocks(); document.body.innerHTML = ''; });
 
@@ -98,6 +99,39 @@ test('保存中にプロジェクトを切り替えても遅い結果を適用�
   expect(f.store.getState().currentFormulaVersionId).toBe('parent');
 });
 
+test('検証ログ追記の失敗後は既存の実行ログを再利用して採用保存する', async () => {
+  const f = setup();
+  f.validation.mockRejectedValueOnce(new Error('検証ログ保存失敗'));
+  await adoptQueryOptimization(f);
+  expect(f.store.getState().queryOptimizationRun?.save?.status).toBe('error');
+  expect(f.upload).toHaveBeenCalledTimes(1);
+  expect(f.append).not.toHaveBeenCalled();
+  f.find.mockResolvedValue({ id: 'log', webViewLink: 'https://drive.example/log' });
+  await adoptQueryOptimization(f);
+  expect(f.find).toHaveBeenLastCalledWith('r.json', 'folder', f.google);
+  expect(f.upload).toHaveBeenCalledTimes(1);
+  expect(f.validation).toHaveBeenLastCalledWith('s', expect.objectContaining({ versionId: 'r',
+    detailRef: 'https://drive.example/log' }), f.google);
+  expect(f.append).toHaveBeenCalledWith('s', expect.objectContaining({ versionId: 'r',
+    note: expect.stringContaining('https://drive.example/log') }), f.google);
+  expect(f.store.getState().queryOptimizationRun?.save?.status).toBe('saved');
+});
+
+test('実行ログの照会失敗ではアップロードせず保存エラーにする', async () => {
+  const f = setup();
+  f.find.mockRejectedValueOnce(new Error('ログ照会失敗'));
+  await adoptQueryOptimization(f);
+  expect(f.upload).not.toHaveBeenCalled();
+  expect(f.validation).not.toHaveBeenCalled();
+  expect(f.append).not.toHaveBeenCalled();
+  expect(f.store.getState().queryOptimizationRun?.save).toEqual({
+    formulaVersionId: 'r', status: 'error', error: 'ログ照会失敗',
+  });
+  await adoptQueryOptimization(f);
+  expect(f.upload).toHaveBeenCalledTimes(1);
+  expect(f.store.getState().queryOptimizationRun?.save?.status).toBe('saved');
+});
+
 test.each([true, false])('編集導線は保存せず下書きを表示できる（親版あり=%s）', (hasParent) => {
   const f = setup();
   if (!hasParent) f.store.setState((s) => ({ ...s, currentFormulaVersionId: null, currentFormulaMarkdown: null }));
@@ -138,8 +172,13 @@ test('版追記だけの失敗後は検証ログを再追記しない', async ()
   const f = setup();
   f.append.mockRejectedValueOnce(new Error('版保存失敗'));
   await adoptQueryOptimization(f);
+  expect(f.store.getState().queryOptimizationRun?.save?.status).toBe('error');
+  f.find.mockResolvedValue({ id: 'log', webViewLink: 'https://drive.example/log' });
   jest.mocked(googleApi.getSheetValues).mockResolvedValue([['validation_id'], ['r']]);
   await adoptQueryOptimization(f);
+  expect(f.upload).toHaveBeenCalledTimes(1);
+  expect(f.append).toHaveBeenLastCalledWith('s', expect.objectContaining({
+    note: expect.stringContaining('https://drive.example/log') }), f.google);
   expect(f.validation).toHaveBeenCalledTimes(1);
   expect(f.store.getState().queryOptimizationRun?.save?.status).toBe('saved');
 });

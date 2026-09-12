@@ -7,7 +7,7 @@ import { sharedEutilsRateLimiters } from '@/lib/ncbi';
 import { validateCombinationExpression } from '@/lib/combination-expression';
 import { runQueryOptimization, validateOptimizationCandidate, QueryOptimizationStopError, type QueryOptimizationInput, type QueryOptimizationDeps } from './queryOptimizationService';
 
-interface Outcome { hits: number; captured: string[] }
+interface Outcome { hits: number; captured: string[]; lost?: { hits: number; pmids?: string[] }; gained?: number }
 
 function setup(outcomes: Record<string, Outcome> = { a: { hits: 200, captured: ['11', '22'] } }, proposals = ['b[tiab]']) {
   const input: QueryOptimizationInput = {
@@ -24,7 +24,37 @@ function setup(outcomes: Record<string, Outcome> = { a: { hits: 200, captured: [
     meshContext: [{ id: 'D001', descriptor: 'Disease', label: 'Disease', treeNumbers: ['C01.100'], parentIds: ['D000'], childIds: [], explode: true, note: '取得済み' }],
   };
   const fetch = jest.fn().mockImplementation(async (resource: string) => {
+    if (resource.includes('efetch.fcgi')) {
+      const pmids = new URL(resource).searchParams.get('id')!.split(',');
+      const xml = `<PubmedArticleSet>${pmids.map((pmid) => `<PubmedArticle><PMID>${pmid}</PMID><ArticleTitle>研究 ${pmid}</ArticleTitle><PubDate><Year>2024</Year></PubDate></PubmedArticle>`).join('')}</PubmedArticleSet>`;
+      return { ok: true, status: 200, text: async () => xml };
+    }
     const query = new URL(resource).searchParams.get('term')!;
+    let depth = 0;
+    let marginIndex = -1;
+    for (let index = 0; index < query.length; index += 1) {
+      if (query[index] === '(') depth += 1;
+      if (query[index] === ')') depth -= 1;
+      if (depth === 0 && query.startsWith(') NOT (', index)) { marginIndex = index; break; }
+    }
+    const before = query.slice(0, marginIndex + 1);
+    const after = query.slice(marginIndex + ') NOT '.length);
+    const keyIn = (side: string) => {
+      const tags: readonly string[] = side.match(/[A-Za-z0-9]+\[tiab\]/g) ?? [];
+      return Object.keys(outcomes).find((term) => tags.includes(`${term}[tiab]`));
+    };
+    // 概念式自体の NOT は通常の測定値を返し、前後の候補式が揃う外側の差集合だけを扱う。
+    if (marginIndex >= 0 && keyIn(before) && keyIn(after) && keyIn(before) !== keyIn(after)) {
+      // 確認用 PMID を要求する方向は後半、逆方向は前半が候補式。
+      const lost = new URL(resource).searchParams.get('retmax') !== '0';
+      const side = lost ? after : before;
+      const candidateKey = keyIn(side)!;
+      const candidate = outcomes[candidateKey]!;
+      return { ok: true, status: 200, json: async () => ({ esearchresult: {
+        count: String(lost ? candidate.lost?.hits ?? 0 : candidate.gained ?? 0),
+        idlist: lost ? candidate.lost?.pmids ?? [] : [],
+      } }) };
+    }
     const tagged: readonly string[] = query.match(/[A-Za-z0-9]+\[tiab\]/g) ?? [];
     const key = Object.keys(outcomes).find((term) => tagged.includes(`${term}[tiab]`)) ?? 'a';
     const outcome = outcomes[key]!;
@@ -53,6 +83,128 @@ function deferred<T>() {
   const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
   return { promise, resolve, reject };
 }
+
+test('シードを維持して上限を満たす候補も失う集合があれば保留し書誌を提示する', async () => {
+  const { input, deps, fetch } = setup({ a: { hits: 200, captured: ['11', '22'] },
+    b: { hits: 50, captured: ['11', '22'], lost: { hits: 150, pmids: ['901', '902'] }, gained: 0 } });
+  input.maxIterations = 1;
+  const result = await runQueryOptimization(input, deps);
+  expect(result.trials[1]).toMatchObject({ accepted: false, held: true, impact: {
+    lostHits: 150, gainedHits: 0, error: null, inspected: [
+      { pmid: '901', title: '研究 901', year: 2024 }, { pmid: '902', title: '研究 902', year: 2024 },
+    ],
+  } });
+  expect(result.trials[1]?.reason).toContain('失う集合 150 件');
+  expect(result.trials[1]?.reason).toContain('書誌を確認した件数 2 / 全体 150');
+  expect(result.best?.measurement.totalHits).toBe(200);
+  expect(result.status).toBe('needs_review');
+  expect(result.unmetReasons).toContain('レビュー候補として保留: candidate-1（失う 150 件・増える 0 件）');
+  expect(fetch.mock.calls.some(([url]) => url.includes('efetch.fcgi') && decodeURIComponent(url).includes('901,902'))).toBe(true);
+  expect(result.apiCalls).toBe(fetch.mock.calls.length + 1);
+});
+
+test.each(['both', 'gained', 'efetch'])('差集合・書誌取得の失敗 %s は実測済み件数を保ち保留する', async (failure) => {
+  const { input, deps, fetch } = setup({ a: { hits: 200, captured: ['11', '22'] },
+    b: { hits: 50, captured: ['11', '22'], lost: { hits: failure === 'gained' ? 0 : 150, pmids: ['901'] } } });
+  input.maxIterations = 1;
+  const original = fetch.getMockImplementation()!;
+  fetch.mockImplementation(async (url: string) => {
+    const params = new URL(url).searchParams;
+    const difference = params.get('term')?.includes(') NOT (');
+    if ((failure === 'both' && difference) || (failure === 'gained' && difference && params.get('retmax') === '0')
+      || (failure === 'efetch' && url.includes('efetch.fcgi'))) return { ok: false, status: 414 };
+    return original(url);
+  });
+  const result = await runQueryOptimization(input, deps);
+  expect(result.trials[1]).toMatchObject({ accepted: false, held: true, impact: {
+    lostHits: failure === 'both' ? null : failure === 'gained' ? 0 : 150,
+    gainedHits: failure === 'efetch' ? 0 : null, inspected: [], error: expect.stringContaining('414'),
+  } });
+  if (failure !== 'efetch') expect(result.trials[1]?.reason).toContain('実測できなかった');
+  expect(result.trials[1]?.apiEvents).toContainEqual({ source: 'PubMed', status: 'failure' });
+  expect(result.best?.measurement.totalHits).toBe(200);
+});
+
+test('削除影響は run の予算で測り、確認書誌を先頭 20 件に制限する', async () => {
+  const pmids = Array.from({ length: 25 }, (_, index) => String(900 + index));
+  const { input, deps, fetch } = setup({ a: { hits: 200, captured: ['11', '22'] },
+    b: { hits: 50, captured: ['11', '22'], lost: { hits: 150, pmids } } });
+  input.maxIterations = 1;
+  let latest: Parameters<NonNullable<QueryOptimizationDeps['onProgress']>>[0] | undefined;
+  deps.onProgress = (progress) => { latest = progress; };
+  const original = fetch.getMockImplementation()!;
+  fetch.mockImplementation(async (url: string) => {
+    if (new URL(url).searchParams.get('term')?.includes(') NOT (') || url.includes('efetch.fcgi')) {
+      expect(latest).toMatchObject({ step: 'measuring', task: null, bestTotalHits: 200 });
+    }
+    return original(url);
+  });
+  const result = await runQueryOptimization(input, deps);
+  expect(result.trials[1]?.impact?.inspected).toHaveLength(20);
+  const url = fetch.mock.calls.find(([resource]) => resource.includes('efetch.fcgi'))![0] as string;
+  expect(new URL(url).searchParams.get('id')!.split(',')).toEqual(pmids.slice(0, 20));
+  expect(result.apiCalls).toBe(fetch.mock.calls.length + 1);
+});
+
+test('2 回の保留は改善なしで停止し次の AI に理由と件数を渡す', async () => {
+  const { input, deps, chat } = setup({ a: { hits: 200, captured: ['11', '22'] },
+    b: { hits: 50, captured: ['11', '22'], lost: { hits: 5 } },
+    c: { hits: 40, captured: ['11', '22'], lost: { hits: 5 } } }, ['b[tiab]', 'c[tiab]']);
+  const result = await runQueryOptimization(input, deps);
+  expect(result.stopReason).toBe('no_improvement');
+  expect(chat).toHaveBeenCalledTimes(2);
+  expect(result.trials.filter((trial) => trial.held)).toHaveLength(2);
+  const prompt = chat.mock.calls[1]![0][1].content as string;
+  for (const text of ['"held": true', '"lostHits": 5', '失う集合 5 件']) expect(prompt).toContain(text);
+});
+
+test('保留の 150 件を次の AI に渡し、その後条件達成しても未達理由には保留を残さない', async () => {
+  const { input, deps, chat } = setup({ a: { hits: 200, captured: ['11', '22'] },
+    b: { hits: 50, captured: ['11', '22'], lost: { hits: 150 } },
+    c: { hits: 90, captured: ['11', '22'] } }, ['b[tiab]', 'c[tiab]']);
+  input.maxIterations = 2;
+  const result = await runQueryOptimization(input, deps);
+  expect(result).toMatchObject({ status: 'achieved', stopReason: 'conditions_met', unmetReasons: [] });
+  expect(result.trials[1]?.held).toBe(true);
+  expect(chat.mock.calls[1]![0][1].content).toContain('"held": true');
+  expect(chat.mock.calls[1]![0][1].content).toContain('"lostHits": 150');
+});
+
+test.each(['seed_loss', 'within_target', 'repeated', 'syntax', 'failure'])(
+  '採用判定前の却下 %s には差集合を測らない', async (kind) => {
+    const { input, deps, fetch } = setup({ a: { hits: kind === 'within_target' ? 80 : 200, captured: ['11', '22'] },
+      b: { hits: 40, captured: kind === 'seed_loss' ? ['11'] : ['11', '22'], lost: { hits: 3 } } },
+    [kind === 'repeated' ? 'a[tiab]' : kind === 'syntax' ? 'b[tiab] OR' : 'b[tiab]']);
+    input.maxIterations = 1;
+    if (kind === 'failure') {
+      const original = fetch.getMockImplementation()!;
+      fetch.mockImplementation(async (url: string) => new URL(url).searchParams.get('term')?.includes('b[tiab]')
+        ? { ok: false, status: 414 } : original(url));
+    }
+    const result = await runQueryOptimization(input, deps);
+    expect(result.trials[1]?.accepted).toBe(false);
+    expect(result.trials[1]?.impact).toBeUndefined();
+    expect(fetch.mock.calls.some(([url]) => new URL(url).searchParams.get('term')?.includes(') NOT ('))).toBe(false);
+    if (kind === 'within_target') expect(result).toMatchObject({ status: 'achieved', unmetReasons: [] });
+  }
+);
+
+test.each(['lost', 'gained', 'efetch'])('削除影響の %s 中の停止例外を握りつぶさない', async (stage) => {
+  const { input, deps, fetch } = setup({ a: { hits: 200, captured: ['11', '22'] },
+    b: { hits: 50, captured: ['11', '22'], lost: { hits: 150, pmids: ['901'] } } });
+  const original = fetch.getMockImplementation()!;
+  fetch.mockImplementation(async (url: string) => {
+    const params = new URL(url).searchParams;
+    if ((stage === 'efetch' && url.includes('efetch.fcgi'))
+      || (params.get('term')?.includes(') NOT (') && params.get('retmax') === (stage === 'lost' ? '20' : stage === 'gained' ? '0' : 'unused'))) {
+      throw new QueryOptimizationStopError('user_stop');
+    }
+    return original(url);
+  });
+  const result = await runQueryOptimization(input, deps);
+  expect(result.stopReason).toBe('user_stop');
+  expect(result.best?.measurement.totalHits).toBe(200);
+});
 
 afterEach(() => jest.restoreAllMocks());
 
@@ -255,7 +407,7 @@ test('初期式が目標内でも AI を呼び、同じ式をキャッシュな�
 });
 
 test('未捕捉時は件数が増えてもシード増加を採用し、全件捕捉後は超過分を減らす', async () => {
-  const { input, deps, chat } = setup({ a: { hits: 150, captured: ['11'] }, b: { hits: 300, captured: ['11', '22'] },
+  const { input, deps, chat, fetch } = setup({ a: { hits: 150, captured: ['11'] }, b: { hits: 300, captured: ['11', '22'] },
     c: { hits: 90, captured: ['11', '22'] } }, ['b[tiab]', 'c[tiab]']);
   const result = await runQueryOptimization(input, deps);
   expect(result.status).toBe('achieved');
@@ -263,6 +415,9 @@ test('未捕捉時は件数が増えてもシード増加を採用し、全件�
   expect(result.trials.map((trial) => trial.accepted)).toEqual([true, true, true, true]);
   expect(result.best?.formula.blocks[0]?.expression).toBe('c[tiab]');
   expect(chat.mock.calls[1]![0][1].content).toContain('"totalHits": 300');
+  expect(result.trials[1]).toMatchObject({ accepted: true, impact: { lostHits: 0, gainedHits: 0 } });
+  expect(result.trials[1]?.reason).toContain('（失う集合 0 件、増える集合 0 件）');
+  expect(fetch.mock.calls.some(([url]) => url.includes('efetch.fcgi'))).toBe(false);
 });
 
 test('上限だけ満たしてシードを失う候補は却下し、次の AI へ前後の実測と理由を返す', async () => {

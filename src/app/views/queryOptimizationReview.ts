@@ -46,6 +46,10 @@ export function renderOptimizationReview(
     ? `既知シード ${measured.capturedPmids.length}/${seeds} 件捕捉`
     : `既知シード捕捉は未測定（対象 ${seeds ?? '不明'} 件）`);
   paragraph('既知シードの捕捉は、未知の適格研究の網羅性を保証するものではありません。');
+  const held = run.trials.filter((trial) => trial.held);
+  paragraph(held.length
+    ? `削除影響の確認: 失う集合があるため保留した候補 ${held.length} 件（${held.map((trial) => trial.candidateId).join('、')}。試行履歴の「削除影響」を確認してください）`
+    : '削除影響の確認: 保留した候補はありません');
   if (seeds === 0) paragraph('検証対象シードがないため、捕捉の確認はできていません。');
 
   subheading('変更一覧（初期式 → 最終式）');

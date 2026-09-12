@@ -62,6 +62,9 @@ test('real extraction, drafting and optimization evaluate an improving proposal 
       const term = params.get('term')!;
       calls.push(term);
       const ids = [...term.matchAll(/(\d+)\[(?:uid|pmid)\]/gi)].map((m) => m[1]!);
+      if (term.includes(') NOT (')) {
+        return new Response(JSON.stringify({ esearchresult: { count: '0', idlist: [] } }));
+      }
       const improved = term.includes('tobacco');
       const capture = ids.filter((id) => !term.includes('smoking') || improved || id === '1');
       return new Response(JSON.stringify({ esearchresult: { count: String(ids.length ? capture.length : improved ? 200 : 100),

@@ -16,6 +16,10 @@ function fixture(words: number, mesh: number, rounds: number) {
   const fetch = jest.fn(async (url) => {
     const query = new URL(String(url)).searchParams.get('term')!;
     queries.push(query);
+    // 固有寄与は内側にも NOT を持つため、候補間の差集合だけを空にする。
+    if (query.includes(') NOT (') && query.split(' NOT ').length === 2) {
+      return { ok: true, status: 200, json: async () => ({ esearchresult: { count: '0', idlist: [] } }) } as Response;
+    }
     const version = Number(/b1v(\d+)word/.exec(query)?.[1] ?? '0');
     const count = query.includes('[uid]') ? 1 : query.includes(' NOT ') ? version + 1 : 100 + (rounds - version) * 100;
     return { ok: true, status: 200, json: async () => ({ esearchresult: { count: String(count), idlist: ['11'] } }) } as Response;
@@ -38,7 +42,8 @@ test('F=40 B=4 M=8 で5候補と最終再検証を200通信以内に収め、実
   expect(result.status).toBe('achieved');
   expect(result.trials.filter((trial) => trial.kind === 'proposal' && trial.accepted)).toHaveLength(5);
   expect(result.trials.map((trial) => trial.kind)).toEqual(['initial', 'proposal', 'proposal', 'proposal', 'proposal', 'proposal', 'final']);
-  expect(result.apiCalls).toBe(MAX_TERM_API_CALLS + 7 * (4 + 2) + 5);
+  // 語別計測上限 + 初期・5候補・最終の評価各6回 + AI5回 + 採用判定を通った5候補の差集合2方向。
+  expect(result.apiCalls).toBe(MAX_TERM_API_CALLS + 7 * (4 + 2) + 5 + 5 * 2);
   expect(result.apiCalls).toBeLessThan(200);
   expect(result.best?.formula.blocks[0]?.expression).toContain('b1v5word');
   expect(result.unmetReasons.join(' ')).toContain('未測定');
@@ -82,11 +87,11 @@ test('追加詳細の途中で停止しても実測済みの候補を履歴とbe
 
 test('全体の通信上限に候補の詳細計測中に達しても、実測済みの採用候補を保持する', async () => {
   const f = fixture(2, 1, 2);
-  // 初期評価6回・初期詳細24回・AI1回・候補評価6回の後、追加詳細1回で上限に達する。
-  const result = await runQueryOptimization(f.input, { ...f.deps, maxApiCalls: 38 });
+  // 初期評価6回・初期詳細24回・AI1回・候補評価6回・差集合2方向2回の後、追加詳細1回（40通信目）で上限に達する。
+  const result = await runQueryOptimization(f.input, { ...f.deps, maxApiCalls: 40 });
   expect(result.status).toBe('needs_review');
   expect(result.stopReason).toBe('api_budget');
-  expect(result.apiCalls).toBe(38);
+  expect(result.apiCalls).toBe(40);
   expect(result.trials[1]).toMatchObject({ kind: 'proposal', accepted: true, after: { totalHits: 200 } });
   expect(result.best?.formula.blocks[0]?.expression).toContain('b1v1word');
 });

@@ -153,6 +153,24 @@ function renderDetails(details: HTMLElement, trial: OptimizationTrial, nodes: Op
     }
     if (!recovered.length && !lost.length) paragraph(seeds, '捕捉シードの変化なし');
   }
+  const deletion = group('削除影響');
+  const impact = trial.impact;
+  if (!impact) paragraph(deletion, '採用判定の前に却下したため、差集合は実測していません');
+  else {
+    paragraph(deletion, `失う集合: ${impact.lostHits ?? '未測定'} 件 / 増える集合: ${impact.gainedHits ?? '未測定'} 件`);
+    paragraph(deletion, `確認した書誌: ${impact.inspected.length} 件 / 失う集合全体 ${impact.lostHits ?? '未測定'} 件（先頭の数件であり、集合全体の安全性を示すものではありません）`);
+    for (const article of impact.inspected) {
+      const p = doc.createElement('p');
+      const link = doc.createElement('a');
+      link.textContent = `PMID ${article.pmid}（${article.year ?? '年不明'}）${article.title ?? 'タイトル未取得'}`;
+      link.href = buildPubmedSearchUrl(`${article.pmid}[uid]`);
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      p.appendChild(link);
+      deletion.appendChild(p);
+    }
+    if (impact.error) paragraph(deletion, `実測・取得の失敗: ${impact.error}`);
+  }
   const api = group('API 待機');
   if (!trial.apiEvents.length) paragraph(api, '通知された待機・取得失敗の記録なし');
   for (const event of trial.apiEvents) paragraph(api, `${optimizationApiLabel(event)}（この試行中の記録）`);
@@ -218,7 +236,7 @@ export function createOptimizationHistoryRenderer(): (
           continue;
         }
         const row = doc.createElement('li');
-        paragraph(row, `${label} — 前後件数: ${hits(trial.before?.totalHits)} → ${hits(trial.after?.totalHits)} / シード: ${seedCount(trial.before, run.seedCount)} → ${seedCount(trial.after, run.seedCount)} / ${trial.kind === 'information' ? '評価保留' : trial.accepted ? '採用' : '却下'}: ${trial.reason}`);
+        paragraph(row, `${label} — 前後件数: ${hits(trial.before?.totalHits)} → ${hits(trial.after?.totalHits)} / シード: ${seedCount(trial.before, run.seedCount)} → ${seedCount(trial.after, run.seedCount)} / ${trial.kind === 'information' ? '評価保留' : trial.held ? '保留' : trial.accepted ? '採用' : '却下'}: ${trial.reason}`);
         if (trial.rationale) paragraph(row, `変更理由（AI の説明）: ${trial.rationale}`);
         const details = doc.createElement('details');
         details.open = existing?.element.querySelector('details')?.open ?? false;
@@ -272,7 +290,7 @@ export function createOptimizationHistoryRenderer(): (
       const summaries = doc.createElement('ul');
       for (const trial of checkpoint.trials) {
         const item = doc.createElement('li');
-        item.textContent = `${trial.candidateId}: ${hits(trial.totalHits)} / シード捕捉 ${trial.capturedSeedCount == null ? '未測定' : `${trial.capturedSeedCount}件（総数の記録なし）`} / ${trial.accepted ? '採用' : '却下'}: ${trial.reason}`;
+        item.textContent = `${trial.candidateId}: ${hits(trial.totalHits)} / シード捕捉 ${trial.capturedSeedCount == null ? '未測定' : `${trial.capturedSeedCount}件（総数の記録なし）`} / ${trial.held ? '保留' : trial.accepted ? '採用' : '却下'}: ${trial.reason}${trial.lostHits !== undefined ? ` / 失う ${trial.lostHits ?? '未測定'} 件` : ''}`;
         summaries.appendChild(item);
       }
       restored.appendChild(summaries);
