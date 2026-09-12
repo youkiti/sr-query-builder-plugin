@@ -2,7 +2,7 @@ import type { ProjectStoreDeps } from '@/features/project';
 import { HIT_THRESHOLD } from '@/features/formula/skills/filterDesigner';
 import { DEFAULT_MAX_ITERATIONS } from './queryOptimizationService';
 import { MAX_SAVED_OPTIMIZATION_PROJECTS, DEFAULT_QUERY_OPTIMIZATION_SETTINGS, getQueryOptimizationSettings, saveQueryOptimizationSettings,
-  validateQueryOptimizationSettings } from './queryOptimizationSettingsService';
+  resolveTargetHits, validateQueryOptimizationSettings } from './queryOptimizationSettingsService';
 
 test('既定値は既存閾値と反復サービスの既定値を参照する', () => {
   expect(DEFAULT_QUERY_OPTIMIZATION_SETTINGS).toEqual({ maxHits: HIT_THRESHOLD, maxIterations: DEFAULT_MAX_ITERATIONS });
@@ -83,4 +83,13 @@ test.each([null, 'broken', [], { projects: null, order: ['A'] },
   expect(await getQueryOptimizationSettings('A', deps)).toBeNull();
   await saveQueryOptimizationSettings('A', { maxHits: 123, maxIterations: 2 }, deps);
   expect(await getQueryOptimizationSettings('A', deps)).toMatchObject({ maxHits: 123 });
+});
+
+test.each<[string | null | undefined, number]>([
+  ['1000', 1000], ['1', 1], [' 2500 ', 2500], ['1e3', 1000],
+  [String(Number.MAX_SAFE_INTEGER), Number.MAX_SAFE_INTEGER],
+  ...['', '  ', undefined, null, '0', '-5', 'abc', '1.5', '1e999', String(Number.MAX_SAFE_INTEGER + 1)]
+    .map((raw): [string | null | undefined, number] => [raw, DEFAULT_QUERY_OPTIMIZATION_SETTINGS.maxHits]),
+])('設定欄の値 %s を生成の目安 %s に解決する', (raw, expected) => {
+  expect(resolveTargetHits(raw)).toBe(expected);
 });

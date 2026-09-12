@@ -1,7 +1,7 @@
 /** @jest-environment node */
 import { executeCase } from './run';
 import { createEvalFetch } from './ncbiEval';
-import type { BenchCase, GoldAudit, RunResult } from './types';
+import { PROFILES, type BenchCase, type GoldAudit, type RunResult } from './types';
 import type { LlmProviderFactory } from '../../src/app/services/llmProviderService';
 import type { JsonSchema } from '../../src/lib/llm/LLMProvider';
 
@@ -24,7 +24,7 @@ function assertSchema(value: unknown, schema: JsonSchema): void {
   } else throw new Error(`Unhandled schema: ${JSON.stringify(schema)}`);
 }
 
-test('real extraction, drafting and optimization evaluate an improving proposal without network', async () => {
+test.each(PROFILES)('$id: 初期生成にも目安を渡し、抽出・調整まで外部通信なしで実行する', async (profile) => {
   const network = jest.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Real network forbidden'));
   try {
     const purposes: string[] = [];
@@ -38,7 +38,11 @@ test('real extraction, drafting and optimization evaluate an improving proposal 
         removed_terms: [], replaced_terms: [], rationale: '同義語で未捕捉シードを回収', measurement_ids: [], mesh_requests: [] },
     };
     const llmFactory: LlmProviderFactory = { model: 'fake', forPurpose: (purpose) => ({ model: 'fake', providerId: 'gemini',
-      chat: async (_messages, options) => {
+      chat: async (messages, options) => {
+        if (purpose === 'draft_block') {
+          expect(messages.find((m) => m.role === 'user')!.content)
+            .toContain(`目安であって上限ではない）: ${profile.maxHits}`);
+        }
         purposes.push(purpose);
         expect(options?.responseFormat).toBe('json');
         expect(options?.responseSchema).toBeDefined();
@@ -76,7 +80,7 @@ test('real extraction, drafting and optimization evaluate an improving proposal 
     const audit: GoldAudit = { includedStudyCount: 4, includedPmidCount: 4, overlapPmids: [], sharedPmids: [], withoutPmid: [], unmappedPmids: [],
       publicationYears: {}, exclusions: { withoutPmid: 0, unresolvedMapping: 0, outsideDate: null }, manual_review: false, reviewNote: '', dateValidation: 'pending' };
     const result: RunResult = { id: 'fake', runId: 'wiring', status: 'running', startedAt: '', model: 'fake', searchDate: fixture.searchDate,
-      profileId: 'default', maxHits: 10000, maxIterations: 5, conditions: {}, apiCalls: { ncbi: 0, llm: 0 }, apiElapsedMs: { ncbi: 0, llm: 0 }, elapsedMs: 0, llmLogs: [] };
+      profileId: profile.id, maxHits: profile.maxHits, maxIterations: profile.maxIterations, conditions: {}, apiCalls: { ncbi: 0, llm: 0 }, apiElapsedMs: { ncbi: 0, llm: 0 }, elapsedMs: 0, llmLogs: [] };
     const saved: RunResult[] = [];
     await executeCase(fixture, audit, 'Smoking cessation protocol', result, {
       eutils: { fetch: createEvalFetch(fixture.searchDate, fakeFetch, () => undefined), maxRetries: 0, strictCounts: true,

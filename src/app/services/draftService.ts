@@ -118,6 +118,7 @@ export interface DraftGenerationInput {
   protocol: ProtocolDraft;
   blocks: BlocksDraft;
   seedContext: SeedContext;
+  targetHits?: number;
 }
 
 /** LLM と計測・進捗の副作用は注入元が管理する。保存なし用途ではロガーなしの LLM を渡す。 */
@@ -125,13 +126,17 @@ export type DraftGenerationDeps = Pick<
   DraftServiceDeps, 'llmFactory' | 'onProgress' | 'countBlockHits' | 'onBlockCounted'
 >;
 
+export interface DraftGenerationOptions {
+  targetHits?: number;
+}
+
 const noopProgress: (p: DraftProgress) => void = () => undefined;
 
 /**
  * 検索式ドラフトを生成して Sheets に保存し、store の currentFormulaVersionId を更新する。
  * @throws 先にプロジェクト選択・プロトコル入力・ブロック承認が済んでいないときは明示的なエラー
  */
-export async function generateDraft(deps: DraftServiceDeps): Promise<DraftResult> {
+export async function generateDraft(deps: DraftServiceDeps, options: DraftGenerationOptions = {}): Promise<DraftResult> {
   const state = deps.store.getState();
   if (state.project === null) {
     throw new Error('プロジェクトが選択されていません');
@@ -149,7 +154,7 @@ export async function generateDraft(deps: DraftServiceDeps): Promise<DraftResult
 
   const blockCount = blocks.blocks.length;
   const seedContext = await collectSeedContext(project.spreadsheetId, deps);
-  const generated = await generateDraftFormula({ protocol, blocks, seedContext }, deps);
+  const generated = await generateDraftFormula({ protocol, blocks, seedContext, targetHits: options.targetHits }, deps);
 
   notifyProgress({ step: 'save', blockCount });
   const versionId = (deps.newUuid ?? newUuid)();
@@ -213,6 +218,7 @@ export async function generateDraftFormula(
         description: block.description,
         researchQuestion: protocol.researchQuestion,
         seedTitles: seedContext.titles,
+        targetHits: input.targetHits,
       },
       deps.llmFactory.forPurpose('draft_block')
     );

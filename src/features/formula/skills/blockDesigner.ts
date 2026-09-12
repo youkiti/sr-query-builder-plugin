@@ -15,6 +15,8 @@ export interface BlockDesignerInput {
   researchQuestion: string;
   /** seed 論文のタイトル一覧（概念を実際の研究空間に接地させる）。空配列でも可 */
   seedTitles?: string[];
+  /** 検索式全体の目安ヒット件数（PubMed）。上限ではない。未指定可 */
+  targetHits?: number;
 }
 
 export interface BlockSkeleton {
@@ -40,6 +42,10 @@ export const BLOCK_DESIGNER_SYSTEM_PROMPT = `
 - seed 論文のタイトルが与えられた場合は、そこに実際に現れる語彙・表記ゆれを要件に反映する。
   ただし seed は「捕捉すべき既知の正例」であって母集団ではないので、seed の語彙に過剰適合して
   概念を狭めない（一般的な同義語・関連語も含める）。
+- 目安ヒット件数が与えられたときは、その規模に収まる検索式を組める粒度で要件を書く。
+  この件数は**最終的な検索式全体（全ブロックを掛け合わせた後）の目安**であって、
+  このブロック単体の目標ではなく、守るべき上限でもない。
+  seed 論文の捕捉や概念の網羅性を犠牲にしてまで満たさない。
 - conceptSummary は英語 1 文、rationale は日本語の戦略メモ。
 - 出力は JSON のみ。
 `.trim();
@@ -50,6 +56,8 @@ RQ: {{RQ}}
 ブロック:
 - label: {{LABEL}}
 - description: {{DESC}}
+
+検索式全体の目安ヒット件数（PubMed。目安であって上限ではない）: {{TARGET_HITS}}
 
 seed 論文のタイトル（既知の正例。語彙の参考にする）:
 {{SEED_TITLES}}
@@ -81,6 +89,7 @@ export async function designBlock(
   input: BlockDesignerInput,
   provider: LLMProvider
 ): Promise<BlockSkeleton> {
+  const { targetHits = NaN } = input;
   const seedTitles = input.seedTitles ?? [];
   const seedTitlesBlock =
     seedTitles.length === 0 ? '(なし)' : seedTitles.map((t) => `- ${t}`).join('\n');
@@ -91,6 +100,8 @@ export async function designBlock(
     LABEL: input.blockLabel,
     DESC: input.description,
     SEED_TITLES: seedTitlesBlock,
+    TARGET_HITS: Number.isSafeInteger(targetHits) && targetHits > 0
+      ? String(targetHits) : '(指定なし)',
   });
 
   const response = await provider.chat(

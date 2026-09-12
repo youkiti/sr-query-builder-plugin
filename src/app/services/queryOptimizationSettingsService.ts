@@ -26,6 +26,13 @@ export const DEFAULT_QUERY_OPTIMIZATION_SETTINGS: Readonly<QueryOptimizationSett
   maxIterations: DEFAULT_MAX_ITERATIONS,
 };
 
+/** 設定欄の入力値から生成に渡す目安件数を解決する。不正・未設定なら既定値。 */
+export function resolveTargetHits(rawMaxHits: string | null | undefined): number {
+  const targetHits = Number(rawMaxHits);
+  return Number.isSafeInteger(targetHits) && targetHits > 0
+    ? targetHits : DEFAULT_QUERY_OPTIMIZATION_SETTINGS.maxHits;
+}
+
 export function validateQueryOptimizationSettings(settings: QueryOptimizationSettings, seedCount = 0): string | null {
   if (!Number.isSafeInteger(settings.maxHits) || settings.maxHits <= 0) return '最大件数は正の整数で指定してください。';
   if (!Number.isSafeInteger(settings.maxIterations) || settings.maxIterations <= 0) return '反復上限は正の整数で指定してください。';

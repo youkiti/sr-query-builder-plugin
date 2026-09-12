@@ -448,3 +448,28 @@ describe('generateDraftFormula', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+test.each(['generateDraftFormula', 'generateDraft'] as const)('%s が目安を全ブロックの設計だけに転送する', async (entry) => {
+  const { deps, store } = setupDeps();
+  const prompts: Record<string, string[]> = {};
+  deps.llmFactory = { model: 'test', forPurpose: (purpose) => {
+    const base = skillProviderFor(purpose);
+    return { ...base, chat: async (messages) => {
+      (prompts[purpose] ??= []).push(messages.find((m) => m.role === 'user')!.content);
+      return base.chat(messages);
+    } };
+  } };
+  if (entry === 'generateDraft') {
+    await generateDraft(deps, { targetHits: 1234 });
+  } else {
+    const state = store.getState();
+    await generateDraftFormula({ protocol: state.protocolDraft!, blocks: state.blocksDraft!, targetHits: 1234,
+      seedContext: { titles: [], samples: [], meshSummary: { seedCount: 0, concepts: [], checkTags: [] } } }, deps);
+  }
+  expect(prompts.draft_block).toHaveLength(2);
+  for (const prompt of prompts.draft_block!) expect(prompt).toContain('目安であって上限ではない）: 1234');
+  for (const purpose of ['suggest_mesh', 'expand_freeword']) {
+    expect(prompts[purpose]).toHaveLength(2);
+    for (const prompt of prompts[purpose]!) expect(prompt).not.toContain('1234');
+  }
+});
