@@ -10,9 +10,12 @@ function fixture() {
     approvedBlocks: [{ id: '1', approvedBlockId: '1', label: '疾患' }],
     criteria: { researchQuestion: 'RQ', inclusionCriteria: '組入', exclusionCriteria: '除外' },
   };
-  const fetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({
-    esearchresult: { count: '10', idlist: ['11', '22'] },
-  }) } as Response));
+  const fetch = jest.fn(async (url?: unknown) => {
+    const impact = url !== undefined && new URL(String(url)).searchParams.get('term')!.includes(') NOT (');
+    return { ok: true, status: 200, json: async () => ({
+      esearchresult: impact ? { count: '0', idlist: [] } : { count: '10', idlist: ['11', '22'] },
+    }) } as Response;
+  });
   const proposal = { target_block_id: '1', proposed_expression: 'b[tiab]', rationale: '基準に合わせて修正',
     added_terms: [], removed_terms: [], replaced_terms: [{ before: 'a[tiab]', after: 'b[tiab]' }],
     measurement_ids: ['r:initial'], mesh_requests: [] as { descriptor: string; tree_number: string }[] };
@@ -48,9 +51,13 @@ test('生成する全試行の kind と apiEvents を設定し、変更案には
   const f = fixture();
   f.chat.mockImplementationOnce(async () => ({ ...f.response(), text: JSON.stringify({ ...f.proposal,
     mesh_requests: [{ descriptor: 'Asthma', tree_number: '' }] }) }));
-  f.deps.eutils.fetch = jest.fn(async (url) => ({ ok: true, status: 200, json: async () => ({ esearchresult: {
-    count: new URL(String(url)).searchParams.get('term')!.includes('b[tiab]') ? '5' : '10', idlist: ['11', '22'],
-  } }) } as Response));
+  f.deps.eutils.fetch = jest.fn(async (url) => {
+    const term = new URL(String(url)).searchParams.get('term')!;
+    return { ok: true, status: 200, json: async () => ({ esearchresult: term.includes(') NOT (')
+      ? { count: '0', idlist: [] }
+      : { count: term.includes('b[tiab]') ? '5' : '10', idlist: ['11', '22'] },
+    }) } as Response;
+  });
   const result = await runQueryOptimization(f.input, f.deps);
   expect(result.trials.map((trial) => trial.kind)).toEqual(['initial', 'information', 'proposal', 'final']);
   for (const trial of result.trials) {

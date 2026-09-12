@@ -22,6 +22,21 @@ function run(status: 'achieved' | 'needs_review' | 'stopped' | 'error'): QueryOp
 const actions = { adopt: jest.fn(async () => {}), edit: jest.fn() };
 beforeEach(() => { jest.clearAllMocks(); });
 
+test.each(['achieved', 'needs_review', 'stopped', 'error'] as const)('最終状態 %s でも保留の有無を表示する', (status) => {
+  const current = run(status);
+  const container = document.createElement('div');
+  renderOptimizationReview(container, current, actions);
+  expect(container.textContent).toContain('削除影響の確認: 保留した候補はありません');
+  current.trials.push({ ...current.trials[0]!, kind: 'proposal', candidateId: 'candidate-1', held: true, accepted: false });
+  container.replaceChildren();
+  renderOptimizationReview(container, current, actions);
+  expect(container.textContent).toContain('失う集合があるため保留した候補 1 件（candidate-1。試行履歴の「削除影響」を確認してください）');
+  current.trials.push({ ...current.trials[1]!, candidateId: 'candidate-2' });
+  container.replaceChildren();
+  renderOptimizationReview(container, current, actions);
+  expect(container.textContent).toContain('保留した候補 2 件（candidate-1、candidate-2。試行履歴の「削除影響」を確認してください）');
+});
+
 test.each([['achieved', '条件達成'], ['needs_review', '要確認'], ['stopped', '停止'], ['error', 'エラー']] as const)(
   '%s を %s と区別し、最終式・上限・既知シード・正味の変更と懸念を出す', (status, label) => {
     const container = document.createElement('div');
