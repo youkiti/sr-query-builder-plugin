@@ -266,6 +266,12 @@ export function createOptimizationHistoryRenderer(): (
         }
         const row = doc.createElement('li');
         paragraph(row, `${label} — 前後件数: ${hits(trial.before?.totalHits)} → ${hits(trial.after?.totalHits)} / シード: ${seedCount(trial.before, run.seedCount)} → ${seedCount(trial.after, run.seedCount)} / ${trial.kind === 'information' ? '評価保留' : trial.held ? '保留' : trial.accepted ? '採用' : '却下'}: ${trial.reason}`);
+        if (trial.kind === 'information' && trial.informationResult) {
+          paragraph(row, `情報要求 ${trial.candidateId}: 文脈へ反映 ${trial.informationResult.obtained} / 要求 ${trial.informationResult.requested} 件`);
+        }
+        if (trial.informedBy) {
+          paragraph(row, `情報要求 ${trial.informedBy.candidateId} で得た文脈 ${trial.informedBy.obtained}/${trial.informedBy.requested} 件を読んだうえでの判断`);
+        }
         if (trial.rationale) paragraph(row, `変更理由（AI の説明）: ${trial.rationale}`);
         const details = doc.createElement('details');
         details.open = existing?.element.querySelector('details')?.open ?? false;

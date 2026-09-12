@@ -1071,6 +1071,115 @@ const meshRequest: skill.OptimizationMeshRequest = { descriptor: 'Disease', tree
 const childNode: skill.OptimizationMeshNode = { id: 'D002', descriptor: 'Child', label: 'Child',
   treeNumbers: ['C01.100.200'], parentIds: ['D001'], childIds: [], explode: true, note: '直下を取得済み' };
 
+test('初期式が条件達成でも情報要求直後には完了せず、取得文脈を読んだ判断を記録する', async () => {
+  const { input, deps, chat } = setup({ a: { hits: 50, captured: ['11', '22'] } }, ['a[tiab]']);
+  requestMesh(chat, [meshRequest]);
+  deps.fetchMeshContext = jest.fn().mockResolvedValue([childNode]);
+  const progress = jest.fn();
+  deps.onProgress = progress;
+  const optimize = jest.spyOn(skill, 'optimizeQuery');
+  const result = await runQueryOptimization(input, deps);
+  expect(chat).toHaveBeenCalledTimes(2);
+  expect(optimize.mock.calls[1]![0].meshContext).toContainEqual(childNode);
+  expect(result).toMatchObject({ status: 'achieved', iterations: 2, informationTrials: 1 });
+  expect(result.trials.map((trial) => trial.kind)).toEqual(['initial', 'information', 'proposal', 'final']);
+  expect(result.trials[1]).toMatchObject({ informationResult: { requested: 1, obtained: 1 } });
+  expect(result.trials[2]).toMatchObject({ informedBy: { candidateId: 'candidate-1', requested: 1, obtained: 1 },
+    reason: '評価済みの同一式への回帰' });
+  expect(result.trials[3]).not.toHaveProperty('informedBy');
+  expect(result.unmetReasons.join()).not.toContain('判断が未了');
+  expect(progress).toHaveBeenLastCalledWith(expect.objectContaining({ evaluatedTrials: 1, informationTrials: 1 }));
+});
+
+test('連続した情報要求が反復上限に達したら最後の要求を判断未了として残す', async () => {
+  const { input, deps, chat } = setup({ a: { hits: 50, captured: ['11', '22'] } });
+  input.maxIterations = 2;
+  requestMesh(chat, [meshRequest]);
+  requestMesh(chat, [meshRequest, meshRequest]);
+  deps.fetchMeshContext = jest.fn().mockResolvedValue([childNode]);
+  const progress = jest.fn();
+  deps.onProgress = progress;
+  const result = await runQueryOptimization(input, deps);
+  expect(result).toMatchObject({ status: 'needs_review', stopReason: 'iteration_limit', informationTrials: 2 });
+  expect(chat).toHaveBeenCalledTimes(2);
+  expect(deps.fetchMeshContext).toHaveBeenCalledTimes(1);
+  expect(result.trials[2]).toMatchObject({ kind: 'information', informationResult: { requested: 2, obtained: 0 } });
+  expect(result.trials.every((trial) => !trial.informedBy)).toBe(true);
+  expect(result.unmetReasons).toContain('情報要求 candidate-2 への判断が未了です（文脈へ反映 0 / 要求 2 件）');
+  expect(progress).toHaveBeenLastCalledWith(expect.objectContaining({ evaluatedTrials: 0, informationTrials: 2 }));
+});
+
+test.each(['user_stop', 'api_budget', 'time_budget'] as const)('情報取得途中の %s は停止理由を保持し、履歴にない情報要求を未達理由で参照しない', async (reason) => {
+  const { input, deps, chat } = setup();
+  requestMesh(chat, [meshRequest, meshRequest]);
+  deps.fetchMeshContext = jest.fn().mockResolvedValueOnce([childNode])
+    .mockRejectedValueOnce(new QueryOptimizationStopError(reason));
+  const result = await runQueryOptimization(input, deps);
+  expect(result.stopReason).toBe(reason);
+  expect(result.status).not.toBe('achieved');
+  expect(result.informationTrials).toBe(1);
+  expect(result.trials.map((trial) => trial.kind)).toEqual(['initial']);
+  expect(result.unmetReasons.join()).not.toContain('判断が未了');
+  expect(result.unmetReasons.join()).not.toContain('candidate-1');
+});
+
+test.each(['user_stop', 'time_budget'] as const)('最終 round の情報要求を保存した直後の %s を反復上限に置き換えない', async (reason) => {
+  const { input, deps, chat, write } = setup({ a: { hits: 80, captured: ['11', '22'] } });
+  input.maxIterations = 1;
+  requestMesh(chat, [meshRequest]);
+  let informationSaved = false;
+  let checksAfterSave = 0;
+  write.mockImplementation(async (items: Record<string, checkpoint.QueryOptimizationCheckpoint>) => {
+    if (Object.values(items).some((item) => item.trials.some((trial) => trial.candidateId === 'candidate-1'))) {
+      informationSaved = true;
+    }
+  });
+  deps.shouldStop = () => {
+    if (informationSaved) checksAfterSave += 1;
+    // save() 内の境界を通過した後、ループ末尾の境界で停止を検出する。
+    return reason === 'user_stop' && checksAfterSave >= 2;
+  };
+  deps.maxElapsedMs = 1000;
+  deps.now = () => reason === 'time_budget' && checksAfterSave >= 2 ? 1000 : 0;
+  const result = await runQueryOptimization(input, deps);
+  expect(result.stopReason).toBe(reason);
+  expect(result.status).not.toBe('achieved');
+  expect(result.trials.map((trial) => trial.kind)).toEqual(['initial', 'information']);
+  expect(result.unmetReasons).toContain('情報要求 candidate-1 への判断が未了です（文脈へ反映 0 / 要求 1 件）');
+  expect(chat).toHaveBeenCalledTimes(1);
+});
+
+test.each(['accepted', 'invalid'] as const)('連続要求後の %s の判断は最後の情報要求にだけ対応付ける', async (decision) => {
+  const { input, deps, chat } = setup({ a: { hits: 200, captured: ['11', '22'] },
+    b: { hits: 50, captured: ['11', '22'] } }, [decision === 'accepted' ? 'b[tiab]' : '#999']);
+  input.maxIterations = 3;
+  requestMesh(chat, [meshRequest]);
+  requestMesh(chat, [meshRequest]);
+  deps.fetchMeshContext = jest.fn().mockResolvedValue([childNode]);
+  const result = await runQueryOptimization(input, deps);
+  expect(result.trials[3]).toMatchObject({ kind: 'proposal', accepted: decision === 'accepted',
+    informedBy: { candidateId: 'candidate-2', requested: 1, obtained: 1 } });
+  expect(result.unmetReasons.join()).not.toContain('判断が未了');
+  expect(result.informationTrials).toBe(2);
+});
+
+test.each(['missing', 'empty', 'failure', 'unspecified', 'limited'] as const)('情報要求の %s を構造化した件数で記録し、却下も判断済みとする', async (kind) => {
+  const { input, deps, chat } = setup();
+  const requests = kind === 'limited' ? Array.from({ length: 4 }, () => meshRequest)
+    : [kind === 'unspecified' ? { descriptor: '', treeNumber: '' } : meshRequest];
+  requestMesh(chat, requests);
+  if (kind !== 'missing') deps.fetchMeshContext = kind === 'failure'
+    ? jest.fn().mockRejectedValue(new Error('取得失敗'))
+    : jest.fn().mockResolvedValue(kind === 'empty' ? [] : [childNode]);
+  const result = await runQueryOptimization(input, deps);
+  const counts = { requested: requests.length, obtained: kind === 'limited' ? 3 : 0 };
+  expect(result.trials[1]?.informationResult).toEqual(counts);
+  expect(result.trials[2]?.informedBy).toEqual({ candidateId: 'candidate-1', ...counts });
+  expect(result.trials[2]?.accepted).toBe(false);
+  expect(result.trials[3]).not.toHaveProperty('informedBy');
+  expect(result.unmetReasons.join()).not.toContain('判断が未了');
+});
+
 test('追加取得した枝を次の AI 文脈へ反映し、情報要求だけの同一式では停止しない', async () => {
   const { input, deps, chat, fetch } = setup();
   input.maxIterations = 2;
@@ -1384,17 +1493,42 @@ test('終了状態の保存に失敗しても結果を失わず、その事実�
   expect(result.best?.measurement.totalHits).toBe(80);
 });
 
-test.each([1, 5])('目標内で MeSH 要求を返しても、反復上限 %s の範囲で最終再検証へ進む', async (limit) => {
+test('目標内でも反復上限 1 の情報要求は追加取得を打ち切り、最終再検証せず判断未了で終わる', async () => {
   const { input, deps, chat } = setup({ a: { hits: 80, captured: ['11', '22'] } });
-  input.maxIterations = limit;
+  input.maxIterations = 1;
   requestMesh(chat, [meshRequest]);
   const evaluate = jest.spyOn(evaluation, 'evaluateQuery');
   const result = await runQueryOptimization(input, deps);
-  expect(result).toMatchObject({ status: 'achieved', stopReason: 'conditions_met', iterations: 1 });
+  expect(result).toMatchObject({ status: 'needs_review', stopReason: 'iteration_limit', iterations: 1 });
   expect(chat).toHaveBeenCalledTimes(1);
-  expect(evaluate).toHaveBeenCalledTimes(2);
+  expect(evaluate).toHaveBeenCalledTimes(1);
+  expect(result.trials.map((trial) => trial.kind)).toEqual(['initial', 'information']);
   expect(result.trials[1]!.after).toBeNull();
-  expect(result.trials[2]!.candidateId).toBe('final-1');
+  expect(result.trials[1]).toMatchObject({ informationResult: { requested: 1, obtained: 0 },
+    reason: 'Disease / C01.100: 未取得: 反復上限に達したため追加取得を打ち切りました。' });
+  expect(result.unmetReasons).toContain('情報要求 candidate-1 への判断が未了です（文脈へ反映 0 / 要求 1 件）');
+});
+
+test('目標内で反復上限 5 の情報要求は次 round の AI 応答を評価してから条件達成する', async () => {
+  const { input, deps, chat } = setup({ a: { hits: 80, captured: ['11', '22'] } });
+  input.maxIterations = 5;
+  requestMesh(chat, [meshRequest]);
+  const optimize = jest.spyOn(skill, 'optimizeQuery');
+  const evaluate = jest.spyOn(evaluation, 'evaluateQuery');
+  const result = await runQueryOptimization(input, deps);
+  expect(result).toMatchObject({ status: 'achieved', stopReason: 'conditions_met', iterations: 2 });
+  expect(chat).toHaveBeenCalledTimes(2);
+  expect(evaluate).toHaveBeenCalledTimes(3);
+  expect(optimize.mock.calls[1]![0].meshRequestResults).toEqual([
+    { request: meshRequest, note: '未取得: MeSH 取得 callback が注入されていません。' },
+  ]);
+  expect(result.trials.map((trial) => trial.kind)).toEqual(['initial', 'information', 'proposal', 'final']);
+  expect(result.trials[1]!.after).toBeNull();
+  expect(result.trials[2]).toMatchObject({ candidateId: 'candidate-2', accepted: false,
+    informedBy: { candidateId: 'candidate-1', requested: 1, obtained: 0 },
+    after: { id: 'run:candidate-2' }, reason: '局面の指標に改善がありません' });
+  expect(result.trials[3]!.candidateId).toBe('final-2');
+  expect(result.unmetReasons).toEqual([]);
 });
 
 test('非承認ブロックと研究デザインフィルタの語別計測をしない', async () => {

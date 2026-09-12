@@ -66,6 +66,8 @@ export type QueryOptimizationStep =
 export interface QueryOptimizationProgress {
   /** 情報要求と通信リトライを含まない、修正案の評価数。 */
   evaluatedTrials?: number;
+  /** 候補評価とは別に数える、情報要求の回数。 */
+  informationTrials?: number;
   task?: { kind: 'terms' | 'seeds'; completed: number; total: number } | null;
   apiEvents?: OptimizationApiEvent[];
   apiWaiting?: OptimizationApiEvent | null;
@@ -137,6 +139,8 @@ export class QueryOptimizationStopError extends Error {
 }
 
 export interface QueryOptimizationResult {
+  /** 情報要求の回数。旧形式の結果との互換性のため省略可。 */
+  informationTrials?: number;
   /** 旧形式の結果との互換性のため省略可。新しい run は必ず配列を返す。 */
   seedDiagnoses?: OptimizationSeedDiagnosis[];
   status: 'achieved' | 'needs_review' | 'stopped' | 'error';
@@ -217,6 +221,8 @@ export async function runQueryOptimization(
   const termCache = new Map<string, number>();
   let iterations = 0;
   let evaluatedTrials = 0;
+  let informationTrials = 0;
+  let pendingInformation: OptimizationTrial['informedBy'];
   let task: QueryOptimizationProgress['task'] = null;
   let apiWaiting: OptimizationApiEvent | null = null;
   let apiEvents: OptimizationApiEvent[] = [];
@@ -230,7 +236,7 @@ export async function runQueryOptimization(
     if (!deps.onProgress) return;
     try {
       deps.onProgress({ step, iterations,
-        evaluatedTrials, task: task ? { ...task } : null,
+        evaluatedTrials, informationTrials, task: task ? { ...task } : null,
         apiWaiting: apiWaiting ? { ...apiWaiting } : null,
         apiEvents: apiEvents.map((event) => ({ ...event })),
         bestTotalHits: best?.measurement.totalHits ?? null,
@@ -326,6 +332,7 @@ export async function runQueryOptimization(
     },
   };
   const expandMesh = async (requests: readonly OptimizationMeshRequest[], canContinue: boolean) => {
+    let obtained = 0;
     const results: OptimizationMeshRequestResult[] = [];
     for (const [index, request] of requests.entries()) {
       boundary();
@@ -362,6 +369,9 @@ export async function runQueryOptimization(
             } : added);
           }
           meshContext = [...merged.values()];
+          if (nodes.length > 0) {
+            obtained += 1;
+          }
           notifyMeshContext();
           note = nodes.length > 0 ? '追加取得した周辺ノードを文脈へ反映しました。'
             : '未取得: 取得結果が空のため追加の親子関係は確認できませんでした。';
@@ -377,7 +387,8 @@ export async function runQueryOptimization(
       results.push({ request: { ...request }, note });
     }
     meshRequestResults.push(...results);
-    return results.map(({ request, note }) => `${request.descriptor || '(未指定)'} / ${request.treeNumber || '(未指定)'}: ${note}`).join('\n');
+    return { requested: requests.length, obtained,
+      notes: results.map(({ request, note }) => `${request.descriptor || '(未指定)'} / ${request.treeNumber || '(未指定)'}: ${note}`).join('\n') };
   };
   const save = async () => {
     const latest = trials[trials.length - 1];
@@ -537,6 +548,7 @@ export async function runQueryOptimization(
     const unrecoverable = seedDiagnoses.filter((seed) => seed.recoverableByTerms === false);
     if (unrecoverable.length) unmetReasons.push(`語の調整では回収できないシードがあります（${unrecoverable.map((seed) => seed.pmid).join(', ')}）。検索概念・フィルタが強すぎる可能性があるため、ブロック承認（#/blocks）で見直してください`);
     if (!best) unmetReasons.push('検証済み候補がありません');
+    if (pendingInformation) unmetReasons.push(`情報要求 ${pendingInformation.candidateId} への判断が未了です（文脈へ反映 ${pendingInformation.obtained} / 要求 ${pendingInformation.requested} 件）`);
     if (termBudgetExhausted) unmetReasons.push(`語別計測は ${MAX_TERM_API_CALLS} 通信の上限に達しました。追加取得していない語別件数・固有寄与は未測定です。`);
     if (fixed.seedPmids.length === 0) unmetReasons.push('シードが未指定です');
     // 最良候補は保持し、最終再検証で崩れた値だけを未達理由の根拠に切り替える。
@@ -553,7 +565,7 @@ export async function runQueryOptimization(
     const result: QueryOptimizationResult = {
       status: reason === 'conditions_met' ? 'achieved' : reason === 'user_stop' ? 'stopped'
         : reason === 'api_error' || reason === 'invalid_input' ? 'error' : 'needs_review',
-      stopReason: reason, best, trials, unmetReasons, seedDiagnoses, iterations, apiCalls, elapsedMs: now() - startedAt,
+      stopReason: reason, best, trials, unmetReasons, seedDiagnoses, iterations, informationTrials, apiCalls, elapsedMs: now() - startedAt,
     };
     // 終了後に残すのは確定した終了記録だけ。停止境界を通さず、候補・測定は更新しない。
     // 試行も通信消費も記録していない run は、既存の別 run のチェックポイントに触れない。
@@ -648,20 +660,27 @@ export async function runQueryOptimization(
       iterations = round;
       const candidateId = `candidate-${round}`;
       if (proposal.meshRequests.length > 0) {
-        // 情報要求だけの回は候補評価を保留する。同一式回帰とせず、未達なら次の AI が取得結果を読む。
+        // 情報要求だけの回は候補評価を保留する。同一式回帰とせず、次の AI が取得結果を読む。
         // この回も反復上限に数え、情報要求だけが続いても無限に継続しない。
-        const note = await expandMesh(proposal.meshRequests, round < maxIterations);
+        informationTrials += 1;
+        const information = await expandMesh(proposal.meshRequests, round < maxIterations);
         trials.push(makeTrial({ kind: 'information', candidateId, formula: best.formula,
-          before: best.measurement, after: null, accepted: false, reason: note, rationale: proposal.rationale,
+          before: best.measurement, after: null, accepted: false, reason: information.notes, rationale: proposal.rationale,
+          informationResult: { requested: information.requested, obtained: information.obtained },
           meshRequests: proposal.meshRequests.map((request) => ({ ...request })) }));
+        pendingInformation = { candidateId, requested: information.requested, obtained: information.obtained };
         await save();
+        boundary();
+        continue;
       } else {
         evaluatedTrials += 1;
         const details = {
           kind: 'proposal' as const,
+          ...(pendingInformation ? { informedBy: { ...pendingInformation } } : {}),
           changes: { targetBlockId: proposal.targetBlockId, addedTerms: [...proposal.addedTerms],
             removedTerms: [...proposal.removedTerms], replacedTerms: proposal.replacedTerms.map((term) => ({ ...term })) },
         };
+        pendingInformation = undefined;
         const candidate = applyProposal(best.formula, proposal);
         const removed = proposal.removedTerms.length ? proposal.removedTerms : (() => {
           const terms = (expression: string) => tokenizeExpression(expression)

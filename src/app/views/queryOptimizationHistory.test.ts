@@ -36,6 +36,21 @@ function setup(callbacks: DraftViewCallbacks = {}) {
 }
 beforeEach(() => jest.useFakeTimers({ now: 1000 }));
 
+test('情報取得の件数と、その文脈を読んだ判断を別の履歴行に表示する', () => {
+  const f = setup();
+  f.state.queryOptimizationRun!.trials = [
+    { ...trial('request'), kind: 'information', after: null, informationResult: { requested: 3, obtained: 1 } },
+    { ...trial('decision'), informedBy: { candidateId: 'request', requested: 3, obtained: 1 } },
+  ];
+  f.render();
+  const rows = f.container.querySelectorAll('.optimization__history li');
+  expect(rows).toHaveLength(2);
+  expect(rows[0]!.textContent).toContain('情報要求 — 前後件数:');
+  expect(rows[0]!.textContent).toContain('情報要求 request: 文脈へ反映 1 / 要求 3 件');
+  expect(rows[1]!.textContent).toContain('試行1 — 前後件数:');
+  expect(rows[1]!.textContent).toContain('情報要求 request で得た文脈 1/3 件を読んだうえでの判断');
+});
+
 test('捕捉表の列・行見出しと捕捉・未捕捉・未測定を表示する', () => {
   const f = setup();
   f.state.queryOptimizationRun!.trials[0]!.after!.seedCapture = { seedPmids: ['11', '22'], rows: [
