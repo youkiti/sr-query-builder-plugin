@@ -28,6 +28,7 @@ import {
   getQueryOptimizationSettings,
   saveQueryOptimizationSettings,
   validateQueryOptimizationSettings,
+  resolveTargetHits,
   DEFAULT_QUERY_OPTIMIZATION_SETTINGS,
   QueryOptimizationStopError,
   type QueryOptimizationSettings,
@@ -1192,6 +1193,7 @@ export async function runOptimizeQuery(
     const initialFormula = resume?.available ? resume.data.bestFormula!
       : state.currentFormulaMarkdown ? parsePubmedFormulaMd(state.currentFormulaMarkdown)
       : (await generateDraftFormula({ protocol: state.protocolDraft, blocks: state.blocksDraft,
+        targetHits: fixedSettings.maxHits,
         seedContext: { titles: seeds.flatMap((seed) => seed.title ? [seed.title] : []).slice(0, 30),
           samples: [], meshSummary: { seedCount: 0, concepts: [], checkTags: [] } },
       }, { llmFactory: factory, onProgress: () => check() })).formula;
@@ -1565,6 +1567,15 @@ async function runGenerateDraft(
     spreadsheetId: project.spreadsheetId,
   });
   const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
+  // 入力欄を増やさず両経路の挙動を揃えるため、設定欄の値を生成の目安にも使う。
+  // ただしこのボタンは設定の読み込み完了を待たずに押せる（自動調整のボタンと違い
+  // status を見ていない）。読み込み中・失敗中の設定欄はプレースホルダの既定値なので、
+  // そのときは保存済みの設定を読み直す。
+  const setup = store.getState().queryOptimizationSetup;
+  const rawMaxHits = setup?.projectId === project.projectId && setup.status === 'ready'
+    ? setup.maxHits
+    : (await getQueryOptimizationSettings(project.projectId, runtime.store))?.maxHits;
+  const targetHits = resolveTargetHits(rawMaxHits === undefined ? undefined : String(rawMaxHits));
   return generateDraft({
     google: runtime.google,
     store,
@@ -1575,7 +1586,7 @@ async function runGenerateDraft(
     // 概念ブロックは葉式なのでそのまま esearch count に投げられる
     countBlockHits: async (expression) =>
       (await esearch(expression, eutils, { retmax: 0 })).count,
-  });
+  }, { targetHits });
 }
 
 async function runExport(store: AppStore, runtime: ChromeRuntimeDeps): Promise<ExportResult> {

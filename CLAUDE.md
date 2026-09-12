@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - ユーザーフロー全 10 ルート（home → protocol → blocks → seeds → draft → expand → edit → export → done + history）の画面実装済み。検索式の生成と検証は `draft` タブに統合され、「生成して検証する」1 操作でブロックごとのヒット数（line_hits）をライブ表示しつつ、完成後に捕捉率・MeSH 検証まで自動実行する（旧 `validate` ルートは廃止）
 - `#/expand` の inside モード（有効 seed 0 件）は既定で AI に specific（精度優先）な絞り込み式を設計させ、その relevance 上位 50 件から最大 5 件を人のレビューに回す（issue #93。`design-specific-query` skill / `purpose=design_specific_query`。チェックを外すと従来の現式上位）。specific 式が 0 件・構文エラー・設計失敗のときは現式へ自動フォールバックし、理由を画面に出す
-- `#/draft` から検索式の自動調整を実行できる。最大件数と反復上限を指定し、実測・変更理由をライブ履歴で確認する。最終レビューは条件達成／要確認／停止／エラーを区別し、最後に一度だけ `auto_optimize` として採用保存、または未保存のまま `#/edit` へ渡せる。既知シードの捕捉は未知の適格研究の網羅性を保証しない。候補は採用直前に差集合（変更前 NOT 変更後）を実測し、失う集合が 1 件でもあれば自動採用せず保留してレビューに回す（issue #106）。**自動調整のテストで `esearch` をスタブするときは、差集合クエリ（`term` に `) NOT (` を含む）を先に判定して 0 件を返すこと**。既定の件数を返すと採用されるはずの候補がすべて「保留」になり、`achieved` 期待のテストが `needs_review` で落ちる（unit 3 ファイル・E2E 1 ファイルで実際に踏んだ）
+- `#/draft` から検索式の自動調整を実行できる。最大件数と反復上限を指定し、実測・変更理由をライブ履歴で確認する。最大件数は調整ループだけでなく初期式生成のプロンプトにも目安として渡る（上限ではない）。最終レビューは条件達成／要確認／停止／エラーを区別し、最後に一度だけ `auto_optimize` として採用保存、または未保存のまま `#/edit` へ渡せる。既知シードの捕捉は未知の適格研究の網羅性を保証しない。候補は採用直前に差集合（変更前 NOT 変更後）を実測し、失う集合が 1 件でもあれば自動採用せず保留してレビューに回す（issue #106）。**自動調整のテストで `esearch` をスタブするときは、差集合クエリ（`term` に `) NOT (` を含む）を先に判定して 0 件を返すこと**。既定の件数を返すと採用されるはずの候補がすべて「保留」になり、`achieved` 期待のテストが `needs_review` で落ちる（unit 3 ファイル・E2E 1 ファイルで実際に踏んだ）
 - P0 の検証ロジック（行ごとのヒット数 / シード捕捉率 / 全 DB 変換 / MeSH 抽出）は TypeScript へ移植済み（[src/features/validation/](src/features/validation/), [src/features/conversion/](src/features/conversion/)）
 - 未実装・残タスクは「[未実装・既知のギャップ](#未実装既知のギャップ)」を参照
 

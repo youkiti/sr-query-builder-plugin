@@ -1,3 +1,4 @@
+import { DEFAULT_QUERY_OPTIMIZATION_SETTINGS } from './services/queryOptimizationSettingsService';
 import {
   buildContextLabel,
   createLocationOptions,
@@ -2162,6 +2163,85 @@ describe('startApp - wiring 層', () => {
     expect(expandRun?.error).toContain('API キー');
     expect(doc.querySelector('.expand__error')?.textContent).toContain('API キー');
     expect(doc.querySelector('.expand__candidate')).toBeNull();
+  });
+
+  test.each(['1234', undefined, '', 'abc', '0', '-5', '1.5', '1e999'])('生成して検証する経路で設定欄 %s の目安がプロンプトに届く', async (rawMaxHits) => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+      'apiKeys.gemini': 'KEY',
+    });
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes('generativelanguage.googleapis.com')) return geminiDraftSkillResponse();
+      if (url.includes('/upload/drive/v3/files')) return jsonResponse({ id: 'f', webViewLink: '' });
+      if (url.includes('eutils.ncbi.nlm.nih.gov')) return jsonResponse({ esearchresult: { count: '0', idlist: [] } });
+      return jsonResponse({});
+    });
+    const handle = startApp(doc, { getHash: () => '#/draft', onHashChange: () => () => undefined,
+      setHash: jest.fn(), runtime });
+    await flush();
+    seedDraftPrereqs(handle);
+    await flush();
+    if (rawMaxHits === undefined) {
+      handle.store.setState((s) => ({ ...s, queryOptimizationSetup: null }));
+    } else {
+      const input = doc.querySelector<HTMLInputElement>('.optimization__setup input')!;
+      input.value = rawMaxHits;
+      input.dispatchEvent(new Event('input'));
+      expect(handle.store.getState().queryOptimizationSetup?.maxHits).toBe(input.value);
+    }
+    doc.querySelector<HTMLButtonElement>('#app-content button')!.click();
+    for (let i = 0; i < 30; i += 1) await flush();
+    const calls = fetchMock.mock.calls.filter((c) => String(c[0]).includes('generativelanguage.googleapis.com'));
+    expect(calls.length).toBeGreaterThanOrEqual(3);
+    const prompt = JSON.stringify(JSON.parse((calls[0]![1] as RequestInit).body as string));
+    const expected = rawMaxHits === '1234' ? 1234 : DEFAULT_QUERY_OPTIMIZATION_SETTINGS.maxHits;
+    expect(prompt).toContain(`目安であって上限ではない）: ${expected}`);
+    expect(handle.store.getState().validationResult).not.toBeNull();
+    handle.dispose();
+  });
+
+  test.each([
+    { status: 'loading', projectId: 'p', savedMaxHits: 1000 },
+    { status: 'loading', projectId: 'p', savedMaxHits: undefined },
+    { status: 'error', projectId: 'p', savedMaxHits: 1000 },
+    { status: 'error', projectId: 'p', savedMaxHits: undefined },
+    { status: 'ready', projectId: 'other', savedMaxHits: 1000 },
+    { status: 'ready', projectId: 'other', savedMaxHits: undefined },
+  ] as const)('設定欄が $projectId / $status のとき保存値 $savedMaxHits から生成の目安を解決する', async ({ status, projectId, savedMaxHits }) => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+      'apiKeys.gemini': 'KEY',
+      queryOptimizationSettings: savedMaxHits === undefined ? undefined : {
+        projects: { p: { projectId: 'p', maxHits: savedMaxHits, maxIterations: 5 } }, order: ['p'],
+      },
+    });
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes('generativelanguage.googleapis.com')) return geminiDraftSkillResponse();
+      if (url.includes('/upload/drive/v3/files')) return jsonResponse({ id: 'f', webViewLink: '' });
+      if (url.includes('eutils.ncbi.nlm.nih.gov')) return jsonResponse({ esearchresult: { count: '0', idlist: [] } });
+      return jsonResponse({});
+    });
+    const handle = startApp(doc, { getHash: () => '#/draft', onHashChange: () => () => undefined,
+      setHash: jest.fn(), runtime });
+    await flush();
+    seedDraftPrereqs(handle);
+    await flush();
+    handle.store.setState((s) => ({ ...s, queryOptimizationSetup: {
+      projectId, status, maxHits: String(DEFAULT_QUERY_OPTIMIZATION_SETTINGS.maxHits),
+      maxIterations: '5', seedCount: null, error: status === 'error' ? '読み込み失敗' : null,
+    } }));
+    const generateBtn = doc.querySelector<HTMLButtonElement>('#app-content button')!;
+    expect(generateBtn.disabled).toBe(false);
+    generateBtn.click();
+    for (let i = 0; i < 30; i += 1) await flush();
+    const calls = fetchMock.mock.calls.filter((c) => String(c[0]).includes('generativelanguage.googleapis.com'));
+    expect(calls.length).toBeGreaterThanOrEqual(3);
+    const prompt = (calls[0]![1] as RequestInit).body as string;
+    expect(prompt).toContain(`目安であって上限ではない）: ${savedMaxHits ?? DEFAULT_QUERY_OPTIMIZATION_SETTINGS.maxHits}`);
+    expect(handle.store.getState().validationResult).not.toBeNull();
+    handle.dispose();
   });
 
   test('生成→検証パイプラインが ValidationLog に検証行を追記する', async () => {
