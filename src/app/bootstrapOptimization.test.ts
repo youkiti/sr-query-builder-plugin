@@ -12,6 +12,7 @@ import * as protocolRepository from '@/features/protocol/protocolRepository';
 import * as formulaRepository from '@/features/formula/formulaRepository';
 import * as improveSkill from '@/features/formula/skills/improveBlock';
 import { getQueryOptimizationSettings } from './services/queryOptimizationSettingsService';
+import { createQueryOptimizationInputIdentity, type InterruptedQueryOptimization } from './services/queryOptimizationCheckpointService';
 import type { SeedPaper } from '@/domain/seedPaper';
 import { serializePubmedFormulaMd } from '@/lib/search-formula-md';
 
@@ -69,6 +70,73 @@ async function switchProject(fixture: ReturnType<typeof setup>, projectId = 'oth
   app.dispose();
 }
 afterEach(() => { jest.restoreAllMocks(); document.body.innerHTML = ''; });
+
+function prepareResume(f: ReturnType<typeof setup>) {
+  const state = f.store.getState();
+  const checkpoint: InterruptedQueryOptimization = { projectId: 'p', runId: 'old', maxHits: 123, savedAt: 'old-time',
+    status: 'interrupted', needsRevalidation: true,
+    trials: [{ candidateId: 'rejected', formula, reason: 'シードを失う', fingerprint: 'old-hash', accepted: false,
+      totalHits: 1, capturedSeedCount: 0 }],
+    resume: { bestFormula: { blocks: [{ id: '1', expression: 'best[tiab]', isCombination: false }], combinationExpression: null },
+      inputIdentity: createQueryOptimizationInputIdentity(state.protocolDraft!, state.blocksDraft!, ['11'], 123),
+      limits: { apiCalls: 200, elapsedMs: 600000, evaluatedTrials: 5 },
+      consumed: { apiCalls: 120, elapsedMs: 300000, evaluatedTrials: 2 },
+      previousRejectedTrials: [{ formula, reason: 'さらに前の却下', fingerprint: 'older-hash' }] },
+  };
+  f.data.queryOptimizationCheckpoint = checkpoint;
+  f.store.setState((s) => ({ ...s, queryOptimizationSetup: { projectId: 'p', status: 'ready',
+    maxHits: '123', maxIterations: '5', seedCount: 1, seedPmids: ['11'], error: null, checkpoint } }));
+  const resume = () => runOptimizeQuery(f.store, f.runtime, { google: f.runtime.google, store: f.runtime.store },
+    { maxHits: 123, maxIterations: 5 }, 'old');
+  return { checkpoint, resume };
+}
+
+test('再開は最良式・新 runId・3種類の残予算を使い、初期式を生成せず旧記録を保持する', async () => {
+  const f = setup();
+  const { checkpoint, resume } = prepareResume(f);
+  const generate = jest.spyOn(draft, 'generateDraftFormula');
+  await resume();
+  const [input, deps] = f.run.mock.calls[0]!;
+  expect(input.runId).not.toBe('old');
+  expect(input.initialFormula).toEqual(checkpoint.resume!.bestFormula);
+  expect(input.maxIterations).toBe(3);
+  expect(input.resumeBudget).toEqual({ runId: 'old', limits: checkpoint.resume!.limits, consumed: checkpoint.resume!.consumed });
+  expect(input.previousRejectedTrials?.map((trial) => trial.reason)).toEqual(['さらに前の却下', 'シードを失う']);
+  expect(input.previousRejectedTrials?.[1]).not.toHaveProperty('totalHits');
+  expect(deps).toMatchObject({ maxApiCalls: 80, maxElapsedMs: 300000 });
+  expect(f.store.getState().queryOptimizationRun?.maxIterations).toBe(3);
+  expect(await getQueryOptimizationSettings('p', f.runtime.store)).toMatchObject({ maxIterations: 5 });
+  expect(generate).not.toHaveBeenCalled();
+  expect(f.data.queryOptimizationCheckpoint).toBe(checkpoint);
+});
+
+test.each(['criteria', 'blocks', 'seeds', 'budget', 'completed', 'missing'] as const)('再開時にも %s を確認し、run 作成前に拒否する', async (kind) => {
+  const f = setup();
+  const { checkpoint, resume } = prepareResume(f);
+  if (kind === 'criteria') f.store.setState((s) => ({ ...s, protocolDraft: { ...s.protocolDraft!, researchQuestion: '変更' } }));
+  if (kind === 'blocks') f.store.setState((s) => ({ ...s, blocksDraft: { ...s.blocksDraft!, combinationExpression: '#2' } }));
+  if (kind === 'seeds') f.store.setState((s) => ({ ...s, queryOptimizationSetup: { ...s.queryOptimizationSetup!, seedPmids: ['22'] } }));
+  if (kind === 'budget') checkpoint.resume!.consumed.evaluatedTrials = 5;
+  if (kind === 'completed') checkpoint.completion = { status: 'achieved', stopReason: 'conditions_met', unmetReasons: [] };
+  if (kind === 'missing') f.store.setState((s) => ({ ...s, queryOptimizationSetup: null }));
+  await resume();
+  expect(f.run).not.toHaveBeenCalled();
+  expect(f.list).not.toHaveBeenCalled();
+  expect(f.store.getState().queryOptimizationRun).toBeNull();
+  expect(f.store.getState().queryOptimizationSetup?.error).toBeTruthy();
+});
+
+test('準備後に外部シード集合が変わっていたら取得し直した集合で拒否し、旧ログを保持する', async () => {
+  const f = setup();
+  const { checkpoint, resume } = prepareResume(f);
+  f.list.mockResolvedValue([seed('22')]);
+  await resume();
+  expect(f.run).not.toHaveBeenCalled();
+  expect(f.buildFactory).not.toHaveBeenCalled();
+  expect(f.store.getState().queryOptimizationRun).toBeNull();
+  expect(f.store.getState().queryOptimizationSetup?.error).toContain('変わっている');
+  expect(f.data.queryOptimizationCheckpoint).toBe(checkpoint);
+});
 
 test('UI の入力値を実行と固定表示に共用し、入力・停止・復元を store 経由で行う', async () => {
   const fixture = setup();

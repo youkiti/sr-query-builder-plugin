@@ -171,6 +171,7 @@ export interface QueryOptimizationRunState {
 
 export interface QueryOptimizationSetupState {
   checkpoint?: CompletedQueryOptimization | InterruptedQueryOptimization | null;
+  seedPmids?: string[];
   projectId: string;
   status: 'loading' | 'ready' | 'error';
   maxHits: string;

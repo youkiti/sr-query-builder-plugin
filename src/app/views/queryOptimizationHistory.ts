@@ -1,6 +1,7 @@
 import type { OptimizationApiEvent, OptimizationMeasurement, OptimizationMeshNode, OptimizationTrial } from '@/features/formula/skills/optimizeQuery';
 import { extractBlockTerms } from '@/features/validation/blockTerms';
 import { buildPubmedSearchUrl } from '@/lib/ncbi/pubmedUrl';
+import type { OptimizationResumeAvailability } from '../services/queryOptimizationCheckpointService';
 import { tokenizeExpression } from '@/lib/search-formula-md/expression';
 import type { QueryOptimizationRunState, QueryOptimizationSetupState } from '../store';
 
@@ -159,7 +160,9 @@ function renderDetails(details: HTMLElement, trial: OptimizationTrial, nodes: Op
 
 /** データは毎回 state から読む。スクロール位置と開閉状態だけを DOM に保持する。 */
 export function createOptimizationHistoryRenderer(): (
-  container: HTMLElement, run: QueryOptimizationRunState | null, setup: QueryOptimizationSetupState | null
+  container: HTMLElement, run: QueryOptimizationRunState | null, setup: QueryOptimizationSetupState | null,
+  resume?: { availability: OptimizationResumeAvailability;
+    start?: () => void; disabled: boolean }
 ) => void {
   let key = '';
   let section: HTMLElement | null = null;
@@ -169,8 +172,9 @@ export function createOptimizationHistoryRenderer(): (
   let scrollTop = 0;
   let renderedContext: OptimizationMeshNode[] | null = null;
   const rows = new Map<string, { element: HTMLLIElement; trial: OptimizationTrial }>();
-  return (container, run, setup) => {
+  return (container, run, setup, resume) => {
     const doc = container.ownerDocument;
+    container.querySelector('.optimization__restored')?.remove();
     if (run) {
       const nextKey = `${run.projectId}:${run.runId}`;
       if (key !== nextKey || !section || !viewport || !list) {
@@ -232,7 +236,8 @@ export function createOptimizationHistoryRenderer(): (
       // 画面全体ではなく履歴領域だけを動かす。新規行がない更新では追従しない。
       viewport.scrollTop = follow && added ? viewport.scrollHeight : scrollTop;
       scrollTop = viewport.scrollTop;
-    } else if (setup?.checkpoint) {
+    }
+    if (setup?.checkpoint && (!run || run.trials.length === 0)) {
       const checkpoint = setup.checkpoint;
       const restored = doc.createElement('section');
       restored.className = 'optimization__restored';
@@ -241,6 +246,29 @@ export function createOptimizationHistoryRenderer(): (
       restored.appendChild(title);
       paragraph(restored, checkpoint.status === 'interrupted' ? '処理は中断しています。バックグラウンドでは継続していません。' : 'この実行は終了しています。');
       paragraph(restored, `保存日時: ${checkpoint.savedAt}。ログのみを復元しました。以下は保存時の記録で、再検証は済んでいません。`);
+      if (!run && checkpoint.status === 'interrupted' && resume) {
+        const message = doc.createElement('p');
+        message.setAttribute('aria-live', 'polite');
+        if (resume.availability.available) {
+          const remaining = resume.availability.remaining;
+          message.textContent = `保存した最良候補を初期式にして新しい実行を開始し、件数・シード捕捉をすべて測り直します。残り予算: 通信 ${remaining.apiCalls} 回 / 時間 ${Math.floor(remaining.elapsedMs / 1000)} 秒 / 評価試行 ${remaining.evaluatedTrials} 回。`;
+          restored.appendChild(message);
+          const button = doc.createElement('button');
+          button.type = 'button';
+          button.className = 'optimization__resume';
+          button.textContent = '最良候補から再開して測り直す';
+          button.disabled = resume.disabled || !resume.start;
+          button.addEventListener('click', () => {
+            if (button.disabled) return;
+            button.disabled = true;
+            resume.start?.();
+          });
+          restored.appendChild(button);
+        } else {
+          message.textContent = resume.availability.reason;
+          restored.appendChild(message);
+        }
+      }
       const summaries = doc.createElement('ul');
       for (const trial of checkpoint.trials) {
         const item = doc.createElement('li');
