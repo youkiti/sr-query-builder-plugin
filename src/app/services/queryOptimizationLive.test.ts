@@ -108,12 +108,13 @@ test('通信再試行とレート調整・取得失敗を分離し、試行数�
   expect(failed.trials[0]?.apiEvents).toContainEqual({ source: 'PubMed', status: 'failure' });
 });
 
-test('固定作業は確認済みの総数で通知し、最良候補の値は却下候補から更新しない', async () => {
+test.each([false, true])('固定作業は確認済みの総数で通知し、最良候補の値は却下候補から更新しない（詳細計測=%s）', async (measureTermDetails) => {
   const f = fixture();
   const progress: QueryOptimizationProgress[] = [];
-  const result = await runQueryOptimization(f.input, { ...f.deps, onProgress: (p) => progress.push(p) });
+  const result = await runQueryOptimization(f.input, { ...f.deps, measureTermDetails, onProgress: (p) => progress.push(p) });
+  const total = measureTermDetails ? 2 : 1;
   expect(progress.map((p) => p.task)).toEqual(expect.arrayContaining([
-    { kind: 'terms', completed: 0, total: 1 }, { kind: 'terms', completed: 1, total: 1 },
+    ...Array.from({ length: total + 1 }, (_, completed) => ({ kind: 'terms', completed, total })),
     { kind: 'seeds', completed: 0, total: 2 }, { kind: 'seeds', completed: 2, total: 2 },
   ]));
   expect(result.trials[1]?.accepted).toBe(false);
