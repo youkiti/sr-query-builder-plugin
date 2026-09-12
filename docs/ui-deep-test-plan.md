@@ -140,8 +140,8 @@ CLAUDE.md §目的 と [ui-flow.md §2](ui-flow.md) から逆算した 6 本。
 > **実装済み（issue #109）**: 表の API エラー 3 行は `#/expand` の候補取得について実装した。失敗は
 > [`classifyApiError`](../src/lib/api-error/apiErrorKind.ts) が `permission` / `rate_limit` / `temporary` / `other` に
 > 分類し、`store.expandRun.errorKind` を通じて [expandView.ts](../src/app/views/expandView.ts) が案内を出し分ける：
-> - Sheets 403（および `drive.file` で同じ意味になる 404）: `.expand__error-panel--permission` に共有設定の確認を促し、
->   スプレッドシートを新しいタブで開くボタンを出す。同じ操作の再試行は勧めない（権限が直るまで結果が変わらないため）。
+> - Sheets 403（および `drive.file` で同じ意味になる 404）: `.expand__error-panel--permission` に
+>   「Google で許可する（Picker 許可。成功で自動再取得）」＋「スプレッドシートを開く」のボタンを出す。
 >   **モーダルではなく画面内のパネル**にした（フォーカストラップを新設せずに済み、`role="alert"` で読み上げられる）。
 > - NCBI 429: 自動リトライ中は `.expand__api-wait`（`role="status"`）に「約 N 秒待ってから自動で再試行します（M / 6 回目）」を出す
 >   （[expandApiWait.ts](../src/app/services/expandApiWait.ts) が `EutilsDeps` の `rateLimiter` / `sleep` を包む。リトライ回数は変えていない）。

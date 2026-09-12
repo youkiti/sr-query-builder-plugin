@@ -8,6 +8,8 @@ import {
 import { createStore, INITIAL_STATE } from './store';
 import { SHEET_HEADERS } from '@/domain/sheetsSchema';
 import { sharedEutilsRateLimiters } from '@/lib/ncbi';
+import { PICKER_GRANT_MESSAGE } from '@/background/pickerGrant';
+import * as llmProviderService from './services/llmProviderService';
 
 function buildDocument(): Document {
   const doc = document.implementation.createHTMLDocument('test');
@@ -2168,7 +2170,44 @@ describe('startApp - wiring 層', () => {
     expect(doc.querySelector('.expand__error-panel')).toBeNull();
   });
 
-  // issue #109: 403 は権限の問題なので、同じボタンを押し直しても永久に失敗する。
+  test('待機していない間の AI 状態通知は store の購読者へ通知しない', async () => {
+    const doc = buildDocument();
+    const { runtime } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+    });
+    const handle = startApp(doc, {
+      getHash: () => '#/expand', onHashChange: () => () => undefined, setHash: jest.fn(), runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({ ...s, currentFormulaVersionId: 'v-1', currentFormulaMarkdown: '#1 asthma[tiab]' }));
+    const listener = jest.fn();
+    const unsubscribe = handle.store.subscribe(listener);
+    const factory = jest.spyOn(llmProviderService, 'buildLlmProviderFactory').mockImplementation(async (deps) => {
+      listener.mockClear();
+      const before = handle.store.getState();
+      deps.onRequestState?.('idle');
+      deps.onRequestState?.('failure');
+      expect(handle.store.getState()).toBe(before);
+      expect(listener).not.toHaveBeenCalled();
+      deps.onRequestState?.('retry');
+      expect(listener).toHaveBeenCalledTimes(1);
+      deps.onRequestState?.('idle');
+      expect(listener).toHaveBeenCalledTimes(2);
+      deps.onRequestState?.('idle');
+      expect(listener).toHaveBeenCalledTimes(2);
+      throw new Error('通信前にテストを終了');
+    });
+    try {
+      doc.querySelector<HTMLButtonElement>('.expand__actions button')!.click();
+      await flush();
+      expect(factory).toHaveBeenCalledTimes(1);
+      expect(handle.store.getState().expandRun?.error).toBe('通信前にテストを終了');
+    } finally {
+      factory.mockRestore();
+      unsubscribe();
+    }
+  });
+
   test('SeedPapers が 403 なら許可エラーとして分類し、共有設定を新しいタブで開く導線を出す', async () => {
     const doc = buildDocument();
     const { runtime, fetchMock } = makeRuntime({
@@ -2188,6 +2227,10 @@ describe('startApp - wiring 層', () => {
       return jsonResponse({});
     });
     const createTab = jest.spyOn(chrome.tabs, 'create').mockImplementation(() => undefined);
+    const originalSendMessage = Object.getOwnPropertyDescriptor(chrome.runtime, 'sendMessage');
+    const sendMessage = jest.fn().mockResolvedValue(undefined);
+    Object.defineProperty(chrome.runtime, 'sendMessage', { configurable: true, value: sendMessage });
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
       const handle = startApp(doc, {
         getHash: () => '#/expand',
@@ -2214,11 +2257,31 @@ describe('startApp - wiring 層', () => {
       expect(handle.store.getState().expandRun?.errorKind).toBe('permission');
       const panel = doc.querySelector('.expand__error-panel--permission')!;
       expect(panel).not.toBeNull();
-      panel.querySelector<HTMLButtonElement>('.expand__error-action')!.click();
+      panel.querySelector<HTMLButtonElement>('.expand__error-action--open')!.click();
+      await flush();
       expect(createTab).toHaveBeenCalledWith({
-        url: 'https://docs.google.com/spreadsheets/d/SHEET-1/edit',
+        url: 'https://docs.google.com/spreadsheets/d/SHEET-1/edit?authuser=me%40x',
       });
+      panel.querySelector<HTMLButtonElement>('.expand__error-action--grant')!.click();
+      await flush();
+      expect(sendMessage).toHaveBeenCalledWith({
+        type: PICKER_GRANT_MESSAGE, spreadsheetId: 'SHEET-1', openAppOnSuccess: false,
+      });
+      expect(panel.querySelector('.expand__error-grant-status')?.textContent).toBe(
+        '許可に失敗しました: 許可フローを開始できませんでした。'
+      );
+      jest.mocked(runtime.profile.getProfileUserInfo).mockRejectedValueOnce(new Error('取得失敗'));
+      panel.querySelector<HTMLButtonElement>('.expand__error-action--open')!.click();
+      await flush();
+      expect(createTab).toHaveBeenLastCalledWith({ url: 'https://docs.google.com/spreadsheets/d/SHEET-1/edit' });
+      createTab.mockImplementationOnce(() => Promise.reject(new Error('タブ作成失敗')));
+      panel.querySelector<HTMLButtonElement>('.expand__error-action--open')!.click();
+      await flush();
+      expect(warn).toHaveBeenCalledWith('[sr-query-builder] スプレッドシートのタブを開けませんでした');
     } finally {
+      if (originalSendMessage) Object.defineProperty(chrome.runtime, 'sendMessage', originalSendMessage);
+      else Reflect.deleteProperty(chrome.runtime, 'sendMessage');
+      warn.mockRestore();
       createTab.mockRestore();
     }
   });

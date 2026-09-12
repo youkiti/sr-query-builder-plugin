@@ -10,6 +10,7 @@ import type {
   ValidationSummary,
 } from '@/app/services';
 import type { SeedUserDecision } from '@/domain/seedPaper';
+import type { PickerGrantResult } from '@/background/pickerGrant';
 import {
   buildUpdateProposals,
   type IncludedPaper,
@@ -82,11 +83,9 @@ export interface ExpandViewCallbacks {
   onDecide?: (input: RecordDecisionInput) => Promise<RecordDecisionResult>;
   /** ラウンド完了時の再検証コールバック。check_final_query 相当を期待 */
   onRoundComplete?: () => Promise<ValidationSummary>;
-  /**
-   * 許可エラー（issue #109）のとき、対象スプレッドシートを新しいタブで開く。
-   * 共有設定の変更は拡張の中では完結しないので、Google 側の画面へ送り出すしかない。
-   */
+  /** 許可エラーのとき、対象スプレッドシートを新しいタブで開く。 */
   onOpenSpreadsheet?: (spreadsheetId: string) => void;
+  onRequestSpreadsheetAccess?: (spreadsheetId: string) => Promise<PickerGrantResult>;
 }
 
 interface CandidateItemHandle {
@@ -229,6 +228,7 @@ export function createExpandView(callbacks: ExpandViewCallbacks = {}): RenderVie
       const panel = renderErrorGuidance(doc, run.errorKind, {
         spreadsheetId: ctx.state.project.spreadsheetId,
         onOpenSpreadsheet: callbacks.onOpenSpreadsheet,
+        onRequestSpreadsheetAccess: callbacks.onRequestSpreadsheetAccess,
         onRetry: startFetch,
       });
       if (panel) guidance.appendChild(panel);
@@ -597,6 +597,7 @@ function apiWaitText(wait: ExpandApiWait): string {
 interface ErrorGuidanceOptions {
   spreadsheetId: string;
   onOpenSpreadsheet?: (spreadsheetId: string) => void;
+  onRequestSpreadsheetAccess?: (spreadsheetId: string) => Promise<PickerGrantResult>;
   onRetry: () => void;
 }
 
@@ -628,17 +629,65 @@ function renderErrorGuidance(
   panel.appendChild(body);
 
   if (kind === 'permission') {
-    title.textContent = '⛔ 共有設定の確認が必要です';
+    title.textContent = '⛔ このスプレッドシートを読めませんでした';
     // 403 / 404 は「Picker 未選択」「共有されていない」「削除済み」「ID 誤り」のいずれでも
     // 返るため断定しない（popup の許可導線と同じ作法）。
     body.textContent =
-      'このスプレッドシートを、いまログインしているアカウントで読めませんでした。共有設定で自分に権限が付いているかを確認してください（シートが削除されている / ID が違う場合も同じ応答になります）。権限が直るまでは、同じ操作を繰り返しても結果は変わりません。';
+      'いまログインしているアカウントで、このスプレッドシートを読めませんでした。拡張機能にまだ許可していない場合は「Google で許可する」から対象のシートを選んでください（初回のみ）。許可しても読めない場合は、共有設定で自分に権限が付いているかを確認してください（シートが削除されている / ID が違う場合も同じ応答になります）。権限が直るまでは、同じ操作を繰り返しても結果は変わりません。';
+    const status = doc.createElement('p');
+    status.className = 'expand__error-grant-status';
+    status.setAttribute('role', 'status');
+    const grant = doc.createElement('button');
+    grant.type = 'button';
+    grant.className = 'expand__error-action expand__error-action--grant';
+    grant.textContent = 'Google で許可する';
+    const writeOutcome = (message: string, retry: boolean): void => {
+      // 許可待ちの間に再描画された場合は、現在のパネルへ結果を書く。
+      const currentStatus = status.isConnected
+        ? status
+        : doc.querySelector('.expand__error-grant-status');
+      if (currentStatus) currentStatus.textContent = message;
+      if (retry) {
+        // 許可待ちの間に許可エラー以外の画面（取得済みの候補一覧など）へ変わっていたら、
+        // 自動の再取得でその画面を上書きしない。
+        if (currentStatus) options.onRetry();
+      } else {
+        grant.disabled = false;
+        const currentGrant = doc.querySelector<HTMLButtonElement>('.expand__error-action--grant');
+        if (currentGrant) currentGrant.disabled = false;
+      }
+    };
+    grant.addEventListener('click', async () => {
+      if (!options.onRequestSpreadsheetAccess) return;
+      grant.disabled = true;
+      status.textContent = '許可画面を開いています…';
+      try {
+        const result = await options.onRequestSpreadsheetAccess(options.spreadsheetId);
+        switch (result.status) {
+          case 'granted':
+            writeOutcome('許可しました。もう一度取得しています…', true);
+            break;
+          case 'cancelled':
+            writeOutcome('許可がキャンセルされました。', false);
+            break;
+          case 'busy':
+            writeOutcome('許可画面を開いています。表示された画面で操作してください。', false);
+            break;
+          case 'failed':
+            writeOutcome(`許可に失敗しました: ${result.message}`, false);
+        }
+      } catch (err) {
+        writeOutcome(`許可に失敗しました: ${err instanceof Error ? err.message : String(err)}`, false);
+      }
+    });
+    panel.appendChild(grant);
     const open = doc.createElement('button');
     open.type = 'button';
-    open.className = 'expand__error-action';
+    open.className = 'expand__error-action expand__error-action--open';
     open.textContent = 'スプレッドシートを開く';
     open.addEventListener('click', () => options.onOpenSpreadsheet?.(options.spreadsheetId));
     panel.appendChild(open);
+    panel.appendChild(status);
     return panel;
   }
 

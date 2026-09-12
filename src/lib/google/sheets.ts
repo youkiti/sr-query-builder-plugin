@@ -15,11 +15,12 @@ export interface CreatedSpreadsheet {
 /**
  * スプレッドシートを Google の画面で開く URL。
  *
- * 共有ダイアログを直接開く URL は公開されていないため、許可エラーの復帰導線（issue #109）も
- * ここへ送り出して、利用者に本体の「共有」から設定してもらう。
+ * authuser にメールアドレスを渡すと、そのアカウントで開く。
+ * この指定は利用者のブラウザでの挙動に依存するため、実機確認が必要。
  */
-export function buildSpreadsheetUrl(spreadsheetId: string): string {
-  return `https://docs.google.com/spreadsheets/d/${encodeURIComponent(spreadsheetId)}/edit`;
+export function buildSpreadsheetUrl(spreadsheetId: string, authuser?: string | null): string {
+  const query = authuser ? `?authuser=${encodeURIComponent(authuser)}` : '';
+  return `https://docs.google.com/spreadsheets/d/${encodeURIComponent(spreadsheetId)}/edit${query}`;
 }
 
 /**

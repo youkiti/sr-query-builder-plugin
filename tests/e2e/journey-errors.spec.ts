@@ -3,7 +3,7 @@
  * expand の候補取得を共通スタブで通し、対象 API だけ後勝ちの route で失敗させる。
  * 自動リトライも失敗させて利用者向けエラーを確認した後、fallback で成功スタブへ戻す。
  * docs/ui-deep-test-plan.md Phase E の表のうち API エラー 3 行（issue #109 で実装済み）を検査する:
- * 403 は共有設定への導線、429 は待機中の残り回数、500 は再試行の導線。
+ * 403 は Picker 許可とシートを開く導線、429 は待機中の残り回数、500 は再試行の導線。
  */
 
 import { test, expect } from '@playwright/test';
@@ -41,7 +41,7 @@ test.describe('journey-errors (app の API エラー復帰)', () => {
       attempts: 1,
       panel: '.expand__error-panel--permission',
       guidance: '同じ操作を繰り返しても結果は変わりません',
-      /** 許可エラーは同じ操作の再試行を勧めない。復帰は共有設定を直してから本体のボタンで行う */
+      /** 許可エラーは Picker 許可の成功後に自動で再取得する */
       recoverFromPanel: false,
     },
     {
@@ -118,20 +118,38 @@ test.describe('journey-errors (app の API エラー復帰)', () => {
       if (scenario.recoverFromPanel) {
         await expect(retry).toHaveText('もう一度取得する');
       } else {
-        // 共有設定は拡張の中では直せないので、Google 側の画面を新しいタブで開く
-        await expect(retry).toHaveText('スプレッドシートを開く');
-        await retry.click();
+        // 拡張で利用中のアカウントを指定して Google 側の画面を開く
+        const open = panel.locator('.expand__error-action--open');
+        await expect(open).toHaveText('スプレッドシートを開く');
+        await open.click();
+        await expect.poll(() => page.evaluate(
+          () => (window as unknown as { __appStubTabs: unknown[] }).__appStubTabs.length
+        )).toBe(1);
         const opened = await page.evaluate(
           () => (window as unknown as { __appStubTabs: { url?: string }[] }).__appStubTabs
         );
         expect(opened).toEqual([
-          { url: 'https://docs.google.com/spreadsheets/d/sheet-fixture-1/edit' },
+          { url: 'https://docs.google.com/spreadsheets/d/sheet-fixture-1/edit?authuser=tester%40example.com' },
         ]);
         await expect(page.locator('.expand__candidate')).toHaveCount(0);
       }
 
       failing = false;
-      await (scenario.recoverFromPanel ? retry : fetchButton).click();
+      if (scenario.recoverFromPanel) {
+        await retry.click();
+      } else {
+        await page.evaluate(() => {
+          (window as unknown as { __appStubSendMessageResponse: unknown }).__appStubSendMessageResponse =
+            { status: 'granted' };
+        });
+        await panel.locator('.expand__error-action--grant').click();
+        const messages = await page.evaluate(
+          () => (window as unknown as { __appStubMessages: { message: unknown }[] }).__appStubMessages
+        );
+        expect(messages.map((entry) => entry.message)).toContainEqual({
+          type: 'sr-query-builder/picker-grant', spreadsheetId: 'sheet-fixture-1', openAppOnSuccess: false,
+        });
+      }
       await expect(page.locator('.expand__candidate')).toHaveCount(5, { timeout: 20_000 });
       await expect(page.locator('.expand__candidate').first()).toContainText(CANDIDATE_PMIDS[0]!);
       expect(recoveredRequests).toBeGreaterThan(0);

@@ -104,6 +104,7 @@ import {
 import type { Protocol, ProtocolBlock } from '@/domain/protocol';
 import type { BlocksDraft, ProtocolDraft } from './store';
 import { buildSpreadsheetUrl, getCurrentUserEmail } from '@/lib/google';
+import { PICKER_GRANT_MESSAGE, type PickerGrantResult } from '@/background/pickerGrant';
 import { evaluateGuards } from './guards';
 import {
   ROUTE_LABELS,
@@ -630,10 +631,22 @@ function buildDefaultViewOptions(
       onDecide: async (input: RecordDecisionInput): Promise<RecordDecisionResult> =>
         runRecordDecision(store, runtime, input),
       onRoundComplete: async (): Promise<ValidationSummary> => runValidate(store, runtime),
-      // 許可エラーの復帰は Google 側の共有設定でしか行えない（issue #109）。
-      // 共有ダイアログへの直リンクは無いので、スプレッドシート本体を新しいタブで開く。
-      onOpenSpreadsheet: (spreadsheetId) =>
-        chrome.tabs.create({ url: buildSpreadsheetUrl(spreadsheetId) }),
+      onRequestSpreadsheetAccess: async (spreadsheetId): Promise<PickerGrantResult> => {
+        const result = await chrome.runtime.sendMessage({
+          type: PICKER_GRANT_MESSAGE,
+          spreadsheetId,
+          openAppOnSuccess: false,
+        }) as PickerGrantResult | undefined;
+        return result ?? { status: 'failed', message: '許可フローを開始できませんでした。' };
+      },
+      onOpenSpreadsheet: async (spreadsheetId) => {
+        const email = await getCurrentUserEmail(runtime.profile).catch(() => null);
+        try {
+          await chrome.tabs.create({ url: buildSpreadsheetUrl(spreadsheetId, email) });
+        } catch {
+          console.warn('[sr-query-builder] スプレッドシートのタブを開けませんでした');
+        }
+      },
     },
     settings: {
       readKey: (key) => runtime.store.read<string>(key),
@@ -847,7 +860,7 @@ async function runFetchBoundary(
   }
   const setApiWait = (apiWait: ExpandApiWait | null): void => {
     store.setState((s) =>
-      s.expandRun === null || s.expandRun.status !== 'running'
+      s.expandRun === null || s.expandRun.status !== 'running' || s.expandRun.apiWait === apiWait
         ? s
         : { ...s, expandRun: { ...s.expandRun, apiWait } }
     );

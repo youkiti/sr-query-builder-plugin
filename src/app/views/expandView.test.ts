@@ -1,5 +1,6 @@
 import type { BoundaryCasesResult, ValidationSummary } from '@/app/services';
 import { INITIAL_STATE, type AppState, type ExpandApiWait, type ExpandRunState } from '../store';
+import type { PickerGrantResult } from '@/background/pickerGrant';
 import type { ApiErrorKind } from '@/lib/api-error';
 import { createExpandView } from './expandView';
 
@@ -415,13 +416,85 @@ describe('createExpandView', () => {
       expect(panel.textContent).toContain('同じ操作を繰り返しても結果は変わりません');
       // 削除済み・ID 誤りでも同じ応答になるので断定しない
       expect(panel.textContent).toContain('シートが削除されている');
-      expect(panel.querySelector('.expand__error-action')?.textContent).not.toContain('もう一度取得');
+      expect(panel.querySelectorAll('.expand__error-action')).toHaveLength(2);
+      for (const button of Array.from(panel.querySelectorAll('.expand__error-action'))) {
+        expect(button.textContent).not.toContain('もう一度取得');
+      }
       // 生のメッセージは診断用に残す
       expect(container.querySelector('.expand__error')?.textContent).toBe('Google API failed: HTTP 403');
 
-      panel.querySelector<HTMLButtonElement>('.expand__error-action')!.click();
+      panel.querySelector<HTMLButtonElement>('.expand__error-action--open')!.click();
       expect(onOpenSpreadsheet).toHaveBeenCalledWith(stateReady.project!.spreadsheetId);
       expect(onFetch).not.toHaveBeenCalled();
+    });
+
+    test.each([
+      [{ status: 'granted' }, '許可しました。もう一度取得しています…', 1],
+      [{ status: 'cancelled' }, '許可がキャンセルされました。', 0],
+      [{ status: 'busy' }, '許可画面を開いています。表示された画面で操作してください。', 0],
+      [{ status: 'failed', message: '失敗詳細' }, '許可に失敗しました: 失敗詳細', 0],
+    ] satisfies [PickerGrantResult, string, number][])('許可結果 %j を表示する', async (result, message, fetches) => {
+      let resolve!: (result: PickerGrantResult) => void;
+      const onRequestSpreadsheetAccess = jest.fn(() => new Promise<PickerGrantResult>((r) => { resolve = r; }));
+      const onFetch = jest.fn().mockResolvedValue(undefined);
+      const view = createExpandView({ onRequestSpreadsheetAccess, onFetch });
+      const container = buildContainer();
+      view(container, { state: errorState('403', 'permission'), navigate: jest.fn() });
+      const grant = container.querySelector<HTMLButtonElement>('.expand__error-action--grant')!;
+      grant.click();
+      expect(grant.disabled).toBe(true);
+      expect(container.querySelector('[role="status"]')?.textContent).toBe('許可画面を開いています…');
+      expect(onRequestSpreadsheetAccess).toHaveBeenCalledWith('s');
+      resolve(result);
+      await flushAsync();
+      expect(container.querySelector('.expand__error-grant-status')?.textContent).toBe(message);
+      expect(onFetch).toHaveBeenCalledTimes(fetches);
+      if (!fetches) expect(grant.disabled).toBe(false);
+    });
+
+    test.each([new Error('失敗詳細'), '失敗詳細'])('許可依頼の reject を表示する: %s', async (err) => {
+      const onFetch = jest.fn();
+      const view = createExpandView({ onFetch, onRequestSpreadsheetAccess: jest.fn().mockRejectedValue(err) });
+      const container = buildContainer();
+      view(container, { state: errorState('403', 'permission'), navigate: jest.fn() });
+      const grant = container.querySelector<HTMLButtonElement>('.expand__error-action--grant')!;
+      grant.click();
+      await flushAsync();
+      expect(container.querySelector('.expand__error-grant-status')?.textContent).toBe('許可に失敗しました: 失敗詳細');
+      expect(grant.disabled).toBe(false);
+      expect(onFetch).not.toHaveBeenCalled();
+    });
+
+    test('許可コールバックが無い場合は何もしない', async () => {
+      const onFetch = jest.fn();
+      const container = buildContainer();
+      createExpandView({ onFetch })(container, { state: errorState('403', 'permission'), navigate: jest.fn() });
+      const grant = container.querySelector<HTMLButtonElement>('.expand__error-action--grant')!;
+      expect(() => grant.click()).not.toThrow();
+      await flushAsync();
+      expect(grant.disabled).toBe(false);
+      expect(container.querySelector('.expand__error-grant-status')?.textContent).toBe('');
+      expect(onFetch).not.toHaveBeenCalled();
+    });
+
+    // パネルが消えている＝候補一覧など別の画面に変わっているので、再取得で上書きしない
+    test.each([true, false])('許可待ち中に再描画されたら、許可エラーのパネルが残っているときだけ再取得する（パネルあり: %s）', async (keepPanel) => {
+      let resolve!: (result: PickerGrantResult) => void;
+      const onFetch = jest.fn().mockResolvedValue(undefined);
+      const view = createExpandView({ onFetch, onRequestSpreadsheetAccess: () => new Promise((r) => { resolve = r; }) });
+      const container = buildContainer();
+      const ctx = { state: errorState('403', 'permission'), navigate: jest.fn() };
+      view(container, ctx);
+      const oldStatus = container.querySelector('.expand__error-grant-status')!;
+      container.querySelector<HTMLButtonElement>('.expand__error-action--grant')!.click();
+      view(container, keepPanel ? ctx : { ...ctx, state: stateReady });
+      expect(oldStatus.isConnected).toBe(false);
+      resolve({ status: 'granted' });
+      await flushAsync();
+      if (keepPanel) {
+        expect(container.querySelector('.expand__error-grant-status')?.textContent).toBe('許可しました。もう一度取得しています…');
+      }
+      expect(onFetch).toHaveBeenCalledTimes(keepPanel ? 1 : 0);
     });
 
     test.each([

@@ -261,3 +261,7 @@
 .expand__error-action {
   font-size: 0.9rem;
 }
+
+.expand__error-action + .expand__error-action {
+  margin-left: 0.5rem;
+}

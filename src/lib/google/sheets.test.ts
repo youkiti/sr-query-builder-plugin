@@ -89,6 +89,16 @@ describe('getSheetValues', () => {
 });
 
 describe('buildSpreadsheetUrl', () => {
+  test('メールアドレスを指定したアカウントで開く', () => {
+    expect(buildSpreadsheetUrl('sid-1', 'me@example.com')).toBe(
+      'https://docs.google.com/spreadsheets/d/sid-1/edit?authuser=me%40example.com'
+    );
+  });
+
+  test.each([null, '', undefined])('メールが %s ならアカウント指定を付けない', (email) => {
+    expect(buildSpreadsheetUrl('sid-1', email)).toBe('https://docs.google.com/spreadsheets/d/sid-1/edit');
+  });
+
   test('スプレッドシートを開く URL を組み立てる', () => {
     expect(buildSpreadsheetUrl('sid-1')).toBe('https://docs.google.com/spreadsheets/d/sid-1/edit');
   });
