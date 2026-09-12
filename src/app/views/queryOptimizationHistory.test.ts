@@ -35,6 +35,27 @@ function setup(callbacks: DraftViewCallbacks = {}) {
   return { state, container, render };
 }
 beforeEach(() => jest.useFakeTimers({ now: 1000 }));
+
+test('捕捉表の列・行見出しと捕捉・未捕捉・未測定を表示する', () => {
+  const f = setup();
+  f.state.queryOptimizationRun!.trials[0]!.after!.seedCapture = { seedPmids: ['11', '22'], rows: [
+    { blockId: '1', capturedPmids: ['11'], error: null },
+    { blockId: '2', capturedPmids: null, error: 'HTTP 414' },
+  ] };
+  f.render();
+  const table = f.container.querySelector('table[aria-label="シード × ブロック捕捉表"]')!;
+  expect(table.parentElement!.className).toBe('optimization__capture-table');
+  expect(Array.from(table.querySelectorAll('th[scope="col"]')).map((th) => th.textContent)).toEqual(['シード PMID', '#1', '#2']);
+  expect(Array.from(table.querySelectorAll('th[scope="row"]')).map((th) => th.textContent)).toEqual(['11', '22']);
+  expect(Array.from(table.querySelectorAll('td')).map((td) => td.textContent)).toEqual(['○', '未測定', '×', '未測定']);
+});
+
+test('捕捉表のない試行を未計測と表示する', () => {
+  const f = setup();
+  f.render();
+  expect(f.container.textContent).toContain('捕捉表は未計測');
+  expect(f.container.querySelector('table[aria-label="シード × ブロック捕捉表"]')).toBeNull();
+});
 afterEach(() => { document.body.innerHTML = ''; jest.useRealTimers(); jest.restoreAllMocks(); });
 
 test.each([150, null])('保留の削除影響 %s と書誌を表示し未測定を 0 にしない', (lostHits) => {
@@ -81,7 +102,7 @@ test('変更詳細、ツリー、書誌リンク、語の単独件数と固有�
   ];
   f.render();
   const details = f.container.querySelector('.optimization__history details')!;
-  expect(Array.from(details.querySelectorAll('h4')).map((h) => h.textContent)).toEqual(['MeSH', 'フリーワード', 'シード', '削除影響', 'API 待機']);
+  expect(Array.from(details.querySelectorAll('h4')).map((h) => h.textContent)).toEqual(['MeSH', 'フリーワード', 'シード', 'シード × ブロック捕捉表', '削除影響', 'API 待機']);
   expect(details.textContent).toContain('差集合は実測していません');
   expect(details.textContent).toContain('Parent → Child');
   expect(details.textContent).toContain('C01.001 / explode: なし / 子は未取得');

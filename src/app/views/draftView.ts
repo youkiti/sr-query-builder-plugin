@@ -50,6 +50,7 @@ export interface DraftViewCallbacks extends ValidationResultsCallbacks {
   onAdoptOptimization?: () => Promise<void>;
   /** 編集導線を提供しない描画用途では省略する。 */
   onEditOptimization?: () => void;
+  onBlocksFromOptimization?: () => void;
   /** 「生成して検証する」ボタンが押されたとき。進捗・エラーは store.draftRun 経由で反映される */
   onGenerate?: () => Promise<void>;
   /**
@@ -165,7 +166,7 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
     renderCurrentHistory(ctx.state);
     renderOptimizationReview(container,
       ctx.state.queryOptimizationRun?.projectId === ctx.state.project.projectId ? ctx.state.queryOptimizationRun : null,
-      { adopt: callbacks.onAdoptOptimization, edit: callbacks.onEditOptimization });
+      { adopt: callbacks.onAdoptOptimization, edit: callbacks.onEditOptimization, blocks: callbacks.onBlocksFromOptimization });
     if (!ctx.state.queryOptimizationSetup && callbacks.onPrepareOptimization) {
       void Promise.resolve().then(() => callbacks.onPrepareOptimization?.());
     }

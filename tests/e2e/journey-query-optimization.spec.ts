@@ -18,13 +18,15 @@ const APP_URL = '/app/app.html#/draft';
 const PMID = '20000001';
 const INITIAL_MD = '## PubMed/MEDLINE\n\n```\n#1 "ARDS"[tiab] OR "broad"[tiab]\n#2 "ECMO"[tiab]\n#3 #1 AND #2\n```\n';
 
-async function setup(page: Page, options: { hasSeeds: boolean; holdAi: boolean; heldLost?: number; checkpoint?: QueryOptimizationCheckpoint }
+async function setup(page: Page, options: { hasSeeds: boolean; holdAi: boolean; heldLost?: number; missedByFilter?: boolean; checkpoint?: QueryOptimizationCheckpoint }
   = { hasSeeds: true, holdAi: false }) {
+  const initialMd = options.missedByFilter ? INITIAL_MD.replace('#3 #1 AND #2',
+    '#3 randomized controlled trial[pt]\n#4 #1 AND #2 AND #3') : INITIAL_MD;
   const seed: Record<string, string> = { seed_id: 'seed-1', pmid: PMID, title: 'ARDS と ECMO',
     source: 'initial', is_valid: 'TRUE', user_decision: 'include' };
   const fake = await registerSheetsStub(page, { appendDelayMs: 300, tabs: {
     FormulaVersions: [[...SHEET_HEADERS.FormulaVersions],
-      ['fv-20260420-01', '', '1', 'snapshot', INITIAL_MD, 'ai_draft', '2026-09-11T00:00:00Z', '', 'gemini-3.5-flash']],
+      ['fv-20260420-01', '', '1', 'snapshot', initialMd, 'ai_draft', '2026-09-11T00:00:00Z', '', 'gemini-3.5-flash']],
     ValidationLog: [[...SHEET_HEADERS.ValidationLog]],
     SeedPapers: [[...SHEET_HEADERS.SeedPapers], ...(options.hasSeeds ? [SHEET_HEADERS.SeedPapers.map((key) => seed[key] ?? '')] : [])],
   } });
@@ -35,6 +37,9 @@ async function setup(page: Page, options: { hasSeeds: boolean; holdAi: boolean; 
     if (query.includes(') NOT (')) {
       const lost = options.heldLost !== undefined && query.split(') NOT (')[0]!.includes('broad');
       return { count: String(lost ? options.heldLost : 0), idlist: lost ? ['30000001'] : [] };
+    }
+    if (options.missedByFilter && query.includes('[uid]')) {
+      return query.includes('randomized') ? { count: '0', idlist: [] } : { count: '1', idlist: [PMID] };
     }
     return url.includes(PMID) ? { count: '1', idlist: [PMID] }
       : { count: url.includes('broad') ? '250' : '50', idlist: [] };
@@ -48,7 +53,7 @@ async function setup(page: Page, options: { hasSeeds: boolean; holdAi: boolean; 
     const gate = new Promise<void>((resolve) => { release = resolve; });
     await page.route('**/generativelanguage.googleapis.com/**', async (route) => { await gate; await route.fallback(); });
   }
-  await injectAppStub(page, fullStateScenario({ preloadedState: { ...FULL_APP_STATE, currentFormulaMarkdown: INITIAL_MD },
+  await injectAppStub(page, fullStateScenario({ preloadedState: { ...FULL_APP_STATE, currentFormulaMarkdown: initialMd },
     extraStorage: { 'apiKeys.gemini': 'dummy-key', ...(options.checkpoint ? {
       queryOptimizationCheckpoint: options.checkpoint,
       queryOptimizationSettings: { projectId: options.checkpoint.projectId, maxHits: 100, maxIterations: 5 },
@@ -72,6 +77,23 @@ async function expectReview(page: Page, label: string) {
 
 test.describe('検索式の自動調整', () => {
   test.setTimeout(90_000);
+  test('未捕捉シードとフィルタを診断しブロック承認へ戻る', async ({ page }) => {
+    await setup(page, { hasSeeds: true, holdAi: false, missedByFilter: true });
+    await start(page);
+    await expectReview(page, '要確認');
+    await expect(page.locator('.optimization__history')).toContainText('削除案を受け付けません');
+    await expect(page.getByRole('heading', { name: '未捕捉シードの診断', exact: true })).toBeVisible();
+    const review = page.locator('.optimization__review');
+    await expect(review).toContainText(PMID);
+    await expect(review).toContainText('承認外');
+    await expect(review).toContainText('語の調整では回収できないシード');
+    const button = page.getByRole('button', { name: 'ブロック承認へ戻る', exact: true });
+    await expect(button).toBeVisible();
+    const result = await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze();
+    expect(result.violations).toEqual([]);
+    await button.click();
+    await expect(page).toHaveURL(/#\/blocks$/);
+  });
   test('リロードした中断ログから最良式を新しい run で再測定し、旧記録と残予算を保つ', async ({ page }) => {
     const best = parsePubmedFormulaMd(INITIAL_MD.replace(' OR "broad"[tiab]', ''));
     const checkpoint: QueryOptimizationCheckpoint = { projectId: FULL_APP_STATE.project!.projectId,

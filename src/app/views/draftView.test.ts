@@ -57,6 +57,24 @@ function stateReady(extra: Partial<AppState> = {}): AppState {
   };
 }
 
+test('ブロック承認 callback が最終レビューへ渡る', () => {
+  const blocks = jest.fn();
+  const render = createDraftView({ onBlocksFromOptimization: blocks });
+  const container = buildContainer();
+  const state = stateReady({ queryOptimizationRun: {
+    status: 'ready', projectId: 'p', runId: 'r', maxHits: 100, maxIterations: 1, seedCount: 1,
+    startedAtMs: 0, finishedAtMs: 1, stopRequested: false, error: null, meshContext: [], trials: [],
+    progress: { step: 'review', iterations: 1, bestTotalHits: null, bestCapturedSeedCount: null, trial: null },
+    result: { status: 'needs_review', stopReason: 'iteration_limit', best: null, trials: [],
+      unmetReasons: [], iterations: 1, apiCalls: 1, elapsedMs: 1,
+      seedDiagnoses: [{ pmid: '22', title: null, year: null, hasAbstract: false,
+        meshHeadingCount: null, blockingBlockIds: ['3'], recoverableByTerms: false, note: '承認外' }] },
+  } });
+  render(container, { state, navigate: jest.fn() });
+  Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'ブロック承認へ戻る')!.click();
+  expect(blocks).toHaveBeenCalledTimes(1);
+});
+
 function runningState(progressLabel = 'MeSH を提案中（ブロック 1/2）'): DraftRunState {
   return {
     status: 'running',

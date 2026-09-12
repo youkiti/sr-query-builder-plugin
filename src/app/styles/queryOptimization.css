@@ -109,3 +109,18 @@
 .optimization__save-error {
   color: var(--color-danger);
 }
+
+.optimization__capture-table {
+  overflow-x: auto;
+}
+
+.optimization__capture-table table {
+  border-collapse: collapse;
+}
+
+.optimization__capture-table th,
+.optimization__capture-table td {
+  border: 1px solid var(--color-border);
+  padding: var(--space-2) var(--space-3);
+  white-space: nowrap;
+}

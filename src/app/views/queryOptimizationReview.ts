@@ -1,9 +1,11 @@
 import { serializePubmedFormulaMd } from '@/lib/search-formula-md';
+import { buildPubmedSearchUrl } from '@/lib/ncbi/pubmedUrl';
 import type { QueryOptimizationRunState } from '../store';
 
 export interface OptimizationReviewActions {
   adopt: (() => Promise<void>) | undefined;
   edit: (() => void) | undefined;
+  blocks: (() => void) | undefined;
 }
 
 /** 最終候補と初期式を直接比較する。却下案や途中で戻した変更は最終差分へ混ぜない。 */
@@ -73,6 +75,32 @@ export function renderOptimizationReview(
     }
     if (!list.children.length) paragraph('初期式からの変更はありません。');
     else section.appendChild(list);
+  }
+  subheading('未捕捉シードの診断');
+  const diagnoses = result?.seedDiagnoses ?? [];
+  if (!diagnoses.length) paragraph(seeds === 0 ? '検証対象シードがないため診断はありません' : '未捕捉シードはありません');
+  for (const diagnosis of diagnoses) {
+    const p = doc.createElement('p');
+    const link = doc.createElement('a');
+    link.textContent = `PMID ${diagnosis.pmid}（${diagnosis.year ?? '年不明'}）${diagnosis.title ?? 'タイトル未取得'}`;
+    link.href = buildPubmedSearchUrl(`${diagnosis.pmid}[uid]`);
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    p.appendChild(link);
+    section.appendChild(p);
+    paragraph(diagnosis.note);
+  }
+  if (diagnoses.some((diagnosis) => diagnosis.recoverableByTerms === false)) {
+    paragraph('語の調整では回収できないシードがあります。検索概念・フィルタが強すぎる可能性があるため、ブロック承認で見直してください。');
+    const buttons = doc.createElement('div');
+    buttons.className = 'optimization__review-actions';
+    const blocks = doc.createElement('button');
+    blocks.type = 'button';
+    blocks.textContent = 'ブロック承認へ戻る';
+    blocks.disabled = !actions.blocks;
+    blocks.addEventListener('click', () => actions.blocks?.());
+    buttons.appendChild(blocks);
+    section.appendChild(buttons);
   }
   subheading('残った懸念');
   const reasons = result?.unmetReasons ?? (run.error ? [run.error] : []);

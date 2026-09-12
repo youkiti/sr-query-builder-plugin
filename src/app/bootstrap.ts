@@ -436,6 +436,7 @@ function buildDefaultViewOptions(
       onOptimize: (settings, resumeRunId) => runOptimizeQuery(store, runtime, llmFactoryDepsBase(), settings, resumeRunId),
       onAdoptOptimization: () => adoptQueryOptimization({ store, google: runtime.google }),
       onEditOptimization: () => { if (editQueryOptimization(store)) navigate('edit'); },
+      onBlocksFromOptimization: () => navigate('blocks'),
       onStopOptimization: () => {
         store.setState((s) => s.queryOptimizationRun?.status !== 'running' ? s : {
           ...s, queryOptimizationRun: { ...s.queryOptimizationRun, stopRequested: true },
@@ -1230,7 +1231,7 @@ export async function runOptimizeQuery(
     if (err instanceof QueryOptimizationStopError && err.stopReason === 'user_stop') {
       const run = store.getState().queryOptimizationRun;
       update({ status: 'ready', finishedAtMs: Date.now(), result: { status: 'stopped', stopReason: 'user_stop', best: null,
-        trials: [], unmetReasons: ['初期式の実測前に停止しました。'], iterations: 0, apiCalls: 0,
+        trials: [], seedDiagnoses: [], unmetReasons: ['初期式の実測前に停止しました。'], iterations: 0, apiCalls: 0,
         elapsedMs: Date.now() - (run?.startedAtMs ?? Date.now()) } });
     } else {
       update({ status: 'error', finishedAtMs: Date.now(), error: err instanceof Error ? err.message : String(err) });
