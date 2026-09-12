@@ -18,12 +18,24 @@ function setup() {
   return { data, deps, trial };
 }
 
+test('保留と差集合件数だけを射影し、書誌は保存せず旧形式も復元する', async () => {
+  const { data, deps, trial } = setup();
+  const held = { ...trial, candidateId: 'candidate-1', accepted: false, held: true,
+    impact: { lostHits: 150, gainedHits: 0, inspected: [{ pmid: '901', title: '研究', year: 2024 }], error: null } };
+  const saved = await saveQueryOptimizationCheckpoint('p', 'run', 100, [trial, held], deps);
+  expect(saved.trials[0]).toMatchObject({ held: false, lostHits: null, gainedHits: null });
+  expect(saved.trials[1]).toMatchObject({ held: true, lostHits: 150, gainedHits: 0 });
+  expect(JSON.stringify(saved)).not.toContain('inspected');
+  data['queryOptimizationCheckpoint'] = { ...saved, trials: saved.trials.map(({ held: _held, lostHits: _lost, gainedHits: _gained, ...old }) => old) };
+  expect((await getQueryOptimizationCheckpoint('p', deps))?.trials[1]).not.toHaveProperty('lostHits');
+});
+
 test('単一キーに要約だけを保存し、復元は中断・要再検証を返す', async () => {
   const { data, deps, trial } = setup();
   const saved = await saveQueryOptimizationCheckpoint('p', 'run', 100, [trial], deps, () => 'fixed-time');
   expect(Object.keys(data)).toEqual(['queryOptimizationCheckpoint']);
   expect(saved.trials).toEqual([{ candidateId: 'initial', formula: trial.formula, totalHits: 0,
-    capturedSeedCount: 0, accepted: true, reason: '初期式', fingerprint: 'hash' }]);
+    capturedSeedCount: 0, accepted: true, held: false, lostHits: null, gainedHits: null, reason: '初期式', fingerprint: 'hash' }]);
   for (const field of ['before', 'after', 'measurement', 'terms', 'capturedPmids', 'missedPmids', 'rationale']) {
     expect(JSON.stringify(saved)).not.toContain(`"${field}"`);
   }

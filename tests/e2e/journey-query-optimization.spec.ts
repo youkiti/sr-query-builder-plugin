@@ -16,7 +16,7 @@ const APP_URL = '/app/app.html#/draft';
 const PMID = '20000001';
 const INITIAL_MD = '## PubMed/MEDLINE\n\n```\n#1 "ARDS"[tiab] OR "broad"[tiab]\n#2 "ECMO"[tiab]\n#3 #1 AND #2\n```\n';
 
-async function setup(page: Page, options = { hasSeeds: true, holdAi: false }) {
+async function setup(page: Page, options: { hasSeeds: boolean; holdAi: boolean; heldLost?: number } = { hasSeeds: true, holdAi: false }) {
   const seed: Record<string, string> = { seed_id: 'seed-1', pmid: PMID, title: 'ARDS と ECMO',
     source: 'initial', is_valid: 'TRUE', user_decision: 'include' };
   const fake = await registerSheetsStub(page, { appendDelayMs: 300, tabs: {
@@ -27,9 +27,15 @@ async function setup(page: Page, options = { hasSeeds: true, holdAi: false }) {
   } });
   await registerDriveStub(page);
   await registerMeshRdfStub(page);
-  await registerNcbiStub(page, { esearch: (url) => url.includes(PMID)
-    ? { count: '1', idlist: [PMID] }
-    : { count: url.includes('broad') ? '250' : '50', idlist: [] } });
+  await registerNcbiStub(page, { esearch: (url) => {
+    const query = new URL(url).searchParams.get('term')!;
+    if (query.includes(') NOT (')) {
+      const lost = options.heldLost !== undefined && query.split(') NOT (')[0]!.includes('broad');
+      return { count: String(lost ? options.heldLost : 0), idlist: lost ? ['30000001'] : [] };
+    }
+    return url.includes(PMID) ? { count: '1', idlist: [PMID] }
+      : { count: url.includes('broad') ? '250' : '50', idlist: [] };
+  }, efetchXml: '<PubmedArticleSet><PubmedArticle><PMID>30000001</PMID><ArticleTitle>確認対象の研究</ArticleTitle><PubDate><Year>2024</Year></PubDate></PubmedArticle></PubmedArticleSet>' });
   await registerGeminiStub(page, { responses: { 'optimize-query': {
     target_block_id: '1', proposed_expression: '"ARDS"[tiab]', added_terms: [], removed_terms: ['"broad"[tiab]'],
     replaced_terms: [], rationale: '研究基準に合う ARDS を維持し、広すぎる語を削除しました。', measurement_ids: [], mesh_requests: [],
@@ -60,6 +66,25 @@ async function expectReview(page: Page, label: string) {
 
 test.describe('検索式の自動調整', () => {
   test.setTimeout(90_000);
+  test('失う集合がある候補は保留し、初期式のままレビューと保存へ進む', async ({ page }) => {
+    const { fake } = await setup(page, { hasSeeds: true, holdAi: false, heldLost: 150 });
+    await start(page);
+    await expectReview(page, '要確認');
+    await expect(page.locator('.optimization__history')).toContainText('/ 保留:');
+    await page.getByText('試行1の変更詳細', { exact: true }).click();
+    await expect(page.getByText('失う集合: 150 件 / 増える集合: 0 件', { exact: true })).toBeVisible();
+    await expect(page.locator('.optimization__review')).toContainText('保留した候補 1 件');
+    await expect(page.locator('.optimization__final-formula')).toContainText('"broad"[tiab]');
+    await expect(page.locator('.optimization__review')).toContainText('初期式からの変更はありません');
+    const adopt = page.getByRole('button', { name: '採用して保存', exact: true });
+    await expect(adopt).toBeEnabled();
+    const result = await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze();
+    expect(result.violations).toEqual([]);
+    await adopt.click();
+    await expect(page.locator('.optimization__save-status')).toContainText('保存しました', { timeout: 15_000 });
+    await expect.poll(() => fake.tabs['FormulaVersions']!.length).toBe(3);
+    expect(fake.tabs['FormulaVersions']![2]![4]).toContain('"broad"[tiab]');
+  });
   test('設定 → 実行 → 履歴増加 → 条件達成 → auto_optimize を一度だけ保存', async ({ page }) => {
     const { fake, release } = await setup(page, { hasSeeds: true, holdAi: true });
     await start(page);
