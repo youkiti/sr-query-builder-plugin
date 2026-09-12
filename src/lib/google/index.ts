@@ -34,6 +34,7 @@ export {
 export {
   createFolder,
   ensureChildFolder,
+  findChildFile,
   ensureRootFolder,
   uploadTextFile,
   getFileText,

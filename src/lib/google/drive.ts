@@ -67,6 +67,26 @@ export async function ensureChildFolder(
   return createFolder(name, parentId, deps);
 }
 
+/** 親フォルダ配下の同名ファイルを 1 件返す。無ければ null、照会失敗は例外を返す。 */
+export async function findChildFile(
+  name: string,
+  parentId: string,
+  deps: GoogleApiDeps
+): Promise<DriveFileRef | null> {
+  const escapedName = name.replace(/'/g, "\\'");
+  const query = [
+    `name='${escapedName}'`,
+    `'${parentId}' in parents`,
+    'trashed=false',
+  ].join(' and ');
+  const url =
+    `${METADATA_API}?fields=files(id,webViewLink)` +
+    `&pageSize=1&q=${encodeURIComponent(query)}`;
+  const res = await googleFetch(url, { method: 'GET' }, deps);
+  const body = (await res.json()) as DriveListResponse;
+  return body.files?.[0] ?? null;
+}
+
 /**
  * プレーンテキストや JSON をファイルとして指定フォルダにアップロードする。
  * multipart upload を手動で組み立てる（copy-webpack-plugin などの追加依存不要）。

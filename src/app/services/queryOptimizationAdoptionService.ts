@@ -1,6 +1,6 @@
 import { appendFormulaVersion, getFormulaVersionById } from '@/features/formula';
 import { appendValidationLog } from '@/features/validation';
-import { ensureChildFolder, getSheetValues, uploadTextFile } from '@/lib/google';
+import { ensureChildFolder, findChildFile, getSheetValues, uploadTextFile } from '@/lib/google';
 import { serializePubmedFormulaMd } from '@/lib/search-formula-md';
 import { nowIso } from '@/utils/iso8601';
 import { resolveProtocolContext, type EditServiceDeps } from './editService';
@@ -32,11 +32,11 @@ export async function adoptQueryOptimization(deps: EditServiceDeps): Promise<voi
       const createdAt = (deps.now ?? nowIso)();
       const logs = await ensureChildFolder('logs', project.driveFolderId, deps.google);
       const folder = await ensureChildFolder('validation', logs.id, deps.google);
-      // Sheets と Drive は一括確定できないため、アップロード後の保存失敗から再試行すると、
-      // 同じ run のログ JSON が再試行ごとに 1 件増え、未参照ファイルが残る場合がある。
-      // 採用版・検証ログは runId の照会で重複を防ぎ、保存する式と実測値の正しさは保つため、
-      // 現段階ではログの余剰保存として許容する。
-      const file = await uploadTextFile({
+      // Drive は同名ファイルを上書きせず別 ID で増やすため、先に照会して再アップロードを避ける。
+      // 照会失敗は保存失敗として扱い、アップロードへフォールバックしない。
+      // 照会とアップロードは一括確定できず、その間に別タブが同名ファイルを作る競合は防げない。
+      const existing = await findChildFile(`${run.runId}.json`, folder.id, deps.google);
+      const file = existing ?? await uploadTextFile({
         name: `${run.runId}.json`, parentId: folder.id, mimeType: 'application/json',
         content: JSON.stringify({ runId: run.runId, versionId, parentVersionId: state.currentFormulaVersionId,
           maxHits: run.maxHits, maxIterations: run.maxIterations, input: run.inputSnapshot ?? null,
