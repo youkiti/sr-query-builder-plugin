@@ -866,6 +866,7 @@ function renderQueryOptimization(container: HTMLElement, state: AppState, callba
       ['現在の最良候補の件数', run.progress.bestTotalHits === null ? '未計測' : `${run.progress.bestTotalHits.toLocaleString()} 件`],
       ['既知シード捕捉数', `${run.progress.bestCapturedSeedCount ?? '未計測'} / ${run.seedCount ?? '確認中'}`],
       ['試行回数', `${run.progress.evaluatedTrials ?? run.trials.filter((trial) => trial.kind === 'proposal').length} / 最大 ${run.maxIterations}`],
+      ['情報取得', `${run.progress.informationTrials ?? run.trials.filter((trial) => trial.kind === 'information').length} 回`],
     ]) {
       const item = doc.createElement('span');
       item.textContent = `${label}: ${value}`;

@@ -15,7 +15,23 @@ function state(): AppState {
 }
 afterEach(() => { jest.restoreAllMocks(); jest.useRealTimers(); document.body.innerHTML = ''; });
 
-test('5 指標と現在段階を表示し、進捗更新で focus を呼ばず、全体の割合を出さない', () => {
+test('情報取得回数は通知値を表示し、未通知なら情報要求の履歴から数える', () => {
+  jest.useFakeTimers();
+  const container = document.createElement('div');
+  const current = state();
+  const run = current.queryOptimizationRun!;
+  run.trials = [{ kind: 'information', candidateId: 'request', formula: { blocks: [], combinationExpression: null },
+    accepted: false, reason: '情報取得', rationale: '', before: null, after: null, apiEvents: [] }];
+  const render = createDraftView();
+  render(container, { state: current, navigate: jest.fn() });
+  expect(container.querySelector('.optimization__metrics')!.textContent).toContain('情報取得: 1 回');
+  expect(container.querySelector('.optimization__metrics')!.textContent).toContain('試行回数: 0 / 最大 2');
+  run.progress.informationTrials = 2;
+  render(container, { state: current, navigate: jest.fn() });
+  expect(container.querySelector('.optimization__metrics')!.textContent).toContain('情報取得: 2 回');
+});
+
+test('6 指標と現在段階を表示し、進捗更新で focus を呼ばず、全体の割合を出さない', () => {
   jest.useFakeTimers({ now: 1000 });
   const container = document.createElement('div');
   document.body.appendChild(container);
@@ -23,7 +39,7 @@ test('5 指標と現在段階を表示し、進捗更新で focus を呼ばず�
   const render = createDraftView();
   const current = state();
   render(container, { state: current, navigate: jest.fn() });
-  expect(container.querySelectorAll('.optimization__metrics > span')).toHaveLength(5);
+  expect(container.querySelectorAll('.optimization__metrics > span')).toHaveLength(6);
   expect(container.querySelector('.optimization__metrics')!.textContent).toContain('最良候補の件数: 140 件');
   expect(container.querySelector('[aria-current=step]')!.textContent).toBe('再検証');
   expect(container.querySelector('progress')).toBeNull();

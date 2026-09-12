@@ -104,6 +104,17 @@ export interface OptimizationTrial {
   changes?: Pick<OptimizeQueryProposal, 'targetBlockId' | 'addedTerms' | 'removedTerms' | 'replacedTerms'>;
   /** 情報要求の対象だけを保持し、ノード本体は run の文脈から引く。 */
   meshRequests?: OptimizationMeshRequest[];
+  /** 情報要求の件数と、取得に成功して文脈へ反映できた要求の件数。 */
+  informationResult?: { requested: number; obtained: number };
+  /** 直前の情報要求で得た文脈を読んだうえでの判断。次の候補評価にだけ設定する。 */
+  informedBy?: {
+    /** 元になった情報要求の試行 ID。 */
+    candidateId: string;
+    /** 要求した件数。 */
+    requested: number;
+    /** 文脈へ反映できた要求の件数。0 なら新しい文脈は得られていない。 */
+    obtained: number;
+  };
   apiEvents: OptimizationApiEvent[];
   candidateId: string;
   formula: PubmedFormula;
