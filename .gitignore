@@ -60,3 +60,5 @@ playwright/.cache/
 # （video/README.md 参照）
 video/tools/
 video/build/
+
+experiments/query-optimization-bench/results/

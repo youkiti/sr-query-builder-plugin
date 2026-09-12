@@ -1,0 +1,78 @@
+# r2 / PMC9943918
+# DB label: Appendix 2. MEDLINE search strategy
+# lines=74 raw_chars=2118
+
+1. Risk Factors/
+2. risk factor*.tw.
+3. Biomarkers/
+4. biomarker*.tw.
+5. marker*.tw.
+6. biological marker*.tw.
+7. Vascular Endothelial Growth Factor A/
+8. Vascular Endothelial Growth Factor A.tw.
+9. VEGF.tw.
+10. "Intercellular Signaling Peptides and Proteins"/
+11. growth factor*.tw.
+12. exp Erythropoietin/
+13. erythropoietin*.tw.
+14. EPO.tw.
+15. retinal angiogenic factor*.tw.
+16. exp Epidemiology/
+17. epidemiolog*.tw.
+18. potential role*.tw.
+19. ((risk* or rate*) adj5 (progress* or complicat*)).tw.
+20. Risk Assessment/
+21. (risk* adj5 (assess* or stratif*)).tw.
+22. exp Phenotype/
+23. phenotype*.tw.
+24. Prognosis/
+25. prognos*.tw.
+26. predict*.tw.
+27. model*.tw.
+28. variable*.tw.
+29. or/1‐28
+30. Diabetic Retinopathy/
+31. proliferative diabetic retinopathy*.tw.
+32. PDR.tw.
+33. non?proliferative diabetic retinopathy*.tw.
+34. NPDR.tw.
+35. (complication* adj5 (diabetic retinopathy* or DR)).tw.
+36. (microvascular complication* adj5 diabet*).tw.
+37. (severity* adj5 (diabetic retinopathy* or DR)).tw.
+38. (advanced adj5 (diabetic retinopathy* or DR*)).tw.
+39. severe retinopathy*.tw.
+40. Retinal Neovascularization/
+41. (retina* adj5 neo?vasculari*).tw.
+42. new vessel*.tw.
+43. ((neovasculari* or new vessel*) adj5 (disc* or retina* or elsewhere or iris*)).tw.
+44. (NVD or NVE or NVI).tw.
+45. rubeosis iridis*.tw.
+46. ((vision* or sight*) adj5 threat* adj25 (diabet* or retinopathy*)).tw.
+47. or/30‐46
+48. Vitreous Hemorrhage/
+49. vitreous h?emorrhage*.tw.
+50. fibro?proliferative disease*.tw.
+51. tractional retinal detachment*.tw.
+52. rhegmatogenous retinal detachment*.tw.
+53. Glaucoma, Neovascular/
+54. neovascular glaucoma*.tw.
+55. NVG.tw.
+56. ((moderate* or severe* or reduced) adj5 vis*).tw.
+57. Blindness/
+58. (registered adj5 blind).tw.
+59. blindness*.tw.
+60. partial* sight*.tw.
+61. or/48‐60
+62. occurrence*.tw.
+63. advancement*.tw.
+64. worsen*.tw.
+65. (evolution* or evolv*).tw.
+66. relationship* between.tw.
+67. Association/
+68. "correlation of data"/
+69. incidence/ or prevalence/
+70. exp disease progression/
+71. natural histor*.tw.
+72. natural course*.tw.
+73. or/62‐72
+74. 29 and 47 and 61 and 73

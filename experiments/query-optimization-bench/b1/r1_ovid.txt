@@ -1,0 +1,22 @@
+# r1 / PMC9009295
+# DB label: MEDLINE/Embase/PsycINFO (in Ovid)
+# lines=18 raw_chars=709
+
+1. exp Smoking Cessation/
+2. exp "Tobacco Use Disorder"/
+3. (SMOKING* or TOBACCO or "TOBACCO USE DISORDER*" or "TOBACCO USE CESSATION*" or NICOTINE*).mp.
+4. (SMOKING CESSATION or ANTISMOK*).ti,ab.
+5. (quit* or smok* or nonsmok* or cigar* or tobacco* or nicotine*).ti.
+6. smoking cessation.mp.
+7. exp "Tobacco Use Cessation"/
+8. 1 or 2 or 3 or 4 or 5 or 6 or 7
+9. exp mindfulness/
+10. exp meditation/
+11. exp "Mind Body Therapies"/
+12. exp "Mind Body Relations, Metaphysical"/
+13. exp Breathing Exercises/
+14. (meditat* or mindful* or "relaxation* mind body" or "body mind").mp.
+15. (Samadhi or Samapatti).mp.
+16. (acceptance adj2 commitment).ti,ab.
+17. 9 or 10 or 11 or 12 or 13 or 14 or 15 or 16
+18. 8 and 17

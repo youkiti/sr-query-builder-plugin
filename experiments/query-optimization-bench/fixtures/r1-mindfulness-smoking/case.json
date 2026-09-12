@@ -1,0 +1,319 @@
+{
+  "id": "r1-mindfulness-smoking",
+  "pmcid": "PMC9009295",
+  "searchDate": "2021-04-15",
+  "license": "CC BY",
+  "protocolPath": "protocol.md",
+  "gold": [
+    {
+      "id": "bloom 2020",
+      "members": [
+        {
+          "studyId": "bloom 2020",
+          "pmids": [
+            "31993658"
+          ]
+        }
+      ],
+      "pmids": [
+        "31993658"
+      ]
+    },
+    {
+      "id": "bock 2012",
+      "members": [
+        {
+          "studyId": "bock 2012",
+          "pmids": [
+            "20429895",
+            "21992583"
+          ]
+        }
+      ],
+      "pmids": [
+        "20429895",
+        "21992583"
+      ]
+    },
+    {
+      "id": "bock 2019",
+      "members": [
+        {
+          "studyId": "bock 2019",
+          "pmids": [
+            "24937018",
+            "29025502",
+            "30295912"
+          ]
+        }
+      ],
+      "pmids": [
+        "24937018",
+        "29025502",
+        "30295912"
+      ]
+    },
+    {
+      "id": "bricker 2014a",
+      "members": [
+        {
+          "studyId": "bricker 2014a",
+          "pmids": [
+            "24935757",
+            "25156397"
+          ]
+        }
+      ],
+      "pmids": [
+        "24935757",
+        "25156397"
+      ]
+    },
+    {
+      "id": "bricker 2018",
+      "members": [
+        {
+          "studyId": "bricker 2018",
+          "pmids": [
+            "29235186",
+            "29678799",
+            "30340143",
+            "33433609"
+          ]
+        }
+      ],
+      "pmids": [
+        "29235186",
+        "29678799",
+        "30340143",
+        "33433609"
+      ]
+    },
+    {
+      "id": "bricker 2020",
+      "members": [
+        {
+          "studyId": "bricker 2020",
+          "pmids": [
+            "32955554"
+          ]
+        }
+      ],
+      "pmids": [
+        "32955554"
+      ]
+    },
+    {
+      "id": "brown 2013",
+      "members": [
+        {
+          "studyId": "brown 2013",
+          "pmids": [
+            "23884317"
+          ]
+        }
+      ],
+      "pmids": [
+        "23884317"
+      ]
+    },
+    {
+      "id": "davis 2014a + davis 2014b",
+      "members": [
+        {
+          "studyId": "davis 2014a",
+          "pmids": [
+            "23775222",
+            "24611852",
+            "24963659",
+            "25019551"
+          ]
+        },
+        {
+          "studyId": "davis 2014b",
+          "pmids": [
+            "24957302",
+            "24963659"
+          ]
+        }
+      ],
+      "pmids": [
+        "23775222",
+        "24611852",
+        "24957302",
+        "24963659",
+        "25019551"
+      ]
+    },
+    {
+      "id": "de souza 2020",
+      "members": [
+        {
+          "studyId": "de souza 2020",
+          "pmids": [
+            "32222767"
+          ]
+        }
+      ],
+      "pmids": [
+        "32222767"
+      ]
+    },
+    {
+      "id": "garrison 2020",
+      "members": [
+        {
+          "studyId": "garrison 2020",
+          "pmids": [
+            "25884648",
+            "29917096"
+          ]
+        }
+      ],
+      "pmids": [
+        "25884648",
+        "29917096"
+      ]
+    },
+    {
+      "id": "gaskins 2015",
+      "members": [
+        {
+          "studyId": "gaskins 2015",
+          "pmids": [
+            "26029280"
+          ]
+        }
+      ],
+      "pmids": [
+        "26029280"
+      ]
+    },
+    {
+      "id": "mak 2020",
+      "members": [
+        {
+          "studyId": "mak 2020",
+          "pmids": [
+            "25879419",
+            "33198700"
+          ]
+        }
+      ],
+      "pmids": [
+        "25879419",
+        "33198700"
+      ]
+    },
+    {
+      "id": "mcclure 2020",
+      "members": [
+        {
+          "studyId": "mcclure 2020",
+          "pmids": [
+            "30590810"
+          ]
+        }
+      ],
+      "pmids": [
+        "30590810"
+      ]
+    },
+    {
+      "id": "o'connor 2020",
+      "members": [
+        {
+          "studyId": "o'connor 2020",
+          "pmids": [
+            "32005334"
+          ]
+        }
+      ],
+      "pmids": [
+        "32005334"
+      ]
+    },
+    {
+      "id": "pbert 2020",
+      "members": [
+        {
+          "studyId": "pbert 2020",
+          "pmids": [
+            "33343761"
+          ]
+        }
+      ],
+      "pmids": [
+        "33343761"
+      ]
+    },
+    {
+      "id": "vidrine 2016",
+      "members": [
+        {
+          "studyId": "vidrine 2016",
+          "pmids": [
+            "27213492",
+            "28191263",
+            "28650195"
+          ]
+        }
+      ],
+      "pmids": [
+        "27213492",
+        "28191263",
+        "28650195"
+      ]
+    },
+    {
+      "id": "weng 2021",
+      "members": [
+        {
+          "studyId": "weng 2021",
+          "pmids": [
+            "33069106"
+          ]
+        }
+      ],
+      "pmids": [
+        "33069106"
+      ]
+    }
+  ],
+  "heldOut": [
+    "bloom 2020",
+    "bock 2012",
+    "bricker 2014a",
+    "bricker 2018",
+    "bricker 2020",
+    "brown 2013",
+    "davis 2014a + davis 2014b",
+    "de souza 2020",
+    "garrison 2020",
+    "gaskins 2015",
+    "mak 2020",
+    "mcclure 2020",
+    "o'connor 2020",
+    "pbert 2020"
+  ],
+  "seeds": {
+    "seed": 20260912,
+    "selections": [
+      {
+        "groupId": "vidrine 2016",
+        "pmid": "27213492",
+        "year": null
+      },
+      {
+        "groupId": "weng 2021",
+        "pmid": "33069106",
+        "year": null
+      },
+      {
+        "groupId": "bock 2019",
+        "pmid": "24937018",
+        "year": null
+      }
+    ]
+  }
+}

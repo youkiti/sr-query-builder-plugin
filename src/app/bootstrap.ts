@@ -69,7 +69,7 @@ import { isSeedEligibleForValidation, type SeedPaper } from '@/domain/seedPaper'
 import { listSeedPapers } from '@/features/seeds';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
 import { newUuid } from '@/utils/uuid';
-import type { OptimizationMeshNode } from '@/features/formula/skills/optimizeQuery';
+import { fetchMeshContext } from './services/meshContextService';
 import { getQueryOptimizationCheckpoint } from './services/queryOptimizationCheckpointService';
 import {
   efetchArticles,
@@ -78,7 +78,6 @@ import {
   fetchMeshLabels,
   fetchMeshTreeNumbers,
   type EfetchArticle,
-  type EutilsDeps,
 } from '@/lib/ncbi';
 import {
   appendExcessFilterBlocks,
@@ -1193,34 +1192,7 @@ export async function runOptimizeQuery(
       seedPapers: seeds.flatMap((seed) => seed.pmid === null ? [] : [{ pmid: seed.pmid, title: seed.title }]),
     }, { eutils, llmFactory: factory, checkpoint: runtime.store, shouldStop, measureTermDetails: true,
       onMeshContext: (meshContext) => update({ meshContext }),
-      fetchMeshContext: async (request, observedEutils) => {
-        const bounded: EutilsDeps = { ...(observedEutils ?? eutils), maxRetries: 1 };
-        check();
-        const branches = request.treeNumber ? [request.treeNumber]
-          : (await fetchMeshTreeNumbers([request.descriptor], bounded)).get(request.descriptor) ?? [];
-        check();
-        const nodes = new Map<string, OptimizationMeshNode>();
-        // 追加取得は最大 3 枝の直下まで。未取得の祖先・子孫を関係として補わない。
-        for (const branch of branches.slice(0, 3)) {
-          const labels = await fetchMeshLabels([branch], bounded);
-          check();
-          const children = await fetchMeshChildren(branch, bounded);
-          check();
-          const parent = labels.get(branch);
-          for (const node of [...labels.values(), ...children]) {
-            const previous = nodes.get(node.descriptorUi);
-            const parentIds = node.treeNumber === branch || !parent ? [] : [parent.descriptorUi];
-            const childIds = node.treeNumber === branch ? children.map((child) => child.descriptorUi) : [];
-            nodes.set(node.descriptorUi, { id: node.descriptorUi, descriptor: node.label, label: node.label,
-              treeNumbers: [...new Set([...(previous?.treeNumbers ?? []), node.treeNumber])],
-              parentIds: [...new Set([...(previous?.parentIds ?? []), ...parentIds])],
-              childIds: [...new Set([...(previous?.childIds ?? []), ...childIds])], explode: true,
-              note: '最大 3 枝の直下のみ取得。その他の親子関係は未取得。',
-            });
-          }
-        }
-        return [...nodes.values()];
-      },
+      fetchMeshContext: (request, observedEutils) => fetchMeshContext(request, observedEutils ?? eutils, check),
       onProgress: publisher.publish,
     });
     publisher.flush();

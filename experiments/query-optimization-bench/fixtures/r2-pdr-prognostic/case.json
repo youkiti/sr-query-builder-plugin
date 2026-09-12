@@ -1,0 +1,943 @@
+{
+  "id": "r2-pdr-prognostic",
+  "pmcid": "PMC9943918",
+  "searchDate": "2022-05-27",
+  "license": "CC BY",
+  "protocolPath": "protocol.md",
+  "gold": [
+    {
+      "id": "arfken 1998",
+      "members": [
+        {
+          "studyId": "arfken 1998",
+          "pmids": [
+            "9589242"
+          ]
+        }
+      ],
+      "pmids": [
+        "9589242"
+      ]
+    },
+    {
+      "id": "ballard 1986",
+      "members": [
+        {
+          "studyId": "ballard 1986",
+          "pmids": [
+            "3743309"
+          ]
+        }
+      ],
+      "pmids": [
+        "3743309"
+      ]
+    },
+    {
+      "id": "bojestig 1998",
+      "members": [
+        {
+          "studyId": "bojestig 1998",
+          "pmids": [
+            "9796888"
+          ]
+        }
+      ],
+      "pmids": [
+        "9796888"
+      ]
+    },
+    {
+      "id": "burditt 1968",
+      "members": [
+        {
+          "studyId": "burditt 1968",
+          "pmids": [
+            "5656160"
+          ]
+        }
+      ],
+      "pmids": [
+        "5656160"
+      ]
+    },
+    {
+      "id": "chawla 2021",
+      "members": [
+        {
+          "studyId": "chawla 2021",
+          "pmids": [
+            "33551334"
+          ]
+        }
+      ],
+      "pmids": [
+        "33551334"
+      ]
+    },
+    {
+      "id": "chen 1995",
+      "members": [
+        {
+          "studyId": "chen 1995",
+          "pmids": [
+            "8550277"
+          ]
+        }
+      ],
+      "pmids": [
+        "8550277"
+      ]
+    },
+    {
+      "id": "cho 2019",
+      "members": [
+        {
+          "studyId": "cho 2019",
+          "pmids": [
+            "32802891"
+          ]
+        }
+      ],
+      "pmids": [
+        "32802891"
+      ]
+    },
+    {
+      "id": "dwyer 1985",
+      "members": [
+        {
+          "studyId": "dwyer 1985",
+          "pmids": [
+            "4042796"
+          ]
+        }
+      ],
+      "pmids": [
+        "4042796"
+      ]
+    },
+    {
+      "id": "gange 2021",
+      "members": [
+        {
+          "studyId": "gange 2021",
+          "pmids": [
+            "34475031"
+          ]
+        }
+      ],
+      "pmids": [
+        "34475031"
+      ]
+    },
+    {
+      "id": "grauslund 2009",
+      "members": [
+        {
+          "studyId": "grauslund 2009",
+          "pmids": [
+            "19593541",
+            "23751972"
+          ]
+        }
+      ],
+      "pmids": [
+        "19593541",
+        "23751972"
+      ]
+    },
+    {
+      "id": "gurreri 2019",
+      "members": [
+        {
+          "studyId": "gurreri 2019",
+          "pmids": [
+            "31100179"
+          ]
+        }
+      ],
+      "pmids": [
+        "31100179"
+      ]
+    },
+    {
+      "id": "hardin 1956",
+      "members": [
+        {
+          "studyId": "hardin 1956",
+          "pmids": [
+            "13365481"
+          ]
+        }
+      ],
+      "pmids": [
+        "13365481"
+      ]
+    },
+    {
+      "id": "harris 2013",
+      "members": [
+        {
+          "studyId": "harris 2013",
+          "pmids": [
+            "23275374"
+          ]
+        }
+      ],
+      "pmids": [
+        "23275374"
+      ]
+    },
+    {
+      "id": "hovind 2003",
+      "members": [
+        {
+          "studyId": "hovind 2003",
+          "pmids": [
+            "12663607"
+          ]
+        }
+      ],
+      "pmids": [
+        "12663607"
+      ]
+    },
+    {
+      "id": "hsieh 2018",
+      "members": [
+        {
+          "studyId": "hsieh 2018",
+          "pmids": [
+            "29167896",
+            "32567151"
+          ]
+        }
+      ],
+      "pmids": [
+        "29167896",
+        "32567151"
+      ]
+    },
+    {
+      "id": "janghorbani 2000",
+      "members": [
+        {
+          "studyId": "janghorbani 2000",
+          "pmids": [
+            "11262670"
+          ]
+        }
+      ],
+      "pmids": [
+        "11262670"
+      ]
+    },
+    {
+      "id": "jeng 2016",
+      "members": [
+        {
+          "studyId": "jeng 2016",
+          "pmids": [
+            "27564383"
+          ]
+        }
+      ],
+      "pmids": [
+        "27564383"
+      ]
+    },
+    {
+      "id": "jones 2012",
+      "members": [
+        {
+          "studyId": "jones 2012",
+          "pmids": [
+            "22279031"
+          ]
+        }
+      ],
+      "pmids": [
+        "22279031"
+      ]
+    },
+    {
+      "id": "kalter-leibovici 1991",
+      "members": [
+        {
+          "studyId": "kalter-leibovici 1991",
+          "pmids": [
+            "1991571"
+          ]
+        }
+      ],
+      "pmids": [
+        "1991571"
+      ]
+    },
+    {
+      "id": "keen 2001",
+      "members": [
+        {
+          "studyId": "keen 2001",
+          "pmids": [
+            "11587046"
+          ]
+        }
+      ],
+      "pmids": [
+        "11587046"
+      ]
+    },
+    {
+      "id": "kim 1998",
+      "members": [
+        {
+          "studyId": "kim 1998",
+          "pmids": [
+            "9538984"
+          ]
+        }
+      ],
+      "pmids": [
+        "9538984"
+      ]
+    },
+    {
+      "id": "kim 2014",
+      "members": [
+        {
+          "studyId": "kim 2014",
+          "pmids": [
+            "25469073"
+          ]
+        }
+      ],
+      "pmids": [
+        "25469073"
+      ]
+    },
+    {
+      "id": "klein 1984",
+      "members": [
+        {
+          "studyId": "klein 1984",
+          "pmids": [
+            "6709313"
+          ]
+        }
+      ],
+      "pmids": [
+        "6709313"
+      ]
+    },
+    {
+      "id": "kofoed-enevoldsen 1987",
+      "members": [
+        {
+          "studyId": "kofoed-enevoldsen 1987",
+          "pmids": [
+            "2969913"
+          ]
+        }
+      ],
+      "pmids": [
+        "2969913"
+      ]
+    },
+    {
+      "id": "kullberg 1993",
+      "members": [
+        {
+          "studyId": "kullberg 1993",
+          "pmids": [
+            "8243877"
+          ]
+        }
+      ],
+      "pmids": [
+        "8243877"
+      ]
+    },
+    {
+      "id": "lee 1992",
+      "members": [
+        {
+          "studyId": "lee 1992",
+          "pmids": [
+            "1551496"
+          ]
+        }
+      ],
+      "pmids": [
+        "1551496"
+      ]
+    },
+    {
+      "id": "lee 2017",
+      "members": [
+        {
+          "studyId": "lee 2017",
+          "pmids": [
+            "28572062"
+          ]
+        }
+      ],
+      "pmids": [
+        "28572062"
+      ]
+    },
+    {
+      "id": "lee 2021",
+      "members": [
+        {
+          "studyId": "lee 2021",
+          "pmids": [
+            "34574686"
+          ]
+        }
+      ],
+      "pmids": [
+        "34574686"
+      ]
+    },
+    {
+      "id": "lestradet 1981",
+      "members": [
+        {
+          "studyId": "lestradet 1981",
+          "pmids": [
+            "7202860"
+          ]
+        }
+      ],
+      "pmids": [
+        "7202860"
+      ]
+    },
+    {
+      "id": "lloyd 1995",
+      "members": [
+        {
+          "studyId": "lloyd 1995",
+          "pmids": [
+            "7548977",
+            "8610658"
+          ]
+        }
+      ],
+      "pmids": [
+        "7548977",
+        "8610658"
+      ]
+    },
+    {
+      "id": "mathiesen 1990",
+      "members": [
+        {
+          "studyId": "mathiesen 1990",
+          "pmids": [
+            "2227133",
+            "7648820"
+          ]
+        }
+      ],
+      "pmids": [
+        "2227133",
+        "7648820"
+      ]
+    },
+    {
+      "id": "mccance 1989",
+      "members": [
+        {
+          "studyId": "mccance 1989",
+          "pmids": [
+            "2571758"
+          ]
+        }
+      ],
+      "pmids": [
+        "2571758"
+      ]
+    },
+    {
+      "id": "mccarty 2003",
+      "members": [
+        {
+          "studyId": "mccarty 2003",
+          "pmids": [
+            "8790620",
+            "14516426"
+          ]
+        }
+      ],
+      "pmids": [
+        "8790620",
+        "14516426"
+      ]
+    },
+    {
+      "id": "miki 1969",
+      "members": [
+        {
+          "studyId": "miki 1969",
+          "pmids": [
+            "5348519"
+          ]
+        }
+      ],
+      "pmids": [
+        "5348519"
+      ]
+    },
+    {
+      "id": "nelson 1989",
+      "members": [
+        {
+          "studyId": "nelson 1989",
+          "pmids": [
+            "2925007"
+          ]
+        }
+      ],
+      "pmids": [
+        "2925007"
+      ]
+    },
+    {
+      "id": "nielsen 1984",
+      "members": [
+        {
+          "studyId": "nielsen 1984",
+          "pmids": [
+            "6372364",
+            "6720292"
+          ]
+        }
+      ],
+      "pmids": [
+        "6372364",
+        "6720292"
+      ]
+    },
+    {
+      "id": "nordwall 2015",
+      "members": [
+        {
+          "studyId": "nordwall 2015",
+          "pmids": [
+            "25510400"
+          ]
+        }
+      ],
+      "pmids": [
+        "25510400"
+      ]
+    },
+    {
+      "id": "okudaira 2000",
+      "members": [
+        {
+          "studyId": "okudaira 2000",
+          "pmids": [
+            "11113692"
+          ]
+        }
+      ],
+      "pmids": [
+        "11113692"
+      ]
+    },
+    {
+      "id": "pambianco 2006",
+      "members": [
+        {
+          "studyId": "pambianco 2006",
+          "pmids": [
+            "16644706"
+          ]
+        }
+      ],
+      "pmids": [
+        "16644706"
+      ]
+    },
+    {
+      "id": "pirart 1977",
+      "members": [
+        {
+          "studyId": "pirart 1977",
+          "pmids": [
+            "913749"
+          ]
+        }
+      ],
+      "pmids": [
+        "913749"
+      ]
+    },
+    {
+      "id": "porta 2001",
+      "members": [
+        {
+          "studyId": "porta 2001",
+          "pmids": [
+            "11793022"
+          ]
+        }
+      ],
+      "pmids": [
+        "11793022"
+      ]
+    },
+    {
+      "id": "rodriguez-villalobos 2005",
+      "members": [
+        {
+          "studyId": "rodriguez-villalobos 2005",
+          "pmids": [
+            "15910698"
+          ]
+        }
+      ],
+      "pmids": [
+        "15910698"
+      ]
+    },
+    {
+      "id": "roy 2006",
+      "members": [
+        {
+          "studyId": "roy 2006",
+          "pmids": [
+            "16966625",
+            "21220623"
+          ]
+        }
+      ],
+      "pmids": [
+        "16966625",
+        "21220623"
+      ]
+    },
+    {
+      "id": "rudnisky 2017",
+      "members": [
+        {
+          "studyId": "rudnisky 2017",
+          "pmids": [
+            "29074008"
+          ]
+        }
+      ],
+      "pmids": [
+        "29074008"
+      ]
+    },
+    {
+      "id": "silva 2015",
+      "members": [
+        {
+          "studyId": "silva 2015",
+          "pmids": [
+            "25704318"
+          ]
+        }
+      ],
+      "pmids": [
+        "25704318"
+      ]
+    },
+    {
+      "id": "simonsen 1980",
+      "members": [
+        {
+          "studyId": "simonsen 1980",
+          "pmids": [
+            "7331773"
+          ]
+        }
+      ],
+      "pmids": [
+        "7331773"
+      ]
+    },
+    {
+      "id": "skrivarhaug 2006",
+      "members": [
+        {
+          "studyId": "skrivarhaug 2006",
+          "pmids": [
+            "16955208"
+          ]
+        }
+      ],
+      "pmids": [
+        "16955208"
+      ]
+    },
+    {
+      "id": "styles 2000",
+      "members": [
+        {
+          "studyId": "styles 2000",
+          "pmids": [
+            "11584841"
+          ]
+        }
+      ],
+      "pmids": [
+        "11584841"
+      ]
+    },
+    {
+      "id": "teuscher 1988",
+      "members": [
+        {
+          "studyId": "teuscher 1988",
+          "pmids": [
+            "3416678",
+            "4065455"
+          ]
+        }
+      ],
+      "pmids": [
+        "3416678",
+        "4065455"
+      ]
+    },
+    {
+      "id": "valone 1981",
+      "members": [
+        {
+          "studyId": "valone 1981",
+          "pmids": [
+            "7259606"
+          ]
+        }
+      ],
+      "pmids": [
+        "7259606"
+      ]
+    },
+    {
+      "id": "varma 2010",
+      "members": [
+        {
+          "studyId": "varma 2010",
+          "pmids": [
+            "20149342"
+          ]
+        }
+      ],
+      "pmids": [
+        "20149342"
+      ]
+    },
+    {
+      "id": "verdaguer 2009",
+      "members": [
+        {
+          "studyId": "verdaguer 2009",
+          "pmids": [
+            "20011954"
+          ]
+        }
+      ],
+      "pmids": [
+        "20011954"
+      ]
+    },
+    {
+      "id": "vesteinsdottir 2010",
+      "members": [
+        {
+          "studyId": "vesteinsdottir 2010",
+          "pmids": [
+            "19604165"
+          ]
+        }
+      ],
+      "pmids": [
+        "19604165"
+      ]
+    },
+    {
+      "id": "voigt 2018",
+      "members": [
+        {
+          "studyId": "voigt 2018",
+          "pmids": [
+            "29183104"
+          ]
+        }
+      ],
+      "pmids": [
+        "29183104"
+      ]
+    },
+    {
+      "id": "wesdr",
+      "members": [
+        {
+          "studyId": "wesdr",
+          "pmids": [
+            "2060413",
+            "2597068",
+            "2644929",
+            "2684072",
+            "2916977",
+            "3184351",
+            "7487599",
+            "7619101",
+            "7748130",
+            "7789648",
+            "7944837",
+            "7997335",
+            "8302566",
+            "8302567",
+            "8341493",
+            "8554220",
+            "8841303",
+            "9080919",
+            "9097744",
+            "9787347",
+            "14718299",
+            "17540447",
+            "19068374"
+          ]
+        }
+      ],
+      "pmids": [
+        "2060413",
+        "2597068",
+        "2644929",
+        "2684072",
+        "2916977",
+        "3184351",
+        "7487599",
+        "7619101",
+        "7748130",
+        "7789648",
+        "7944837",
+        "7997335",
+        "8302566",
+        "8302567",
+        "8341493",
+        "8554220",
+        "8841303",
+        "9080919",
+        "9097744",
+        "9787347",
+        "14718299",
+        "17540447",
+        "19068374"
+      ]
+    },
+    {
+      "id": "yokoyama 1994",
+      "members": [
+        {
+          "studyId": "yokoyama 1994",
+          "pmids": [
+            "7956708"
+          ]
+        }
+      ],
+      "pmids": [
+        "7956708"
+      ]
+    },
+    {
+      "id": "zavrelova 2011",
+      "members": [
+        {
+          "studyId": "zavrelova 2011",
+          "pmids": [
+            "21447662"
+          ]
+        }
+      ],
+      "pmids": [
+        "21447662"
+      ]
+    }
+  ],
+  "heldOut": [
+    "arfken 1998",
+    "ballard 1986",
+    "bojestig 1998",
+    "burditt 1968",
+    "chawla 2021",
+    "chen 1995",
+    "cho 2019",
+    "dwyer 1985",
+    "gange 2021",
+    "grauslund 2009",
+    "gurreri 2019",
+    "hardin 1956",
+    "harris 2013",
+    "hovind 2003",
+    "hsieh 2018",
+    "janghorbani 2000",
+    "jeng 2016",
+    "jones 2012",
+    "kalter-leibovici 1991",
+    "keen 2001",
+    "kim 1998",
+    "kim 2014",
+    "klein 1984",
+    "kofoed-enevoldsen 1987",
+    "kullberg 1993",
+    "lee 1992",
+    "lee 2017",
+    "lestradet 1981",
+    "lloyd 1995",
+    "mathiesen 1990",
+    "mccance 1989",
+    "mccarty 2003",
+    "miki 1969",
+    "nelson 1989",
+    "nielsen 1984",
+    "nordwall 2015",
+    "okudaira 2000",
+    "pambianco 2006",
+    "porta 2001",
+    "rodriguez-villalobos 2005",
+    "roy 2006",
+    "rudnisky 2017",
+    "silva 2015",
+    "simonsen 1980",
+    "skrivarhaug 2006",
+    "styles 2000",
+    "teuscher 1988",
+    "valone 1981",
+    "varma 2010",
+    "verdaguer 2009",
+    "vesteinsdottir 2010",
+    "wesdr",
+    "yokoyama 1994",
+    "zavrelova 2011"
+  ],
+  "seeds": {
+    "seed": 20260912,
+    "selections": [
+      {
+        "groupId": "lee 2021",
+        "pmid": "34574686",
+        "year": 2021
+      },
+      {
+        "groupId": "voigt 2018",
+        "pmid": "29183104",
+        "year": 2018
+      },
+      {
+        "groupId": "pirart 1977",
+        "pmid": "913749",
+        "year": 1977
+      }
+    ]
+  }
+}
