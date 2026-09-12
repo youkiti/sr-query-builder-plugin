@@ -47,6 +47,24 @@ test.each([true, false])('診断の回収見込み %s に応じてブロック�
   }
 });
 
+test.each(['error', 'legacy'] as const)('診断未記録の %s では未捕捉なしと断定しない', (kind) => {
+  const current = run('error');
+  if (kind === 'error') {
+    current.status = 'error';
+    current.result = null;
+  } else {
+    current.result!.seedDiagnoses = undefined;
+    current.result!.unmetReasons = ['未捕捉シード: 22'];
+  }
+  const container = document.createElement('div');
+  renderOptimizationReview(container, current, actions);
+  expect(container.textContent).toContain('未捕捉シードの診断は記録されていません');
+  expect(container.textContent).not.toContain('未捕捉シードはありません');
+  expect(container.textContent).not.toContain('語の調整では回収できないシードがあります');
+  expect(container.textContent).not.toContain('ブロック承認へ戻る');
+  if (kind === 'legacy') expect(container.textContent).toContain('未捕捉シード: 22');
+});
+
 test.each([0, 1])('診断なしでシード %s 件の説明を分ける', (seeds) => {
   const current = run('needs_review');
   current.result!.seedDiagnoses = [];

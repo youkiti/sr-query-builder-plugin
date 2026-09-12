@@ -77,9 +77,10 @@ export function renderOptimizationReview(
     else section.appendChild(list);
   }
   subheading('未捕捉シードの診断');
-  const diagnoses = result?.seedDiagnoses ?? [];
-  if (!diagnoses.length) paragraph(seeds === 0 ? '検証対象シードがないため診断はありません' : '未捕捉シードはありません');
-  for (const diagnosis of diagnoses) {
+  const diagnoses = result?.seedDiagnoses;
+  if (diagnoses === undefined) paragraph('未捕捉シードの診断は記録されていません');
+  else if (!diagnoses.length) paragraph(seeds === 0 ? '検証対象シードがないため診断はありません' : '未捕捉シードはありません');
+  for (const diagnosis of diagnoses ?? []) {
     const p = doc.createElement('p');
     const link = doc.createElement('a');
     link.textContent = `PMID ${diagnosis.pmid}（${diagnosis.year ?? '年不明'}）${diagnosis.title ?? 'タイトル未取得'}`;
@@ -90,7 +91,7 @@ export function renderOptimizationReview(
     section.appendChild(p);
     paragraph(diagnosis.note);
   }
-  if (diagnoses.some((diagnosis) => diagnosis.recoverableByTerms === false)) {
+  if (diagnoses?.some((diagnosis) => diagnosis.recoverableByTerms === false)) {
     paragraph('語の調整では回収できないシードがあります。検索概念・フィルタが強すぎる可能性があるため、ブロック承認で見直してください。');
     const buttons = doc.createElement('div');
     buttons.className = 'optimization__review-actions';
