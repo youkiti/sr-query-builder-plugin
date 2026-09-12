@@ -70,7 +70,8 @@ import { listSeedPapers } from '@/features/seeds';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
 import { newUuid } from '@/utils/uuid';
 import { fetchMeshContext } from './services/meshContextService';
-import { getQueryOptimizationCheckpoint } from './services/queryOptimizationCheckpointService';
+import { createQueryOptimizationInputIdentity, getQueryOptimizationCheckpoint,
+  getQueryOptimizationResumeAvailability } from './services/queryOptimizationCheckpointService';
 import {
   efetchArticles,
   esearch,
@@ -431,7 +432,7 @@ function buildDefaultViewOptions(
           ...s, queryOptimizationSetup: { ...s.queryOptimizationSetup, ...values },
         });
       },
-      onOptimize: (settings) => runOptimizeQuery(store, runtime, llmFactoryDepsBase(), settings),
+      onOptimize: (settings, resumeRunId) => runOptimizeQuery(store, runtime, llmFactoryDepsBase(), settings, resumeRunId),
       onAdoptOptimization: () => adoptQueryOptimization({ store, google: runtime.google }),
       onEditOptimization: () => { if (editQueryOptimization(store)) navigate('edit'); },
       onStopOptimization: () => {
@@ -1077,10 +1078,11 @@ async function prepareQueryOptimization(store: AppStore, runtime: ChromeRuntimeD
     if (seedsResult.status === 'rejected') throw seedsResult.reason;
     const settings = settingsResult.value;
     const seeds = seedsResult.value;
-    const seedCount = new Set(seeds.filter(isSeedEligibleForValidation)
-      .map((seed) => seed.pmid).filter((pmid): pmid is string => pmid !== null)).size;
+    const seedPmids = [...new Set(seeds.filter(isSeedEligibleForValidation)
+      .map((seed) => seed.pmid).filter((pmid): pmid is string => pmid !== null))];
+    const seedCount = seedPmids.length;
     store.setState((s) => s.project?.projectId !== project.projectId || s.queryOptimizationSetup !== loading ? s : {
-      ...s, queryOptimizationSetup: { ...loading, status: 'ready', seedCount, checkpoint,
+      ...s, queryOptimizationSetup: { ...loading, status: 'ready', seedCount, seedPmids, checkpoint,
         maxHits: String(settings?.maxHits ?? DEFAULT_QUERY_OPTIMIZATION_SETTINGS.maxHits),
         maxIterations: String(settings?.maxIterations ?? DEFAULT_QUERY_OPTIMIZATION_SETTINGS.maxIterations),
       },
@@ -1096,7 +1098,8 @@ async function prepareQueryOptimization(store: AppStore, runtime: ChromeRuntimeD
 export async function runOptimizeQuery(
   store: AppStore, runtime: ChromeRuntimeDeps,
   baseDeps: Omit<LlmFactoryDeps, 'llmLogFolderId' | 'spreadsheetId'>,
-  settings: QueryOptimizationSettings
+  settings: QueryOptimizationSettings,
+  resumeRunId?: string
 ): Promise<void> {
   const state = store.getState();
   if (state.queryOptimizationRun?.status === 'running' || state.queryOptimizationRun?.save?.status === 'saving'
@@ -1114,6 +1117,16 @@ export async function runOptimizeQuery(
   };
   const invalid = validateQueryOptimizationSettings(fixedSettings);
   if (invalid) { setupError(invalid); return; }
+  const checkpoint = state.queryOptimizationSetup?.checkpoint;
+  const resume = resumeRunId && checkpoint?.runId === resumeRunId && checkpoint.projectId === projectId
+    ? getQueryOptimizationResumeAvailability(checkpoint,
+      state.protocolDraft && state.protocolDraftPersisted && state.blocksDraft && state.queryOptimizationSetup?.seedPmids
+        ? createQueryOptimizationInputIdentity(state.protocolDraft, state.blocksDraft,
+          state.queryOptimizationSetup.seedPmids, fixedSettings.maxHits) : null) : null;
+  if (resumeRunId && !resume?.available) {
+    setupError(resume && !resume.available ? resume.reason : '再開する中断記録が見つかりません。');
+    return;
+  }
   const runId = newUuid();
   const owns = (s: AppState): boolean => s.project?.projectId === projectId
     && s.queryOptimizationRun?.projectId === projectId && s.queryOptimizationRun.runId === runId
@@ -1129,7 +1142,8 @@ export async function runOptimizeQuery(
   store.setState((s) => ({ ...s,
     queryOptimizationSetup: s.queryOptimizationSetup ? { ...s.queryOptimizationSetup, error: null } : null,
     queryOptimizationRun: {
-    status: 'running', projectId, runId, ...fixedSettings, seedCount: null,
+    status: 'running', projectId, runId, ...fixedSettings,
+    maxIterations: resume?.available ? resume.remaining.evaluatedTrials : fixedSettings.maxIterations, seedCount: null,
     startedAtMs: Date.now(), finishedAtMs: null, progress: { step: 'initial_formula', iterations: 0,
       bestTotalHits: null, bestCapturedSeedCount: null, trial: null },
     trials: [], meshContext: [], stopRequested: false, result: null, error: null,
@@ -1143,13 +1157,16 @@ export async function runOptimizeQuery(
     const seedPmids = [...new Set(seeds.map((seed) => seed.pmid).filter((pmid): pmid is string => pmid !== null))];
     update({ seedCount: seedPmids.length });
     const incompatible = validateQueryOptimizationSettings(fixedSettings, seedPmids.length);
-    if (incompatible) {
+    const inputIdentity = createQueryOptimizationInputIdentity(state.protocolDraft, state.blocksDraft, seedPmids, fixedSettings.maxHits);
+    const rechecked = resume?.available && checkpoint ? getQueryOptimizationResumeAvailability(checkpoint, inputIdentity) : null;
+    if (incompatible || (rechecked && !rechecked.available)) {
       // シード取得後の入力不整合も実行結果ではない。開始前の履歴を保持して設定欄へ戻す。
       store.setState((s) => !owns(s) ? s : { ...s, queryOptimizationRun: state.queryOptimizationRun });
-      setupError(incompatible);
+      setupError(incompatible ?? (rechecked && !rechecked.available ? rechecked.reason : '入力を確認できません。'));
       return;
     }
-    await saveQueryOptimizationSettings(projectId, fixedSettings, runtime.store);
+    await saveQueryOptimizationSettings(projectId, { ...fixedSettings,
+      maxIterations: resume?.available ? resume.data.limits.evaluatedTrials : fixedSettings.maxIterations }, runtime.store);
     check();
     const factory = await buildLlmProviderFactory({ ...baseDeps,
       llmLogFolderId: project.driveFolderId, spreadsheetId: project.spreadsheetId,
@@ -1172,7 +1189,8 @@ export async function runOptimizeQuery(
     check();
     const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
     check();
-    const initialFormula = state.currentFormulaMarkdown ? parsePubmedFormulaMd(state.currentFormulaMarkdown)
+    const initialFormula = resume?.available ? resume.data.bestFormula!
+      : state.currentFormulaMarkdown ? parsePubmedFormulaMd(state.currentFormulaMarkdown)
       : (await generateDraftFormula({ protocol: state.protocolDraft, blocks: state.blocksDraft,
         seedContext: { titles: seeds.flatMap((seed) => seed.title ? [seed.title] : []).slice(0, 30),
           samples: [], meshSummary: { seedCount: 0, concepts: [], checkTags: [] } },
@@ -1181,7 +1199,13 @@ export async function runOptimizeQuery(
     update({ inputSnapshot: { researchQuestion: state.protocolDraft.researchQuestion,
       inclusionCriteria: state.protocolDraft.inclusionCriteria, exclusionCriteria: state.protocolDraft.exclusionCriteria,
       blocks: { ...state.blocksDraft, blocks: state.blocksDraft.blocks.map((block) => ({ ...block })) }, seedPmids: [...seedPmids], model: factory.model } });
-    const result = await runQueryOptimization({ projectId, runId, initialFormula, ...fixedSettings, seedPmids,
+    const result = await runQueryOptimization({ projectId, runId, initialFormula, ...fixedSettings, seedPmids, inputIdentity,
+      ...(resume?.available ? {
+        maxIterations: resume.remaining.evaluatedTrials,
+        resumeBudget: { runId: resumeRunId!, limits: resume.data.limits, consumed: resume.data.consumed },
+        previousRejectedTrials: [...resume.data.previousRejectedTrials, ...checkpoint!.trials.filter((trial) => !trial.accepted)
+          .map(({ formula, reason, fingerprint }) => ({ formula, reason, fingerprint }))],
+      } : {}),
       // 承認ブロックの blockIndex と組み立て式の ID は、ともに配列順の 1 始まり。
       // BlockDraft に独立 ID がないため、id と approvedBlockId は常に同じ値になる。
       approvedBlocks: state.blocksDraft.blocks.map((block, index) => ({
@@ -1191,6 +1215,7 @@ export async function runOptimizeQuery(
         inclusionCriteria: state.protocolDraft.inclusionCriteria, exclusionCriteria: state.protocolDraft.exclusionCriteria },
       seedPapers: seeds.flatMap((seed) => seed.pmid === null ? [] : [{ pmid: seed.pmid, title: seed.title }]),
     }, { eutils, llmFactory: factory, checkpoint: runtime.store, shouldStop, measureTermDetails: true,
+      ...(resume?.available ? { maxApiCalls: resume.remaining.apiCalls, maxElapsedMs: resume.remaining.elapsedMs } : {}),
       onMeshContext: (meshContext) => update({ meshContext }),
       fetchMeshContext: (request, observedEutils) => fetchMeshContext(request, observedEutils ?? eutils, check),
       onProgress: publisher.publish,

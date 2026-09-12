@@ -1,4 +1,5 @@
-import { createDraftView } from './draftView';
+import { createDraftView, type DraftViewCallbacks } from './draftView';
+import { createQueryOptimizationInputIdentity } from '../services/queryOptimizationCheckpointService';
 import { INITIAL_STATE, type AppState } from '../store';
 import type { OptimizationMeasurement, OptimizationMeshNode, OptimizationTrial } from '@/features/formula/skills/optimizeQuery';
 import { buildPubmedSearchUrl } from '@/lib/ncbi/pubmedUrl';
@@ -18,7 +19,7 @@ const meshContext: OptimizationMeshNode[] = [
   { id: 'D1', descriptor: 'Parent', label: 'Parent', treeNumbers: ['C01'], parentIds: [], childIds: ['D2'], explode: true, note: '直下のみ取得' },
   { id: 'D2', descriptor: 'Child', label: 'Child', treeNumbers: ['C01.001'], parentIds: ['D1'], childIds: [], explode: false, note: '子は未取得' },
 ];
-function setup() {
+function setup(callbacks: DraftViewCallbacks = {}) {
   const state: AppState = { ...INITIAL_STATE,
     project: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'd', title: '研究' },
     blocksDraft: { blocks: [{ blockLabel: '疾患', description: '', note: '', aiGenerated: false }], combinationExpression: '#1' },
@@ -29,7 +30,7 @@ function setup() {
   };
   const container = document.createElement('div');
   document.body.appendChild(container);
-  const view = createDraftView();
+  const view = createDraftView(callbacks);
   const render = () => view(container, { state, navigate: jest.fn() });
   return { state, container, render };
 }
@@ -250,6 +251,93 @@ test.each(['interrupted', 'completed'] as const)('復元した %s は実行状�
   expect(f.container.textContent).not.toContain('再開');
   expect(f.container.querySelector('.optimization__status')).toBeNull();
   f.state.queryOptimizationSetup.projectId = 'other';
+  f.render();
+  expect(f.container.querySelector('.optimization__restored')).toBeNull();
+});
+
+function resumable(callbacks: DraftViewCallbacks = {}) {
+  const f = setup(callbacks);
+  f.state.queryOptimizationRun = null;
+  f.state.protocolDraft = { frameworkType: 'pico', researchQuestion: 'RQ', inclusionCriteria: '組入', exclusionCriteria: '除外',
+    studyDesign: '', sourceType: 'manual', sourceFilename: null, rawTextRef: null, rawTextPreview: '', rawTextInline: '' };
+  f.state.protocolDraftPersisted = true;
+  f.state.queryOptimizationSetup = { projectId: 'p', status: 'ready', maxHits: '10', maxIterations: '5', seedCount: 2,
+    seedPmids: ['11', '22'], error: null, checkpoint: {
+      projectId: 'p', runId: 'old', savedAt: '2026-09-10', maxHits: 10, trials: [], status: 'interrupted', needsRevalidation: true,
+      resume: { bestFormula: { blocks: [{ id: '1', expression: 'best[tiab]', isCombination: false }], combinationExpression: null },
+        inputIdentity: createQueryOptimizationInputIdentity(f.state.protocolDraft, f.state.blocksDraft!, ['11', '22'], 10),
+        limits: { apiCalls: 200, elapsedMs: 600000, evaluatedTrials: 5 },
+        consumed: { apiCalls: 120, elapsedMs: 300000, evaluatedTrials: 2 }, previousRejectedTrials: [] },
+    } };
+  return f;
+}
+
+test('中断記録だけに再測定と残予算を示し、既存の開始コールバックへ再開 run を渡す', () => {
+  const onOptimize = jest.fn().mockResolvedValue(undefined);
+  const f = resumable({ onOptimize });
+  f.state.currentFormulaMarkdown = '手編集した現在式は一致条件に含めない';
+  f.render();
+  const restored = f.container.querySelector('.optimization__restored')!;
+  expect(restored.textContent).toContain('再検証は済んでいません');
+  expect(restored.textContent).toContain('件数・シード捕捉をすべて測り直します');
+  expect(restored.textContent).toContain('通信 80 回 / 時間 300 秒 / 評価試行 3 回');
+  const button = restored.querySelector<HTMLButtonElement>('.optimization__resume')!;
+  button.click();
+  button.click();
+  expect(onOptimize).toHaveBeenCalledTimes(1);
+  expect(onOptimize).toHaveBeenCalledWith({ maxHits: 10, maxIterations: 5 }, 'old');
+  const checkpoint = f.state.queryOptimizationSetup!.checkpoint!;
+  f.state.queryOptimizationSetup!.checkpoint = { ...checkpoint, status: 'completed',
+    completion: { status: 'needs_review', stopReason: 'iteration_limit', unmetReasons: [] } };
+  f.render();
+  expect(f.container.querySelector('.optimization__resume')).toBeNull();
+  expect(f.container.querySelector('.optimization__restored')!.textContent).not.toContain('再開');
+});
+
+test.each(['apiCalls', 'elapsedMs', 'evaluatedTrials'] as const)('%s を使い切った記録では再開ボタンを表示しない', (key) => {
+  const f = resumable();
+  const data = f.state.queryOptimizationSetup!.checkpoint!.resume!;
+  data.consumed[key] = data.limits[key];
+  f.render();
+  expect(f.container.querySelector('.optimization__resume')).toBeNull();
+  expect(f.container.textContent).toContain('予算を使い切っている');
+});
+
+test.each(['criteria', 'blocks', 'seeds', 'maxHits', 'unapproved', 'legacy'] as const)('入力変更や記録不足 %s を理由付きで非表示にする', (kind) => {
+  const f = resumable();
+  if (kind === 'criteria') f.state.protocolDraft!.researchQuestion = '変更';
+  if (kind === 'blocks') f.state.blocksDraft!.blocks[0]!.description = '変更';
+  if (kind === 'seeds') f.state.queryOptimizationSetup!.seedPmids = ['11'];
+  if (kind === 'maxHits') f.state.queryOptimizationSetup!.maxHits = '11';
+  if (kind === 'unapproved') f.state.protocolDraftPersisted = false;
+  if (kind === 'legacy') delete f.state.queryOptimizationSetup!.checkpoint!.resume;
+  f.render();
+  expect(f.container.querySelector('.optimization__resume')).toBeNull();
+  expect(f.container.querySelector('.optimization__restored')!.textContent).toMatch(/変わっている|確認できません|記録がありません/);
+});
+
+test('最大件数の入力中にも再開可否を更新し、フォーカスを維持する', () => {
+  const f = resumable({ onOptimize: jest.fn() });
+  f.render();
+  const input = f.container.querySelector<HTMLInputElement>('.optimization__setup input')!;
+  input.focus();
+  input.value = '11';
+  input.dispatchEvent(new Event('input'));
+  expect(f.container.querySelector('.optimization__resume')).toBeNull();
+  expect(document.activeElement).toBe(input);
+  input.value = '10';
+  input.dispatchEvent(new Event('input'));
+  expect(f.container.querySelector('.optimization__resume')).not.toBeNull();
+  expect(f.container.querySelectorAll('.optimization__restored')).toHaveLength(1);
+});
+
+test('再開した run の最初の試行が届くまでは復元ログを読める', () => {
+  const f = resumable();
+  f.state.queryOptimizationRun = { ...setup().state.queryOptimizationRun!, trials: [], runId: 'new-run' };
+  f.render();
+  expect(f.container.querySelector('.optimization__restored')!.textContent).toContain('再検証は済んでいません');
+  expect(f.container.querySelector('.optimization__resume')).toBeNull();
+  f.state.queryOptimizationRun.trials = [trial('initial')];
   f.render();
   expect(f.container.querySelector('.optimization__restored')).toBeNull();
 });

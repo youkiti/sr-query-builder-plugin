@@ -208,6 +208,179 @@ test.each(['lost', 'gained', 'efetch'])('削除影響の %s 中の停止例外�
 
 afterEach(() => jest.restoreAllMocks());
 
+test('過去の却下式・理由・fingerprint は AI 文脈だけへ渡し、同じ候補も新 run で測り直す', async () => {
+  const f = setup({ a: { hits: 300, captured: ['11', '22'] }, b: { hits: 200, captured: ['11', '22'] },
+    c: { hits: 90, captured: ['11', '22'] } }, ['b[tiab]', 'c[tiab]']);
+  const pastFormula = { ...f.input.initialFormula, blocks: f.input.initialFormula.blocks.map((block) => ({ ...block,
+    expression: block.id === '1' ? 'b[tiab]' : block.expression })) };
+  const old = await evaluation.evaluateQuery(pastFormula, f.input.seedPmids, { eutils: f.deps.eutils });
+  const initialOld = await evaluation.evaluateQuery(f.input.initialFormula, f.input.seedPmids, { eutils: f.deps.eutils });
+  f.input.runId = 'resumed';
+  f.input.previousRejectedTrials = [
+    { formula: pastFormula, reason: '前回はシードを失った', fingerprint: old.fingerprint },
+    { formula: f.input.initialFormula, reason: '前回の別の却下理由', fingerprint: initialOld.fingerprint },
+  ];
+  const evaluate = jest.spyOn(evaluation, 'evaluateQuery');
+  const optimize = jest.spyOn(skill, 'optimizeQuery');
+  const result = await runQueryOptimization(f.input, f.deps);
+  expect(result.stopReason).toBe('conditions_met');
+  expect(result.trials[1]).toMatchObject({ accepted: true, after: { id: 'resumed:candidate-1', totalHits: 200 } });
+  expect(evaluate.mock.calls.map(([formula]) => formula.blocks[0]!.expression)).toEqual(['a[tiab]', 'b[tiab]', 'c[tiab]', 'c[tiab]']);
+  expect(optimize.mock.calls[0]![0].trials).toBe(result.trials);
+  expect(result.trials.map((trial) => trial.reason)).not.toContain('前回はシードを失った');
+  expect(optimize.mock.calls[0]![0].previousRejectedTrials).toEqual(f.input.previousRejectedTrials);
+  const prompt = f.chat.mock.calls[0]![0][1].content as string;
+  for (const text of ['前回はシードを失った', old.fingerprint, '過去の run の却下記録（未再検証']) expect(prompt).toContain(text);
+});
+
+test('再開の累積消費量を途中と終了の両方に保存し、再び再開しても元の予算を増やさない', async () => {
+  const f = setup({ a: { hits: 300, captured: ['11', '22'] }, b: { hits: 200, captured: ['11', '22'] } });
+  const limits = { apiCalls: 200, elapsedMs: 600000, evaluatedTrials: 5 };
+  f.input.maxIterations = 1;
+  f.input.inputIdentity = 'fixed-input';
+  f.input.resumeBudget = { runId: 'previous', limits, consumed: { apiCalls: 120, elapsedMs: 100000, evaluatedTrials: 4 } };
+  f.deps.maxApiCalls = 80;
+  f.deps.maxElapsedMs = 500000;
+  let time = 1000;
+  f.deps.now = () => time;
+  const fetch = f.fetch.getMockImplementation()!;
+  f.fetch.mockImplementation(async (url: string) => { time += 100; return fetch(url); });
+  const result = await runQueryOptimization(f.input, f.deps);
+  const records = f.write.mock.calls.map(([items]) => items.queryOptimizationCheckpoint as checkpoint.QueryOptimizationCheckpoint);
+  expect(records.find((record) => record.trials.length === 1)?.resume).toMatchObject({ limits, consumed: { apiCalls: 125, elapsedMs: 100500, evaluatedTrials: 4 } });
+  const saved = records[records.length - 1]!;
+  expect(saved.resume).toMatchObject({ inputIdentity: 'fixed-input', resumedFromRunId: 'previous', limits,
+    consumed: { apiCalls: 120 + result.apiCalls, elapsedMs: 100000 + result.elapsedMs, evaluatedTrials: 5 } });
+  expect(checkpoint.getQueryOptimizationResumeAvailability({ ...saved, completion: undefined }, 'fixed-input'))
+    .toMatchObject({ available: false, reason: expect.stringContaining('予算を使い切っている') });
+});
+
+test('再開直後の10通信未満では保存せず、過去の測定値も作らない', async () => {
+  const f = setup();
+  f.input.inputIdentity = 'same';
+  f.input.resumeBudget = { runId: 'old', limits: { apiCalls: 200, elapsedMs: 600000, evaluatedTrials: 5 },
+    consumed: { apiCalls: 120, elapsedMs: 300000, evaluatedTrials: 2 } };
+  f.input.maxIterations = 3;
+  f.deps.maxApiCalls = 80;
+  f.deps.maxElapsedMs = 300000;
+  const arrived = deferred<void>();
+  const response = deferred<unknown>();
+  let stopped = false;
+  f.deps.shouldStop = () => stopped;
+  f.fetch.mockImplementationOnce(() => { arrived.resolve(); return response.promise; });
+  const running = runQueryOptimization(f.input, f.deps);
+  await arrived.promise;
+  expect(f.write).not.toHaveBeenCalled();
+  stopped = true;
+  response.resolve({ ok: true, json: async () => ({ esearchresult: { count: '1', idlist: [] } }) });
+  expect((await running).best).toBeNull();
+  expect(f.write).not.toHaveBeenCalled();
+});
+
+test.each([false, true])('語別計測中は10通信ごとに保存し、未記録は最大9回に収まる（再開: %s）', async (resuming) => {
+  const f = setup();
+  f.input.initialFormula.blocks[0]!.expression = ['a[tiab]', ...Array.from({ length: 20 }, (_, i) => `word${i}[tiab]`)].join(' OR ');
+  f.input.inputIdentity = 'same';
+  const consumedBefore = resuming ? 120 : 0;
+  if (resuming) {
+    f.input.resumeBudget = { runId: 'old', limits: { apiCalls: 200, elapsedMs: 600000, evaluatedTrials: 5 },
+      consumed: { apiCalls: consumedBefore, elapsedMs: 1000, evaluatedTrials: 2 } };
+    f.input.maxIterations = 3;
+    f.deps.maxApiCalls = 80;
+    f.deps.maxElapsedMs = 599000;
+  }
+  let stopped = false;
+  f.deps.shouldStop = () => stopped;
+  const fetch = f.fetch.getMockImplementation()!;
+  const observations: { sent: number; saves: number; recorded: number }[] = [];
+  f.fetch.mockImplementation(async (url: string) => {
+    const sent = f.fetch.mock.calls.length;
+    const writes = f.write.mock.calls;
+    if (sent > 5) observations.push({ sent, saves: writes.length,
+      recorded: writes[writes.length - 1]![0].queryOptimizationCheckpoint.resume.consumed.apiCalls });
+    if (sent === 34) stopped = true;
+    return fetch(url);
+  });
+  const result = await runQueryOptimization(f.input, f.deps);
+  expect(result.stopReason).toBe('user_stop');
+  expect(f.chat).not.toHaveBeenCalled();
+  for (const observation of observations) {
+    // 並行通信は送信前に加算済みなので、保存済みの数は実 fetch の順序より先に進みうる。
+    expect([5, 15, 25].map((calls) => consumedBefore + calls)).toContain(observation.recorded);
+    expect(observation.saves).toBe((observation.recorded - consumedBefore - 5) / 10 + 1);
+    expect(consumedBefore + observation.sent - observation.recorded).toBeLessThanOrEqual(9);
+    expect(observation.recorded).toBeLessThanOrEqual(consumedBefore + result.apiCalls);
+  }
+  expect(observations.map((entry) => entry.sent)).toEqual(Array.from({ length: 29 }, (_, i) => i + 6));
+  const checkpoints = f.write.mock.calls.map(([items]) => items.queryOptimizationCheckpoint as checkpoint.QueryOptimizationCheckpoint);
+  expect(checkpoints.map((entry) => entry.resume!.consumed.apiCalls)).toEqual([5, 15, 25, 34].map((calls) => consumedBefore + calls));
+  expect(checkpoints[checkpoints.length - 1]!.completion?.status).toBe('stopped');
+  const availability = checkpoint.getQueryOptimizationResumeAvailability(checkpoints[2]!, 'same');
+  expect(availability).toMatchObject({ available: true, remaining: { apiCalls: 200 - consumedBefore - 25 } });
+});
+
+test('途中保存が遅くても別の並行通信は送信でき、10通信ごとの保存を重複させない', async () => {
+  const f = setup();
+  f.input.maxIterations = 1;
+  f.input.initialFormula.blocks[0]!.expression = ['a[tiab]', ...Array.from({ length: 20 }, (_, i) => `word${i}[tiab]`)].join(' OR ');
+  const releaseWrite = deferred<void>();
+  const sentWhileSaving = deferred<void>();
+  let saving = false;
+  f.write.mockImplementation(async (items: Record<string, checkpoint.QueryOptimizationCheckpoint>) => {
+    if (items.queryOptimizationCheckpoint?.resume?.consumed.apiCalls === 15) {
+      saving = true;
+      await releaseWrite.promise;
+      saving = false;
+    }
+  });
+  const fetch = f.fetch.getMockImplementation()!;
+  f.fetch.mockImplementation(async (url: string) => {
+    if (saving && f.fetch.mock.calls.length > 15) sentWhileSaving.resolve();
+    return fetch(url);
+  });
+  const running = runQueryOptimization(f.input, f.deps);
+  try {
+    await sentWhileSaving.promise;
+    expect(saving).toBe(true);
+    const counts = f.write.mock.calls.map(([items]) => items.queryOptimizationCheckpoint.resume.consumed.apiCalls);
+    expect(counts.filter((count) => count === 15)).toHaveLength(1);
+    expect(counts.filter((count) => count === 25)).toHaveLength(1);
+  } finally { releaseWrite.resolve(); }
+  const result = await running;
+  expect(result.apiCalls).toBe(f.fetch.mock.calls.length + f.chat.mock.calls.length);
+  expect(f.write.mock.calls[f.write.mock.calls.length - 1]![0].queryOptimizationCheckpoint.resume.consumed.apiCalls).toBe(result.apiCalls);
+});
+
+test('中断と再開を重ねても途中保存の通信・時間・評価試行を累積する', async () => {
+  let previous: checkpoint.QueryOptimizationCheckpoint | undefined;
+  for (let resumeCount = 0; resumeCount < 3; resumeCount += 1) {
+    const f = setup({ a: { hits: 200, captured: ['11', '22'] }, b: { hits: 300, captured: ['11', '22'] } });
+    f.input.inputIdentity = 'same';
+    f.input.runId = `run-${resumeCount}`;
+    let time = 0;
+    f.deps.now = () => time;
+    const fetch = f.fetch.getMockImplementation()!;
+    f.fetch.mockImplementation(async (url: string) => { time += 100; return fetch(url); });
+    if (previous) {
+      const availability = checkpoint.getQueryOptimizationResumeAvailability(previous, 'same');
+      if (!availability.available) throw new Error(availability.reason);
+      f.input.initialFormula = availability.data.bestFormula!;
+      f.input.maxIterations = availability.remaining.evaluatedTrials;
+      f.input.resumeBudget = { runId: previous.runId, limits: availability.data.limits, consumed: availability.data.consumed };
+      f.deps.maxApiCalls = availability.remaining.apiCalls;
+      f.deps.maxElapsedMs = availability.remaining.elapsedMs;
+    }
+    await runQueryOptimization(f.input, f.deps);
+    const saved = f.write.mock.calls.map(([items]) => items.queryOptimizationCheckpoint as checkpoint.QueryOptimizationCheckpoint)
+      .find((record) => record.trials.length === 2 && !record.completion)!;
+    expect(saved.resume?.consumed.evaluatedTrials).toBe(resumeCount + 1);
+    expect(saved.resume?.consumed.apiCalls).toBeGreaterThan(previous?.resume?.consumed.apiCalls ?? 0);
+    expect(saved.resume?.consumed.elapsedMs).toBeGreaterThan(previous?.resume?.consumed.elapsedMs ?? 0);
+    expect(saved.resume?.limits).toEqual({ apiCalls: 200, elapsedMs: 600000, evaluatedTrials: 5 });
+    previous = saved;
+  }
+});
+
 test('初期式が目標内でも AI を呼び、同じ式をキャッシュなしで再検証する。外部保存・store 更新はない', async () => {
   const { input, deps, fetch, chat, forPurpose, write } = setup({ a: { hits: 80, captured: ['11', '22'] } }, ['a[tiab]']);
   const append = jest.spyOn(google, 'appendRow');
@@ -222,6 +395,8 @@ test('初期式が目標内でも AI を呼び、同じ式をキャッシュな�
   expect(result.trials.map((trial) => trial.candidateId)).toEqual(['initial', 'candidate-1', 'final-1']);
   expect(result.trials[1]?.accepted).toBe(false);
   expect(write).toHaveBeenCalledTimes(4);
+  // 各区間は10通信未満でも、初期評価・候補評価・最終評価・終了は必ず保存する。
+  expect(write.mock.calls.map(([items]) => items.queryOptimizationCheckpoint.resume.consumed.apiCalls)).toEqual([5, 13, 18, 18]);
   expect(result.apiCalls).toBe(fetch.mock.calls.length + 1);
   for (const [, options] of fetch.mock.calls) expect(options).toEqual({ cache: 'no-store' });
   expect(append).not.toHaveBeenCalled();
@@ -817,7 +992,7 @@ test('記録済み試行は後の語別計測で変化せず、同じ最良式�
   const recorded: { trial: skill.OptimizationTrial; json: string }[] = [];
   const save = checkpoint.saveQueryOptimizationCheckpoint;
   jest.spyOn(checkpoint, 'saveQueryOptimizationCheckpoint').mockImplementation(async (...args) => {
-    for (const trial of args[3]) {
+    for (const trial of args[0].trials) {
       if (!recorded.some((entry) => entry.trial === trial)) recorded.push({ trial, json: JSON.stringify(trial) });
     }
     return save(...args);

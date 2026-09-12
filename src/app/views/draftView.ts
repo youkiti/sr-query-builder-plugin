@@ -1,4 +1,5 @@
 import { renderOptimizationReview } from './queryOptimizationReview';
+import { createQueryOptimizationInputIdentity, getQueryOptimizationResumeAvailability } from '../services/queryOptimizationCheckpointService';
 import { DEFAULT_QUERY_OPTIMIZATION_SETTINGS, type QueryOptimizationSettings } from '../services/queryOptimizationSettingsService';
 import type { DraftBlockHit, DraftProgress } from '@/app/services';
 import { HIT_THRESHOLD, type ExcessFilterCandidate } from '@/features/formula/skills';
@@ -43,7 +44,7 @@ import {
 export interface DraftViewCallbacks extends ValidationResultsCallbacks {
   onPrepareOptimization?: (retry?: boolean) => Promise<void>;
   onOptimizationSettingsInput?: (values: { maxHits: string; maxIterations: string }) => void;
-  onOptimize?: (settings: QueryOptimizationSettings) => Promise<void>;
+  onOptimize?: (settings: QueryOptimizationSettings, resumeRunId?: string) => Promise<void>;
   onStopOptimization?: () => void;
   /** 採用保存を提供しない描画用途では省略する。 */
   onAdoptOptimization?: () => Promise<void>;
@@ -144,10 +145,24 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
     }
     container.appendChild(actions);
 
-    renderQueryOptimization(container, ctx.state, callbacks, (stop) => { stopElapsedTimer = stop; });
-    renderHistory(container,
-      ctx.state.queryOptimizationRun?.projectId === ctx.state.project.projectId ? ctx.state.queryOptimizationRun : null,
-      ctx.state.queryOptimizationSetup?.projectId === ctx.state.project.projectId ? ctx.state.queryOptimizationSetup : null);
+    const renderCurrentHistory = (state: AppState): void => {
+      const setup = state.queryOptimizationSetup?.projectId === state.project?.projectId ? state.queryOptimizationSetup : null;
+      const checkpoint = setup?.checkpoint;
+      const identity = setup?.status === 'ready' && setup.seedPmids && state.protocolDraftPersisted && state.protocolDraft && state.blocksDraft
+        ? createQueryOptimizationInputIdentity(state.protocolDraft, state.blocksDraft, setup.seedPmids, Number(setup.maxHits)) : null;
+      renderHistory(container,
+        state.queryOptimizationRun?.projectId === state.project?.projectId ? state.queryOptimizationRun : null, setup,
+        checkpoint ? { availability: getQueryOptimizationResumeAvailability(checkpoint, identity),
+          disabled: state.draftRun?.status === 'running',
+          start: callbacks.onOptimize ? () => { void callbacks.onOptimize?.({ maxHits: Number(setup!.maxHits),
+            maxIterations: checkpoint.resume!.limits.evaluatedTrials }, checkpoint.runId); } : undefined,
+        } : undefined);
+    };
+    renderQueryOptimization(container, ctx.state, callbacks, (stop) => { stopElapsedTimer = stop; }, (values) => {
+      renderCurrentHistory({ ...ctx.state, queryOptimizationSetup: ctx.state.queryOptimizationSetup
+        ? { ...ctx.state.queryOptimizationSetup, ...values } : null });
+    });
+    renderCurrentHistory(ctx.state);
     renderOptimizationReview(container,
       ctx.state.queryOptimizationRun?.projectId === ctx.state.project.projectId ? ctx.state.queryOptimizationRun : null,
       { adopt: callbacks.onAdoptOptimization, edit: callbacks.onEditOptimization });
@@ -825,7 +840,8 @@ export { formatValidationProgress } from './validationResults';
 
 /** 可変回数の処理なので、全体の割合ではなく現在段階と実測済みの最良値を示す。 */
 function renderQueryOptimization(container: HTMLElement, state: AppState, callbacks: DraftViewCallbacks,
-  setTimerCleanup: (stop: () => void) => void): void {
+  setTimerCleanup: (stop: () => void) => void,
+  refreshHistory: (values: { maxHits: string; maxIterations: string }) => void): void {
   const doc = container.ownerDocument;
   const run = state.queryOptimizationRun?.projectId === state.project?.projectId ? state.queryOptimizationRun : null;
   const setup = state.queryOptimizationSetup?.projectId === state.project?.projectId ? state.queryOptimizationSetup : null;
@@ -985,7 +1001,11 @@ function renderQueryOptimization(container: HTMLElement, state: AppState, callba
   const summary = doc.createElement('summary');
   summary.textContent = '詳細設定';
   details.append(summary, iterationsLabel);
-  const inputChanged = (): void => callbacks.onOptimizationSettingsInput?.({ maxHits: hits.value, maxIterations: iterations.value });
+  const inputChanged = (): void => {
+    const values = { maxHits: hits.value, maxIterations: iterations.value };
+    callbacks.onOptimizationSettingsInput?.(values);
+    refreshHistory(values);
+  };
   hits.addEventListener('input', inputChanged);
   iterations.addEventListener('input', inputChanged);
   const start = doc.createElement('button');

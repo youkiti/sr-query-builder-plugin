@@ -11,12 +11,15 @@ import { SHEET_HEADERS } from '../../src/domain/sheetsSchema';
 import { injectAppStub } from './fixtures/appStub';
 import { fullStateScenario, FULL_APP_STATE } from './fixtures/scenarios/fullState';
 import { registerSheetsStub, registerDriveStub, registerNcbiStub, registerGeminiStub, registerMeshRdfStub } from './fixtures/apiStubs';
+import { createQueryOptimizationInputIdentity, type QueryOptimizationCheckpoint } from '../../src/app/services/queryOptimizationCheckpointService';
+import { parsePubmedFormulaMd } from '../../src/lib/search-formula-md';
 
 const APP_URL = '/app/app.html#/draft';
 const PMID = '20000001';
 const INITIAL_MD = '## PubMed/MEDLINE\n\n```\n#1 "ARDS"[tiab] OR "broad"[tiab]\n#2 "ECMO"[tiab]\n#3 #1 AND #2\n```\n';
 
-async function setup(page: Page, options: { hasSeeds: boolean; holdAi: boolean; heldLost?: number } = { hasSeeds: true, holdAi: false }) {
+async function setup(page: Page, options: { hasSeeds: boolean; holdAi: boolean; heldLost?: number; checkpoint?: QueryOptimizationCheckpoint }
+  = { hasSeeds: true, holdAi: false }) {
   const seed: Record<string, string> = { seed_id: 'seed-1', pmid: PMID, title: 'ARDS と ECMO',
     source: 'initial', is_valid: 'TRUE', user_decision: 'include' };
   const fake = await registerSheetsStub(page, { appendDelayMs: 300, tabs: {
@@ -46,7 +49,10 @@ async function setup(page: Page, options: { hasSeeds: boolean; holdAi: boolean; 
     await page.route('**/generativelanguage.googleapis.com/**', async (route) => { await gate; await route.fallback(); });
   }
   await injectAppStub(page, fullStateScenario({ preloadedState: { ...FULL_APP_STATE, currentFormulaMarkdown: INITIAL_MD },
-    extraStorage: { 'apiKeys.gemini': 'dummy-key' } }));
+    extraStorage: { 'apiKeys.gemini': 'dummy-key', ...(options.checkpoint ? {
+      queryOptimizationCheckpoint: options.checkpoint,
+      queryOptimizationSettings: { projectId: options.checkpoint.projectId, maxHits: 100, maxIterations: 5 },
+    } : {}) } }));
   return { fake, release };
 }
 
@@ -66,6 +72,53 @@ async function expectReview(page: Page, label: string) {
 
 test.describe('検索式の自動調整', () => {
   test.setTimeout(90_000);
+  test('リロードした中断ログから最良式を新しい run で再測定し、旧記録と残予算を保つ', async ({ page }) => {
+    const best = parsePubmedFormulaMd(INITIAL_MD.replace(' OR "broad"[tiab]', ''));
+    const checkpoint: QueryOptimizationCheckpoint = { projectId: FULL_APP_STATE.project!.projectId,
+      runId: 'interrupted-run', savedAt: '2026-09-10T00:00:00Z', maxHits: 100,
+      trials: [{ candidateId: 'old-rejected', formula: parsePubmedFormulaMd(INITIAL_MD), totalHits: 999,
+        capturedSeedCount: 0, accepted: false, reason: '前回はシードを失った', fingerprint: 'old-fingerprint' }],
+      resume: { bestFormula: best,
+        inputIdentity: createQueryOptimizationInputIdentity(FULL_APP_STATE.protocolDraft!, FULL_APP_STATE.blocksDraft!, [PMID], 100),
+        limits: { apiCalls: 200, elapsedMs: 600000, evaluatedTrials: 5 },
+        consumed: { apiCalls: 120, elapsedMs: 300000, evaluatedTrials: 2 }, previousRejectedTrials: [] },
+    };
+    const { fake } = await setup(page, { hasSeeds: true, holdAi: false, checkpoint });
+    const queries: string[] = [];
+    let prompt = '';
+    await page.route('**/eutils.ncbi.nlm.nih.gov/**', async (route) => {
+      queries.push(new URL(route.request().url()).searchParams.get('term') ?? '');
+      await route.fallback();
+    });
+    await page.route('**/generativelanguage.googleapis.com/**', async (route) => {
+      prompt = route.request().postData() ?? '';
+      await route.fallback();
+    });
+    await page.goto(APP_URL);
+    await expect(page.locator('.optimization__resume')).toBeEnabled();
+    await page.reload();
+    await expect(page.locator('.optimization__restored')).toContainText('再検証は済んでいません');
+    await expect(page.locator('.optimization__restored')).toContainText('通信 80 回 / 時間 300 秒 / 評価試行 3 回');
+    const a11y = await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze();
+    expect(a11y.violations).toEqual([]);
+    await page.locator('.optimization__resume').click();
+    await expectReview(page, '条件達成');
+    await expect(page.locator('.optimization__history-scroll > ol > li').first()).toContainText('50 件 / シード: 未測定 → 1/1件');
+    expect(queries.some((query) => query.includes('[uid]'))).toBe(true);
+    expect(queries.some((query) => query.includes('broad'))).toBe(false);
+    expect(prompt).toContain('前回はシードを失った');
+    expect(prompt).toContain('old-fingerprint');
+    expect(fake.tabs['FormulaVersions']).toHaveLength(2);
+    const data = await page.evaluate(() => chrome.storage.local.get(null));
+    const saved = data.queryOptimizationCheckpoint as QueryOptimizationCheckpoint;
+    expect(saved.runId).not.toBe(checkpoint.runId);
+    expect(saved.resume?.resumedFromRunId).toBe(checkpoint.runId);
+    expect(saved.resume?.consumed.apiCalls).toBeGreaterThan(120);
+    expect(saved.resume?.consumed.evaluatedTrials).toBe(3);
+    expect(Object.keys(data).filter((key) => key.startsWith('queryOptimizationCheckpoint'))).toEqual(['queryOptimizationCheckpoint']);
+    expect(saved.completion?.status).toBe('achieved');
+  });
+
   test('失う集合がある候補は保留し、初期式のままレビューと保存へ進む', async ({ page }) => {
     const { fake } = await setup(page, { hasSeeds: true, holdAi: false, heldLost: 150 });
     await start(page);

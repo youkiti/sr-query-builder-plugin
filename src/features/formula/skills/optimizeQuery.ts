@@ -88,6 +88,13 @@ export interface OptimizationApiEvent {
   source: 'PubMed' | 'MeSH' | 'AI';
 }
 
+/** 過去の run の却下記録。今回の測定 ID・実測値として参照してはいけない。 */
+export interface PreviousOptimizationRejection {
+  formula: PubmedFormula;
+  reason: string;
+  fingerprint: string | null;
+}
+
 export interface OptimizeQueryInput {
   formula: PubmedFormula;
   approvedBlocks: ApprovedOptimizationBlock[];
@@ -98,6 +105,7 @@ export interface OptimizeQueryInput {
   meshContext?: OptimizationMeshNode[];
   meshRequestResults?: OptimizationMeshRequestResult[];
   trials?: OptimizationTrial[];
+  previousRejectedTrials?: PreviousOptimizationRejection[];
 }
 
 export interface OptimizeQueryProposal {
@@ -159,6 +167,8 @@ MeSH 追加取得要求の結果（未取得理由を含む）:
 {{MESH_REQUEST_RESULTS}}
 試行履歴（採否・却下理由・前後の実測）:
 {{TRIALS}}
+過去の run の却下記録（未再検証。今回の実測ではなく、同じ失敗を避けるための文脈）:
+{{PREVIOUS_REJECTIONS}}
 スキーマ:
 {
   "target_block_id": "<変更対象 ID>",
@@ -210,6 +220,7 @@ export async function optimizeQuery(
     SEEDS: formatContext(input.seedPapers),
     MESH: formatContext(input.meshContext),
     MESH_REQUEST_RESULTS: formatContext(input.meshRequestResults),
+    PREVIOUS_REJECTIONS: formatContext(input.previousRejectedTrials ?? []),
     TRIALS: input.trials?.length ? input.trials.map((trial) => [
       formatContext({ candidateId: trial.candidateId, formula: trial.formula,
         accepted: trial.accepted, reason: trial.reason, rationale: trial.rationale,

@@ -10,6 +10,7 @@ import {
   type OptimizationImpact,
   type OptimizationApiEvent,
   type OptimizeQueryProposal,
+  type PreviousOptimizationRejection,
 } from '@/features/formula/skills/optimizeQuery';
 import type { ProjectStoreDeps } from '@/features/project';
 import { extractBlockTerms } from '@/features/validation/blockTerms';
@@ -25,7 +26,7 @@ import { esearch, efetchArticles, type EutilsDeps } from '@/lib/ncbi';
 import { resolveRateLimiter } from '@/lib/ncbi/eutils';
 import type { LlmProviderFactory } from './llmProviderService';
 import { evaluateQuery, type QueryEvaluation } from './queryEvaluationService';
-import { saveQueryOptimizationCheckpoint } from './queryOptimizationCheckpointService';
+import { saveQueryOptimizationCheckpoint, type OptimizationBudget } from './queryOptimizationCheckpointService';
 
 export interface QueryOptimizationInput {
   projectId: string;
@@ -41,6 +42,10 @@ export interface QueryOptimizationInput {
   seedPapers?: { pmid: string; title: string | null }[];
   /** 呼び出し側で取得済みの周辺ツリー。未提供なら未取得として AI に明示する。 */
   meshContext?: OptimizationMeshNode[];
+  /** 固定した研究基準・承認ブロック・シード集合・最大件数の指標。 */
+  inputIdentity?: string;
+  previousRejectedTrials?: PreviousOptimizationRejection[];
+  resumeBudget?: { limits: OptimizationBudget; consumed: OptimizationBudget; runId: string };
 }
 
 export type QueryOptimizationStep =
@@ -143,14 +148,16 @@ export interface QueryOptimizationResult {
 // NCBI の実 HTTP（リトライ含む）＋ LLM chat ＋ MeSH 追加取得の単位で 200 回、待機込み 10 分。
 // 注入プロバイダ内部の再試行・監査通信は外側から観測できないため chat 1 回に数える。
 export const DEFAULT_MAX_ITERATIONS = 5;
-const DEFAULT_MAX_API_CALLS = 200;
+export const DEFAULT_MAX_API_CALLS = 200;
 export const MAX_TERM_API_CALLS = 100;
+// 保存回数を約1/10に抑えつつ、中断時に払い戻されうる通信を最大9回に留める。
+const CHECKPOINT_API_CALL_INTERVAL = 10;
 // 先頭 N 件の書誌は確認対象の提示であって、集合全体を安全と判断する根拠にしない。
 const INSPECT_LIMIT = 20;
 
 /** 追加分析の予算切れは、候補評価全体を停止する理由にはしない。 */
 class TermAnalysisBudgetError extends Error {}
-const DEFAULT_MAX_ELAPSED_MS = 10 * 60 * 1000;
+export const DEFAULT_MAX_ELAPSED_MS = 10 * 60 * 1000;
 // 一度に全階層を取得せず、優先する少数の枝を調べる。既定 5 反復でも追加取得は最大 15 回。
 const MAX_MESH_REQUESTS_PER_ITERATION = 3;
 // 候補由来の単発失敗は修正機会を残す。改善なしの停止基準と揃え、2 回連続の測定失敗は
@@ -178,6 +185,11 @@ export async function runQueryOptimization(
     maxHits: input.maxHits, maxIterations: input.maxIterations,
     seedPapers: input.seedPapers?.map(({ pmid, title }) => ({ pmid, title })),
     meshContext: input.meshContext?.map(copyMeshNode),
+    inputIdentity: input.inputIdentity,
+    previousRejectedTrials: input.previousRejectedTrials
+      ? JSON.parse(JSON.stringify(input.previousRejectedTrials)) as PreviousOptimizationRejection[] : [],
+    resumeBudget: input.resumeBudget ? { runId: input.resumeBudget.runId,
+      limits: { ...input.resumeBudget.limits }, consumed: { ...input.resumeBudget.consumed } } : undefined,
   };
   let meshContext = fixed.meshContext;
   const notifyMeshContext = (): void => {
@@ -191,7 +203,10 @@ export async function runQueryOptimization(
   const maxIterations = fixed.maxIterations ?? DEFAULT_MAX_ITERATIONS;
   const maxApiCalls = deps.maxApiCalls ?? DEFAULT_MAX_API_CALLS;
   const maxElapsedMs = deps.maxElapsedMs ?? DEFAULT_MAX_ELAPSED_MS;
+  const consumedBefore = fixed.resumeBudget?.consumed ?? { apiCalls: 0, elapsedMs: 0, evaluatedTrials: 0 };
+  const limits = fixed.resumeBudget?.limits ?? { apiCalls: maxApiCalls, elapsedMs: maxElapsedMs, evaluatedTrials: maxIterations };
   let apiCalls = 0;
+  let lastSavedApiCalls = 0;
   let termApiCalls = 0;
   let termBudgetExhausted = false;
   const termCache = new Map<string, number>();
@@ -202,6 +217,7 @@ export async function runQueryOptimization(
   let apiEvents: OptimizationApiEvent[] = [];
   let apiSource: OptimizationApiEvent['source'] = 'PubMed';
   let best: VerifiedOptimizationCandidate | null = null;
+  let checkpointWritten = false;
   const trials: OptimizationTrial[] = [];
   let step: QueryOptimizationStep = 'measuring';
   const notify = (trial: OptimizationTrial | null = null): void => {
@@ -231,10 +247,10 @@ export async function runQueryOptimization(
 
   // 一度停止したら callback が false に戻っても再開しない。応答の前後で同じ境界を使う。
   // 通信予算を使い切る最後の応答も破棄する。上限到達後の結果更新を許さないため。
-  function boundary(): void {
+  function boundary(checkApiBudget = true): void {
     if (!terminal && deps.shouldStop?.()) terminal = 'user_stop';
     if (!terminal && now() - startedAt >= maxElapsedMs) terminal = 'time_budget';
-    if (!terminal && apiCalls >= maxApiCalls) terminal = 'api_budget';
+    if (!terminal && checkApiBudget && apiCalls >= maxApiCalls) terminal = 'api_budget';
     if (terminal) throw new QueryOptimizationStopError(terminal);
   }
   const rateLimiter = resolveRateLimiter(deps.eutils);
@@ -262,6 +278,9 @@ export async function runQueryOptimization(
     fetch: async (resource, init) => {
       boundary();
       apiCalls += 1;
+      await persistProgress();
+      // この通信の予算は加算前に確認済み。保存待ち中の停止・時間切れは引き続き確認する。
+      boundary(false);
       const response = await deps.eutils.fetch(resource, { ...init, cache: 'no-store' });
       boundary();
       return response;
@@ -316,6 +335,8 @@ export async function runQueryOptimization(
       } else {
         boundary();
         apiCalls += 1;
+        await persistProgress();
+        boundary(false);
         try {
           apiSource = 'MeSH';
           const nodes = await (deps.onProgress
@@ -358,10 +379,35 @@ export async function runQueryOptimization(
     task = null;
     notify(trials[trials.length - 1] ?? null);
     boundary();
-    await saveQueryOptimizationCheckpoint(fixed.projectId, fixed.runId, fixed.maxHits,
-      trials, deps.checkpoint, () => new Date(now()).toISOString());
+    await saveQueryOptimizationCheckpoint(checkpointOptions(), deps.checkpoint);
+    lastSavedApiCalls = apiCalls;
+    checkpointWritten = true;
     boundary();
   };
+  async function persistProgress(): Promise<void> {
+    // 初回の未検証式しかない通常 run は、初期評価が終わるまで復元対象にしない。
+    if (!best && !fixed.resumeBudget) return;
+    if (apiCalls - lastSavedApiCalls < CHECKPOINT_API_CALL_INTERVAL) return;
+    const options = checkpointOptions();
+    // 判定と更新を await 前に済ませ、並行通信の重複保存を防ぐ。
+    // 保存失敗は呼び出し側へ伝え、基準は戻さない。次の保存が最大9通信遅れるだけで、累積消費量は変えない。
+    lastSavedApiCalls = apiCalls;
+    await saveQueryOptimizationCheckpoint(options, deps.checkpoint);
+    checkpointWritten = true;
+  }
+  function checkpointOptions() {
+    return { projectId: fixed.projectId, runId: fixed.runId, maxHits: fixed.maxHits, trials,
+      now: () => new Date(now()).toISOString(),
+      resume: { bestFormula: best?.formula ?? (fixed.resumeBudget ? fixed.initialFormula : null),
+        inputIdentity: fixed.inputIdentity ?? '', limits,
+        consumed: { apiCalls: consumedBefore.apiCalls + apiCalls,
+          elapsedMs: consumedBefore.elapsedMs + Math.max(0, now() - startedAt),
+          evaluatedTrials: consumedBefore.evaluatedTrials + evaluatedTrials },
+        previousRejectedTrials: fixed.previousRejectedTrials ?? [],
+        ...(fixed.resumeBudget ? { resumedFromRunId: fixed.resumeBudget.runId } : {}),
+      },
+    };
+  }
   const measure = async (formula: PubmedFormula, candidateId: string) => {
     boundary();
     task = fixed.seedPmids.length ? { kind: 'seeds', completed: 0, total: fixed.seedPmids.length } : null;
@@ -432,13 +478,12 @@ export async function runQueryOptimization(
       stopReason: reason, best, trials, unmetReasons, iterations, apiCalls, elapsedMs: now() - startedAt,
     };
     // 終了後に残すのは確定した終了記録だけ。停止境界を通さず、候補・測定は更新しない。
-    // まだ試行を記録していない run は、既存の別 run のチェックポイントに触れない。
-    if (trials.length > 0) {
+    // 試行も通信消費も記録していない run は、既存の別 run のチェックポイントに触れない。
+    if (trials.length > 0 || checkpointWritten) {
       try {
-        await saveQueryOptimizationCheckpoint(fixed.projectId, fixed.runId, fixed.maxHits,
-          trials, deps.checkpoint, () => new Date(now()).toISOString(), {
+        await saveQueryOptimizationCheckpoint({ ...checkpointOptions(), completion: {
             status: result.status, stopReason: result.stopReason, unmetReasons: result.unmetReasons,
-          });
+          } }, deps.checkpoint);
       } catch (err) {
         result.unmetReasons.push(`終了記録の保存に失敗しました: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -498,11 +543,13 @@ export async function runQueryOptimization(
         apiSource = 'PubMed';
       }) : deps.llmFactory.forPurpose('optimize_query');
       apiCalls += 1;
+      await persistProgress();
+      boundary(false);
       const proposal = await optimizeQuery({
         formula: best.formula, approvedBlocks: fixed.approvedBlocks, criteria: fixed.criteria,
         maxHits: fixed.maxHits, measurement: best.measurement,
         seedPapers: fixed.seedPapers ?? fixed.seedPmids.map((pmid) => ({ pmid, title: null })),
-        meshContext, meshRequestResults, trials,
+        meshContext, meshRequestResults, trials, previousRejectedTrials: fixed.previousRejectedTrials,
       }, provider);
       boundary();
       iterations = round;
