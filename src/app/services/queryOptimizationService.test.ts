@@ -140,6 +140,71 @@ test.each(['declared', 'implicit', 'replacement', 'captured'])('削除制御 %s 
   expect(f.fetch.mock.calls.some(([url]) => new URL(url as string).searchParams.get('term')?.includes('b[tiab]'))).toBe(!rejected);
 });
 
+test.each([
+  ['大文字小文字', 'a[tiab] OR B[tiab]', 'a[tiab] OR b[tiab] OR c[tiab]', []],
+  ['連続空白', 'a[tiab] OR "acute respiratory distress"[tiab]', 'a[tiab] OR "acute  respiratory distress"[tiab] OR c[tiab]', []],
+  ['置換前の表記', 'a[tiab] OR "Acute  respiratory distress"[tiab]', 'a[tiab] OR c[tiab]',
+    [{ before: '"acute respiratory distress"[tiab]', after: 'c[tiab]' }]],
+] as const)('%s の揺れを暗黙の削除として却下しない', async (_, before, after, replaced) => {
+  const f = setup({ a: { hits: 200, captured: ['11'] } });
+  f.input.initialFormula.blocks[0]!.expression = before;
+  f.input.maxIterations = 1;
+  f.chat.mockResolvedValue({ text: JSON.stringify({ target_block_id: '1', proposed_expression: after,
+    added_terms: ['c[tiab]'], removed_terms: [], replaced_terms: replaced }) });
+  const result = await runQueryOptimization(f.input, f.deps);
+  expect(result.trials[1]).toMatchObject({ kind: 'proposal', after: expect.any(Object) });
+  expect(result.trials[1]!.reason).not.toContain('削除案を受け付けません');
+});
+
+test('暗黙の削除の却下理由には元の大文字小文字と空白を残す', async () => {
+  const f = setup({ a: { hits: 200, captured: ['11'] } });
+  f.input.initialFormula.blocks[0]!.expression = 'a[tiab] OR "Acute  respiratory distress"[tiab]';
+  f.input.maxIterations = 1;
+  f.chat.mockResolvedValue({ text: JSON.stringify({ target_block_id: '1', proposed_expression: 'a[tiab] OR c[tiab]',
+    added_terms: ['c[tiab]'], removed_terms: [], replaced_terms: [] }) });
+  const result = await runQueryOptimization(f.input, f.deps);
+  expect(result.trials[1]).toMatchObject({ accepted: false, after: null });
+  expect(result.trials[1]!.reason).toContain('削除案を受け付けません');
+  expect(result.trials[1]!.reason).toContain('"Acute  respiratory distress"[tiab]');
+});
+
+test('捕捉表の最初の通信中に停止しても初期試行と最良候補を保存する', async () => {
+  const f = setup({ a: { hits: 200, captured: ['11'] } });
+  const original = f.fetch.getMockImplementation()!;
+  let stop = false;
+  f.deps.shouldStop = () => stop;
+  f.fetch.mockImplementation(async (url: string) => {
+    const query = new URL(url).searchParams.get('term') ?? '';
+    // 初期実測の最終式捕捉と区別し、捕捉表の先頭の概念行で停止する。
+    if (query.includes('[uid]') && query.startsWith('(a[tiab]) AND (')) stop = true;
+    return original(url);
+  });
+  const result = await runQueryOptimization(f.input, f.deps);
+  expect(stop).toBe(true);
+  expect(captureQueries(f.fetch)).toHaveLength(2);
+  expect(result.trials).toHaveLength(1);
+  expect(result.trials[0]).toMatchObject({ kind: 'initial', candidateId: 'initial', accepted: true });
+  expect(result.best).not.toBeNull();
+  expect(result).toMatchObject({ status: 'stopped', stopReason: 'user_stop' });
+  expect(f.write).toHaveBeenCalled();
+});
+
+test('フィルタ行が未測定なら最終式の未捕捉を結合構造と断定しない', async () => {
+  const f = setup({ a: { hits: 200, captured: ['11'], blockCapture: {
+    '1': ['11', '22'], '2': ['11', '22'], RCTfilter: ['11', '22'], '3': ['11'],
+  } } }, ['a[tiab]']);
+  const original = f.fetch.getMockImplementation()!;
+  f.fetch.mockImplementation(async (url: string) => {
+    const query = new URL(url).searchParams.get('term') ?? '';
+    if (query.startsWith('(randomized controlled trial[pt]) AND (')) throw new Error('フィルタ捕捉の通信失敗');
+    return original(url);
+  });
+  const result = await runQueryOptimization(f.input, f.deps);
+  expect(result.seedDiagnoses![0]).toMatchObject({ recoverableByTerms: false, blockingBlockIds: ['3'] });
+  expect(result.seedDiagnoses![0]!.note).not.toContain('結合構造');
+  expect(result.seedDiagnoses![0]!.note).toContain('#RCTfilter は未測定のため判定不能');
+});
+
 test('承認外フィルタと結合行が落とすシードを回収不能と診断する', async () => {
   const f = setup({ a: { hits: 200, captured: ['11'], blockCapture: {
     '1': ['11', '22'], '2': ['11', '22'], RCTfilter: ['11'], '3': ['11'],
