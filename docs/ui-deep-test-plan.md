@@ -7,8 +7,8 @@
   - Phase A: [tests/e2e/fixtures/appStub.ts](../tests/e2e/fixtures/appStub.ts) + [src/app/app.ts](../src/app/app.ts) の `window.__E2E_PRELOADED_STATE__` hook、[app-smoke-of-smoke.spec.ts](../tests/e2e/app-smoke-of-smoke.spec.ts) 11 ケース。fetch インターセプタ（A#4）は [tests/e2e/fixtures/apiStubs.ts](../tests/e2e/fixtures/apiStubs.ts)（Sheets/Drive/NCBI/Gemini 共通スタブ）として実装済み
   - Phase B: `app-{home,protocol,blocks,seeds,draft,validate,expand,edit,export,done,history}.spec.ts` 計 37 ケース（含む a11y 11）
   - Phase C: [app-guards.spec.ts](../tests/e2e/app-guards.spec.ts) 6 ケース、[app-sidebar-visual.spec.ts](../tests/e2e/app-sidebar-visual.spec.ts) 4 ケース
-  - Phase D: `journey-docx-upload.spec.ts` (J3 UI-only) + `journey-history-switch.spec.ts` (J2) に加え、`journey-draft-generate.spec.ts` / `journey-expand-boundary.spec.ts` を追加。J1 相当（draft 生成〜検証の実操作貫通）と J4 の margin 探索（境界事例取得ボタン起点部分）が実装済みになった。J4 のキーボード判定（i/e/m 連打）はまだ未着手
-  - Phase E: `journey-errors.spec.ts`（OAuth レイヤのみ）— Sheets 403 / NCBI 429 / LLM 500 は Phase A#4 fetch stub（apiStubs.ts）の整備により前提が外れ、着手可能になった
+  - Phase D: `journey-docx-upload.spec.ts` (J3 UI-only) + `journey-history-switch.spec.ts` (J2) に加え、`journey-draft-generate.spec.ts` / `journey-expand-boundary.spec.ts` を追加。J1 相当（draft 生成〜検証の実操作貫通）と J4 の margin 探索（境界事例取得ボタン起点部分）が実装済みになった。`journey-expand-keyboard.spec.ts` で J4 の候補 5 件への i/i/i/e/m 連続判定（各保存完了を待機）・n/p 移動・Sheets append 録音も実装済み
+  - Phase E: `journey-errors.spec.ts` — OAuth レイヤに加え、expand 取得時の Sheets 403 / NCBI 429 / LLM 500 の利用者向けエラー表示と再取得による復帰を実装済み。target UI との差分は Phase E の ⚠️ drift 注記を参照
   - Phase F: `app-regression.spec.ts` で 11 ルート × `#app-content` 非空 + 3 status 非空 + long-title bounding box
   - Phase G: `options.spec.ts` 5 ケース（MVP 現実装向け）
   - **副作用**: axe が実バグを検出したため以下を修正: `blocksView.ts` / `editView.ts` / `seedsView.ts` に `aria-label`、`bootstrap.ts` のサイドバーに `aria-current="page"`、`options.css` に `.options__muted a { text-decoration: underline }`。
@@ -89,7 +89,7 @@ CLAUDE.md §目的 と [ui-flow.md §2](ui-flow.md) から逆算した 6 本。
 | `app-seeds.spec.ts` | `#/seeds` | 3 | 0 件 / N 件、PMID バリデーション |
 | `app-draft.spec.ts` | `#/draft` | 2 | 生成中スケルトン、完了後のコードブロック表示 |
 | `app-validate.spec.ts` | `#/validate` | 3 | 捕捉率バッジ、行ヒット数、missed PMIDs 一覧 |
-| `app-expand.spec.ts` | `#/expand` | 4 | dev バナー + 取得ボタン表示、0 件の空状態、キーボード i/e/m（J4 兼用）、axe |
+| `app-expand.spec.ts` | `#/expand` | 4 | dev バナー + 取得ボタン表示、0 件の空状態、候補 0 件・focus 無しで i を押したときのクラッシュ回避（候補への判定は別 spec）、axe |
 | `app-edit.spec.ts` | `#/edit` | 2 | diff ペイン、空 diff でスクロール無し |
 | `app-export.spec.ts` | `#/export` | 3 | 4 DB 変換結果、コピー／DL、未変換時の完了ボタン非表示 |
 | `app-done.spec.ts` | `#/done` | 1 | nbib DL 案内リンク |
@@ -120,16 +120,15 @@ CLAUDE.md §目的 と [ui-flow.md §2](ui-flow.md) から逆算した 6 本。
 1. **`journey-new-project.spec.ts`** (J1): popup → 新規作成ボタンクリック → `chrome.tabs.create` が呼ばれたことを検証 → app.html 直接 goto で続きを再現（`chrome.tabs.create` 経路は拡張パッケージロードが必要なため疑似）
 2. **`journey-history-switch.spec.ts`** (J2): 2 件の `formulaVersions` を持つ状態で `#/history` → クリック → `#/validate` に state 反映を確認
 3. **`journey-docx-upload.spec.ts`** (J3): file input に `.docx` Buffer を set → パース成功 / 壊れた docx で UI が固まらない
-4. **`journey-expand-keyboard.spec.ts`** (J4): `page.keyboard.press('i')` を候補件数ぶん連打 → **Sheets API 書き込みの録音**で assertion する。[expandService.ts](../src/app/services/expandService.ts) の `recordDecision` は `appendSeedPaper(spreadsheetId, seed, deps.google)` で Sheets に直接書き込み、`AppState` には `seedPapers` を持たない（[store.ts:50-77](../src/app/store.ts#L50-L77)）。assertion は以下いずれかの方式：
-   - **方式 a**: `page.route('**/sheets.googleapis.com/**/values:append*', ...)` で 5 回の append リクエストを handler で録音し、body に `source=interactive` の行が 5 本入っていることを確認
-   - **方式 b**: Phase A の E2E hook を経由して `deps.google.fetch` をテスト用 spy に差し替え、呼び出し回数と引数を assertion する
-   - **注意**: `store.getState().seedPapers` を見る書き方は実装と乖離するので避ける
+4. **`journey-expand-keyboard.spec.ts`** (J4・実装済み): 現式の inside 探索で候補 5 件を並べ、list にフォーカスを載せて n/p 移動と i/i/i/e/m の連続判定を確認する。各カードの「保存しました」を待ってから次のキーを送り、次の未判定候補への自動前進も確認する。
+   - **方式 a（採用）**: `page.route('**/sheets.googleapis.com/**/values/*:append*', ...)` で SeedPapers 宛のリクエスト body を録音し、PMID と `user_decision` の対応、および全 5 行の `source=interactive`（include 3 件 / exclude 1 件 / maybe 1 件）を確認する。実際の URL は `/values/<range>:append`。LLMApiLog 等の append は共通スタブへ fallback する。
+   - **注意**: [expandService.ts](../src/app/services/expandService.ts) の `recordDecision` は `appendSeedPaper(spreadsheetId, seed, deps.google)` で Sheets に直接書き込む。`store.getState().seedPapers` を見る assertion は使わない。録音用ハンドラは成功応答だけを返し、保存データの再読込・ラウンド再検証はこのテストの対象外。
 5. **`journey-draft-generate.spec.ts`** (J1 相当・実装済み): `#/draft` の「生成する」を実操作で通し、ブロック設計 → MeSH → フリーワード → 行ごとヒット数 → 保存 → 捕捉率検証が一周することを確認する。[tests/e2e/fixtures/apiStubs.ts](../tests/e2e/fixtures/apiStubs.ts) の共通スタブを使用。J1 全体（新規作成→export 貫通）のうち draft 生成〜検証の主要経路のみを回帰確認しており、`journey-new-project.spec.ts`（項目 1）や export 以降は未着手のまま
-6. **`journey-expand-boundary.spec.ts`** (J4 の一部・実装済み): `#/expand` の「境界事例を取得」を実操作で通し、margin 探索（拡張式 NOT 現式 → esearch → efetch → AI 選定）が一周して候補と更新提案が並ぶこと、および候補への include 判定が SeedPapers へ登録されることを確認する。[tests/e2e/fixtures/apiStubs.ts](../tests/e2e/fixtures/apiStubs.ts) の共通スタブを使用。項目 4 のキーボード判定（i/e/m 連打）はこの spec の対象外で未着手のまま
+6. **`journey-expand-boundary.spec.ts`** (J4 の一部・実装済み): `#/expand` の「境界事例を取得」を実操作で通し、margin 探索（拡張式 NOT 現式 → esearch → efetch → AI 選定）が一周して候補と更新提案が並ぶこと、および候補への include 判定が SeedPapers へ登録されることを確認する。[tests/e2e/fixtures/apiStubs.ts](../tests/e2e/fixtures/apiStubs.ts) の共通スタブを使用。キーボード判定はこの spec の対象外で、項目 4 の専用 spec で実装済み
 
 ### Phase E: エラー復帰の網（0.5 日）
 
-**`journey-errors.spec.ts`** (J5) で `page.route()` を使って API を 401/403/429/500 に差し替える。前提条件だった Phase A#4 の fetch stub 拡充は [tests/e2e/fixtures/apiStubs.ts](../tests/e2e/fixtures/apiStubs.ts) の整備により満たされたため、Sheets 403 / NCBI 429 / LLM 500 の異常系ケースは着手可能な状態になっている（未着手）。
+**`journey-errors.spec.ts`** (J5・実装済み): 既存の OAuth（popup）2 ケースに加え、`#/expand` の候補取得で Sheets の SeedPapers 読取を 403、NCBI の esearch を 429、Gemini の候補選定を 500 に差し替える 3 ケースを追加。共通スタブを後から登録した `page.route()` で上書きし、自動リトライを含めて失敗させる。利用者に見えるエラー・取得ボタンの再活性を確認後、`route.fallback()` で成功スタブに戻し、再取得で候補 5 件が並びエラーが消えることを検証する。以下の表は **target spec** であり、現実装との差分は直後の注記を参照。
 
 | 発生源 | 期待挙動 |
 |---|---|
@@ -137,6 +136,12 @@ CLAUDE.md §目的 と [ui-flow.md §2](ui-flow.md) から逆算した 6 本。
 | Sheets 403 | モーダル + 共有設定への外部リンク（新規タブで開くか確認: `chrome.tabs.create` 録音）|
 | NCBI 429 | バナー「レート制限中…」が表示、再試行で再発火 |
 | LLM 500 | 該当 skill カードに赤バッジ + 再試行ボタン活性 |
+
+> ⚠️ **drift（実装との乖離）**: 表の API エラー 3 行は **target spec**。今回テストする `#/expand` の候補取得では、現実装（[bootstrap.ts](../src/app/bootstrap.ts) の `runFetchBoundary` / [expandView.ts](../src/app/views/expandView.ts)）を正として固定する：
+> - Sheets 403: 共有設定モーダル・外部リンクではなく、`.expand__error` に `Google API failed: HTTP 403` とレスポンスの詳細を表示する。
+> - NCBI 429: 専用の「レート制限中…」バナーではなく、既定の最大 6 回の試行（初回 + 5 回の自動リトライ）後に `.expand__error` へ `esearch failed: HTTP 429` を表示する（[eutils.ts](../src/lib/ncbi/eutils.ts)）。
+> - LLM 500: skill カードの赤バッジ・専用再試行ボタンではなく、既定の最大 3 回の試行後に `.expand__error` へ `Gemini API failed: HTTP 500` を表示する（[retry.ts](../src/lib/llm/retry.ts) / [GeminiProvider.ts](../src/lib/llm/GeminiProvider.ts)）。
+> - 3 系統ともエラー領域は `aria-live="polite"`。「境界事例を取得」が再び有効になり、同じボタンで取得をやり直せる。上記 target UI の追加、および他ビュー固有のエラー復帰はこのテストの対象外。
 
 ### Phase F: 回帰ネット（継続拡張, コスト随時）
 

@@ -175,7 +175,7 @@ src/
 - **自動調整の復元はログ表示まで**: リロード後はチェックポイントを中断／完了済みの記録として表示する。途中からの自動再開や復元ログからの採用保存は行わず、新しく実行して測り直す。シード 0 件では捕捉確認済みの条件達成にはしない。設計・実装状況は [docs/query-optimization-plan.md](docs/query-optimization-plan.md) を参照
 - **P1 の画面接続は実装済み**: `editView` はチップ編集部品を使用し、`blockInspector` が語の寄与と MeSH 文脈を表示する。自動調整も語別計測・MeSH の追加取得を利用する。NCBI 通信は `eutils.ts` の共有レート制御を通る。画面未接続・レート制御未実装という旧記述は解消済み
 - **OpenAI / Anthropic Claude への直接連携は未実装**: 実装済みなのは Gemini と OpenRouter の 2 プロバイダ（`src/lib/llm/GeminiProvider.ts` / `OpenRouterProvider.ts`。既定モデルは `gemini-3.5-flash`）。Options 画面で OpenRouter の API キーとカスタムモデル ID（最大 20 件）を追加登録できるため OpenRouter 経由で多くのモデルに到達できるが、OpenAI / Anthropic の API を直接叩く `LLMProvider` 実装は無い（`LlmProviderId` 型に `openai` / `anthropic` の値はあるが対応実装が無い）
-- E2E ジャーニー J1（新規作成→export 貫通）は draft 生成〜検証の主要経路を journey-draft-generate.spec.ts で回帰確認済み。J4（expand キーボード判定）/ J5 の API エラー系は残タスク（[docs/ui-deep-test-plan.md](docs/ui-deep-test-plan.md) Phase D/E）
+- E2E ジャーニー J1（新規作成→export 貫通）は draft 生成〜検証の主要経路を journey-draft-generate.spec.ts で回帰確認済み。J4（expand の i/e/m 判定・n/p 移動・Sheets append 録音）と J5（expand 取得時の Sheets 403 / NCBI 429 / LLM 500 のエラー表示・再取得）は実装済み。Phase E の target UI との差分は drift 注記を参照（[docs/ui-deep-test-plan.md](docs/ui-deep-test-plan.md) Phase D/E）
 
 ## 目的（ゴール）
 
