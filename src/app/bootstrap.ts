@@ -14,6 +14,7 @@ import { createOptimizationProgressPublisher } from './services/queryOptimizatio
 import {
   approveBlocks,
   buildEutilsDeps,
+  withExpandApiWait,
   buildLlmProviderFactory,
   clearBlocksDraftBackup,
   createChromeRuntimeDeps,
@@ -81,6 +82,7 @@ import {
   fetchMeshTreeNumbers,
   type EfetchArticle,
 } from '@/lib/ncbi';
+import { classifyApiError } from '@/lib/api-error';
 import {
   appendExcessFilterBlocks,
   getLatestFormulaVersion,
@@ -101,7 +103,7 @@ import {
 } from '@/features/protocol';
 import type { Protocol, ProtocolBlock } from '@/domain/protocol';
 import type { BlocksDraft, ProtocolDraft } from './store';
-import { getCurrentUserEmail } from '@/lib/google';
+import { buildSpreadsheetUrl, getCurrentUserEmail } from '@/lib/google';
 import { evaluateGuards } from './guards';
 import {
   ROUTE_LABELS,
@@ -110,7 +112,7 @@ import {
   parseRoute,
   type RouteName,
 } from './router';
-import { createStore, type AppState, type AppStore } from './store';
+import { createStore, type AppState, type AppStore, type ExpandApiWait } from './store';
 import { buildViews, type BuildViewsOptions, type ViewContext } from './views';
 import { formatDraftProgress, formatValidationProgress } from './views/draftView';
 import { resolveInstructionDraft } from './views/editView';
@@ -628,6 +630,10 @@ function buildDefaultViewOptions(
       onDecide: async (input: RecordDecisionInput): Promise<RecordDecisionResult> =>
         runRecordDecision(store, runtime, input),
       onRoundComplete: async (): Promise<ValidationSummary> => runValidate(store, runtime),
+      // 許可エラーの復帰は Google 側の共有設定でしか行えない（issue #109）。
+      // 共有ダイアログへの直リンクは無いので、スプレッドシート本体を新しいタブで開く。
+      onOpenSpreadsheet: (spreadsheetId) =>
+        chrome.tabs.create({ url: buildSpreadsheetUrl(spreadsheetId) }),
     },
     settings: {
       readKey: (key) => runtime.store.read<string>(key),
@@ -827,6 +833,8 @@ async function runFetchBoundary(
       step: 'protocol',
       startedAtMs: Date.now(),
       error: null,
+      errorKind: null,
+      apiWait: null,
       result: null,
     },
   }));
@@ -837,13 +845,32 @@ async function runFetchBoundary(
     setExpandRunError(store, new Error('プロジェクトが選択されていません'));
     return;
   }
+  const setApiWait = (apiWait: ExpandApiWait | null): void => {
+    store.setState((s) =>
+      s.expandRun === null || s.expandRun.status !== 'running'
+        ? s
+        : { ...s, expandRun: { ...s.expandRun, apiWait } }
+    );
+  };
+
   try {
     const factory: LlmProviderFactory = await buildLlmProviderFactory({
       ...baseDeps,
       llmLogFolderId: project.driveFolderId,
       spreadsheetId: project.spreadsheetId,
+      // AI は試行回数を通知しない（withRetry の 'retry' は「何回目か」を持たず、同じ
+      // ファクトリを全 skill が共有するので呼び出し境界も観測できない）。待っている事実だけ出す。
+      onRequestState: (state) =>
+        setApiWait(
+          state === 'retry'
+            ? { source: 'AI', kind: 'retry', attempt: null, maxAttempts: null, waitMs: null }
+            : null
+        ),
     });
-    const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
+    const eutils = withExpandApiWait(
+      await buildEutilsDeps({ google: runtime.google, store: runtime.store }),
+      setApiWait
+    );
     const result = await fetchBoundaryCandidates({
       google: runtime.google,
       eutils,
@@ -863,6 +890,8 @@ async function runFetchBoundary(
         step: 'done',
         startedAtMs: s.expandRun?.startedAtMs ?? Date.now(),
         error: null,
+        errorKind: null,
+        apiWait: null,
         result,
       },
     }));
@@ -880,6 +909,8 @@ function setExpandRunError(store: AppStore, err: unknown): void {
       step: s.expandRun?.step ?? 'protocol',
       startedAtMs: s.expandRun?.startedAtMs ?? Date.now(),
       error: err instanceof Error ? err.message : String(err),
+      errorKind: classifyApiError(err),
+      apiWait: null,
       result: null,
     },
   }));

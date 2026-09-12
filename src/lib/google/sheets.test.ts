@@ -1,4 +1,4 @@
-import { appendRow, createSpreadsheet, getSheetValues, updateRow, writeHeaderRow } from './sheets';
+import { appendRow, buildSpreadsheetUrl, createSpreadsheet, getSheetValues, updateRow, writeHeaderRow } from './sheets';
 
 function okJson(body: unknown): Response {
   return {
@@ -85,5 +85,15 @@ describe('getSheetValues', () => {
   test('values が未定義なら [] を返す', async () => {
     const d = deps({});
     await expect(getSheetValues('sid', 'Protocol', d)).resolves.toEqual([]);
+  });
+});
+
+describe('buildSpreadsheetUrl', () => {
+  test('スプレッドシートを開く URL を組み立てる', () => {
+    expect(buildSpreadsheetUrl('sid-1')).toBe('https://docs.google.com/spreadsheets/d/sid-1/edit');
+  });
+
+  test('ID をエスケープしてパスから外れさせない', () => {
+    expect(buildSpreadsheetUrl('a/b?c')).toBe('https://docs.google.com/spreadsheets/d/a%2Fb%3Fc/edit');
   });
 });

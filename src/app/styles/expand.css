@@ -221,3 +221,43 @@
   color: var(--color-text);
   font-size: var(--font-size-sm);
 }
+
+/* 通信待ちと失敗の分類つき案内（issue #109）。
+   文字色は指定せず既定（--color-text）に委ねる: --color-warning (#c57d1b) をこの淡い背景に
+   載せると 3.02:1 で AA 未満になる実測が CLAUDE.md にある。種類は左ボーダーと文頭の記号で示す
+   （--color-bg-muted 上の --color-text は 15.77:1）。 */
+.expand__api-wait {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.75rem;
+  border-left: 4px solid var(--color-warning);
+  background: var(--color-bg-muted);
+  font-size: 0.9rem;
+}
+
+.expand__error-panel {
+  margin: 0.5rem 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--color-warning);
+  border-radius: 4px;
+  background: var(--color-bg-muted);
+}
+
+.expand__error-panel--permission {
+  border-left-color: var(--color-danger);
+}
+
+.expand__error-title {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+}
+
+.expand__error-body {
+  margin: 0 0 0.6rem;
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.expand__error-action {
+  font-size: 0.9rem;
+}

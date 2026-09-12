@@ -1,3 +1,4 @@
+import { buildSpreadsheetUrl } from '@/lib/google';
 /**
  * Google Sheets / Drive API（`sheets.googleapis.com` / `www.googleapis.com/drive`）の
  * in-memory モック。`chrome.storage.local` に永続化するので、章をまたいで
@@ -101,7 +102,7 @@ async function handleCreateSpreadsheet(bodyText: string): Promise<Response> {
       tabs[tabTitle] = [];
     }
   }
-  const spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
+  const spreadsheetUrl = buildSpreadsheetUrl(spreadsheetId);
   backend.spreadsheets[spreadsheetId] = { spreadsheetId, spreadsheetUrl, title, tabs };
   // 実際の Sheets API は spreadsheet も Drive 上のファイルとして存在する
   // （`spreadsheets.create` は常にマイドライブ直下に作る）。`moveFileToFolder` が

@@ -29,6 +29,7 @@ export {
   appendRow,
   updateRow,
   getSheetValues,
+  buildSpreadsheetUrl,
   type CreatedSpreadsheet,
 } from './sheets';
 export {

@@ -41,6 +41,12 @@ export const NCBI_RATE_LIMIT_WITHOUT_API_KEY = 3;
 export const NCBI_RATE_LIMIT_WITH_API_KEY = 10;
 
 /**
+ * `EutilsDeps.maxRetries` を省略したときのリトライ回数（初回呼び出しは含まない）。
+ * 画面が「何回目の試行を待っているか」を出すために総試行回数（= これ + 1）が要る（issue #109）。
+ */
+export const EUTILS_DEFAULT_MAX_RETRIES = 5;
+
+/**
  * プロセス内で共有する既定のレートリミッタ（issue #59）。
  * モジュールスコープの単一インスタンスなので、`EutilsDeps` を複数箇所（サービスごと）で
  * 組み立てても枠は分裂せず 1 プロセス全体で共有される。API キーの有無で 2 段のバケットを
@@ -247,7 +253,7 @@ export async function esearch(
       }
       return body;
     },
-    { sleep: deps.sleep, maxRetries: deps.maxRetries ?? 5, shouldRetry: shouldRetryEutils }
+    { sleep: deps.sleep, maxRetries: deps.maxRetries ?? EUTILS_DEFAULT_MAX_RETRIES, shouldRetry: shouldRetryEutils }
   );
 
   const result = json.esearchresult;
@@ -316,7 +322,7 @@ export async function efetchArticles(
       }
       return await res.text();
     },
-    { sleep: deps.sleep, maxRetries: deps.maxRetries ?? 5 }
+    { sleep: deps.sleep, maxRetries: deps.maxRetries ?? EUTILS_DEFAULT_MAX_RETRIES }
   );
 
   return parsePubmedXml(xml);

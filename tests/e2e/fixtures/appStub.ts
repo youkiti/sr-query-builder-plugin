@@ -108,6 +108,8 @@ export async function injectAppStub(page: Page, scenario: AppScenario = {}): Pro
 
       type MessageRecord = { message: unknown; timestamp: number };
       const sentMessages: MessageRecord[] = [];
+      // 許可エラーの復帰導線（issue #109）が新しいタブを開いたことを spec から読めるようにする。
+      const createdTabs: { url?: string }[] = [];
 
       const chromeStub = {
         runtime: {
@@ -124,7 +126,10 @@ export async function injectAppStub(page: Page, scenario: AppScenario = {}): Pro
           },
         },
         tabs: {
-          create: (_opts: { url?: string }) => undefined,
+          create: (opts: { url?: string }) => {
+            createdTabs.push(opts);
+            return undefined;
+          },
         },
         identity: {
           getAuthToken: (
@@ -168,6 +173,7 @@ export async function injectAppStub(page: Page, scenario: AppScenario = {}): Pro
       (window as unknown as { __appStubData: Record<string, unknown> }).__appStubData = data;
       (window as unknown as { __appStubMessages: MessageRecord[] }).__appStubMessages =
         sentMessages;
+      (window as unknown as { __appStubTabs: { url?: string }[] }).__appStubTabs = createdTabs;
     },
     {
       authed,

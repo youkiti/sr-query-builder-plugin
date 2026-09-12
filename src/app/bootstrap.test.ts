@@ -2163,6 +2163,64 @@ describe('startApp - wiring 層', () => {
     expect(expandRun?.error).toContain('API キー');
     expect(doc.querySelector('.expand__error')?.textContent).toContain('API キー');
     expect(doc.querySelector('.expand__candidate')).toBeNull();
+    // LlmApiKeyMissingError は HTTP 由来ではないので分類できない。一般論の再試行を勧めない。
+    expect(expandRun?.errorKind).toBe('other');
+    expect(doc.querySelector('.expand__error-panel')).toBeNull();
+  });
+
+  // issue #109: 403 は権限の問題なので、同じボタンを押し直しても永久に失敗する。
+  test('SeedPapers が 403 なら許可エラーとして分類し、共有設定を新しいタブで開く導線を出す', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+      'apiKeys.gemini': 'KEY',
+    });
+    fetchMock.mockImplementation(async (url: string) => {
+      const u = typeof url === 'string' ? url : String(url);
+      if (u.includes('/values/SeedPapers')) {
+        return {
+          ok: false,
+          status: 403,
+          json: async () => ({}),
+          text: async () => JSON.stringify({ error: { message: 'The caller does not have permission' } }),
+        } as Response;
+      }
+      return jsonResponse({});
+    });
+    const createTab = jest.spyOn(chrome.tabs, 'create').mockImplementation(() => undefined);
+    try {
+      const handle = startApp(doc, {
+        getHash: () => '#/expand',
+        onHashChange: jest.fn().mockReturnValue(() => undefined),
+        setHash: jest.fn(),
+        runtime,
+      });
+      await flush();
+      handle.store.setState((s) => ({
+        ...s,
+        // Protocol タブを読みに行かせず、SeedPapers の 403 を最初の失敗にする
+        protocolDraft: {
+          frameworkType: 'pico', researchQuestion: 'RQ', inclusionCriteria: '', exclusionCriteria: '',
+          studyDesign: 'RCT', sourceType: 'manual', sourceFilename: null, rawTextRef: null,
+          rawTextPreview: 'p', rawTextInline: '本文',
+        },
+        currentFormulaVersionId: 'v-1',
+        currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 asthma[tiab]\n```\n',
+      }));
+      doc.querySelector<HTMLButtonElement>('.expand__actions button')!.click();
+      for (let i = 0; i < 10; i += 1) {
+        await flush();
+      }
+      expect(handle.store.getState().expandRun?.errorKind).toBe('permission');
+      const panel = doc.querySelector('.expand__error-panel--permission')!;
+      expect(panel).not.toBeNull();
+      panel.querySelector<HTMLButtonElement>('.expand__error-action')!.click();
+      expect(createTab).toHaveBeenCalledWith({
+        url: 'https://docs.google.com/spreadsheets/d/SHEET-1/edit',
+      });
+    } finally {
+      createTab.mockRestore();
+    }
   });
 
   test.each(['1234', undefined, '', 'abc', '0', '-5', '1.5', '1e999'])('生成して検証する経路で設定欄 %s の目安がプロンプトに届く', async (rawMaxHits) => {

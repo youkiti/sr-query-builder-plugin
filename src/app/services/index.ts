@@ -115,6 +115,7 @@ export {
   type SpecificQueryFallback,
   type SpecificQueryOutcome,
 } from './expandService';
+export { withExpandApiWait } from './expandApiWait';
 
 export * from './queryOptimizationService';
 export * from './queryOptimizationCheckpointService';

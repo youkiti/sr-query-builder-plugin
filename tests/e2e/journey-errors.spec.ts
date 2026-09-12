@@ -2,10 +2,12 @@
  * OAuth の案内と、API エラー後も画面が残り同じ操作で取得を再開できることを守る。
  * expand の候補取得を共通スタブで通し、対象 API だけ後勝ちの route で失敗させる。
  * 自動リトライも失敗させて利用者向けエラーを確認した後、fallback で成功スタブへ戻す。
- * docs/ui-deep-test-plan.md Phase E の target 表ではなく、現実装のエラー表示を検査する。
+ * docs/ui-deep-test-plan.md Phase E の表のうち API エラー 3 行（issue #109 で実装済み）を検査する:
+ * 403 は共有設定への導線、429 は待機中の残り回数、500 は再試行の導線。
  */
 
 import { test, expect } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
 import { injectChromeStub } from './fixtures/chromeStub';
 import { setupExpandCandidates, CANDIDATE_PMIDS } from './fixtures/scenarios/expandCandidates';
 
@@ -37,6 +39,10 @@ test.describe('journey-errors (app の API エラー復帰)', () => {
       status: 403,
       error: 'Google API failed: HTTP 403',
       attempts: 1,
+      panel: '.expand__error-panel--permission',
+      guidance: '同じ操作を繰り返しても結果は変わりません',
+      /** 許可エラーは同じ操作の再試行を勧めない。復帰は共有設定を直してから本体のボタンで行う */
+      recoverFromPanel: false,
     },
     {
       name: 'NCBI 429',
@@ -44,6 +50,9 @@ test.describe('journey-errors (app の API エラー復帰)', () => {
       status: 429,
       error: 'esearch failed: HTTP 429',
       attempts: 6,
+      panel: '.expand__error-panel--rate_limit',
+      guidance: '呼び出しが集中しています',
+      recoverFromPanel: true,
     },
     {
       name: 'LLM 500',
@@ -51,11 +60,14 @@ test.describe('journey-errors (app の API エラー復帰)', () => {
       status: 500,
       error: 'Gemini API failed: HTTP 500',
       attempts: 3,
+      panel: '.expand__error-panel--temporary',
+      guidance: '一時的な障害の可能性があります',
+      recoverFromPanel: true,
     },
   ];
 
   for (const scenario of cases) {
-    test(`${scenario.name}: エラー表示後に再取得して候補を表示できる`, async ({ page }) => {
+    test(`${scenario.name}: 分類に応じた案内を出し、復帰して候補を表示できる`, async ({ page }) => {
       // NCBI の既定バックオフ（1 + 2 + 4 + 8 + 16 秒）も実際に待つ。
       test.setTimeout(70_000);
       await setupExpandCandidates(page);
@@ -79,21 +91,52 @@ test.describe('journey-errors (app の API エラー復帰)', () => {
       const fetchButton = page.getByRole('button', { name: '境界事例を取得', exact: true });
       await fetchButton.click();
 
+      if (scenario.name === 'NCBI 429') {
+        // issue #109: 31 秒のバックオフを黙って待たない。待機中であることと残り回数を出す。
+        const wait = page.locator('.expand__api-wait');
+        await expect(wait).toContainText('自動で再試行します', { timeout: 20_000 });
+        await expect(wait).toContainText('/ 6 回目');
+        await expect(wait).toHaveAttribute('role', 'status');
+      }
+
       const error = page.locator('.expand__error');
       await expect(error).toContainText(scenario.error, { timeout: 45_000 });
-      await expect(error).toBeVisible();
       await expect(error).toHaveAttribute('aria-live', 'polite');
+      const panel = page.locator(scenario.panel);
+      await expect(panel).toBeVisible();
+      await expect(panel).toContainText(scenario.guidance);
+      await expect(panel).toHaveAttribute('role', 'alert');
+      // 分類つき案内は issue #109 で足した新しい UI 状態なので、状態ごとに 1 本の慣習で axe を回す
+      const a11y = await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze();
+      expect(a11y.violations).toEqual([]);
       expect(failedRequests).toBe(scenario.attempts);
       await expect(fetchButton).toBeEnabled();
       await expect(page.locator('#app-content h2')).toBeVisible();
       await expect(page.locator('.expand__candidate')).toHaveCount(0);
 
+      const retry = panel.getByRole('button');
+      if (scenario.recoverFromPanel) {
+        await expect(retry).toHaveText('もう一度取得する');
+      } else {
+        // 共有設定は拡張の中では直せないので、Google 側の画面を新しいタブで開く
+        await expect(retry).toHaveText('スプレッドシートを開く');
+        await retry.click();
+        const opened = await page.evaluate(
+          () => (window as unknown as { __appStubTabs: { url?: string }[] }).__appStubTabs
+        );
+        expect(opened).toEqual([
+          { url: 'https://docs.google.com/spreadsheets/d/sheet-fixture-1/edit' },
+        ]);
+        await expect(page.locator('.expand__candidate')).toHaveCount(0);
+      }
+
       failing = false;
-      await fetchButton.click();
+      await (scenario.recoverFromPanel ? retry : fetchButton).click();
       await expect(page.locator('.expand__candidate')).toHaveCount(5, { timeout: 20_000 });
       await expect(page.locator('.expand__candidate').first()).toContainText(CANDIDATE_PMIDS[0]!);
       expect(recoveredRequests).toBeGreaterThan(0);
       await expect(error).toHaveText('');
+      await expect(page.locator('.expand__error-panel')).toHaveCount(0);
       await expect(fetchButton).toBeEnabled();
     });
   }

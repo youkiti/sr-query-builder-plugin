@@ -1,5 +1,6 @@
 import type { BoundaryCasesResult, ValidationSummary } from '@/app/services';
-import { INITIAL_STATE, type AppState, type ExpandRunState } from '../store';
+import { INITIAL_STATE, type AppState, type ExpandApiWait, type ExpandRunState } from '../store';
+import type { ApiErrorKind } from '@/lib/api-error';
 import { createExpandView } from './expandView';
 
 function buildContainer(): HTMLElement {
@@ -67,6 +68,8 @@ function readyState(result: BoundaryCasesResult = sampleResult()): AppState {
     step: 'done',
     startedAtMs: 0,
     error: null,
+    errorKind: null,
+    apiWait: null,
     result,
   };
   return { ...stateReady, expandRun };
@@ -75,25 +78,30 @@ function readyState(result: BoundaryCasesResult = sampleResult()): AppState {
 /** status='running'（取得中）の expandRun を載せた state */
 function runningState(
   step: ExpandRunState['step'] = 'esearch',
-  startedAtMs = 0
+  startedAtMs = 0,
+  apiWait: ExpandApiWait | null = null
 ): AppState {
   const expandRun: ExpandRunState = {
     status: 'running',
     step,
     startedAtMs,
     error: null,
+    errorKind: null,
+    apiWait,
     result: null,
   };
   return { ...stateReady, expandRun };
 }
 
 /** status='error' の expandRun を載せた state */
-function errorState(message: string | null): AppState {
+function errorState(message: string | null, errorKind: ApiErrorKind | null = null): AppState {
   const expandRun: ExpandRunState = {
     status: 'error',
     step: 'pick-boundary',
     startedAtMs: 0,
     error: message,
+    errorKind,
+    apiWait: null,
     result: null,
   };
   return { ...stateReady, expandRun };
@@ -389,6 +397,102 @@ describe('createExpandView', () => {
       const container = buildContainer();
       view(container, { state: errorState(null), navigate: jest.fn() });
       expect(container.querySelector('.expand__error')?.textContent).toBe('不明なエラー');
+    });
+
+    // issue #109: 生のメッセージだけでは「次に何をすればよいか」が分からない。
+    test('permission は共有設定の導線を出し、同じ操作の再試行を勧めない', () => {
+      const onOpenSpreadsheet = jest.fn();
+      const onFetch = jest.fn().mockResolvedValue(undefined);
+      const view = createExpandView({ onOpenSpreadsheet, onFetch });
+      const container = buildContainer();
+      view(container, {
+        state: errorState('Google API failed: HTTP 403', 'permission'),
+        navigate: jest.fn(),
+      });
+      const panel = container.querySelector('.expand__error-panel--permission')!;
+      expect(panel).not.toBeNull();
+      expect(panel.getAttribute('role')).toBe('alert');
+      expect(panel.textContent).toContain('同じ操作を繰り返しても結果は変わりません');
+      // 削除済み・ID 誤りでも同じ応答になるので断定しない
+      expect(panel.textContent).toContain('シートが削除されている');
+      expect(panel.querySelector('.expand__error-action')?.textContent).not.toContain('もう一度取得');
+      // 生のメッセージは診断用に残す
+      expect(container.querySelector('.expand__error')?.textContent).toBe('Google API failed: HTTP 403');
+
+      panel.querySelector<HTMLButtonElement>('.expand__error-action')!.click();
+      expect(onOpenSpreadsheet).toHaveBeenCalledWith(stateReady.project!.spreadsheetId);
+      expect(onFetch).not.toHaveBeenCalled();
+    });
+
+    test.each([
+      ['rate_limit', '呼び出しが集中しています'],
+      ['temporary', '一時的な障害の可能性があります'],
+    ] as const)('%s は再試行の導線を出し、押すと同じ取得をやり直す', (kind, heading) => {
+      const onFetch = jest.fn().mockResolvedValue(undefined);
+      const view = createExpandView({ onFetch });
+      const container = buildContainer();
+      view(container, { state: errorState('失敗', kind), navigate: jest.fn() });
+      const panel = container.querySelector(`.expand__error-panel--${kind}`)!;
+      expect(panel.textContent).toContain(heading);
+      panel.querySelector<HTMLButtonElement>('.expand__error-action')!.click();
+      expect(onFetch).toHaveBeenCalledWith({ insideStrategy: 'specific' });
+    });
+
+    test('分類できない失敗には案内を出さない（直らない操作を勧めないため）', () => {
+      const view = createExpandView();
+      const container = buildContainer();
+      view(container, { state: errorState('検索式の展開結果が空です', 'other'), navigate: jest.fn() });
+      expect(container.querySelector('.expand__error-panel')).toBeNull();
+      expect(container.querySelector('.expand__error')?.textContent).toBe('検索式の展開結果が空です');
+    });
+  });
+
+  // issue #109: 429 のバックオフは既定で最大 31 秒。通知が無いと「取得中…」のまま固まって見える。
+  describe('通信待ちの表示', () => {
+    test('リトライ待ちは待ち秒数と試行回数を出す', () => {
+      const view = createExpandView();
+      const container = buildContainer();
+      const wait: ExpandApiWait = {
+        source: 'PubMed', kind: 'retry', attempt: 4, maxAttempts: 6, waitMs: 8000,
+      };
+      view(container, { state: runningState('esearch', 0, wait), navigate: jest.fn() });
+      const box = container.querySelector('.expand__api-wait')!;
+      expect(box.getAttribute('role')).toBe('status');
+      expect(box.textContent).toContain('約 8 秒待ってから');
+      expect(box.textContent).toContain('（4 / 6 回目）');
+      expect(box.textContent).toContain('PubMed');
+    });
+
+    test('レート制御待ちは 429 と混同させず、試行回数を出さない', () => {
+      const view = createExpandView();
+      const container = buildContainer();
+      const wait: ExpandApiWait = {
+        source: 'PubMed', kind: 'rate_limit', attempt: null, maxAttempts: null, waitMs: null,
+      };
+      view(container, { state: runningState('esearch', 0, wait), navigate: jest.fn() });
+      const box = container.querySelector('.expand__api-wait')!;
+      expect(box.textContent).toContain('呼び出し間隔を調整しています');
+      expect(box.textContent).not.toContain('回目');
+    });
+
+    test('試行回数を持たない AI の待ちは回数を出さずに待機だけ伝える', () => {
+      const view = createExpandView();
+      const container = buildContainer();
+      const wait: ExpandApiWait = {
+        source: 'AI', kind: 'retry', attempt: null, maxAttempts: null, waitMs: null,
+      };
+      view(container, { state: runningState('pick-boundary', 0, wait), navigate: jest.fn() });
+      const box = container.querySelector('.expand__api-wait')!;
+      expect(box.textContent).toContain('AI が応答しませんでした');
+      expect(box.textContent).not.toContain('回目');
+      expect(box.textContent).not.toContain('秒待って');
+    });
+
+    test('待っていないときは何も出さない', () => {
+      const view = createExpandView();
+      const container = buildContainer();
+      view(container, { state: runningState('esearch'), navigate: jest.fn() });
+      expect(container.querySelector('.expand__api-wait')).toBeNull();
     });
   });
 

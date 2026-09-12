@@ -13,6 +13,16 @@ export interface CreatedSpreadsheet {
 }
 
 /**
+ * スプレッドシートを Google の画面で開く URL。
+ *
+ * 共有ダイアログを直接開く URL は公開されていないため、許可エラーの復帰導線（issue #109）も
+ * ここへ送り出して、利用者に本体の「共有」から設定してもらう。
+ */
+export function buildSpreadsheetUrl(spreadsheetId: string): string {
+  return `https://docs.google.com/spreadsheets/d/${encodeURIComponent(spreadsheetId)}/edit`;
+}
+
+/**
  * タイトルと初期タブ名を指定してスプレッドシートを新規作成する。
  * 指定されたタブ名と同じ順序で sheet が作られる（既定の `Sheet1` は含めない）。
  */

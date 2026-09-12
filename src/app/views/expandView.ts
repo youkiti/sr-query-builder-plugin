@@ -16,7 +16,8 @@ import {
   type UpdateProposal,
 } from '@/features/formula';
 import { ROUTE_LABELS } from '../router';
-import type { ExpandRunState } from '../store';
+import type { ApiErrorKind } from '@/lib/api-error';
+import type { ExpandApiWait, ExpandRunState } from '../store';
 import type { RenderView } from './types';
 
 /**
@@ -81,6 +82,11 @@ export interface ExpandViewCallbacks {
   onDecide?: (input: RecordDecisionInput) => Promise<RecordDecisionResult>;
   /** ラウンド完了時の再検証コールバック。check_final_query 相当を期待 */
   onRoundComplete?: () => Promise<ValidationSummary>;
+  /**
+   * 許可エラー（issue #109）のとき、対象スプレッドシートを新しいタブで開く。
+   * 共有設定の変更は拡張の中では完結しないので、Google 側の画面へ送り出すしかない。
+   */
+  onOpenSpreadsheet?: (spreadsheetId: string) => void;
 }
 
 interface CandidateItemHandle {
@@ -175,6 +181,11 @@ export function createExpandView(callbacks: ExpandViewCallbacks = {}): RenderVie
     status.setAttribute('aria-live', 'polite');
     container.appendChild(status);
 
+    // 分類つきの案内（issue #109）。生のメッセージより先に「次に何をすればよいか」を置く。
+    const guidance = doc.createElement('div');
+    guidance.className = 'expand__guidance';
+    container.appendChild(guidance);
+
     const errorBox = doc.createElement('p');
     errorBox.className = 'expand__error';
     errorBox.setAttribute('aria-live', 'polite');
@@ -190,7 +201,7 @@ export function createExpandView(callbacks: ExpandViewCallbacks = {}): RenderVie
     round.setAttribute('aria-live', 'polite');
     container.appendChild(round);
 
-    fetchBtn.addEventListener('click', () => {
+    const startFetch = (): void => {
       if (!callbacks.onFetch || fetchBtn.disabled) {
         return;
       }
@@ -202,15 +213,25 @@ export function createExpandView(callbacks: ExpandViewCallbacks = {}): RenderVie
       void callbacks.onFetch({
         insideStrategy: specificToggle.checked ? 'specific' : 'current',
       });
-    });
+    };
+    fetchBtn.addEventListener('click', startFetch);
 
     if (running && run) {
       status.textContent = runningStatusText(run.step, run.startedAtMs);
       startElapsedTicker(status, run.step, run.startedAtMs);
+      if (run.apiWait) {
+        guidance.appendChild(renderApiWait(doc, run.apiWait));
+      }
       return;
     }
     if (run?.status === 'error') {
       errorBox.textContent = run.error ?? '不明なエラー';
+      const panel = renderErrorGuidance(doc, run.errorKind, {
+        spreadsheetId: ctx.state.project.spreadsheetId,
+        onOpenSpreadsheet: callbacks.onOpenSpreadsheet,
+        onRetry: startFetch,
+      });
+      if (panel) guidance.appendChild(panel);
       return;
     }
     if (run?.status === 'ready' && run.result) {
@@ -542,6 +563,101 @@ function startElapsedTicker(
 
 function runningStatusText(step: ExpandFetchStep | 'done', startedAtMs: number): string {
   return `[取得] ${FETCH_STEP_ACTIVE_LABELS[step]}（経過 ${formatElapsed(Date.now() - startedAtMs)}）`;
+}
+
+/**
+ * 通信待ちの表示（issue #109）。
+ *
+ * NCBI の 429 は既定で最大 5 回・合計 31 秒待つ。これを出さないと画面は「取得中…」の
+ * ままで、待っているのか固まったのかが利用者から区別できない。`role="status"` にして
+ * 進捗トラッカーとは別の粒度で読み上げる（試行が進むたびに全体を読み直させない）。
+ */
+function renderApiWait(doc: Document, wait: ExpandApiWait): HTMLElement {
+  const box = doc.createElement('p');
+  box.className = 'expand__api-wait';
+  box.setAttribute('role', 'status');
+  box.textContent = apiWaitText(wait);
+  return box;
+}
+
+function apiWaitText(wait: ExpandApiWait): string {
+  if (wait.kind === 'rate_limit') {
+    // 相手が 429 を返したわけではなく、こちらが枠（3 / 10 req/s）を守って待っている状態。
+    return `⏳ ${wait.source} の呼び出し間隔を調整しています。順番が来るまで待っています。`;
+  }
+  const after =
+    wait.waitMs === null ? '待ってから' : `約 ${Math.max(1, Math.round(wait.waitMs / 1000))} 秒待ってから`;
+  const count =
+    wait.attempt === null || wait.maxAttempts === null
+      ? ''
+      : `（${wait.attempt} / ${wait.maxAttempts} 回目）`;
+  return `⏳ ${wait.source} が応答しませんでした。${after}自動で再試行します${count}。`;
+}
+
+interface ErrorGuidanceOptions {
+  spreadsheetId: string;
+  onOpenSpreadsheet?: (spreadsheetId: string) => void;
+  onRetry: () => void;
+}
+
+/**
+ * 失敗の分類ごとに「次に何をすればよいか」を出す（issue #109）。
+ *
+ * `other` は案内を出さない。分類できない失敗に一般論の再試行を勧めると、直らない操作を
+ * 繰り返させることになるため、生のメッセージ（`.expand__error`）だけを残す。
+ *
+ * 配色は使わず、左ボーダーと文頭の記号で種類を示す。この淡い背景に `--color-warning` を
+ * 文字色として載せると 3.02:1 で AA を割る実測が CLAUDE.md にあるため、文字色は既定の
+ * `--color-text` に委ねている。
+ */
+function renderErrorGuidance(
+  doc: Document,
+  kind: ApiErrorKind | null,
+  options: ErrorGuidanceOptions
+): HTMLElement | null {
+  if (kind === null || kind === 'other') return null;
+  const panel = doc.createElement('section');
+  panel.className = `expand__error-panel expand__error-panel--${kind}`;
+  panel.setAttribute('role', 'alert');
+
+  const title = doc.createElement('h3');
+  title.className = 'expand__error-title';
+  const body = doc.createElement('p');
+  body.className = 'expand__error-body';
+  panel.appendChild(title);
+  panel.appendChild(body);
+
+  if (kind === 'permission') {
+    title.textContent = '⛔ 共有設定の確認が必要です';
+    // 403 / 404 は「Picker 未選択」「共有されていない」「削除済み」「ID 誤り」のいずれでも
+    // 返るため断定しない（popup の許可導線と同じ作法）。
+    body.textContent =
+      'このスプレッドシートを、いまログインしているアカウントで読めませんでした。共有設定で自分に権限が付いているかを確認してください（シートが削除されている / ID が違う場合も同じ応答になります）。権限が直るまでは、同じ操作を繰り返しても結果は変わりません。';
+    const open = doc.createElement('button');
+    open.type = 'button';
+    open.className = 'expand__error-action';
+    open.textContent = 'スプレッドシートを開く';
+    open.addEventListener('click', () => options.onOpenSpreadsheet?.(options.spreadsheetId));
+    panel.appendChild(open);
+    return panel;
+  }
+
+  if (kind === 'rate_limit') {
+    title.textContent = '⏱ 呼び出しが集中しています';
+    body.textContent =
+      '自動の再試行を使い切っても復帰しませんでした。少し時間を置いてからもう一度お試しください。NCBI の API キーを設定画面で登録すると、1 秒あたりの呼び出し枠が 3 回から 10 回に広がります。';
+  } else {
+    title.textContent = '↻ 一時的な障害の可能性があります';
+    body.textContent =
+      '相手のサービスが一時的に応答できない状態でした。自動で再試行しても復帰しなかっただけで、入力や設定が誤っているとは限りません。もう一度お試しください。';
+  }
+  const retry = doc.createElement('button');
+  retry.type = 'button';
+  retry.className = 'expand__error-action';
+  retry.textContent = 'もう一度取得する';
+  retry.addEventListener('click', options.onRetry);
+  panel.appendChild(retry);
+  return panel;
 }
 
 function formatElapsed(ms: number): string {

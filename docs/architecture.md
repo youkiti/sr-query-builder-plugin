@@ -63,6 +63,7 @@ src/
 │   ├── app.html
 │   ├── app.ts                     # エントリ。ハッシュルーティングの起動のみ
 │   ├── services/                  # 画面とドメインロジックの仲介（以下は抜粋。実体は 10 本以上ある）
+│   │   ├── expandApiWait.ts       # #/expand の NCBI 通信を包み、レート制御待ち・リトライ待ちを画面へ通知
 │   │   ├── queryEvaluationService.ts # 保存なしの検索式評価（厳密な件数・固定シード捕捉）
 │   │   ├── queryOptimizationService.ts # 検索式の自動調整ループ（候補の検査・採否・停止。draft 画面から実行）
 │   │   ├── queryOptimizationProgressPublisher.ts # 進捗通知の間引き・段階遷移と試行確定の即時反映
@@ -155,9 +156,11 @@ src/
 │   │   ├── toIctrp.ts
 │   │   └── generateAll.ts
 ├── lib/                           # 外部 API / 低レベルユーティリティ
+│   ├── api-error/
+│   │   └── apiErrorKind.ts        # 外部 API の失敗を permission / rate_limit / temporary / other に分類（案内の出し分け）
 │   ├── google/
 │   │   ├── auth.ts                # chrome.identity.getAuthToken ラッパ
-│   │   ├── sheets.ts              # Sheets API（バッチ書き込み / 読み取り）
+│   │   ├── sheets.ts              # Sheets API（バッチ書き込み / 読み取り / 共有設定へ送る URL 生成）
 │   │   ├── drive.ts               # Drive API
 │   │   └── identity.ts            # chrome.identity.getProfileUserInfo ラッパ
 │   ├── ncbi/
