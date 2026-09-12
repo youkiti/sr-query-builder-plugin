@@ -17,6 +17,19 @@ function provider(text: string): { provider: LLMProvider; calls: ChatMessage[][]
 }
 
 describe('designBlock', () => {
+  test.each([
+    [1000, '1000'], [10000, '10000'], [Number.MAX_SAFE_INTEGER, String(Number.MAX_SAFE_INTEGER)],
+    [undefined, '(指定なし)'], [0, '(指定なし)'], [-5, '(指定なし)'],
+    [1.5, '(指定なし)'], [NaN, '(指定なし)'], [Infinity, '(指定なし)'],
+    [Number.MAX_SAFE_INTEGER + 1, '(指定なし)'],
+  ])('目安件数 %s を user prompt に %s として渡す', async (targetHits, expected) => {
+    const { provider: p, calls } = provider('{}');
+    await designBlock({ blockLabel: 'P', description: 'd', researchQuestion: 'rq', targetHits }, p);
+    const userMsg = calls[0]!.find((m) => m.role === 'user')!.content;
+    expect(userMsg).toContain(`検索式全体の目安ヒット件数（PubMed。目安であって上限ではない）: ${expected}`);
+    expect(userMsg).not.toContain('{{TARGET_HITS}}');
+  });
+
   test('概念骨格を構造化して返す', async () => {
     const json = JSON.stringify({
       concept_summary: 'Adults with type 2 diabetes',

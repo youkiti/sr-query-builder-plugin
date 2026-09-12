@@ -405,3 +405,20 @@ test('数値に変換済みの Infinity も run を作る前に拒否する', as
   expect(f.store.getState().queryOptimizationSetup?.error).toContain('正の整数');
   expect(f.list).not.toHaveBeenCalled();
 });
+
+test('自動調整の固定最大件数が初期式の生成プロンプトに届く', async () => {
+  const f = setup();
+  f.store.setState((s) => ({ ...s, currentFormulaMarkdown: null, currentFormulaVersionId: null }));
+  const prompts: string[] = [];
+  f.buildFactory.mockResolvedValue({ model: 'fake', forPurpose: (purpose) => ({
+    model: 'fake', providerId: 'gemini', chat: async (messages) => {
+      if (purpose === 'draft_block') prompts.push(messages.find((m) => m.role === 'user')!.content);
+      return { text: JSON.stringify({ concept_summary: '概念', mesh_requirements: [], freeword_requirements: [],
+        suggestions: [], freewords: [{ query: 'a[tiab]', rationale: '' }] }), tokensIn: null, tokensOut: null, raw: {} };
+    },
+  }) });
+  await f.invoke(4321);
+  expect(prompts).toHaveLength(1);
+  expect(prompts[0]).toContain('目安であって上限ではない）: 4321');
+  expect(f.run).toHaveBeenCalledWith(expect.objectContaining({ maxHits: 4321 }), expect.anything());
+});

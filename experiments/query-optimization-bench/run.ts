@@ -127,7 +127,7 @@ export async function executeCase(fixture: BenchCase, audit: GoldAudit, protocol
   const blocks = { blocks: extracted.blocks.map((block) => ({ ...block, aiGenerated: true, note: '' })),
     combinationExpression: extracted.combinationExpression };
   // C0 は適格基準だけから生成し、既知 3 群を与える追加工程の効果を C1 で測る。
-  const draft = await generateDraftFormula({ protocol, blocks,
+  const draft = await generateDraftFormula({ protocol, blocks, targetHits: result.maxHits,
     seedContext: { titles: [], samples: [], meshSummary: { seedCount: 0, concepts: [], checkTags: [] } } },
   { llmFactory, onProgress: progress, countBlockHits: async (query) => (await esearch(query, eutils, { retmax: 0 })).count });
   const measure = async (query: string): Promise<ConditionResult> => {
