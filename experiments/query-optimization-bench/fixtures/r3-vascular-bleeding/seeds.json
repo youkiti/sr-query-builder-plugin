@@ -1,0 +1,20 @@
+{
+  "seed": 20260912,
+  "selections": [
+    {
+      "groupId": "weaver 2002",
+      "pmid": "11957004",
+      "year": 2002
+    },
+    {
+      "groupId": "minkowitz 2019",
+      "pmid": "31376435",
+      "year": 2019
+    },
+    {
+      "groupId": "robinson 2000",
+      "pmid": "10848853",
+      "year": 2000
+    }
+  ]
+}

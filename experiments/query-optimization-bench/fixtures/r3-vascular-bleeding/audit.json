@@ -1,0 +1,42 @@
+{
+  "includedStudyCount": 19,
+  "includedPmidCount": 20,
+  "overlapPmids": [],
+  "sharedPmids": [],
+  "unmappedPmids": [],
+  "withoutPmid": [
+    "euctr2016-003661-26-pl",
+    "nct02094885",
+    "o'donnell 2010"
+  ],
+  "publicationYears": {
+    "1903723": 1991,
+    "7674464": 1995,
+    "9123925": 1996,
+    "9278654": 1997,
+    "10848853": 2000,
+    "11052282": 2000,
+    "11957004": 2002,
+    "12217279": null,
+    "12792646": null,
+    "14560228": 2003,
+    "15079782": 2004,
+    "16779513": 2006,
+    "19889206": 2009,
+    "23332688": 2013,
+    "25458801": 2015,
+    "28647631": 2017,
+    "30926276": 2019,
+    "31376435": 2019,
+    "31607387": 2020,
+    "35363452": 2022
+  },
+  "exclusions": {
+    "withoutPmid": 3,
+    "unresolvedMapping": 0,
+    "outsideDate": null
+  },
+  "manual_review": false,
+  "reviewNote": "",
+  "dateValidation": "pending"
+}

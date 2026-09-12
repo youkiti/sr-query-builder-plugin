@@ -1,0 +1,315 @@
+{
+  "id": "r3-vascular-bleeding",
+  "pmcid": "PMC9936832",
+  "searchDate": "2022-03-31",
+  "license": "CC BY",
+  "protocolPath": "protocol.md",
+  "gold": [
+    {
+      "id": "bajardi 2009",
+      "members": [
+        {
+          "studyId": "bajardi 2009",
+          "pmids": [
+            "19889206"
+          ]
+        }
+      ],
+      "pmids": [
+        "19889206"
+      ]
+    },
+    {
+      "id": "bochicchio 2015",
+      "members": [
+        {
+          "studyId": "bochicchio 2015",
+          "pmids": [
+            "25458801"
+          ]
+        }
+      ],
+      "pmids": [
+        "25458801"
+      ]
+    },
+    {
+      "id": "chetter 2017",
+      "members": [
+        {
+          "studyId": "chetter 2017",
+          "pmids": [
+            "28647631"
+          ]
+        }
+      ],
+      "pmids": [
+        "28647631"
+      ]
+    },
+    {
+      "id": "clagett 1995",
+      "members": [
+        {
+          "studyId": "clagett 1995",
+          "pmids": [
+            "7674464"
+          ]
+        }
+      ],
+      "pmids": [
+        "7674464"
+      ]
+    },
+    {
+      "id": "czerny 2000",
+      "members": [
+        {
+          "studyId": "czerny 2000",
+          "pmids": [
+            "11052282"
+          ]
+        }
+      ],
+      "pmids": [
+        "11052282"
+      ]
+    },
+    {
+      "id": "giovanacci 2002",
+      "members": [
+        {
+          "studyId": "giovanacci 2002",
+          "pmids": [
+            "12217279",
+            "12792646"
+          ]
+        }
+      ],
+      "pmids": [
+        "12217279",
+        "12792646"
+      ]
+    },
+    {
+      "id": "joseph 2004",
+      "members": [
+        {
+          "studyId": "joseph 2004",
+          "pmids": [
+            "15079782"
+          ]
+        }
+      ],
+      "pmids": [
+        "15079782"
+      ]
+    },
+    {
+      "id": "leijdekkers 2006",
+      "members": [
+        {
+          "studyId": "leijdekkers 2006",
+          "pmids": [
+            "16779513"
+          ]
+        }
+      ],
+      "pmids": [
+        "16779513"
+      ]
+    },
+    {
+      "id": "lethagen 1991",
+      "members": [
+        {
+          "studyId": "lethagen 1991",
+          "pmids": [
+            "1903723"
+          ]
+        }
+      ],
+      "pmids": [
+        "1903723"
+      ]
+    },
+    {
+      "id": "milne 1996",
+      "members": [
+        {
+          "studyId": "milne 1996",
+          "pmids": [
+            "9123925"
+          ]
+        }
+      ],
+      "pmids": [
+        "9123925"
+      ]
+    },
+    {
+      "id": "minkowitz 2019",
+      "members": [
+        {
+          "studyId": "minkowitz 2019",
+          "pmids": [
+            "31376435"
+          ]
+        }
+      ],
+      "pmids": [
+        "31376435"
+      ]
+    },
+    {
+      "id": "monaco 2020",
+      "members": [
+        {
+          "studyId": "monaco 2020",
+          "pmids": [
+            "31607387"
+          ]
+        }
+      ],
+      "pmids": [
+        "31607387"
+      ]
+    },
+    {
+      "id": "nenezic 2019",
+      "members": [
+        {
+          "studyId": "nenezic 2019",
+          "pmids": [
+            "30926276"
+          ]
+        }
+      ],
+      "pmids": [
+        "30926276"
+      ]
+    },
+    {
+      "id": "poise-3 2022",
+      "members": [
+        {
+          "studyId": "poise-3 2022",
+          "pmids": [
+            "35363452"
+          ]
+        }
+      ],
+      "pmids": [
+        "35363452"
+      ]
+    },
+    {
+      "id": "qerimi 2013",
+      "members": [
+        {
+          "studyId": "qerimi 2013",
+          "pmids": [
+            "23332688"
+          ]
+        }
+      ],
+      "pmids": [
+        "23332688"
+      ]
+    },
+    {
+      "id": "ranaboldo 1997",
+      "members": [
+        {
+          "studyId": "ranaboldo 1997",
+          "pmids": [
+            "9278654"
+          ]
+        }
+      ],
+      "pmids": [
+        "9278654"
+      ]
+    },
+    {
+      "id": "robinson 2000",
+      "members": [
+        {
+          "studyId": "robinson 2000",
+          "pmids": [
+            "10848853"
+          ]
+        }
+      ],
+      "pmids": [
+        "10848853"
+      ]
+    },
+    {
+      "id": "taylor 2003",
+      "members": [
+        {
+          "studyId": "taylor 2003",
+          "pmids": [
+            "14560228"
+          ]
+        }
+      ],
+      "pmids": [
+        "14560228"
+      ]
+    },
+    {
+      "id": "weaver 2002",
+      "members": [
+        {
+          "studyId": "weaver 2002",
+          "pmids": [
+            "11957004"
+          ]
+        }
+      ],
+      "pmids": [
+        "11957004"
+      ]
+    }
+  ],
+  "heldOut": [
+    "bajardi 2009",
+    "bochicchio 2015",
+    "chetter 2017",
+    "clagett 1995",
+    "czerny 2000",
+    "giovanacci 2002",
+    "joseph 2004",
+    "leijdekkers 2006",
+    "lethagen 1991",
+    "milne 1996",
+    "monaco 2020",
+    "nenezic 2019",
+    "poise-3 2022",
+    "qerimi 2013",
+    "ranaboldo 1997",
+    "taylor 2003"
+  ],
+  "seeds": {
+    "seed": 20260912,
+    "selections": [
+      {
+        "groupId": "weaver 2002",
+        "pmid": "11957004",
+        "year": 2002
+      },
+      {
+        "groupId": "minkowitz 2019",
+        "pmid": "31376435",
+        "year": 2019
+      },
+      {
+        "groupId": "robinson 2000",
+        "pmid": "10848853",
+        "year": 2000
+      }
+    ]
+  }
+}

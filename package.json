@@ -8,6 +8,11 @@
     "node": ">=18.0.0"
   },
   "scripts": {
+    "eval:optimize": "tsx experiments/query-optimization-bench/run.ts",
+    "eval:candidates": "tsx experiments/query-optimization-bench/candidates.ts",
+    "eval:b1": "tsx experiments/query-optimization-bench/b1.ts",
+    "eval:prepare": "tsx experiments/query-optimization-bench/prepare.ts",
+    "eval:report": "tsx experiments/query-optimization-bench/report.ts",
     "dev": "webpack --mode development",
     "watch": "webpack --mode development --watch",
     "build": "webpack --mode production",
@@ -17,7 +22,7 @@
     "release:alpha": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release-alpha.ps1",
     "release": "pwsh -NoProfile -File tools/release/release.ps1",
     "pack:release": "pwsh -NoProfile -File tools/release/pack.ps1",
-    "lint": "eslint src tests --ext .ts",
+    "lint": "eslint src tests experiments --ext .ts",
     "lint:css": "stylelint \"src/**/*.css\"",
     "typecheck": "tsc --noEmit",
     "test": "jest",
@@ -52,6 +57,7 @@
     "ts-jest": "^29.1.2",
     "ts-loader": "^9.5.1",
     "ts-node": "^10.9.2",
+    "tsx": "^4.23.13",
     "typescript": "^5.3.3",
     "webpack": "^5.90.0",
     "webpack-cli": "^5.1.4"

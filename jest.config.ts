@@ -3,7 +3,7 @@ import type { Config } from 'jest';
 const config: Config = {
   preset: 'ts-jest',
   testEnvironment: 'jsdom',
-  roots: ['<rootDir>/src', '<rootDir>/tests'],
+  roots: ['<rootDir>/src', '<rootDir>/tests', '<rootDir>/experiments'],
   testMatch: ['**/*.test.ts'],
   // Playwright スモーク（tests/e2e/*.spec.ts）は jest と別実行する
   testPathIgnorePatterns: ['/node_modules/', '<rootDir>/tests/e2e/'],

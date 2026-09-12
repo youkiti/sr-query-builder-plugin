@@ -1,0 +1,62 @@
+{
+  "includedStudyCount": 18,
+  "includedPmidCount": 32,
+  "overlapPmids": [],
+  "sharedPmids": [
+    {
+      "pmid": "24963659",
+      "studies": [
+        "davis 2014a",
+        "davis 2014b"
+      ]
+    }
+  ],
+  "unmappedPmids": [],
+  "withoutPmid": [
+    "gifford 2003",
+    "savvides 2014",
+    "singh 2014"
+  ],
+  "publicationYears": {
+    "20429895": null,
+    "21992583": null,
+    "23775222": null,
+    "23884317": 2013,
+    "24611852": null,
+    "24935757": null,
+    "24937018": null,
+    "24957302": null,
+    "24963659": null,
+    "25019551": null,
+    "25156397": null,
+    "25879419": null,
+    "25884648": null,
+    "26029280": 2015,
+    "27213492": null,
+    "28191263": null,
+    "28650195": null,
+    "29025502": null,
+    "29235186": null,
+    "29678799": null,
+    "29917096": null,
+    "30295912": null,
+    "30340143": null,
+    "30590810": 2020,
+    "31993658": 2020,
+    "32005334": null,
+    "32222767": 2020,
+    "32955554": 2020,
+    "33069106": null,
+    "33198700": null,
+    "33343761": null,
+    "33433609": null
+  },
+  "exclusions": {
+    "withoutPmid": 3,
+    "unresolvedMapping": 0,
+    "outsideDate": null
+  },
+  "manual_review": false,
+  "reviewNote": "2026-09-12 commander 判定: Davis 2014a と Davis 2014b は別研究。2014a は N=196・対照 Wisconsin Tobacco Quit Line の電話カウンセリング・実施 2010-13、2014b は N=135・対照 American Lung Association Freedom From Smoking・実施 2011-12 で、標本も対照も異なる 2 本の RCT。共有 PMID 24963659 は Hair cortisol as a biomarker of stress in mindfulness training for smokers（J Altern Complement Med 2014）で、両試験にまたがる副次報告。したがって分割では同じ群に置き（共有報告のため）、採点では 2 研究として数える。",
+  "dateValidation": "pending"
+}
