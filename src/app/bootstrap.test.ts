@@ -8,6 +8,8 @@ import {
 import { createStore, INITIAL_STATE } from './store';
 import { SHEET_HEADERS } from '@/domain/sheetsSchema';
 import { sharedEutilsRateLimiters } from '@/lib/ncbi';
+import { PICKER_GRANT_MESSAGE } from '@/background/pickerGrant';
+import * as llmProviderService from './services/llmProviderService';
 
 function buildDocument(): Document {
   const doc = document.implementation.createHTMLDocument('test');
@@ -2163,6 +2165,125 @@ describe('startApp - wiring 層', () => {
     expect(expandRun?.error).toContain('API キー');
     expect(doc.querySelector('.expand__error')?.textContent).toContain('API キー');
     expect(doc.querySelector('.expand__candidate')).toBeNull();
+    // LlmApiKeyMissingError は HTTP 由来ではないので分類できない。一般論の再試行を勧めない。
+    expect(expandRun?.errorKind).toBe('other');
+    expect(doc.querySelector('.expand__error-panel')).toBeNull();
+  });
+
+  test('待機していない間の AI 状態通知は store の購読者へ通知しない', async () => {
+    const doc = buildDocument();
+    const { runtime } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+    });
+    const handle = startApp(doc, {
+      getHash: () => '#/expand', onHashChange: () => () => undefined, setHash: jest.fn(), runtime,
+    });
+    await flush();
+    handle.store.setState((s) => ({ ...s, currentFormulaVersionId: 'v-1', currentFormulaMarkdown: '#1 asthma[tiab]' }));
+    const listener = jest.fn();
+    const unsubscribe = handle.store.subscribe(listener);
+    const factory = jest.spyOn(llmProviderService, 'buildLlmProviderFactory').mockImplementation(async (deps) => {
+      listener.mockClear();
+      const before = handle.store.getState();
+      deps.onRequestState?.('idle');
+      deps.onRequestState?.('failure');
+      expect(handle.store.getState()).toBe(before);
+      expect(listener).not.toHaveBeenCalled();
+      deps.onRequestState?.('retry');
+      expect(listener).toHaveBeenCalledTimes(1);
+      deps.onRequestState?.('idle');
+      expect(listener).toHaveBeenCalledTimes(2);
+      deps.onRequestState?.('idle');
+      expect(listener).toHaveBeenCalledTimes(2);
+      throw new Error('通信前にテストを終了');
+    });
+    try {
+      doc.querySelector<HTMLButtonElement>('.expand__actions button')!.click();
+      await flush();
+      expect(factory).toHaveBeenCalledTimes(1);
+      expect(handle.store.getState().expandRun?.error).toBe('通信前にテストを終了');
+    } finally {
+      factory.mockRestore();
+      unsubscribe();
+    }
+  });
+
+  test('SeedPapers が 403 なら許可エラーとして分類し、共有設定を新しいタブで開く導線を出す', async () => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+      'apiKeys.gemini': 'KEY',
+    });
+    fetchMock.mockImplementation(async (url: string) => {
+      const u = typeof url === 'string' ? url : String(url);
+      if (u.includes('/values/SeedPapers')) {
+        return {
+          ok: false,
+          status: 403,
+          json: async () => ({}),
+          text: async () => JSON.stringify({ error: { message: 'The caller does not have permission' } }),
+        } as Response;
+      }
+      return jsonResponse({});
+    });
+    const createTab = jest.spyOn(chrome.tabs, 'create').mockImplementation(() => undefined);
+    const originalSendMessage = Object.getOwnPropertyDescriptor(chrome.runtime, 'sendMessage');
+    const sendMessage = jest.fn().mockResolvedValue(undefined);
+    Object.defineProperty(chrome.runtime, 'sendMessage', { configurable: true, value: sendMessage });
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const handle = startApp(doc, {
+        getHash: () => '#/expand',
+        onHashChange: jest.fn().mockReturnValue(() => undefined),
+        setHash: jest.fn(),
+        runtime,
+      });
+      await flush();
+      handle.store.setState((s) => ({
+        ...s,
+        // Protocol タブを読みに行かせず、SeedPapers の 403 を最初の失敗にする
+        protocolDraft: {
+          frameworkType: 'pico', researchQuestion: 'RQ', inclusionCriteria: '', exclusionCriteria: '',
+          studyDesign: 'RCT', sourceType: 'manual', sourceFilename: null, rawTextRef: null,
+          rawTextPreview: 'p', rawTextInline: '本文',
+        },
+        currentFormulaVersionId: 'v-1',
+        currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 asthma[tiab]\n```\n',
+      }));
+      doc.querySelector<HTMLButtonElement>('.expand__actions button')!.click();
+      for (let i = 0; i < 10; i += 1) {
+        await flush();
+      }
+      expect(handle.store.getState().expandRun?.errorKind).toBe('permission');
+      const panel = doc.querySelector('.expand__error-panel--permission')!;
+      expect(panel).not.toBeNull();
+      panel.querySelector<HTMLButtonElement>('.expand__error-action--open')!.click();
+      await flush();
+      expect(createTab).toHaveBeenCalledWith({
+        url: 'https://docs.google.com/spreadsheets/d/SHEET-1/edit?authuser=me%40x',
+      });
+      panel.querySelector<HTMLButtonElement>('.expand__error-action--grant')!.click();
+      await flush();
+      expect(sendMessage).toHaveBeenCalledWith({
+        type: PICKER_GRANT_MESSAGE, spreadsheetId: 'SHEET-1', openAppOnSuccess: false,
+      });
+      expect(panel.querySelector('.expand__error-grant-status')?.textContent).toBe(
+        '許可に失敗しました: 許可フローを開始できませんでした。'
+      );
+      jest.mocked(runtime.profile.getProfileUserInfo).mockRejectedValueOnce(new Error('取得失敗'));
+      panel.querySelector<HTMLButtonElement>('.expand__error-action--open')!.click();
+      await flush();
+      expect(createTab).toHaveBeenLastCalledWith({ url: 'https://docs.google.com/spreadsheets/d/SHEET-1/edit' });
+      createTab.mockImplementationOnce(() => Promise.reject(new Error('タブ作成失敗')));
+      panel.querySelector<HTMLButtonElement>('.expand__error-action--open')!.click();
+      await flush();
+      expect(warn).toHaveBeenCalledWith('[sr-query-builder] スプレッドシートのタブを開けませんでした');
+    } finally {
+      if (originalSendMessage) Object.defineProperty(chrome.runtime, 'sendMessage', originalSendMessage);
+      else Reflect.deleteProperty(chrome.runtime, 'sendMessage');
+      warn.mockRestore();
+      createTab.mockRestore();
+    }
   });
 
   test.each(['1234', undefined, '', 'abc', '0', '-5', '1.5', '1e999'])('生成して検証する経路で設定欄 %s の目安がプロンプトに届く', async (rawMaxHits) => {

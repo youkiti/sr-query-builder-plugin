@@ -13,6 +13,17 @@ export interface CreatedSpreadsheet {
 }
 
 /**
+ * スプレッドシートを Google の画面で開く URL。
+ *
+ * authuser にメールアドレスを渡すと、そのアカウントで開く。
+ * この指定は利用者のブラウザでの挙動に依存するため、実機確認が必要。
+ */
+export function buildSpreadsheetUrl(spreadsheetId: string, authuser?: string | null): string {
+  const query = authuser ? `?authuser=${encodeURIComponent(authuser)}` : '';
+  return `https://docs.google.com/spreadsheets/d/${encodeURIComponent(spreadsheetId)}/edit${query}`;
+}
+
+/**
  * タイトルと初期タブ名を指定してスプレッドシートを新規作成する。
  * 指定されたタブ名と同じ順序で sheet が作られる（既定の `Sheet1` は含めない）。
  */

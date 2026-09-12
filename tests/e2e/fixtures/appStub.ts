@@ -4,7 +4,7 @@
  * `chromeStub.ts`（popup 用）に加えて、以下を提供する:
  * - `window.__E2E_PRELOADED_STATE__` による app store の初期 state 投入（方式 X）
  * - `chrome.storage.local.currentProject` のシード（hydrateCurrentProject との整合）
- * - `chrome.runtime.sendMessage` の no-op スタブ
+ * - `chrome.runtime.sendMessage` の応答を差し替えられるスタブ
  * - NCBI / Google Sheets / Google Drive への fetch 経路を `page.route()` でモック
  *
  * docs/ui-deep-test-plan.md §1.1 方式 X / §A-2 に対応。
@@ -108,6 +108,8 @@ export async function injectAppStub(page: Page, scenario: AppScenario = {}): Pro
 
       type MessageRecord = { message: unknown; timestamp: number };
       const sentMessages: MessageRecord[] = [];
+      // 許可エラーの復帰導線（issue #109）が新しいタブを開いたことを spec から読めるようにする。
+      const createdTabs: { url?: string }[] = [];
 
       const chromeStub = {
         runtime: {
@@ -116,15 +118,20 @@ export async function injectAppStub(page: Page, scenario: AppScenario = {}): Pro
           openOptionsPage: () => undefined,
           sendMessage: (msg: unknown, cb?: (resp: unknown) => void) => {
             sentMessages.push({ message: msg, timestamp: Date.now() });
-            if (typeof cb === 'function') cb(undefined);
-            return Promise.resolve(undefined);
+            const response = (window as unknown as { __appStubSendMessageResponse?: unknown })
+              .__appStubSendMessageResponse;
+            if (typeof cb === 'function') cb(response);
+            return Promise.resolve(response);
           },
           get lastError() {
             return lastErrorRef.value;
           },
         },
         tabs: {
-          create: (_opts: { url?: string }) => undefined,
+          create: (opts: { url?: string }) => {
+            createdTabs.push(opts);
+            return undefined;
+          },
         },
         identity: {
           getAuthToken: (
@@ -168,6 +175,7 @@ export async function injectAppStub(page: Page, scenario: AppScenario = {}): Pro
       (window as unknown as { __appStubData: Record<string, unknown> }).__appStubData = data;
       (window as unknown as { __appStubMessages: MessageRecord[] }).__appStubMessages =
         sentMessages;
+      (window as unknown as { __appStubTabs: { url?: string }[] }).__appStubTabs = createdTabs;
     },
     {
       authed,

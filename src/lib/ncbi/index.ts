@@ -7,6 +7,8 @@ export {
   sharedEutilsRateLimiters,
   NCBI_RATE_LIMIT_WITHOUT_API_KEY,
   NCBI_RATE_LIMIT_WITH_API_KEY,
+  EUTILS_DEFAULT_MAX_RETRIES,
+  resolveRateLimiter,
   type EfetchArticle,
   type MeshHeadingDetail,
   type MeshQualifierDetail,

@@ -15,12 +15,24 @@
 
 import { buildPickerUrl, parsePickerRedirect } from '@/lib/google/pickerUrl';
 
-/** popup → background のメッセージ種別 */
+/** popup / app → background のメッセージ種別 */
 export const PICKER_GRANT_MESSAGE = 'sr-query-builder/picker-grant';
 
 export interface PickerGrantRequest {
   type: typeof PICKER_GRANT_MESSAGE;
   spreadsheetId: string;
+  openAppOnSuccess?: boolean;
+}
+
+export function isPickerGrantRequest(message: unknown): message is PickerGrantRequest {
+  if (typeof message !== 'object' || message === null) return false;
+  const candidate = message as { type?: unknown; spreadsheetId?: unknown; openAppOnSuccess?: unknown };
+  return (
+    candidate.type === PICKER_GRANT_MESSAGE &&
+    typeof candidate.spreadsheetId === 'string' &&
+    candidate.spreadsheetId.length > 0 &&
+    (!('openAppOnSuccess' in candidate) || typeof candidate.openAppOnSuccess === 'boolean')
+  );
 }
 
 export type PickerGrantResult =

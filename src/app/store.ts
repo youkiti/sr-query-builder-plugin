@@ -16,6 +16,7 @@ import type {
   InsideStrategy,
 } from './services/expandService';
 import type { BlockImprovementResult } from './services/editService';
+import type { ApiErrorKind } from '@/lib/api-error';
 import { DEFAULT_ROUTE, type RouteName } from './router';
 
 /**
@@ -203,8 +204,34 @@ export interface ExpandRunState {
   startedAtMs: number;
   /** status='error' のときのメッセージ。それ以外は null */
   error: string | null;
+  /** status='error' のときの分類（issue #109）。案内の出し分けに使う。それ以外は null */
+  errorKind: ApiErrorKind | null;
+  /**
+   * running 中に自動リトライ・レート制御で待っているときの内訳（issue #109）。
+   * 待っていない間は null。NCBI 429 は既定で最大 31 秒待つので、
+   * これが無いと画面は「取得中…」のまま固まったのか待っているのか区別できない。
+   */
+  apiWait: ExpandApiWait | null;
   /** status='ready' のときの取得結果（候補・ヒット数）。それ以外は null */
   result: BoundaryCasesResult | null;
+}
+
+/**
+ * 取得中の通信待ちの内訳（issue #109）。
+ *
+ * `kind='rate_limit'` は自分側のレート制御（NCBI の 3 / 10 req/s 枠）で発行を待っている状態で、
+ * 相手が 429 を返したわけではない。`kind='retry'` が相手の失敗を受けたバックオフ待ちで、
+ * こちらだけ試行回数と待ち時間を持つ。
+ */
+export interface ExpandApiWait {
+  source: 'PubMed' | 'AI';
+  kind: 'rate_limit' | 'retry';
+  /** retry のとき、これから行う試行が何回目か（初回を 1 とする）。rate_limit では null */
+  attempt: number | null;
+  /** 初回を含む総試行回数。rate_limit では null */
+  maxAttempts: number | null;
+  /** バックオフの待機ミリ秒。rate_limit と、待ち時間が分からない経路では null */
+  waitMs: number | null;
 }
 
 /**

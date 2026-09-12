@@ -1,15 +1,14 @@
 /**
- * MV3 Service Worker（起動フックと、popup から依頼される Picker 許可フロー）。
+ * MV3 Service Worker（起動フックと、popup / app から依頼される Picker 許可フロー）。
  * 実処理は別モジュールで実装し、ここは配線に徹する。
  */
 
 import { createChromeRuntimeDeps, loadExistingProject } from '@/app/services';
 import { getCurrentUserEmail } from '@/lib/google';
 import {
-  PICKER_GRANT_MESSAGE,
+  isPickerGrantRequest,
   requestSpreadsheetAccess,
   type PickerGrantDeps,
-  type PickerGrantRequest,
 } from './pickerGrant';
 
 chrome.runtime.onInstalled.addListener((details) => {
@@ -20,7 +19,7 @@ chrome.action.onClicked.addListener(() => {
   void chrome.tabs.create({ url: chrome.runtime.getURL('popup/popup.html') });
 });
 
-function createChromePickerGrantDeps(): PickerGrantDeps {
+function createChromePickerGrantDeps(openAppOnSuccess = true): PickerGrantDeps {
   const runtime = createChromeRuntimeDeps();
   return {
     getRedirectUri: () => chrome.identity.getRedirectURL('picker'),
@@ -29,24 +28,14 @@ function createChromePickerGrantDeps(): PickerGrantDeps {
     openProject: async (spreadsheetId) => {
       await loadExistingProject(spreadsheetId, runtime);
     },
-    onOpened: () => {
+    onOpened: openAppOnSuccess === false ? () => undefined : () => {
       void chrome.tabs.create({ url: chrome.runtime.getURL('app/app.html') });
     },
   };
 }
 
-function isPickerGrantRequest(message: unknown): message is PickerGrantRequest {
-  if (typeof message !== 'object' || message === null) return false;
-  const candidate = message as { type?: unknown; spreadsheetId?: unknown };
-  return (
-    candidate.type === PICKER_GRANT_MESSAGE &&
-    typeof candidate.spreadsheetId === 'string' &&
-    candidate.spreadsheetId.length > 0
-  );
-}
-
 /**
- * popup からの Picker 許可依頼を受ける。
+ * popup / app からの Picker 許可依頼を受ける。
  *
  * popup.html は通常タブとして開かれるため（`action.default_popup` 無し）フォーカスを失っても
  * 閉じないが、それでもユーザーが手動でタブを閉じる／別タブに切り替えて放置する可能性はある。
@@ -57,7 +46,7 @@ function isPickerGrantRequest(message: unknown): message is PickerGrantRequest {
  */
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!isPickerGrantRequest(message)) return false;
-  void requestSpreadsheetAccess(message.spreadsheetId, createChromePickerGrantDeps()).then(
+  void requestSpreadsheetAccess(message.spreadsheetId, createChromePickerGrantDeps(message.openAppOnSuccess)).then(
     (result) => {
       // popup が既に閉じていると sendResponse は receiving end 不在で失敗するが、
       // 背景側の処理は完了しているので握りつぶしてよい

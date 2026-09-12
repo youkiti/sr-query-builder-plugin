@@ -8,7 +8,7 @@
   - Phase B: `app-{home,protocol,blocks,seeds,draft,validate,expand,edit,export,done,history}.spec.ts` 計 37 ケース（含む a11y 11）
   - Phase C: [app-guards.spec.ts](../tests/e2e/app-guards.spec.ts) 6 ケース、[app-sidebar-visual.spec.ts](../tests/e2e/app-sidebar-visual.spec.ts) 4 ケース
   - Phase D: `journey-docx-upload.spec.ts` (J3 UI-only) + `journey-history-switch.spec.ts` (J2) に加え、`journey-draft-generate.spec.ts` / `journey-expand-boundary.spec.ts` を追加。J1 相当（draft 生成〜検証の実操作貫通）と J4 の margin 探索（境界事例取得ボタン起点部分）が実装済みになった。`journey-expand-keyboard.spec.ts` で J4 の候補 5 件への i/i/i/e/m 連続判定（各保存完了を待機）・n/p 移動・Sheets append 録音も実装済み
-  - Phase E: `journey-errors.spec.ts` — OAuth レイヤに加え、expand 取得時の Sheets 403 / NCBI 429 / LLM 500 の利用者向けエラー表示と再取得による復帰を実装済み。target UI との差分は Phase E の ⚠️ drift 注記を参照
+  - Phase E: `journey-errors.spec.ts` — OAuth レイヤに加え、expand 取得時の Sheets 403 / NCBI 429 / LLM 500 の分類つき案内（共有設定の導線 / 待機中の残り回数 / 再試行）と復帰を実装済み（issue #109）。残る差分は Phase E の注記を参照
   - Phase F: `app-regression.spec.ts` で 11 ルート × `#app-content` 非空 + 3 status 非空 + long-title bounding box
   - Phase G: `options.spec.ts` 5 ケース（MVP 現実装向け）
   - **副作用**: axe が実バグを検出したため以下を修正: `blocksView.ts` / `editView.ts` / `seedsView.ts` に `aria-label`、`bootstrap.ts` のサイドバーに `aria-current="page"`、`options.css` に `.options__muted a { text-decoration: underline }`。
@@ -128,7 +128,7 @@ CLAUDE.md §目的 と [ui-flow.md §2](ui-flow.md) から逆算した 6 本。
 
 ### Phase E: エラー復帰の網（0.5 日）
 
-**`journey-errors.spec.ts`** (J5・実装済み): 既存の OAuth（popup）2 ケースに加え、`#/expand` の候補取得で Sheets の SeedPapers 読取を 403、NCBI の esearch を 429、Gemini の候補選定を 500 に差し替える 3 ケースを追加。共通スタブを後から登録した `page.route()` で上書きし、自動リトライを含めて失敗させる。利用者に見えるエラー・取得ボタンの再活性を確認後、`route.fallback()` で成功スタブに戻し、再取得で候補 5 件が並びエラーが消えることを検証する。以下の表は **target spec** であり、現実装との差分は直後の注記を参照。
+**`journey-errors.spec.ts`** (J5・実装済み): 既存の OAuth（popup）2 ケースに加え、`#/expand` の候補取得で Sheets の SeedPapers 読取を 403、NCBI の esearch を 429、Gemini の候補選定を 500 に差し替える 3 ケースを追加。共通スタブを後から登録した `page.route()` で上書きし、自動リトライを含めて失敗させる。分類ごとの案内パネル（`role="alert"`）と axe、429 の待機表示、許可エラーで開くタブの URL を確認後、`route.fallback()` で成功スタブに戻し、再取得で候補 5 件が並びエラーと案内が消えることを検証する。以下の表は当初の **target spec**。実装との差分は直後の注記を参照。
 
 | 発生源 | 期待挙動 |
 |---|---|
@@ -137,11 +137,22 @@ CLAUDE.md §目的 と [ui-flow.md §2](ui-flow.md) から逆算した 6 本。
 | NCBI 429 | バナー「レート制限中…」が表示、再試行で再発火 |
 | LLM 500 | 該当 skill カードに赤バッジ + 再試行ボタン活性 |
 
-> ⚠️ **drift（実装との乖離）**: 表の API エラー 3 行は **target spec**。今回テストする `#/expand` の候補取得では、現実装（[bootstrap.ts](../src/app/bootstrap.ts) の `runFetchBoundary` / [expandView.ts](../src/app/views/expandView.ts)）を正として固定する：
-> - Sheets 403: 共有設定モーダル・外部リンクではなく、`.expand__error` に `Google API failed: HTTP 403` とレスポンスの詳細を表示する。
-> - NCBI 429: 専用の「レート制限中…」バナーではなく、既定の最大 6 回の試行（初回 + 5 回の自動リトライ）後に `.expand__error` へ `esearch failed: HTTP 429` を表示する（[eutils.ts](../src/lib/ncbi/eutils.ts)）。
-> - LLM 500: skill カードの赤バッジ・専用再試行ボタンではなく、既定の最大 3 回の試行後に `.expand__error` へ `Gemini API failed: HTTP 500` を表示する（[retry.ts](../src/lib/llm/retry.ts) / [GeminiProvider.ts](../src/lib/llm/GeminiProvider.ts)）。
-> - 3 系統ともエラー領域は `aria-live="polite"`。「境界事例を取得」が再び有効になり、同じボタンで取得をやり直せる。上記 target UI の追加、および他ビュー固有のエラー復帰はこのテストの対象外。
+> **実装済み（issue #109）**: 表の API エラー 3 行は `#/expand` の候補取得について実装した。失敗は
+> [`classifyApiError`](../src/lib/api-error/apiErrorKind.ts) が `permission` / `rate_limit` / `temporary` / `other` に
+> 分類し、`store.expandRun.errorKind` を通じて [expandView.ts](../src/app/views/expandView.ts) が案内を出し分ける：
+> - Sheets 403（および `drive.file` で同じ意味になる 404）: `.expand__error-panel--permission` に
+>   「Google で許可する（Picker 許可。成功で自動再取得）」＋「スプレッドシートを開く」のボタンを出す。
+>   **モーダルではなく画面内のパネル**にした（フォーカストラップを新設せずに済み、`role="alert"` で読み上げられる）。
+> - NCBI 429: 自動リトライ中は `.expand__api-wait`（`role="status"`）に「約 N 秒待ってから自動で再試行します（M / 6 回目）」を出す
+>   （[expandApiWait.ts](../src/app/services/expandApiWait.ts) が `EutilsDeps` の `rateLimiter` / `sleep` を包む。リトライ回数は変えていない）。
+>   使い切った後は `.expand__error-panel--rate_limit` に「もう一度取得する」を出す。**「バナー」ではなく待機表示＋失敗後パネルの 2 段**。
+> - LLM 500: `.expand__error-panel--temporary` に「もう一度取得する」を出す。expand の取得は単発で skill カードが無いため、
+>   **「skill カードに赤バッジ」は採らず**、取得ボタン近傍のパネルにした。
+>
+> 生のメッセージ（`Google API failed: HTTP 403` 等）は診断用に `.expand__error`（`aria-live="polite"`）へ残す。
+> `other` に分類された失敗には案内を出さない（直らない操作の再試行を勧めないため）。
+> **他ビュー（`#/draft` / `#/edit` / `#/export`）への展開はまだ**で、分類器だけが共通化されている。
+> OAuth 失効（表の 1 行目）のモーダルも未実装のまま（popup 側の案内に留まる）。
 
 ### Phase F: 回帰ネット（継続拡張, コスト随時）
 

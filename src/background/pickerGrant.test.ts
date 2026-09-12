@@ -1,5 +1,7 @@
 import {
   isUserCancelledAuthError,
+  isPickerGrantRequest,
+  PICKER_GRANT_MESSAGE,
   requestSpreadsheetAccess,
   type PickerGrantDeps,
 } from './pickerGrant';
@@ -152,5 +154,22 @@ describe('requestSpreadsheetAccess', () => {
 
     // ガードが解除され、次の要求は通る
     await expect(requestSpreadsheetAccess('sheet-1', deps)).resolves.toEqual({ status: 'granted' });
+  });
+});
+
+
+describe('isPickerGrantRequest', () => {
+  test.each([
+    [{ type: PICKER_GRANT_MESSAGE, spreadsheetId: 'sid' }, true],
+    [{ type: PICKER_GRANT_MESSAGE, spreadsheetId: 'sid', openAppOnSuccess: false }, true],
+    [{ type: PICKER_GRANT_MESSAGE, spreadsheetId: 'sid', openAppOnSuccess: true }, true],
+    [{ type: PICKER_GRANT_MESSAGE, spreadsheetId: 'sid', openAppOnSuccess: 'false' }, false],
+    [{ type: PICKER_GRANT_MESSAGE, spreadsheetId: 'sid', openAppOnSuccess: undefined }, false],
+    [{ type: 'other', spreadsheetId: 'sid' }, false],
+    [{ type: PICKER_GRANT_MESSAGE, spreadsheetId: '' }, false],
+    [null, false],
+    ['message', false],
+  ])('メッセージ %j の妥当性は %s', (message, expected) => {
+    expect(isPickerGrantRequest(message)).toBe(expected);
   });
 });

@@ -10,13 +10,15 @@ import type {
   ValidationSummary,
 } from '@/app/services';
 import type { SeedUserDecision } from '@/domain/seedPaper';
+import type { PickerGrantResult } from '@/background/pickerGrant';
 import {
   buildUpdateProposals,
   type IncludedPaper,
   type UpdateProposal,
 } from '@/features/formula';
 import { ROUTE_LABELS } from '../router';
-import type { ExpandRunState } from '../store';
+import type { ApiErrorKind } from '@/lib/api-error';
+import type { ExpandApiWait, ExpandRunState } from '../store';
 import type { RenderView } from './types';
 
 /**
@@ -81,6 +83,9 @@ export interface ExpandViewCallbacks {
   onDecide?: (input: RecordDecisionInput) => Promise<RecordDecisionResult>;
   /** ラウンド完了時の再検証コールバック。check_final_query 相当を期待 */
   onRoundComplete?: () => Promise<ValidationSummary>;
+  /** 許可エラーのとき、対象スプレッドシートを新しいタブで開く。 */
+  onOpenSpreadsheet?: (spreadsheetId: string) => void;
+  onRequestSpreadsheetAccess?: (spreadsheetId: string) => Promise<PickerGrantResult>;
 }
 
 interface CandidateItemHandle {
@@ -175,6 +180,11 @@ export function createExpandView(callbacks: ExpandViewCallbacks = {}): RenderVie
     status.setAttribute('aria-live', 'polite');
     container.appendChild(status);
 
+    // 分類つきの案内（issue #109）。生のメッセージより先に「次に何をすればよいか」を置く。
+    const guidance = doc.createElement('div');
+    guidance.className = 'expand__guidance';
+    container.appendChild(guidance);
+
     const errorBox = doc.createElement('p');
     errorBox.className = 'expand__error';
     errorBox.setAttribute('aria-live', 'polite');
@@ -190,7 +200,7 @@ export function createExpandView(callbacks: ExpandViewCallbacks = {}): RenderVie
     round.setAttribute('aria-live', 'polite');
     container.appendChild(round);
 
-    fetchBtn.addEventListener('click', () => {
+    const startFetch = (): void => {
       if (!callbacks.onFetch || fetchBtn.disabled) {
         return;
       }
@@ -202,15 +212,26 @@ export function createExpandView(callbacks: ExpandViewCallbacks = {}): RenderVie
       void callbacks.onFetch({
         insideStrategy: specificToggle.checked ? 'specific' : 'current',
       });
-    });
+    };
+    fetchBtn.addEventListener('click', startFetch);
 
     if (running && run) {
       status.textContent = runningStatusText(run.step, run.startedAtMs);
       startElapsedTicker(status, run.step, run.startedAtMs);
+      if (run.apiWait) {
+        guidance.appendChild(renderApiWait(doc, run.apiWait));
+      }
       return;
     }
     if (run?.status === 'error') {
       errorBox.textContent = run.error ?? '不明なエラー';
+      const panel = renderErrorGuidance(doc, run.errorKind, {
+        spreadsheetId: ctx.state.project.spreadsheetId,
+        onOpenSpreadsheet: callbacks.onOpenSpreadsheet,
+        onRequestSpreadsheetAccess: callbacks.onRequestSpreadsheetAccess,
+        onRetry: startFetch,
+      });
+      if (panel) guidance.appendChild(panel);
       return;
     }
     if (run?.status === 'ready' && run.result) {
@@ -542,6 +563,150 @@ function startElapsedTicker(
 
 function runningStatusText(step: ExpandFetchStep | 'done', startedAtMs: number): string {
   return `[取得] ${FETCH_STEP_ACTIVE_LABELS[step]}（経過 ${formatElapsed(Date.now() - startedAtMs)}）`;
+}
+
+/**
+ * 通信待ちの表示（issue #109）。
+ *
+ * NCBI の 429 は既定で最大 5 回・合計 31 秒待つ。これを出さないと画面は「取得中…」の
+ * ままで、待っているのか固まったのかが利用者から区別できない。`role="status"` にして
+ * 進捗トラッカーとは別の粒度で読み上げる（試行が進むたびに全体を読み直させない）。
+ */
+function renderApiWait(doc: Document, wait: ExpandApiWait): HTMLElement {
+  const box = doc.createElement('p');
+  box.className = 'expand__api-wait';
+  box.setAttribute('role', 'status');
+  box.textContent = apiWaitText(wait);
+  return box;
+}
+
+function apiWaitText(wait: ExpandApiWait): string {
+  if (wait.kind === 'rate_limit') {
+    // 相手が 429 を返したわけではなく、こちらが枠（3 / 10 req/s）を守って待っている状態。
+    return `⏳ ${wait.source} の呼び出し間隔を調整しています。順番が来るまで待っています。`;
+  }
+  const after =
+    wait.waitMs === null ? '待ってから' : `約 ${Math.max(1, Math.round(wait.waitMs / 1000))} 秒待ってから`;
+  const count =
+    wait.attempt === null || wait.maxAttempts === null
+      ? ''
+      : `（${wait.attempt} / ${wait.maxAttempts} 回目）`;
+  return `⏳ ${wait.source} が応答しませんでした。${after}自動で再試行します${count}。`;
+}
+
+interface ErrorGuidanceOptions {
+  spreadsheetId: string;
+  onOpenSpreadsheet?: (spreadsheetId: string) => void;
+  onRequestSpreadsheetAccess?: (spreadsheetId: string) => Promise<PickerGrantResult>;
+  onRetry: () => void;
+}
+
+/**
+ * 失敗の分類ごとに「次に何をすればよいか」を出す（issue #109）。
+ *
+ * `other` は案内を出さない。分類できない失敗に一般論の再試行を勧めると、直らない操作を
+ * 繰り返させることになるため、生のメッセージ（`.expand__error`）だけを残す。
+ *
+ * 配色は使わず、左ボーダーと文頭の記号で種類を示す。この淡い背景に `--color-warning` を
+ * 文字色として載せると 3.02:1 で AA を割る実測が CLAUDE.md にあるため、文字色は既定の
+ * `--color-text` に委ねている。
+ */
+function renderErrorGuidance(
+  doc: Document,
+  kind: ApiErrorKind | null,
+  options: ErrorGuidanceOptions
+): HTMLElement | null {
+  if (kind === null || kind === 'other') return null;
+  const panel = doc.createElement('section');
+  panel.className = `expand__error-panel expand__error-panel--${kind}`;
+  panel.setAttribute('role', 'alert');
+
+  const title = doc.createElement('h3');
+  title.className = 'expand__error-title';
+  const body = doc.createElement('p');
+  body.className = 'expand__error-body';
+  panel.appendChild(title);
+  panel.appendChild(body);
+
+  if (kind === 'permission') {
+    title.textContent = '⛔ このスプレッドシートを読めませんでした';
+    // 403 / 404 は「Picker 未選択」「共有されていない」「削除済み」「ID 誤り」のいずれでも
+    // 返るため断定しない（popup の許可導線と同じ作法）。
+    body.textContent =
+      'いまログインしているアカウントで、このスプレッドシートを読めませんでした。拡張機能にまだ許可していない場合は「Google で許可する」から対象のシートを選んでください（初回のみ）。許可しても読めない場合は、共有設定で自分に権限が付いているかを確認してください（シートが削除されている / ID が違う場合も同じ応答になります）。権限が直るまでは、同じ操作を繰り返しても結果は変わりません。';
+    const status = doc.createElement('p');
+    status.className = 'expand__error-grant-status';
+    status.setAttribute('role', 'status');
+    const grant = doc.createElement('button');
+    grant.type = 'button';
+    grant.className = 'expand__error-action expand__error-action--grant';
+    grant.textContent = 'Google で許可する';
+    const writeOutcome = (message: string, retry: boolean): void => {
+      // 許可待ちの間に再描画された場合は、現在のパネルへ結果を書く。
+      const currentStatus = status.isConnected
+        ? status
+        : doc.querySelector('.expand__error-grant-status');
+      if (currentStatus) currentStatus.textContent = message;
+      if (retry) {
+        // 許可待ちの間に許可エラー以外の画面（取得済みの候補一覧など）へ変わっていたら、
+        // 自動の再取得でその画面を上書きしない。
+        if (currentStatus) options.onRetry();
+      } else {
+        grant.disabled = false;
+        const currentGrant = doc.querySelector<HTMLButtonElement>('.expand__error-action--grant');
+        if (currentGrant) currentGrant.disabled = false;
+      }
+    };
+    grant.addEventListener('click', async () => {
+      if (!options.onRequestSpreadsheetAccess) return;
+      grant.disabled = true;
+      status.textContent = '許可画面を開いています…';
+      try {
+        const result = await options.onRequestSpreadsheetAccess(options.spreadsheetId);
+        switch (result.status) {
+          case 'granted':
+            writeOutcome('許可しました。もう一度取得しています…', true);
+            break;
+          case 'cancelled':
+            writeOutcome('許可がキャンセルされました。', false);
+            break;
+          case 'busy':
+            writeOutcome('許可画面を開いています。表示された画面で操作してください。', false);
+            break;
+          case 'failed':
+            writeOutcome(`許可に失敗しました: ${result.message}`, false);
+        }
+      } catch (err) {
+        writeOutcome(`許可に失敗しました: ${err instanceof Error ? err.message : String(err)}`, false);
+      }
+    });
+    panel.appendChild(grant);
+    const open = doc.createElement('button');
+    open.type = 'button';
+    open.className = 'expand__error-action expand__error-action--open';
+    open.textContent = 'スプレッドシートを開く';
+    open.addEventListener('click', () => options.onOpenSpreadsheet?.(options.spreadsheetId));
+    panel.appendChild(open);
+    panel.appendChild(status);
+    return panel;
+  }
+
+  if (kind === 'rate_limit') {
+    title.textContent = '⏱ 呼び出しが集中しています';
+    body.textContent =
+      '自動の再試行を使い切っても復帰しませんでした。少し時間を置いてからもう一度お試しください。NCBI の API キーを設定画面で登録すると、1 秒あたりの呼び出し枠が 3 回から 10 回に広がります。';
+  } else {
+    title.textContent = '↻ 一時的な障害の可能性があります';
+    body.textContent =
+      '相手のサービスが一時的に応答できない状態でした。自動で再試行しても復帰しなかっただけで、入力や設定が誤っているとは限りません。もう一度お試しください。';
+  }
+  const retry = doc.createElement('button');
+  retry.type = 'button';
+  retry.className = 'expand__error-action';
+  retry.textContent = 'もう一度取得する';
+  retry.addEventListener('click', options.onRetry);
+  panel.appendChild(retry);
+  return panel;
 }
 
 function formatElapsed(ms: number): string {
