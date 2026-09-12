@@ -3,6 +3,9 @@ import {
   type ApprovedOptimizationBlock,
   type OptimizationCriteria,
   type OptimizationMeasurement,
+  type OptimizationSeedCapture,
+  type OptimizationMissedSeed,
+  type OptimizationSeedDiagnosis,
   type OptimizationMeshNode,
   type OptimizationMeshRequest,
   type OptimizationMeshRequestResult,
@@ -134,6 +137,8 @@ export class QueryOptimizationStopError extends Error {
 }
 
 export interface QueryOptimizationResult {
+  /** 旧形式の結果との互換性のため省略可。新しい run は必ず配列を返す。 */
+  seedDiagnoses?: OptimizationSeedDiagnosis[];
   status: 'achieved' | 'needs_review' | 'stopped' | 'error';
   stopReason: OptimizationStopReason;
   best: VerifiedOptimizationCandidate | null;
@@ -217,6 +222,7 @@ export async function runQueryOptimization(
   let apiEvents: OptimizationApiEvent[] = [];
   let apiSource: OptimizationApiEvent['source'] = 'PubMed';
   let best: VerifiedOptimizationCandidate | null = null;
+  let missedSeeds: OptimizationMissedSeed[] = [];
   let checkpointWritten = false;
   const trials: OptimizationTrial[] = [];
   let step: QueryOptimizationStep = 'measuring';
@@ -425,6 +431,52 @@ export async function runQueryOptimization(
     };
     return { formula, evaluation, measurement };
   };
+  async function measureSeedCapture(formula: PubmedFormula, seedPmids: string[]): Promise<OptimizationSeedCapture> {
+    task = null;
+    step = 'measuring';
+    notify();
+    const rows: OptimizationSeedCapture['rows'] = [];
+    for (const block of formula.blocks) {
+      try {
+        const expression = expandFormula(formula, block.id);
+        const result = await esearch(`(${expression}) AND (${seedPmids.map((pmid) => `${pmid}[uid]`).join(' OR ')})`,
+          eutils, { retmax: seedPmids.length });
+        boundary();
+        rows.push({ blockId: block.id, capturedPmids: seedPmids.filter((pmid) => result.pmids.includes(pmid)), error: null });
+      } catch (err) {
+        if (err instanceof QueryOptimizationStopError) throw err;
+        boundary();
+        apiEvent('failure');
+        rows.push({ blockId: block.id, capturedPmids: null, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    return { seedPmids: [...seedPmids], rows };
+  }
+  async function addSeedCapture(candidate: VerifiedOptimizationCandidate): Promise<VerifiedOptimizationCandidate> {
+    if (!candidate.measurement.missedPmids?.length || candidate.measurement.seedCapture) return candidate;
+    const seedCapture = await measureSeedCapture(candidate.formula, fixed.seedPmids);
+    return { ...candidate, measurement: { ...candidate.measurement, seedCapture } };
+  }
+  async function fetchMissedSeeds(pmids: string[]): Promise<OptimizationMissedSeed[]> {
+    try {
+      const articles = await efetchArticles(pmids, eutils);
+      boundary();
+      return pmids.map((pmid) => {
+        const article = articles.find((item) => item.pmid === pmid);
+        return { pmid, title: article?.title ?? null, year: article?.year ?? null,
+          hasAbstract: article?.abstract != null && article.abstract.trim() !== '',
+          abstract: article?.abstract?.slice(0, 1500) ?? null, meshHeadings: article?.meshHeadings ?? [],
+          note: !article ? '書誌の取得に失敗: 応答に文献がありません'
+            : (article.abstract?.length ?? 0) > 1500 ? '抄録を 1500 文字で切り詰め' : null };
+      });
+    } catch (err) {
+      if (err instanceof QueryOptimizationStopError) throw err;
+      boundary();
+      apiEvent('failure');
+      return pmids.map((pmid) => ({ pmid, title: null, year: null, hasAbstract: false, abstract: null,
+        meshHeadings: [], note: `書誌の取得に失敗: ${err instanceof Error ? err.message : String(err)}` }));
+    }
+  }
   const measureImpact = async (before: PubmedFormula, after: PubmedFormula): Promise<OptimizationImpact> => {
     task = null;
     notify();
@@ -458,6 +510,31 @@ export async function runQueryOptimization(
     latestMeasurement: OptimizationMeasurement | undefined = best?.measurement): Promise<QueryOptimizationResult> {
     terminal = reason;
     const unmetReasons: string[] = [];
+    const seedDiagnoses: OptimizationSeedDiagnosis[] = (latestMeasurement?.missedPmids ?? []).map((pmid) => {
+      const article = missedSeeds.find((item) => item.pmid === pmid);
+      const capture = best?.measurement.seedCapture;
+      const measured = capture?.rows.filter((row) => row.capturedPmids !== null) ?? [];
+      const unknown = capture?.rows.filter((row) => row.capturedPmids === null).map((row) => `#${row.blockId}`) ?? [];
+      const blockingBlockIds = measured.length ? measured.filter((row) => !row.capturedPmids!.includes(pmid)).map((row) => row.blockId) : null;
+      const blockingConceptIds = blockingBlockIds?.filter((id) =>
+        best?.formula.blocks.some((block) => block.id === id && block.isCombination === false)) ?? [];
+      const outside = blockingConceptIds.filter((id) => !fixed.approvedBlocks.some((block) => block.id === id));
+      const combination = blockingBlockIds !== null && !blockingBlockIds.some((id) =>
+        best?.formula.blocks.some((block) => block.id === id && !block.isCombination));
+      const recoverableByTerms = blockingBlockIds === null ? null : outside.length > 0 || combination ? false : true;
+      const meshHeadingCount = !article || article.note?.startsWith('書誌の取得に失敗') ? null : article.meshHeadings.length;
+      const note = [blockingBlockIds === null ? '捕捉表が未測定のため判定不能'
+        : combination ? '全概念ブロックが捕捉しているのに最終式で未捕捉（結合構造）'
+          : `ブロック ${blockingConceptIds.map((id) => `#${id}`).join('、')} が落としている`,
+      ...(outside.length ? [`${outside.map((id) => `#${id}`).join('、')} は承認外のブロック（研究デザインフィルタ等）`] : []),
+      ...(unknown.length ? [`${unknown.join('、')} は未測定のため判定不能`] : []),
+      `抄録${article?.hasAbstract ? 'あり' : 'なし'}・MeSH ${meshHeadingCount ?? '未取得'} 件`,
+      ...(article?.note ? [article.note] : [])].join('。');
+      return { pmid, title: article?.title ?? null, year: article?.year ?? null, hasAbstract: article?.hasAbstract ?? false,
+        meshHeadingCount, blockingBlockIds, recoverableByTerms, note };
+    });
+    const unrecoverable = seedDiagnoses.filter((seed) => seed.recoverableByTerms === false);
+    if (unrecoverable.length) unmetReasons.push(`語の調整では回収できないシードがあります（${unrecoverable.map((seed) => seed.pmid).join(', ')}）。検索概念・フィルタが強すぎる可能性があるため、ブロック承認（#/blocks）で見直してください`);
     if (!best) unmetReasons.push('検証済み候補がありません');
     if (termBudgetExhausted) unmetReasons.push(`語別計測は ${MAX_TERM_API_CALLS} 通信の上限に達しました。追加取得していない語別件数・固有寄与は未測定です。`);
     if (fixed.seedPmids.length === 0) unmetReasons.push('シードが未指定です');
@@ -475,7 +552,7 @@ export async function runQueryOptimization(
     const result: QueryOptimizationResult = {
       status: reason === 'conditions_met' ? 'achieved' : reason === 'user_stop' ? 'stopped'
         : reason === 'api_error' || reason === 'invalid_input' ? 'error' : 'needs_review',
-      stopReason: reason, best, trials, unmetReasons, iterations, apiCalls, elapsedMs: now() - startedAt,
+      stopReason: reason, best, trials, unmetReasons, seedDiagnoses, iterations, apiCalls, elapsedMs: now() - startedAt,
     };
     // 終了後に残すのは確定した終了記録だけ。停止境界を通さず、候補・測定は更新しない。
     // 試行も通信消費も記録していない run は、既存の別 run のチェックポイントに触れない。
@@ -509,6 +586,12 @@ export async function runQueryOptimization(
     notifyMeshContext();
     notify();
     const initial = await measure(fixed.initialFormula, 'initial');
+    if (initial.evaluation.status === 'success') {
+      best = initial;
+      best = await addSeedCapture(best);
+      initial.measurement = best.measurement;
+      if (best.measurement.missedPmids?.length) missedSeeds = await fetchMissedSeeds(best.measurement.missedPmids);
+    }
     trials.push(makeTrial({ kind: 'initial', candidateId: 'initial', formula: initial.formula,
       before: null, after: initial.measurement, accepted: initial.evaluation.status === 'success',
       reason: '初期式の実測', rationale: '' }));
@@ -548,6 +631,7 @@ export async function runQueryOptimization(
       const proposal = await optimizeQuery({
         formula: best.formula, approvedBlocks: fixed.approvedBlocks, criteria: fixed.criteria,
         maxHits: fixed.maxHits, measurement: best.measurement,
+        missedSeeds: missedSeeds.filter((seed) => best!.measurement.missedPmids?.includes(seed.pmid)),
         seedPapers: fixed.seedPapers ?? fixed.seedPmids.map((pmid) => ({ pmid, title: null })),
         meshContext, meshRequestResults, trials, previousRejectedTrials: fixed.previousRejectedTrials,
       }, provider);
@@ -570,7 +654,17 @@ export async function runQueryOptimization(
             removedTerms: [...proposal.removedTerms], replacedTerms: proposal.replacedTerms.map((term) => ({ ...term })) },
         };
         const candidate = applyProposal(best.formula, proposal);
-        const invalid = validateOptimizationCandidate(fixed.initialFormula, candidate, fixed.approvedBlocks, proposal);
+        const removed = proposal.removedTerms.length ? proposal.removedTerms : (() => {
+          const terms = (expression: string) => tokenizeExpression(expression)
+            .filter((segment) => segment.kind === 'mesh' || segment.kind === 'freeword').map((segment) => segment.text.trim());
+          const after = new Set(terms(proposal.proposedExpression));
+          const replaced = new Set(proposal.replacedTerms.map((term) => term.before.trim()));
+          return [...new Set(terms(best.formula.blocks.find((block) => block.id === proposal.targetBlockId)?.expression ?? ''))]
+            .filter((term) => !after.has(term) && !replaced.has(term));
+        })();
+        const invalid = validateOptimizationCandidate(fixed.initialFormula, candidate, fixed.approvedBlocks, proposal)
+          ?? (best.measurement.missedPmids?.length && removed.length
+            ? `未捕捉シードがある間は削除案を受け付けません（回収を優先: 同義語追加・MeSH 拡張。削除とみなした語: ${removed.join(', ')}）` : null);
         if (invalid) {
           trials.push(makeTrial({ ...details, candidateId, formula: candidate, before: best.measurement,
             after: null, accepted: false, reason: invalid, rationale: proposal.rationale }));
@@ -613,6 +707,13 @@ export async function runQueryOptimization(
             } catch (err) {
               if (err instanceof QueryOptimizationStopError) detailStop = err;
               else apiEvent('failure');
+            }
+          }
+          if (accepted) {
+            best = measured;
+            if (!detailStop) {
+              try { best = await addSeedCapture(best); measured.measurement = best.measurement; }
+              catch (err) { if (err instanceof QueryOptimizationStopError) detailStop = err; else throw err; }
             }
           }
           trials.push(makeTrial({ ...details, candidateId, formula: candidate, before, after: measured.measurement,

@@ -7,7 +7,9 @@ import { sharedEutilsRateLimiters } from '@/lib/ncbi';
 import { validateCombinationExpression } from '@/lib/combination-expression';
 import { runQueryOptimization, validateOptimizationCandidate, QueryOptimizationStopError, type QueryOptimizationInput, type QueryOptimizationDeps } from './queryOptimizationService';
 
-interface Outcome { hits: number; captured: string[]; lost?: { hits: number; pmids?: string[] }; gained?: number }
+interface Outcome { hits: number; captured: string[]; blockCapture?: Record<string, string[]>;
+  articles?: Record<string, { abstract?: string; mesh?: string[] }>;
+  lost?: { hits: number; pmids?: string[] }; gained?: number }
 
 function setup(outcomes: Record<string, Outcome> = { a: { hits: 200, captured: ['11', '22'] } }, proposals = ['b[tiab]']) {
   const input: QueryOptimizationInput = {
@@ -26,7 +28,10 @@ function setup(outcomes: Record<string, Outcome> = { a: { hits: 200, captured: [
   const fetch = jest.fn().mockImplementation(async (resource: string) => {
     if (resource.includes('efetch.fcgi')) {
       const pmids = new URL(resource).searchParams.get('id')!.split(',');
-      const xml = `<PubmedArticleSet>${pmids.map((pmid) => `<PubmedArticle><PMID>${pmid}</PMID><ArticleTitle>研究 ${pmid}</ArticleTitle><PubDate><Year>2024</Year></PubDate></PubmedArticle>`).join('')}</PubmedArticleSet>`;
+      const xml = `<PubmedArticleSet>${pmids.map((pmid) => {
+        const article = outcomes.a?.articles?.[pmid];
+        return `<PubmedArticle><PMID>${pmid}</PMID><ArticleTitle>研究 ${pmid}</ArticleTitle><PubDate><Year>2024</Year></PubDate>${article?.abstract ? `<Abstract><AbstractText>${article.abstract}</AbstractText></Abstract>` : ''}${(article?.mesh ?? []).map((mesh) => `<MeshHeading><DescriptorName>${mesh}</DescriptorName></MeshHeading>`).join('')}</PubmedArticle>`;
+      }).join('')}</PubmedArticleSet>`;
       return { ok: true, status: 200, text: async () => xml };
     }
     const query = new URL(resource).searchParams.get('term')!;
@@ -59,14 +64,23 @@ function setup(outcomes: Record<string, Outcome> = { a: { hits: 200, captured: [
     const key = Object.keys(outcomes).find((term) => tagged.includes(`${term}[tiab]`)) ?? 'a';
     const outcome = outcomes[key]!;
     const capture = query.includes('[uid]');
+    // uid 句より前の展開済み式で、タグ語の組合せから結合行・概念行・フィルタを特定する。
+    const expression = query.slice(0, query.lastIndexOf(') AND ('));
+    const blockId = expression.includes('fixed[tiab]') && expression.includes('[pt]') ? '3'
+      : expression.includes('fixed[tiab]') ? '2' : expression.includes('[pt]') ? 'RCTfilter'
+        : /\[tiab\]/.test(expression) ? '1' : undefined;
+    const captured = capture && query.includes(') AND (') && blockId
+      ? outcome.blockCapture?.[blockId] ?? outcome.captured : outcome.captured;
     return { ok: true, status: 200, json: async () => ({ esearchresult: {
-      count: String(capture ? outcome.captured.length : outcome.hits), idlist: capture ? outcome.captured : [],
+      count: String(capture ? captured.length : outcome.hits), idlist: capture ? captured : [],
     } }) };
   });
   let next = 0;
   const chat = jest.fn().mockImplementation(async () => ({
     text: JSON.stringify({ target_block_id: '1', proposed_expression: proposals[Math.min(next++, proposals.length - 1)],
-      rationale: '研究基準に沿う変更', added_terms: [], removed_terms: [], replaced_terms: [], measurement_ids: ['run:initial'] }),
+      rationale: '研究基準に沿う変更', added_terms: [], removed_terms: [],
+      replaced_terms: [{ before: next <= 1 ? 'a[tiab]' : proposals[Math.min(next - 2, proposals.length - 1)],
+        after: proposals[Math.min(next - 1, proposals.length - 1)] }], measurement_ids: ['run:initial'] }),
     tokensIn: null, tokensOut: null, raw: {},
   }));
   const provider: LLMProvider = { providerId: 'gemini', model: 'test', chat };
@@ -83,6 +97,155 @@ function deferred<T>() {
   const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
   return { promise, resolve, reject };
 }
+
+const captureQueries = (fetch: ReturnType<typeof setup>['fetch']) => fetch.mock.calls
+  .map(([url]) => new URL(url as string).searchParams.get('term') ?? '')
+  .filter((query) => query.includes('[uid]') && query.includes(') AND ('));
+
+test.each([true, false])('未捕捉 %s のときだけ全ブロックの捕捉表と書誌を取得する', async (missed) => {
+  const f = setup({ a: { hits: 200, captured: missed ? ['11'] : ['11', '22'],
+    articles: { '22': { abstract: '未捕捉の抄録', mesh: ['Disease'] } } } }, ['a[tiab]']);
+  f.input.maxIterations = 1;
+  const result = await runQueryOptimization(f.input, f.deps);
+  const capture = result.trials[0]!.after!.seedCapture;
+  if (missed) {
+    expect(capture?.seedPmids).toEqual(['11', '22']);
+    expect(capture?.rows.map((row) => row.blockId)).toEqual(['1', '2', 'RCTfilter', '3']);
+    expect(capture?.rows.every((row) => row.error === null)).toBe(true);
+    const prompt = f.chat.mock.calls[0]![0][1].content as string;
+    for (const text of ['シード × ブロック捕捉表', '#1: 捕捉 [11] / 未捕捉 [22]', '未捕捉シードの書誌',
+      '"pmid": "22"', '"hasAbstract": true', '未捕捉の抄録', 'Disease']) expect(prompt).toContain(text);
+  } else expect(capture).toBeUndefined();
+  // 同じ式の候補実測と初期実測の 2 回に、未捕捉時だけ全ブロック分を加える。
+  expect(captureQueries(f.fetch)).toHaveLength(2 + (missed ? f.input.initialFormula.blocks.length : 0));
+  expect(f.fetch.mock.calls.filter(([url]) => url.includes('efetch.fcgi'))).toHaveLength(missed ? 1 : 0);
+  expect(result.apiCalls).toBe(f.fetch.mock.calls.length + 1);
+});
+
+test.each(['declared', 'implicit', 'replacement', 'captured'])('削除制御 %s を測定前に適用する', async (kind) => {
+  const f = setup({ a: { hits: 200, captured: kind === 'captured' ? ['11', '22'] : ['11'] },
+    b: { hits: 150, captured: ['11', '22'] } });
+  f.input.initialFormula.blocks[0]!.expression = 'a[tiab] OR x[tiab]';
+  f.input.maxIterations = 1;
+  f.chat.mockResolvedValue({ text: JSON.stringify({ target_block_id: '1', proposed_expression: 'a[tiab] OR b[tiab]',
+    removed_terms: kind === 'declared' || kind === 'captured' ? ['x[tiab]'] : [],
+    replaced_terms: kind === 'replacement' ? [{ before: 'x[tiab]', after: 'b[tiab]' }] : [] }) });
+  const result = await runQueryOptimization(f.input, f.deps);
+  const rejected = kind === 'declared' || kind === 'implicit';
+  if (rejected) {
+    expect(result.trials[1]).toMatchObject({ kind: 'proposal', accepted: false, after: null });
+    expect(result.trials[1]!.reason).toContain('削除案を受け付けません');
+    expect(result.trials[1]!.reason).toContain('x[tiab]');
+  } else expect(result.trials[1]!.after).not.toBeNull();
+  expect(f.fetch.mock.calls.some(([url]) => new URL(url as string).searchParams.get('term')?.includes('b[tiab]'))).toBe(!rejected);
+});
+
+test('承認外フィルタと結合行が落とすシードを回収不能と診断する', async () => {
+  const f = setup({ a: { hits: 200, captured: ['11'], blockCapture: {
+    '1': ['11', '22'], '2': ['11', '22'], RCTfilter: ['11'], '3': ['11'],
+  }, articles: { '22': { abstract: '抄録', mesh: ['Disease'] } } } }, ['a[tiab]']);
+  const result = await runQueryOptimization(f.input, f.deps);
+  expect(result.seedDiagnoses).toEqual([expect.objectContaining({ pmid: '22', title: '研究 22', year: 2024,
+    hasAbstract: true, meshHeadingCount: 1, recoverableByTerms: false, blockingBlockIds: ['RCTfilter', '3'] })]);
+  expect(result.seedDiagnoses![0]!.note).toContain('承認外のブロック（研究デザインフィルタ等）');
+  expect(result.seedDiagnoses![0]!.note).not.toContain('結合行');
+  expect(result.unmetReasons.join(' ')).toContain('語の調整では回収できないシード');
+});
+
+test('承認済み概念ブロックだけが落とすシードは、結合行が最終式で落としていても語で回収できると診断する', async () => {
+  const f = setup({ a: { hits: 200, captured: ['11'], blockCapture: {
+    '1': ['11'], '2': ['11', '22'], RCTfilter: ['11', '22'], '3': ['11'],
+  } } }, ['a[tiab]']);
+  const result = await runQueryOptimization(f.input, f.deps);
+  expect(result.seedDiagnoses![0]).toMatchObject({ blockingBlockIds: ['1', '3'], recoverableByTerms: true });
+  expect(result.seedDiagnoses![0]!.note).toContain('ブロック #1 が落としている');
+  expect(result.seedDiagnoses![0]!.note).not.toContain('#3');
+});
+
+test('全概念ブロックが捕捉しているのに最終式で未捕捉なら結合構造と診断する', async () => {
+  const f = setup({ a: { hits: 200, captured: ['11'], blockCapture: {
+    '1': ['11', '22'], '2': ['11', '22'], RCTfilter: ['11', '22'], '3': ['11'],
+  } } }, ['a[tiab]']);
+  const result = await runQueryOptimization(f.input, f.deps);
+  expect(result.seedDiagnoses![0]).toMatchObject({ recoverableByTerms: false, blockingBlockIds: ['3'] });
+  expect(result.seedDiagnoses![0]!.note).toContain('結合構造');
+});
+
+test.each([false, true])('捕捉表の失敗（全行 %s）を空集合にせず処理を続ける', async (all) => {
+  const f = setup({ a: { hits: 200, captured: ['11'] } }, ['a[tiab]']);
+  const original = f.fetch.getMockImplementation()!;
+  let measuringTable = false;
+  f.deps.onProgress = (progress) => {
+    if (progress.bestTotalHits !== null && progress.step === 'measuring' && progress.task === null) measuringTable = true;
+    if (progress.step === 'adjusting') measuringTable = false;
+  };
+  f.fetch.mockImplementation(async (url: string) => {
+    const query = new URL(url).searchParams.get('term') ?? '';
+    if (measuringTable && query.includes('[uid]') && (all || query === '(fixed[tiab]) AND (11[uid] OR 22[uid])')) {
+      return { ok: false, status: 414 };
+    }
+    return original(url);
+  });
+  const result = await runQueryOptimization(f.input, f.deps);
+  const rows = result.trials[0]!.after!.seedCapture!.rows;
+  expect(rows.filter((row) => row.capturedPmids === null)).toHaveLength(all ? 4 : 1);
+  expect(rows.find((row) => row.blockId === '2')).toMatchObject({ capturedPmids: null, error: expect.stringContaining('414') });
+  expect(result.trials[0]!.apiEvents).toContainEqual({ source: 'PubMed', status: 'failure' });
+  expect(result.iterations).toBeGreaterThan(0);
+  expect(result.seedDiagnoses![0]!.note).toContain('未測定');
+  if (all) expect(result.seedDiagnoses![0]).toMatchObject({ blockingBlockIds: null, recoverableByTerms: null });
+});
+
+test.each([false, true])('採用後に未捕捉が残る %s なら捕捉表を更新し書誌を現在分に絞る', async (remaining) => {
+  const f = setup({ a: { hits: 200, captured: ['11'], articles: {
+    '22': { abstract: '回収するシード' }, '33': { abstract: '残るシード' },
+  } }, b: { hits: 300, captured: ['11', '22'] } }, ['b[tiab]', 'b[tiab]']);
+  if (remaining) f.input.seedPmids.push('33');
+  f.input.maxIterations = 2;
+  const result = await runQueryOptimization(f.input, f.deps);
+  expect(result.trials[1]!.accepted).toBe(true);
+  expect(result.trials[1]!.after!.seedCapture !== undefined).toBe(remaining);
+  expect(result.trials[0]!.after!.seedCapture!.rows[0]!.capturedPmids).toEqual(['11']);
+  if (remaining) expect(result.trials[1]!.after!.seedCapture!.rows[0]!.capturedPmids).toEqual(['11', '22']);
+  const current = (f.chat.mock.calls[1]![0][1].content as string).split('未捕捉シードの書誌:\n')[1]!.split('\n周辺 MeSH')[0]!;
+  expect(current).not.toContain('"pmid": "22"');
+  if (remaining) expect(current).toContain('"pmid": "33"');
+  else expect(current).toContain('(なし)');
+  expect(f.fetch.mock.calls.filter(([url]) => url.includes('efetch.fcgi'))).toHaveLength(1);
+});
+
+test.each(['capture', 'bibliography'])('追加取得 %s 中の停止例外を再送出して run を停止する', async (phase) => {
+  const f = setup({ a: { hits: 200, captured: ['11'] } });
+  const original = f.fetch.getMockImplementation()!;
+  f.fetch.mockImplementation(async (url: string) => {
+    const query = new URL(url).searchParams.get('term') ?? '';
+    if ((phase === 'capture' && query === '(a[tiab]) AND (11[uid] OR 22[uid])')
+      || (phase === 'bibliography' && url.includes('efetch.fcgi'))) throw new QueryOptimizationStopError('user_stop');
+    return original(url);
+  });
+  const result = await runQueryOptimization(f.input, f.deps);
+  expect(result.stopReason).toBe('user_stop');
+  expect(f.chat).not.toHaveBeenCalled();
+});
+
+test.each([false, true])('未捕捉書誌の取得失敗 %s と抄録の切り詰めを記録する', async (failure) => {
+  const f = setup({ a: { hits: 200, captured: ['11'], articles: { '22': { abstract: '長'.repeat(1501) } } } }, ['a[tiab]']);
+  if (failure) {
+    const original = f.fetch.getMockImplementation()!;
+    f.fetch.mockImplementation(async (url: string) => url.includes('efetch.fcgi') ? { ok: false, status: 414 } : original(url));
+  }
+  const result = await runQueryOptimization(f.input, f.deps);
+  const prompt = f.chat.mock.calls[0]![0][1].content as string;
+  if (failure) {
+    expect(prompt).toContain('書誌の取得に失敗:');
+    expect(result.seedDiagnoses![0]!.meshHeadingCount).toBeNull();
+    expect(result.trials[0]!.apiEvents).toContainEqual({ source: 'PubMed', status: 'failure' });
+  } else {
+    expect(prompt).toContain('抄録を 1500 文字で切り詰め');
+    expect(prompt).toContain('長'.repeat(1500));
+    expect(prompt).not.toContain('長'.repeat(1501));
+  }
+});
 
 test('シードを維持して上限を満たす候補も失う集合があれば保留し書誌を提示する', async () => {
   const { input, deps, fetch } = setup({ a: { hits: 200, captured: ['11', '22'] },
@@ -417,7 +580,7 @@ test('未捕捉時は件数が増えてもシード増加を採用し、全件�
   expect(chat.mock.calls[1]![0][1].content).toContain('"totalHits": 300');
   expect(result.trials[1]).toMatchObject({ accepted: true, impact: { lostHits: 0, gainedHits: 0 } });
   expect(result.trials[1]?.reason).toContain('（失う集合 0 件、増える集合 0 件）');
-  expect(fetch.mock.calls.some(([url]) => url.includes('efetch.fcgi'))).toBe(false);
+  expect(fetch.mock.calls.filter(([url]) => url.includes('efetch.fcgi'))).toHaveLength(1);
 });
 
 test('上限だけ満たしてシードを失う候補は却下し、次の AI へ前後の実測と理由を返す', async () => {

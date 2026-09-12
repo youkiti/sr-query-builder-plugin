@@ -16,7 +16,38 @@ export interface ApprovedOptimizationBlock {
   label: string;
 }
 
+/** シード × ブロックの捕捉表。ブロックごとに 1 通信で測る。 */
+export interface OptimizationSeedCapture {
+  /** run のシードと同じ順。 */
+  seedPmids: string[];
+  rows: { blockId: string; capturedPmids: string[] | null; error: string | null }[];
+}
+
+/** 未捕捉シードの書誌。抄録は先頭 1500 文字まで。 */
+export interface OptimizationMissedSeed {
+  pmid: string;
+  title: string | null;
+  year: number | null;
+  hasAbstract: boolean;
+  abstract: string | null;
+  meshHeadings: string[];
+  note: string | null;
+}
+
+/** 未捕捉シードの診断。未測定は null とし、年だけで原因を決めない。 */
+export interface OptimizationSeedDiagnosis {
+  pmid: string;
+  title: string | null;
+  year: number | null;
+  hasAbstract: boolean;
+  meshHeadingCount: number | null;
+  blockingBlockIds: string[] | null;
+  recoverableByTerms: boolean | null;
+  note: string;
+}
+
 export interface OptimizationMeasurement {
+  seedCapture?: OptimizationSeedCapture;
   id: string;
   fingerprint: string;
   measuredAt: string;
@@ -96,6 +127,7 @@ export interface PreviousOptimizationRejection {
 }
 
 export interface OptimizeQueryInput {
+  missedSeeds?: OptimizationMissedSeed[];
   formula: PubmedFormula;
   approvedBlocks: ApprovedOptimizationBlock[];
   criteria: OptimizationCriteria;
@@ -134,6 +166,11 @@ export const OPTIMIZE_QUERY_SYSTEM_PROMPT = `
 - 未計測・失敗は不明であり 0 件ではありません。単独件数と累積 OR の純増 Δ は
   最終式での固有寄与とは異なります。少数でも必要な概念やシードを拾う語は保持します。
 - 冗長・低寄与を削除の確証とせず、変更案全体を制御側が再実測します。
+- 未捕捉シードがある間は削除案を出しません。捕捉表で落としているブロックと未捕捉書誌の
+  語・MeSH を照らし、そのブロックへの同義語追加・MeSH 拡張を優先します。
+  抄録の無い文献は索引語（MeSH・タイトル語）から考えます。承認外のブロック
+  （研究デザインフィルタ）や結合構造が落としている場合は、語の変更では回収できないことを
+  rationale に書き、変更不要なら現在の式を返します。
 - 変更前に当たって変更後に当たらない文献（失う集合）が 1 件でもある変更案は自動採用されず保留になります。
   削除・置換を提案するときは、失う集合が 0 件になる冗長整理か、
   失う理由を rationale で説明できる変更に限ってください。
@@ -161,6 +198,10 @@ export const OPTIMIZE_QUERY_USER_PROMPT_TEMPLATE = `
 {{MEASUREMENT}}
 シード書誌:
 {{SEEDS}}
+シード × ブロック捕捉表:
+{{SEED_CAPTURE}}
+未捕捉シードの書誌:
+{{MISSED_SEEDS}}
 周辺 MeSH ツリー（親子・全 tree number・explode/NoExp）:
 {{MESH}}
 MeSH 追加取得要求の結果（未取得理由を含む）:
@@ -218,6 +259,11 @@ export async function optimizeQuery(
     APPROVED: formatContext(input.approvedBlocks),
     MEASUREMENT: input.measurement ? formatMeasurement(input.measurement) : '(未計測)',
     SEEDS: formatContext(input.seedPapers),
+    SEED_CAPTURE: input.measurement?.seedCapture ? input.measurement.seedCapture.rows.map((row) =>
+      row.capturedPmids === null ? `#${row.blockId}: 未測定（${row.error}）`
+        : `#${row.blockId}: 捕捉 [${row.capturedPmids.join(', ')}] / 未捕捉 [${input.measurement!.seedCapture!.seedPmids.filter((pmid) => !row.capturedPmids!.includes(pmid)).join(', ')}]`
+    ).join('\n') : '(未計測)',
+    MISSED_SEEDS: formatContext(input.missedSeeds),
     MESH: formatContext(input.meshContext),
     MESH_REQUEST_RESULTS: formatContext(input.meshRequestResults),
     PREVIOUS_REJECTIONS: formatContext(input.previousRejectedTrials ?? []),

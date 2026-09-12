@@ -153,6 +153,35 @@ function renderDetails(details: HTMLElement, trial: OptimizationTrial, nodes: Op
     }
     if (!recovered.length && !lost.length) paragraph(seeds, '捕捉シードの変化なし');
   }
+  const captureGroup = group('シード × ブロック捕捉表');
+  const capture = trial.after?.seedCapture;
+  if (!capture) paragraph(captureGroup, '捕捉表は未計測（未捕捉シードがある局面でだけ測ります）');
+  else {
+    const wrapper = doc.createElement('div');
+    wrapper.className = 'optimization__capture-table';
+    const table = doc.createElement('table');
+    table.setAttribute('aria-label', 'シード × ブロック捕捉表');
+    const head = table.createTHead().insertRow();
+    for (const label of ['シード PMID', ...capture.rows.map((row) => `#${row.blockId}`)]) {
+      const th = doc.createElement('th');
+      th.scope = 'col';
+      th.textContent = label;
+      head.appendChild(th);
+    }
+    const body = table.createTBody();
+    for (const pmid of capture.seedPmids) {
+      const row = body.insertRow();
+      const th = doc.createElement('th');
+      th.scope = 'row';
+      th.textContent = pmid;
+      row.appendChild(th);
+      for (const block of capture.rows) {
+        row.insertCell().textContent = block.capturedPmids === null ? '未測定' : block.capturedPmids.includes(pmid) ? '○' : '×';
+      }
+    }
+    wrapper.appendChild(table);
+    captureGroup.appendChild(wrapper);
+  }
   const deletion = group('削除影響');
   const impact = trial.impact;
   if (!impact) paragraph(deletion, '採用判定の前に却下したため、差集合は実測していません');

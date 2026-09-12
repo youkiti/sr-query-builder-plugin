@@ -19,8 +19,42 @@ function run(status: 'achieved' | 'needs_review' | 'stopped' | 'error'): QueryOp
           totalHits: 12, captureRate: 1, capturedPmids: ['1'], missedPmids: [] } } } },
   };
 }
-const actions = { adopt: jest.fn(async () => {}), edit: jest.fn() };
+const actions = { adopt: jest.fn(async () => {}), edit: jest.fn(), blocks: jest.fn() };
 beforeEach(() => { jest.clearAllMocks(); });
+
+test.each([true, false])('診断の回収見込み %s に応じてブロック承認への導線を出す', (recoverableByTerms) => {
+  const current = run('needs_review');
+  current.result!.seedDiagnoses = [{ pmid: '22', title: '研究22', year: 2024, hasAbstract: true,
+    meshHeadingCount: 12, blockingBlockIds: ['1'], recoverableByTerms, note: 'ブロック #1 が落としている。抄録あり・MeSH 12 件' }];
+  const container = document.createElement('div');
+  renderOptimizationReview(container, current, actions);
+  expect(container.textContent).toContain('未捕捉シードの診断');
+  expect(container.textContent).toContain(current.result!.seedDiagnoses[0]!.note);
+  const link = container.querySelector('a')!;
+  expect(link.textContent).toBe('PMID 22（2024）研究22');
+  expect(link.parentElement!.childNodes).toHaveLength(1);
+  expect(link.target).toBe('_blank');
+  expect(link.rel).toBe('noopener noreferrer');
+  const button = Array.from(container.querySelectorAll('button')).find((item) => item.textContent === 'ブロック承認へ戻る');
+  if (recoverableByTerms) expect(button).toBeUndefined();
+  else {
+    expect(container.textContent).toContain('語の調整では回収できないシードがあります。');
+    button!.click();
+    expect(actions.blocks).toHaveBeenCalledTimes(1);
+    container.replaceChildren();
+    renderOptimizationReview(container, current, { ...actions, blocks: undefined });
+    expect(Array.from(container.querySelectorAll('button')).find((item) => item.textContent === 'ブロック承認へ戻る')!.disabled).toBe(true);
+  }
+});
+
+test.each([0, 1])('診断なしでシード %s 件の説明を分ける', (seeds) => {
+  const current = run('needs_review');
+  current.result!.seedDiagnoses = [];
+  current.result!.best!.evaluation.seedPmids = seeds ? ['1'] : [];
+  const container = document.createElement('div');
+  renderOptimizationReview(container, current, actions);
+  expect(container.textContent).toContain(seeds ? '未捕捉シードはありません' : '検証対象シードがないため診断はありません');
+});
 
 test.each(['achieved', 'needs_review', 'stopped', 'error'] as const)('最終状態 %s でも保留の有無を表示する', (status) => {
   const current = run(status);
