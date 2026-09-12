@@ -985,8 +985,8 @@ test.each(['failure', 'clamped'])('語の %s を 0 件・寄与なしとして A
 
 test('AI が通信予算の最後の呼び出しなら遅い応答を破棄する', async () => {
   const { input, deps, fetch, chat, write } = setup();
-  // 初期実測 5 回＋語別 2 回＋AI 1 回で予算を使い切る。
-  deps.maxApiCalls = 8;
+  // 語別計測は予算確保で止まり、初期実測 5 回＋AI 1 回で予算を使い切る。
+  deps.maxApiCalls = 6;
   const waiting = deferred<void>();
   const response = deferred<{ text: string }>();
   chat.mockImplementation(() => { waiting.resolve(); return response.promise; });
@@ -994,8 +994,8 @@ test('AI が通信予算の最後の呼び出しなら遅い応答を破棄す�
   await waiting.promise;
   response.resolve({ text: '{"target_block_id":"1","proposed_expression":"late[tiab]"}' });
   const result = await pending;
-  expect(result).toMatchObject({ stopReason: 'api_budget', apiCalls: 8, iterations: 0 });
-  expect(fetch).toHaveBeenCalledTimes(7);
+  expect(result).toMatchObject({ stopReason: 'api_budget', apiCalls: 6, iterations: 0 });
+  expect(fetch).toHaveBeenCalledTimes(5);
   expect(write).toHaveBeenCalledTimes(2);
   expect(result.trials).toHaveLength(1);
   expect(result.best?.formula.blocks[0]?.expression).toBe('a[tiab]');
@@ -1240,8 +1240,8 @@ test('1 反復の追加取得を優先順の 3 件までに制限し、残りの
 test.each(['success', 'failure'])('追加取得が予算を使い切った場合は %s 応答を破棄する', async (kind) => {
   const { input, deps, chat, write, fetch } = setup();
   requestMesh(chat, [meshRequest, meshRequest]);
-  // 初期実測 5 回、語別 2 回、AI 1 回の後、追加取得 1 回で上限。
-  deps.maxApiCalls = 9;
+  // 語別計測は予算確保で止まり、初期実測 5 回、AI 1 回の後、追加取得 1 回で上限。
+  deps.maxApiCalls = 7;
   const waiting = deferred<void>();
   const response = deferred<skill.OptimizationMeshNode[]>();
   const fetchMeshContext = jest.fn(() => { waiting.resolve(); return response.promise; });
@@ -1251,10 +1251,10 @@ test.each(['success', 'failure'])('追加取得が予算を使い切った場合
   if (kind === 'success') response.resolve([childNode]);
   else response.reject(new Error('遅い取得失敗'));
   const result = await pending;
-  expect(result).toMatchObject({ stopReason: 'api_budget', apiCalls: 9 });
+  expect(result).toMatchObject({ stopReason: 'api_budget', apiCalls: 7 });
   expect(fetchMeshContext).toHaveBeenCalledTimes(1);
   expect(chat).toHaveBeenCalledTimes(1);
-  expect(fetch).toHaveBeenCalledTimes(7);
+  expect(fetch).toHaveBeenCalledTimes(5);
   expect(write).toHaveBeenCalledTimes(2);
   expect(result.trials).toHaveLength(1);
 });

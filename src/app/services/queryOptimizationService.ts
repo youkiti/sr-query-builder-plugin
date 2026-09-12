@@ -218,6 +218,8 @@ export async function runQueryOptimization(
   let lastSavedApiCalls = 0;
   let termApiCalls = 0;
   let termBudgetExhausted = false;
+  let termBudgetReserved = false;
+  let reservedApiCalls = 0;
   const termCache = new Map<string, number>();
   let iterations = 0;
   let evaluatedTrials = 0;
@@ -298,21 +300,25 @@ export async function runQueryOptimization(
       return response;
     },
   };
-  const termEutils: EutilsDeps = { ...eutils, fetch: async (resource, init) => {
+  const canMeasureTerm = (): boolean => {
     if (termApiCalls >= MAX_TERM_API_CALLS) {
       termBudgetExhausted = true;
-      throw new TermAnalysisBudgetError('語別計測の通信上限');
+      return false;
     }
+    if (maxApiCalls - apiCalls <= reservedApiCalls) {
+      termBudgetReserved = true;
+      return false;
+    }
+    return true;
+  };
+  const termEutils: EutilsDeps = { ...eutils, fetch: async (resource, init) => {
+    if (!canMeasureTerm()) throw new TermAnalysisBudgetError('語別計測の通信予算');
     termApiCalls += 1;
     return eutils.fetch(resource, init);
   } };
   const termOptions = {
     eutils: termEutils, cache: termCache, check: boundary,
-    canMeasure: () => {
-      if (termApiCalls < MAX_TERM_API_CALLS) return true;
-      termBudgetExhausted = true;
-      return false;
-    },
+    canMeasure: canMeasureTerm,
     onProgress: (completed: number, total: number) => { task = { kind: 'terms', completed, total }; notify(); },
     onFailure: () => apiEvent('failure'),
   };
@@ -550,6 +556,7 @@ export async function runQueryOptimization(
     if (!best) unmetReasons.push('検証済み候補がありません');
     if (pendingInformation) unmetReasons.push(`情報要求 ${pendingInformation.candidateId} への判断が未了です（文脈へ反映 ${pendingInformation.obtained} / 要求 ${pendingInformation.requested} 件）`);
     if (termBudgetExhausted) unmetReasons.push(`語別計測は ${MAX_TERM_API_CALLS} 通信の上限に達しました。追加取得していない語別件数・固有寄与は未測定です。`);
+    if (termBudgetReserved) unmetReasons.push('候補評価・差集合の実測・最終再検証の通信予算を確保するため、語別計測を打ち切りました。追加取得していない語別件数・固有寄与は未測定です。');
     if (fixed.seedPmids.length === 0) unmetReasons.push('シードが未指定です');
     // 最良候補は保持し、最終再検証で崩れた値だけを未達理由の根拠に切り替える。
     if (latestMeasurement?.missedPmids?.length) unmetReasons.push(`未捕捉シード: ${latestMeasurement.missedPmids.join(', ')}`);
@@ -598,7 +605,11 @@ export async function runQueryOptimization(
     }
     notifyMeshContext();
     notify();
+    const beforeInitialApiCalls = apiCalls;
     const initial = await measure(fixed.initialFormula, 'initial');
+    // 次候補・最終再検証の実コストと差集合3通信に、AI提案1回と上限応答を破棄する境界の余裕1回を加える。
+    // 語別計測にも予算を残すため、確保分は全体の半分を上限とする。
+    reservedApiCalls = Math.min(2 * (apiCalls - beforeInitialApiCalls) + 3 + 2, Math.floor(maxApiCalls / 2));
     let initialStop: QueryOptimizationStopError | null = null;
     if (initial.evaluation.status === 'success') {
       best = initial;
@@ -631,7 +642,8 @@ export async function runQueryOptimization(
       // 初回と採用後だけ語を測る。同じ最良式の却下後は取得済み文脈を共有する。
       if (!best.measurement.terms) {
         const terms = await measureTerms(best.formula, fixed.approvedBlocks, {
-          ...termOptions, finalHits: deps.measureTermDetails ? best.measurement.totalHits : undefined,
+          ...termOptions, blocks: best.measurement.blocks,
+          finalHits: deps.measureTermDetails ? best.measurement.totalHits : undefined,
         });
         boundary();
         // 記録済み試行が参照する測定は不変とし、AI 文脈を付加した新しい測定へ差し替える。
@@ -733,7 +745,7 @@ export async function runQueryOptimization(
           if (deps.measureTermDetails && measured.evaluation.status === 'success') {
             try {
               measured.measurement = { ...measured.measurement, terms: await measureTerms(candidate, fixed.approvedBlocks, {
-                ...termOptions, finalHits: measured.measurement.totalHits,
+                ...termOptions, blocks: measured.measurement.blocks, finalHits: measured.measurement.totalHits,
               }) };
             } catch (err) {
               if (err instanceof QueryOptimizationStopError) detailStop = err;
@@ -904,12 +916,13 @@ interface MeasureTermsOptions {
   check: () => void;
   onProgress?: (completed: number, total: number) => void;
   finalHits?: number | null;
+  blocks?: OptimizationMeasurement['blocks'];
   onFailure?: () => void;
 }
 
 /** 原タグを保持した単独件数と累積 OR の純増。最終式の固有寄与と混同しない。 */
 async function measureTerms(formula: PubmedFormula, approvedBlocks: readonly ApprovedOptimizationBlock[],
-  { eutils, cache, canMeasure, check, onProgress, finalHits, onFailure }: MeasureTermsOptions): Promise<NonNullable<OptimizationMeasurement['terms']>> {
+  { eutils, cache, canMeasure, check, onProgress, finalHits, blocks: measuredBlocks, onFailure }: MeasureTermsOptions): Promise<NonNullable<OptimizationMeasurement['terms']>> {
   const terms: NonNullable<OptimizationMeasurement['terms']> = [];
   const count = async (query: string) => {
     check();
@@ -928,11 +941,44 @@ async function measureTerms(formula: PubmedFormula, approvedBlocks: readonly App
   };
   const approvedIds = new Set(approvedBlocks.map((block) => block.id));
   const blocks = formula.blocks.filter((item) => !item.isCombination && approvedIds.has(item.id));
-  const total = blocks.reduce((sum, block) => sum + new Set(extractBlockTerms(block.expression).freewordTerms
+  const blockHits = new Map(measuredBlocks?.map((block) => [block.id, block.hits]));
+  const measurementOrder = [...blocks].sort((a, b) => (blockHits.get(b.id) ?? -1) - (blockHits.get(a.id) ?? -1));
+  const contributions = new Map<string, Map<string, number>>();
+  const contributionPlans = finalHits == null ? [] : measurementOrder.flatMap((block) => {
+    const segments = tokenizeExpression(block.expression);
+    if (!segments.every((segment) => segment.kind !== 'plain'
+      || /^[\s()]*$/.test(segment.text.replace(/\bOR\b/gi, '')))) return [];
+    const queries = [...new Set(segments.filter((segment) => segment.kind === 'freeword' || segment.kind === 'mesh')
+      .map((segment) => segment.text.trim()))];
+    return [{ block, segments, queries }];
+  });
+  // 延べ対象語数。固有寄与と個別件数・累積Δを別単位とし、未測定の確定も処理済みに数える。
+  const total = contributionPlans.reduce((sum, plan) => sum + plan.queries.length, 0)
+    + blocks.reduce((sum, block) => sum + new Set(extractBlockTerms(block.expression).freewordTerms
     .map((term) => term.query.trim()).filter(Boolean)).size
     + tokenizeExpression(block.expression).filter((item) => item.kind === 'mesh').length, 0);
   onProgress?.(0, total);
-  for (const block of blocks) {
+  let completed = 0;
+  const advance = () => { completed += 1; onProgress?.(completed, total); };
+  if (finalHits != null) {
+    for (const { block, segments, queries } of contributionPlans) {
+      const values = new Map<string, number>();
+      contributions.set(block.id, values);
+      for (const query of queries) {
+        const without: PubmedFormula = { ...formula, blocks: formula.blocks.map((item) => item.id !== block.id ? item : {
+          ...item, expression: segments.map((segment) => (segment.kind === 'freeword' || segment.kind === 'mesh')
+            && segment.text.trim() === query ? `(${segment.text} NOT ${segment.text})` : segment.text).join(''),
+        }) };
+        try {
+          // キャッシュキーには最終式全体と除去後の式を含める。語だけでは再利用しない。
+          const value = await count(`(${expandFormula(formula)}) NOT (${expandFormula(without)})`);
+          if (value <= finalHits) values.set(query, value);
+        } catch { check(); }
+        advance();
+      }
+    }
+  }
+  for (const block of measurementOrder) {
     check();
     const freewords = extractBlockTerms(block.expression).freewordTerms;
     const delta = await analyzeFreewordDelta(freewords, count);
@@ -942,8 +988,8 @@ async function measureTerms(formula: PubmedFormula, approvedBlocks: readonly App
       uncertain = uncertain || row.clamped || row.individualError;
       terms.push({ blockId: block.id, query: row.query, hits: row.individualError ? null : row.individual,
         delta: uncertain ? null : row.delta,
-        ...(finalHits !== undefined ? { finalContribution: null } : {}) });
-      onProgress?.(terms.length, total);
+        ...(finalHits !== undefined ? { finalContribution: contributions.get(block.id)?.get(row.query.trim()) ?? null } : {}) });
+      advance();
     }
     for (const segment of tokenizeExpression(block.expression).filter((item) => item.kind === 'mesh')) {
       let hits: number | null = null;
@@ -952,26 +998,11 @@ async function measureTerms(formula: PubmedFormula, approvedBlocks: readonly App
         check();
         if (!(err instanceof TermAnalysisBudgetError) && canMeasure()) throw err;
       }
-      terms.push({ blockId: block.id, query: segment.text, hits, delta: null });
-      onProgress?.(terms.length, total);
+      terms.push({ blockId: block.id, query: segment.text, hits, delta: null,
+        ...(finalHits !== undefined ? { finalContribution: contributions.get(block.id)?.get(segment.text.trim()) ?? null } : {}) });
+      advance();
     }
   }
-  if (finalHits != null) {
-    for (const term of terms.filter((item) => 'finalContribution' in item && item.hits !== null)) {
-      const block = blocks.find((item) => item.id === term.blockId)!;
-      const segments = tokenizeExpression(block.expression);
-      if (!segments.every((segment) => segment.kind !== 'plain'
-        || /^[\s()]*$/.test(segment.text.replace(/\bOR\b/gi, '')))) continue;
-      const without: PubmedFormula = { ...formula, blocks: formula.blocks.map((item) => item.id !== block.id ? item : {
-        ...item, expression: segments.map((segment) => segment.kind === 'freeword'
-          && segment.text.trim() === term.query ? `(${segment.text} NOT ${segment.text})` : segment.text).join(''),
-      }) };
-      try {
-        // キャッシュキーには最終式全体と除去後の式を含める。語だけでは再利用しない。
-        const value = await count(`(${expandFormula(formula)}) NOT (${expandFormula(without)})`);
-        if (value <= finalHits) term.finalContribution = value;
-      } catch { check(); }
-    }
-  }
-  return terms;
+  // 測定の優先順とは独立に、表示と AI 文脈では元のブロック順・各ブロック内の行順を保つ。
+  return blocks.flatMap((block) => terms.filter((term) => term.blockId === block.id));
 }
