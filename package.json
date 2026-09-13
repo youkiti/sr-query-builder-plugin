@@ -16,6 +16,7 @@
     "eval:b1": "tsx experiments/query-optimization-bench/b1.ts",
     "eval:prepare": "tsx experiments/query-optimization-bench/prepare.ts",
     "eval:report": "tsx experiments/query-optimization-bench/report.ts",
+    "eval:api-audit": "tsx experiments/query-optimization-bench/apiAudit.ts",
     "dev": "webpack --mode development",
     "watch": "webpack --mode development --watch",
     "build": "webpack --mode production",
