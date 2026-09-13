@@ -1,12 +1,54 @@
 /** @jest-environment node */
 import { randomUUID } from 'node:crypto';
 import { esearch, resolveRateLimiter, sharedEutilsRateLimiters } from '../../src/lib/ncbi/eutils';
-import { createEvalFetch, evaluateSearch, observeRateLimiter, redact, seedTitles, type ApiEvent, type LimiterEvent } from './ncbiEval';
+import { createEvalFetch, evaluateSearch, observeBackoff, observeRateLimiter, redact, seedTitles, type ApiEvent, type LimiterEvent } from './ncbiEval';
 
 const empty = () => new Response(JSON.stringify({ esearchresult: { count: '0', idlist: [] } }));
 const noWait = { acquire: async () => undefined };
 
 afterEach(() => { jest.restoreAllMocks(); jest.useRealTimers(); });
+
+test('バックオフは待機前に記録し、注入した待機関数に同じ時間を渡して完了を待つ', async () => {
+  const progress = jest.fn();
+  let finish!: () => void;
+  const sleep = jest.fn((ms: number) => {
+    expect(progress).toHaveBeenCalledWith({ backoff: { ms } });
+    return new Promise<void>((resolve) => { finish = resolve; });
+  });
+  const done = jest.fn();
+  const waiting = observeBackoff((backoff) => progress({ backoff }), sleep)(1234).then(done);
+  expect(sleep).toHaveBeenCalledWith(1234);
+  expect(progress).toHaveBeenCalledTimes(1);
+  expect(done).not.toHaveBeenCalled();
+  finish();
+  await waiting;
+  expect(done).toHaveBeenCalledTimes(1);
+});
+
+test('バックオフの既定待機は指定ミリ秒が経過するまで完了しない', async () => {
+  jest.useFakeTimers();
+  const progress = jest.fn();
+  const done = jest.fn();
+  const waiting = observeBackoff((backoff) => progress({ backoff }))(1000).then(done);
+  expect(progress).toHaveBeenCalledWith({ backoff: { ms: 1000 } });
+  await jest.advanceTimersByTimeAsync(999);
+  expect(done).not.toHaveBeenCalled();
+  await jest.advanceTimersByTimeAsync(1);
+  await waiting;
+  expect(done).toHaveBeenCalledTimes(1);
+});
+
+test.each(['short', 'x'.repeat(1501), null])('ハーネス GET/POST と製品 ESearch の再送を共有 sleep で記録する: %.5s', async (query) => {
+  const progress = jest.fn();
+  const sleep = jest.fn().mockResolvedValue(undefined);
+  const deps = { fetch: jest.fn().mockResolvedValueOnce(new Response('', { status: 429 })).mockResolvedValueOnce(empty()),
+    maxRetries: 1, rateLimiter: noWait, sleep: observeBackoff((backoff) => progress({ backoff }), sleep) };
+  if (query === null) await esearch('query', deps, { retmax: 0 });
+  else await evaluateSearch(query, [], deps);
+  expect(progress.mock.calls).toEqual([[{ backoff: { ms: 1000 } }]]);
+  expect(sleep.mock.calls).toEqual([[1000]]);
+  expect(deps.fetch).toHaveBeenCalledTimes(2);
+});
 
 test('既存のリミッタや計測ラッパを持つ deps は取得前に拒否する', () => {
   const fetch = jest.fn();

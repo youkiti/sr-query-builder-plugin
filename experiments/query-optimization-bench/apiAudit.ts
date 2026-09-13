@@ -15,6 +15,8 @@ export interface ApiAudit {
   files: number;
   requests: RequestRecord[];
   waits: number[];
+  backoffs: number[];
+  warnings: string[];
   processes: { source: string; value: Record<string, unknown> }[];
 }
 
@@ -31,19 +33,27 @@ function progressFiles(path: string): string[] {
   });
 }
 
-/** 壊れた行は場所だけを示して停止する。本文や URL の秘密をエラーへ転載しない。 */
+/** 改行なしの書きかけ末尾だけを許容する。本文や URL の秘密はエラー・警告へ転載しない。 */
 export function readApiAudit(path: string): ApiAudit {
   const files = progressFiles(path);
   if (!files.length) throw new Error(`progress.jsonl がありません: ${path}`);
-  const audit: ApiAudit = { files: files.length, requests: [], waits: [], processes: [] };
+  const audit: ApiAudit = { files: files.length, requests: [], waits: [], backoffs: [], warnings: [], processes: [] };
   for (const file of files) {
-    const lines = readFileSync(file, 'utf8').split(/\r?\n/);
+    const content = readFileSync(file, 'utf8');
+    const endsWithNewline = content.endsWith('\n');
+    const lines = content.split(/\r?\n/);
     if (lines[lines.length - 1] === '') lines.pop();
     for (let index = 0; index < lines.length; index++) {
       const source = `${file}:${index + 1}`;
       let row: unknown;
       try { row = JSON.parse(lines[index]!); }
-      catch { throw new Error(`JSON 行が壊れています: ${source}`); }
+      catch {
+        if (!endsWithNewline && index === lines.length - 1) {
+          audit.warnings.push(`書きかけの末尾行を読み飛ばしました: ${source}`);
+          continue;
+        }
+        throw new Error(`JSON 行が壊れています: ${source}`);
+      }
       if (!object(row) || !object(row.event)) throw new Error(`ログ行の形式が不正です: ${source}`);
       const event = row.event;
       if (object(event.process)) audit.processes.push({ source, value: event.process });
@@ -53,6 +63,13 @@ export function readApiAudit(path: string): ApiAudit {
           throw new Error(`リミッタ待機時間が不正です: ${source}`);
         }
         audit.waits.push(event.limiter.waitedMs);
+      }
+      if ('backoff' in event) {
+        if (!object(event.backoff) || typeof event.backoff.ms !== 'number'
+          || !Number.isFinite(event.backoff.ms) || event.backoff.ms < 0) {
+          throw new Error(`バックオフ待機時間が不正です: ${source}`);
+        }
+        audit.backoffs.push(event.backoff.ms);
       }
       if (!('api' in event)) continue;
       if (typeof event.url !== 'string') throw new Error(`API URL が不正です: ${source}`);
@@ -119,7 +136,10 @@ export function renderApiAudit(audit: ApiAudit): string {
   }
   lines.push('', `リミッタ待機: ${audit.waits.length} 件、合計 ${audit.waits.reduce((sum, wait) => sum + wait, 0)} ms、`
     + `最大 ${audit.waits.reduce((max, wait) => Math.max(max, wait), 0)} ms`
-    + (audit.waits.length ? '' : '（待機ログなし）'), '', 'プロセス条件');
+    + (audit.waits.length ? '' : '（待機ログなし）'),
+    `リトライ待機（バックオフ）: ${audit.backoffs.length} 件、合計 ${audit.backoffs.reduce((sum, wait) => sum + wait, 0)} ms、`
+    + `最大 ${audit.backoffs.reduce((max, wait) => Math.max(max, wait), 0)} ms`
+    + (audit.backoffs.length ? '' : '（バックオフ記録なし）'), '', 'プロセス条件');
   if (!audit.processes.length) lines.push('プロセス条件の記録なし');
   const requestConcurrencyLabels = new Map<unknown, string>([['caller-dependent', '呼び出し側依存']]);
   const externalConcurrencyLabels = new Map<unknown, string>([['unknown', '不明']]);
@@ -129,6 +149,7 @@ export function renderApiAudit(audit: ApiAudit): string {
       + `要求の並行性=${requestConcurrencyLabels.get(value.requestConcurrency) ?? '不明'}、`
       + `外部並行実行=${externalConcurrencyLabels.get(value.externalConcurrency) ?? '不明'}、SHA=${value.gitCommit ?? '不明'}、run=${value.runId ?? '不明'}`);
   }
+  if (audit.warnings.length) lines.push('', ...audit.warnings);
   return redact(lines.join('\n')) + '\n';
 }
 

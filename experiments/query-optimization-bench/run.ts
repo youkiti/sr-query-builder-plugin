@@ -19,7 +19,7 @@ import type { ProjectStoreDeps } from '../../src/features/project/projectStore';
 import { esearch } from '../../src/lib/ncbi/eutils';
 import { installDomParser } from './domParser';
 import { FIXTURES, SEED, computeHeldOut, loadSeedsFile, seedSplitId, validateSeeds } from './prepare';
-import { capturedGold, createEvalFetch, evaluateSearch, observeRateLimiter, redact, seedTitles } from './ncbiEval';
+import { capturedGold, createEvalFetch, evaluateSearch, observeBackoff, observeRateLimiter, redact, seedTitles } from './ncbiEval';
 import { calculateMetrics, compareMetrics } from './metrics';
 import { loadC0Artifact, type C0Variant } from './c0Artifact';
 import { getGitCommit, isGitDirty } from './gitInfo';
@@ -340,7 +340,8 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
         if (!dryRun) writeFileSync(join(attemptDir, path), serialize(value));
       }, result.llmLogs, usageTracker.record);
       result.model = llmFactory.model;
-      const eutils: EutilsDeps = { fetch: observed, apiKey: dryRun ? undefined : process.env.NCBI_API_KEY, strictCounts: true };
+      const eutils: EutilsDeps = { fetch: observed, apiKey: dryRun ? undefined : process.env.NCBI_API_KEY, strictCounts: true,
+        sleep: observeBackoff((backoff) => progress({ backoff })) };
       eutils.rateLimiter = observeRateLimiter(eutils, (limiter) => progress({ limiter }));
       if (dryRun) {
         const checkpoint = memoryCheckpoint();

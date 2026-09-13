@@ -45,6 +45,54 @@ test('秒境界をまたぐ窓とちょうど 1000 ms の除外を固定する',
   expect(renderApiAudit(readApiAudit(path))).toContain('最大リクエスト数: 2 件');
 });
 
+test('バックオフを集計し、ゼロ時間と記録なしを区別する', () => {
+  const audit = readApiAudit(write([0, 1000, 2000].map((ms) => ({ backoff: { ms } }))));
+  expect(audit.backoffs).toEqual([0, 1000, 2000]);
+  expect(renderApiAudit(audit)).toContain('リトライ待機（バックオフ）: 3 件、合計 3000 ms、最大 2000 ms');
+  expect(renderApiAudit(readApiAudit(write([{ backoff: { ms: 0 } }]))))
+    .toContain('リトライ待機（バックオフ）: 1 件、合計 0 ms、最大 0 ms\n');
+  expect(renderApiAudit(readApiAudit(write([{ status: 'completed' }]))))
+    .toContain('リトライ待機（バックオフ）: 0 件、合計 0 ms、最大 0 ms（バックオフ記録なし）');
+});
+
+test.each(['-1', '"秘密の本文"', 'null', 'true', '1e400', '-1e400'])('不正なバックオフ時間は場所だけを示す: %s', (ms) => {
+  const path = join(dir, 'progress.jsonl');
+  writeFileSync(path, `{"event":{"backoff":{"ms":${ms}}}}`);
+  expect(() => readApiAudit(path)).toThrow(new Error(`バックオフ待機時間が不正です: ${path}:1`));
+});
+
+test.each([null, {}, []])('バックオフの形式や時間欠落も拒否する: %j', (backoff) => {
+  const path = write([{ backoff }]);
+  expect(() => readApiAudit(path)).toThrow(new Error(`バックオフ待機時間が不正です: ${path}:1`));
+});
+
+test('改行なしの書きかけ末尾を警告し、他ファイルを含む残りの行を集計する', () => {
+  const path = join(dir, 'progress.jsonl');
+  writeFileSync(path, JSON.stringify({ event: api(0) }) + '\n{"event":"秘密の本文');
+  mkdirSync(join(dir, 'child'));
+  write([{ backoff: { ms: 1000 } }], join(dir, 'child', 'progress.jsonl'));
+  const audit = readApiAudit(dir);
+  expect(audit.requests).toHaveLength(1);
+  expect(audit.backoffs).toEqual([1000]);
+  expect(audit.warnings).toEqual([`書きかけの末尾行を読み飛ばしました: ${path}:2`]);
+  expect(renderApiAudit(audit)).toContain(audit.warnings[0]);
+  expect(renderApiAudit(audit)).not.toContain('秘密の本文');
+});
+
+test('途中の破損行は末尾に改行がなくても拒否する', () => {
+  const path = join(dir, 'progress.jsonl');
+  writeFileSync(path, '秘密の本文\n' + JSON.stringify({ event: api(0) }));
+  expect(() => readApiAudit(path)).toThrow(new Error(`JSON 行が壊れています: ${path}:1`));
+});
+
+test('改行なしでも正常な最終行は警告せず集計する', () => {
+  const path = join(dir, 'progress.jsonl');
+  writeFileSync(path, JSON.stringify({ event: api(0) }));
+  const audit = readApiAudit(path);
+  expect(audit.requests).toHaveLength(1);
+  expect(audit.warnings).toEqual([]);
+});
+
 test.each([
   [{ requestConcurrency: 'caller-dependent', externalConcurrency: 'unknown' }, '呼び出し側依存'],
   [{}, '不明'],

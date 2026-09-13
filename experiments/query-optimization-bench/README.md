@@ -136,11 +136,12 @@ API コール数は実 fetch 回数、API 所要時間は fetch の応答まで�
 | API (`event.api`) | `startedAt`: fetch 送信直前の ISO 8601 時刻、`method`: GET / POST 等。`status` / `elapsedMs` / `url` / `error` は従来どおり |
 | API の試行 | `attempt`: 初回 1、再送 2 以降。`requestId`: 論理的な検索 1 回を識別する UUID。同じ検索式を別途発行すると別 ID・試行 1 に戻る |
 | リミッタ (`event.limiter`) | `at`: acquire 完了時刻、`waitedMs`: 呼び出しから完了まで（共有キューの待機込み）、`bucket`: `withoutApiKey` / `withApiKey`。既存の共有バケットを包んで測定し、待機ゼロも 1 行残す。後続の fetch には紐付けない |
+| バックオフ (`event.backoff`) | `ms`: 再送前に指定された待機時間。待機開始前に 1 行記録し、同じ時間だけ待つ。リミッタ待機とは別集計 |
 | 開始条件 (`event.process`) | 各ケースの実行履歴の先頭に 1 行。`pid`、`hasApiKey`（NCBI キーの有無のみ）、`caseCount`（選択対象数、スキップ予定も含む）、`caseExecution: sequential`（ケースは逐次）、`requestConcurrency: caller-dependent`（ケース内の要求並行性は呼び出し側依存）、`externalConcurrency: unknown`（他プロセスは検知しない）、`gitCommit`、`gitDirty`、`runId` |
 
-試行番号を確定できるのはハーネスの `evalSearch`（製品 ESearch に委譲する GET/POST とハーネスの POST、gold 分割取得を含む）と、再送しない `seedTitles` です。製品サービスから直接発行される ESearch / EFetch / MeSH と LLM は呼び出し単位を観測できないため `attempt` / `requestId` を `null`（不明）で残します。HTTP 結果や URL の一致から再送を推定しません。製品コードを変更せずに追加した観測の範囲にはこの制約があり、すべての経路の再送原因を説明するには追加の観測が必要です。
+試行番号を確定できるのはハーネスの `evalSearch`（製品 ESearch に委譲する GET/POST とハーネスの POST、gold 分割取得を含む）と、再送しない `seedTitles` です。製品サービスから直接発行される ESearch / EFetch / MeSH と LLM は呼び出し単位を観測できないため `attempt` / `requestId` を `null`（不明）で残します。HTTP 結果や URL の一致から再送を推定しません。一方、製品コードを変更せず、共有の `eutils.sleep` を通るすべての再送（ハーネスの `evalSearch` と製品サービス経由の E-utilities に加え、同じ依存を受け取る MeSH RDF の SPARQL 取得 `id.nlm.nih.gov` も含む）の回数と指定待機時間を `backoff` 行として記録します。行にはホストを持たないため、E-utilities の再送だけを切り出すことはできません。個々の `requestId` / 試行とは紐付かず、LLM の再送は対象外です。トークンバケットの待機は `eutils.sleep` を経由しないため、バックオフには数えません。
 
-`run.json` の `apiCalls` は従来どおり実 fetch 回数、`apiElapsedMs` は fetch の所要時間合計で、リミッタ待機は加算しません。全進捗行は保存前に `redact` を通し、API キー値は残しません。
+`run.json` の `apiCalls` は従来どおり実 fetch 回数、`apiElapsedMs` は fetch の所要時間合計で、リミッタ待機・バックオフは加算しません。全進捗行は保存前に `redact` を通し、API キー値は残しません。
 
 ```powershell
 # 1 実行のログ（パスは手元の実行履歴に置き換える）
@@ -149,9 +150,9 @@ npm run eval:api-audit -- experiments/query-optimization-bench/results/<profile>
 npm run eval:api-audit -- experiments/query-optimization-bench/results
 ```
 
-集計対象はホストが `eutils.ncbi.nlm.nih.gov` の通信のみです（別ホストの SPARQL / LLM は除外）。日本語でステータス × 経路（ESearch GET / POST、ESummary、EFetch 等）の件数、任意の 1 秒窓 `[t, t+1000ms)` の最大送信数、各 429 と直前 5 件の送信時刻・前の送信からの間隔・経路・試行番号、リミッタ待機の合計・最大、記録されたプロセス条件を表示します。同じ時刻の別リクエストも数え、外側の完了時刻で並べ替えません。
+集計対象はホストが `eutils.ncbi.nlm.nih.gov` の通信のみです（別ホストの SPARQL / LLM は除外）。日本語でステータス × 経路（ESearch GET / POST、ESummary、EFetch 等）の件数、任意の 1 秒窓 `[t, t+1000ms)` の最大送信数、各 429 と直前 5 件の送信時刻・前の送信からの間隔・経路・試行番号、リミッタ待機とバックオフそれぞれの件数・合計・最大、記録されたプロセス条件を表示します。同じ時刻の別リクエストも数え、外側の完了時刻で並べ替えません。
 
-指定ファイルが無い、ディレクトリ内にログが無い、JSON 行が壊れている（途中の空行も含む）、観測項目が不正な場合はエラー・終了コード 1 にします。壊れた行の本文は出さずファイルと行番号を示します。末尾の改行は許容し、空ファイルは 0 件と明示します。旧ログの送信時刻・方式・試行番号は逆算せず欠測として表示し、時刻欠測の要求はレートと直前履歴から除外します。その場合、最大値と履歴は不完全です。待機ログなしも表示し、待機ゼロと区別します。
+指定ファイルが無い、ディレクトリ内にログが無い、JSON 行が壊れている（途中の空行も含む）、観測項目が不正な場合はエラー・終了コード 1 にします。ただし、ファイルが改行で終わらず、その最終行の JSON パースに失敗した場合だけは書きかけとして読み飛ばし、「書きかけの末尾行を読み飛ばしました: <ファイル>:<行番号>」と警告して集計を続けます。途中の破損行や、改行で終わる破損した最終行は従来どおりエラーです。エラー・警告に壊れた行の本文は出さずファイルと行番号を示します。末尾の改行は許容し、空ファイルは 0 件と明示します。旧ログの送信時刻・方式・試行番号は逆算せず欠測として表示し、時刻欠測の要求はレートと直前履歴から除外します。その場合、最大値と履歴は不完全です。待機ログなし・バックオフ記録なしも表示し、待機ゼロと区別します。
 
 再帰集計は選択した全ファイルを統合するため、コピーしたログを重複して置くと二重計上します。別ホストの時計のずれは補正せず、ログにない別プロセスや同一 IP の通信は把握できません。外部で同時実行した条件は別途記録してください。実 API に接続する検証は、この集計コマンドでは行いません。
 

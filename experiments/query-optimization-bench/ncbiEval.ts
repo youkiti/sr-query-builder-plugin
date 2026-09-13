@@ -76,6 +76,15 @@ export interface LimiterEvent {
   bucket: 'withApiKey' | 'withoutApiKey';
 }
 
+/** 再送前に指定された待機時間を記録し、同じ時間だけ待つ。 */
+export function observeBackoff(onWait: (event: { ms: number }) => void,
+  sleep: NonNullable<EutilsDeps['sleep']> = (ms) => new Promise((resolve) => setTimeout(resolve, ms))): NonNullable<EutilsDeps['sleep']> {
+  return async (ms) => {
+    onWait({ ms });
+    await sleep(ms);
+  };
+}
+
 /** 既定の共有インスタンスを包む。待機と後続 fetch の対応は推測しない。 */
 export function observeRateLimiter(deps: Omit<EutilsDeps, 'rateLimiter'>,
   onWait: (event: LimiterEvent) => void): NonNullable<EutilsDeps['rateLimiter']> {
