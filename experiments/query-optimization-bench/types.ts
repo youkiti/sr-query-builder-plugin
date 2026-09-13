@@ -22,10 +22,10 @@ export interface StudyGroup {
   pmids: string[];
 }
 
-export interface FrozenSeeds {
-  seed: number;
+/** 乱数分割と手動の名前付き集合は識別フィールドを混在させない。 */
+export type FrozenSeeds = ({ seed: number; name?: never } | { name: string; seed?: never }) & {
   selections: { groupId: string; pmid: string; year: number | null }[];
-}
+};
 
 export interface GoldAudit {
   includedStudyCount: number;

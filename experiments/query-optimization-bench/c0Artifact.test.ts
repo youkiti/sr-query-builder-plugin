@@ -1,7 +1,9 @@
 /** @jest-environment node */
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { FIXTURES } from './prepare';
+import { CASES } from './types';
 import { c0Dir, c0FileName, c0FixturePath, hashC0Content, loadC0Artifact, type C0Content } from './c0Artifact';
 
 const baseContent: C0Content = {
@@ -45,4 +47,24 @@ test('loadC0Artifact はケース ID 不一致・ハッシュ不一致を拒否�
   expect(() => loadC0Artifact(dir, 'case-a', 'tampered')).toThrow('ハッシュが一致しません');
 
   expect(() => loadC0Artifact(dir, 'case-a', 'missing')).toThrow('見つかりません');
+});
+
+
+test('既存の全凍結 C0 は由来フィールド無しのままハッシュ検証を通る', () => {
+  const loaded = CASES.flatMap(({ id }) => readdirSync(c0Dir(FIXTURES, id)).filter((name) => name.endsWith('.json'))
+    .map((name) => loadC0Artifact(FIXTURES, id, name.slice(0, -5))));
+  expect(loaded).toHaveLength(6);
+  for (const artifact of loaded) expect(artifact).not.toHaveProperty('source');
+});
+
+test('取り込みの由来もハッシュに含まれ、元ファイル名の改変を検出する', () => {
+  const content: C0Content = { ...baseContent, source: 'import', sourceFilename: 'search_formula.md' };
+  const dir = mkdtempSync(join(tmpdir(), 'c0-import-hash-'));
+  mkdirSync(c0Dir(dir, 'case-a'), { recursive: true });
+  const path = c0FixturePath(dir, 'case-a', 'imported');
+  const sha256 = hashC0Content(content);
+  writeFileSync(path, JSON.stringify({ ...content, sha256 }));
+  expect(loadC0Artifact(dir, 'case-a', 'imported').source).toBe('import');
+  writeFileSync(path, JSON.stringify({ ...content, sourceFilename: 'other.md', sha256 }));
+  expect(() => loadC0Artifact(dir, 'case-a', 'imported')).toThrow('ハッシュ');
 });

@@ -187,3 +187,19 @@ test('候補の事後計測も +label のキーを読み、ラベル無し結果
   expect(JSON.parse(readFileSync(join(labeledDir, 'run.json'), 'utf8')).rejectedCandidates).toHaveLength(2);
   expect(readFileSync(join(plainDir, 'run.json'), 'utf8')).toBe(original);
 });
+
+
+test('名前付き集合も run.ts と同じ分割キーで結果を読む', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'candidate-named-'));
+  const result = { ...makeResult(), seedSplit: 'without-one' };
+  const dir = resultDir(root, 'default', result.id, 'live', 'without-one');
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, 'run.json');
+  writeFileSync(path, JSON.stringify(result));
+  const fetch = jest.fn().mockImplementation(async () => response(0));
+  await main(['--case', result.id, '--seeds', 'without-one'], root, deps(fetch));
+  const saved = JSON.parse(readFileSync(path, 'utf8'));
+  expect(saved.seedSplit).toBe('without-one');
+  expect(saved.rejectedCandidates).toHaveLength(2);
+  await expect(main(['--seeds', 's42', '--dry-run'], root)).rejects.toThrow('--seeds');
+});

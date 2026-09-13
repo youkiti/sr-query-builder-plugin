@@ -18,7 +18,7 @@ import type { EutilsDeps } from '../../src/lib/ncbi/eutils';
 import type { ProjectStoreDeps } from '../../src/features/project/projectStore';
 import { esearch } from '../../src/lib/ncbi/eutils';
 import { installDomParser } from './domParser';
-import { FIXTURES, SEED, computeHeldOut, loadSeedsFile, seedSplitId, validateSeeds } from './prepare';
+import { FIXTURES, SEED, computeHeldOut, loadSeedsFile, parseSeedSplit, seedSplitId, validateSeeds, type SeedSplit } from './prepare';
 import { capturedGold, createEvalFetch, evaluateSearch, redact, seedTitles } from './ncbiEval';
 import { calculateMetrics, compareMetrics } from './metrics';
 import { loadC0Artifact, type C0Variant } from './c0Artifact';
@@ -77,8 +77,8 @@ export interface ParsedArgs {
   profile: { id: string; maxHits: number; maxIterations: number };
   /** tight-1000 または --max-hits による事後探索条件かどうか（default は false）。 */
   postHoc: boolean;
-  /** シード分割の乱数。既定は SEED（`fixtures/<id>/seeds.json`）。 */
-  seed: number;
+  /** シード分割の乱数または集合名。既定は SEED（`fixtures/<id>/seeds.json`）。 */
+  seed: SeedSplit;
   /** --c0 で指定した凍結 C0 の名前（`fixtures/<id>/c0/<name>.json`、拡張子なし）。 */
   c0Name?: string;
   label?: string;
@@ -118,11 +118,7 @@ export function parseArgs(args: string[]): ParsedArgs {
     profile = found;
     postHoc = found.postHoc;
   }
-  let seed = SEED;
-  if (seedArg !== undefined) {
-    seed = Number(seedArg);
-    if (!Number.isSafeInteger(seed)) throw new Error('--seeds には整数を指定してください');
-  }
+  const seed = seedArg === undefined ? SEED : parseSeedSplit(seedArg);
   return { profile, ids: selected ? [selected] : CASES.map((item) => item.id), dryRun, postHoc, seed, c0Name, label };
 }
 
@@ -190,7 +186,7 @@ export async function executeCase(fixture: BenchCase, audit: GoldAudit, protocol
       .filter((study) => study.pmids.length > 0) })).filter((group) => group.pmids.length > 0);
   // held-out は「選択した分割のシード群を除いた残り全群」。分割ごとに実行時に求め、case.json の値は既定分割にしか対応しない。
   const heldOut = computeHeldOut(groups, seeds);
-  result.seedSplit = seedSplitId(seeds.seed);
+  result.seedSplit = seedSplitId(seeds.name ?? seeds.seed);
   result.denominator = { groups, heldOut, outsideDatePmids: allPmids.filter((pmid) => !inDate.includes(pmid)),
     outsideDateGroups: fixture.gold.filter((group) => !groups.some((g) => g.id === group.id)).map((g) => g.id),
     manualReviewPending: audit.manual_review };
@@ -259,7 +255,7 @@ export function decideExisting(existing: RunResult, profile: Pick<ParsedArgs['pr
   throw new Error(`別コミット（既存=${existing.gitCommit?.slice(0, 12) ?? '欠測'}, 現在=${gitCommit?.slice(0, 12) ?? '欠測'}）の完了結果があります。比較用に残すなら --label を付けて実行してください`);
 }
 
-export async function main(args = process.argv.slice(2)): Promise<void> {
+export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES, resultsDir = RESULTS): Promise<void> {
   const { ids, dryRun, profile, postHoc, seed, c0Name, label } = parseArgs(args);
   if (!dryRun) {
     config();
@@ -271,7 +267,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   const c0Key = c0Name ?? 'live';
   const gitCommit = getGitCommit();
   for (const id of ids) {
-    const dir = resultDir(RESULTS, profile.id, id, c0Key, splitId, label);
+    const dir = resultDir(resultsDir, profile.id, id, c0Key, splitId, label);
     const resultPath = join(dir, 'run.json');
     if (!dryRun && existsSync(resultPath)) {
       try {
@@ -306,7 +302,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     };
     try {
       if (!dryRun) mkdirSync(join(attemptDir, 'llm'), { recursive: true });
-      const fixtureDir = join(FIXTURES, id);
+      const fixtureDir = join(fixturesDir, id);
       const fixture = JSON.parse(readFileSync(join(fixtureDir, 'case.json'), 'utf8')) as BenchCase;
       const audit = JSON.parse(readFileSync(join(fixtureDir, 'audit.json'), 'utf8')) as GoldAudit;
       const protocolText = readFileSync(join(fixtureDir, fixture.protocolPath), 'utf8');
@@ -316,7 +312,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       // --c0 の検証（ケース ID・ハッシュ・シード分割の整合）はネットワーク不要なので dry-run でも行う。
       let frozenC0: FrozenC0Input | undefined;
       if (c0Name) {
-        const artifact = loadC0Artifact(FIXTURES, id, c0Name);
+        const artifact = loadC0Artifact(fixturesDir, id, c0Name);
         if (artifact.seedSplit !== null && artifact.seedSplit !== splitId) {
           throw new Error(`凍結 C0 のシード分割 (${artifact.seedSplit}) が実行時の分割 (${splitId}) と一致しません`);
         }

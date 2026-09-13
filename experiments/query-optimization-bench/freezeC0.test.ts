@@ -2,7 +2,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { generateC0Content, main, parseFreezeArgs } from './freezeC0';
+import { generateC0Content, loadFreezeSeeds, main, parseFreezeArgs } from './freezeC0';
 import { hashC0Content } from './c0Artifact';
 import { extractProtocol } from '../../src/features/formula/skills/extractProtocol';
 import { generateDraftFormula } from '../../src/app/services/draftService';
@@ -49,12 +49,12 @@ test('parseFreezeArgs は必須引数を検証し、既定 draft=1・seed=SEED �
   expect(() => parseFreezeArgs(['--case', 'r1-mindfulness-smoking'])).toThrow('criteria-only または seeded');
   expect(() => parseFreezeArgs(['--case', 'r1-mindfulness-smoking', '--variant', 'other'])).toThrow('criteria-only または seeded');
   expect(() => parseFreezeArgs(['--case', 'r1-mindfulness-smoking', '--variant', 'seeded', '--draft', '0'])).toThrow('正の整数');
-  expect(() => parseFreezeArgs(['--case', 'r1-mindfulness-smoking', '--variant', 'seeded', '--seeds', 'abc'])).toThrow('整数');
+  expect(() => parseFreezeArgs(['--case', 'r1-mindfulness-smoking', '--variant', 'seeded', '--seeds', 'Invalid'])).toThrow('整数');
 });
 
 test('generateC0Content: criteria-only は efetchArticles を呼ばず、seedContext を空にする', async () => {
   const content = await generateC0Content({ caseId: 'r1-mindfulness-smoking', variant: 'criteria-only', draftIndex: 1, seedSplit: null,
-    protocolText: 'protocol', seeds }, { llmFactory, eutils: { fetch: jest.fn() } });
+    protocolText: 'protocol' }, { llmFactory, eutils: { fetch: jest.fn() } });
   expect(efetchArticles).not.toHaveBeenCalled();
   expect(content.seedContext).toBeNull();
   expect(content.formula).toEqual(formula);
@@ -239,4 +239,37 @@ test('main: 既定分割は接尾辞なし、既定以外の分割は名前に s
     network.mockRestore();
     if (originalKey === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = originalKey;
   }
+});
+
+
+test('criteria-only は --seeds を拒否し、未指定ならシードの読み込み・検証を省く', () => {
+  expect(() => parseFreezeArgs(['--case', 'r1-mindfulness-smoking', '--variant', 'criteria-only', '--seeds', '42']))
+    .toThrow('criteria-only では --seeds は指定できません');
+  const load = jest.fn(() => { throw new Error('シードファイルがありません'); });
+  expect(loadFreezeSeeds('criteria-only', '/unused', 20260912, groups, load)).toBeUndefined();
+  expect(load).not.toHaveBeenCalled();
+  expect(() => loadFreezeSeeds('seeded', '/unused', 20260912, groups, load)).toThrow('シードファイルがありません');
+  expect(() => loadFreezeSeeds('seeded', '/unused', 20260912, [], () => seeds)).toThrow('群構造');
+});
+
+test('main: seeded はシードファイル必須で seed の自己申告不一致を拒否する', async () => {
+  const fixturesDir = mkdtempSync(join(tmpdir(), 'freezec0-required-'));
+  writeFixture(fixturesDir, 'r1-mindfulness-smoking');
+  const args = ['--case', 'r1-mindfulness-smoking', '--variant', 'seeded', '--seeds', '42', '--dry-run'];
+  await expect(main(args, fixturesDir)).rejects.toThrow('seeds-42.json が見つかりません');
+  writeFileSync(join(fixturesDir, 'r1-mindfulness-smoking', 'seeds-42.json'), JSON.stringify(seeds));
+  await expect(main(args, fixturesDir)).rejects.toThrow('要求した分割（42）と一致しません');
+});
+
+
+test('名前付き集合も seeded の分割指定として受け取り、criteria-only では拒否する', () => {
+  const args = ['--case', 'r1-mindfulness-smoking', '--variant', 'seeded', '--seeds', 'without-one'];
+  expect(parseFreezeArgs(args).seed).toBe('without-one');
+  expect(() => parseFreezeArgs(args.map((arg) => arg === 'seeded' ? 'criteria-only' : arg))).toThrow('criteria-only では --seeds');
+});
+
+test('seeded はシード引数を省略した直接呼び出しも拒否する', async () => {
+  await expect(generateC0Content({ caseId: 'r1-mindfulness-smoking', variant: 'seeded', draftIndex: 1,
+    seedSplit: 's20260912', protocolText: 'protocol' }, { llmFactory, eutils: { fetch: jest.fn() } })).rejects.toThrow('シードが必要');
+  expect(generateDraftFormula).not.toHaveBeenCalled();
 });

@@ -61,6 +61,7 @@ npm run eval:freeze-c0 -- --dry-run --case r1-mindfulness-smoking --variant seed
 - 既存ファイルは上書きしない（`wx`）。作り直したいときは手動で削除してから再実行する
 - 内容には `caseId` / `variant` / `draftIndex` / `seedSplit`（seeded は既定分割でも `s20260912` を記録する。ファイル名の接尾辞省略とは別の話） / `targetHits`（常に 2,000）/ `model` / `gitCommit` / `gitDirty` / 生成した `protocol` / `blocks` / `formula` / `formulaMd` / `seedContext` を保持し、これらから計算した `sha256` を同梱する
 - seeded で凍結シードの一部を efetch で取得できなければ（NCBI 側の一時的な欠落等）、空の `seedContext` にフォールバックせず失敗させる。「seeded を名乗るが実質シード無しの C0」を静かに凍結しない
+- criteria-only の凍結・取り込みではシードファイルを読み込まず、`--seeds` の同時指定は意味が無いため拒否する
 - `--seeds <int>` は分割の乱数そのもの。ファイル内の `seed` が要求値と食い違っていれば（手動編集・コピー間違い等）実行前に拒否する
 - LLM のプロンプト・レスポンス全文は評価計画 §6 のとおり `results/freeze-c0/<caseId>/<出力ファイル名>/llm/` に保存する（run.ts の実行と同じ `loggedFactory` を再利用。`results/` は gitignore 対象）。ハッシュ対象の内容にはログパスを含めない
 - `eval:optimize -- --c0 <name>`（`fixtures/<case>/c0/<name>.json` の拡張子抜きファイル名）を渡すと、その run は `extractProtocol` / `generateDraftFormula` を呼ばず、凍結内容をそのまま C0 として使う。ケース ID 不一致・ハッシュ不一致（改ざん・破損）・シード分割の不一致は実行前に拒否する
@@ -96,6 +97,52 @@ npm run eval:compare -- results/default/r1-mindfulness-smoking/seeded-draft1/s20
 `eval:compare` は、両方が凍結 C0（sha256 付き）であり、その sha256・ケース・シード分割・`maxHits`・`maxIterations` が一致する場合だけ比較する。不一致なら拒否する。表には `label`・`model`・`gitDirty`・`postHoc`（欠落は「欠測」）を表示する。モデルが違う場合は拒否せず、表の直後に「⚠ モデルが異なるため、差にはモデルの違いが混ざる」、どちらかの `gitDirty` が true なら「⚠ 作業ツリーが汚れた状態の run を含む」を表示する。
 
 `CASES` の各ケースには `role`（`development` | `confirmation`）を付けてある。現行 3 件はすべて `development`（ハーネスの弱点発見用）。`confirmation` ケースの追加は別途、事前登録した選定基準で行う（このチャンクでは追加しない）。
+
+## 名前付きシード集合
+
+特定の PMID を除くなど、手動で選んだ集合は `fixtures/<case>/seeds-<name>.json` に置きます。既存の `seeds.json` は変更しません。名前は `^[a-z][a-z0-9-]{0,31}$`（英小文字で始まる英小文字・数字・ハイフンの 1〜32 文字）に限り、負の整数を含む乱数分割 id と区別するため `^s-?\d+$`（例: `s20260912`、`s-42`）は使えません。
+
+ファイルは次の形式です。`groupId` と `pmid` は対象ケースの `case.json` の `gold` から、異なる 3 群について各 1 PMID を選びます。以下の仮の値を置き換え、出版年が不明なら `year` は `null` とします。除外したい PMID を `selections` に含めないようにします。
+
+```json
+{
+  "name": "without-one",
+  "selections": [
+    { "groupId": "群 A の id", "pmid": "群 A の PMID", "year": null },
+    { "groupId": "群 B の id", "pmid": "群 B の PMID", "year": null },
+    { "groupId": "群 C の id", "pmid": "群 C の PMID", "year": null }
+  ]
+}
+```
+
+`name` は要求した名前と一致させ、乱数分割用の `seed` フィールドは入れません。取り違え・群構造の不一致は実行前に拒否します。`eval:prepare` に名前付き集合の生成機能はありません。整数指定のファイル名・形式・既定分割は従来どおりです。
+
+```powershell
+npm run eval:freeze-c0 -- --case r2-pdr-prognostic --variant seeded --seeds without-one --draft 2
+npm run eval:optimize -- --case r2-pdr-prognostic --seeds without-one --c0 seeded-draft2-without-one --dry-run
+npm run eval:candidates -- --case r2-pdr-prognostic --seeds without-one --c0 seeded-draft2-without-one --dry-run
+```
+
+この例の分割 id は `without-one` そのものです。C0 の `seedSplit`、`run.json` の `seedSplit`、結果パス `results/default/r2-pdr-prognostic/seeded-draft2-without-one/without-one/run.json` に同じ値が入ります。
+
+## 手元の検索式を凍結 C0 に取り込む
+
+`eval:import-c0` は `search_formula.md` 形式（`## PubMed/MEDLINE` セクション内にコードブロックと `#N` 行）を既存パーサで読み込みます。式の生成は行わず、`protocol` と `blocks` は通常の凍結と同じ `extractProtocol` の LLM 呼び出しで作ります。取り込んだ非結合ブロック数と抽出した `blocks.blocks` の数が一致しなければ停止します。
+
+```powershell
+npm run eval:import-c0 -- --case r2-pdr-prognostic --variant criteria-only --formula ./search_formula.md --draft 2 --dry-run
+# 本実行には Gemini / NCBI への通信が必要
+npm run eval:import-c0 -- --case r2-pdr-prognostic --variant criteria-only --formula ./search_formula.md --draft 2
+npm run eval:import-c0 -- --case r2-pdr-prognostic --variant seeded --formula ./search_formula.md --seeds without-one --draft 2
+```
+
+`--draft` は既定 1、seeded の `--seeds` は整数・名前付き集合の両方に対応します。seeded は通常の凍結と共通の efetch → シード文脈構築を使い、部分欠落でも停止します。凍結前の非結合ブロックごと＋式全体の ESearch（`retmax: 0`、構文エラー時は停止）も共通です。
+
+出力名・ハッシュ・上書き禁止（`wx`）・LLM ログ保存先は `eval:freeze-c0` と同じです。生成済みファイルがある場合は別の `--draft` 番号を指定してください。由来として `source: "import"` と `sourceFilename`（元ファイルのベース名）をハッシュ対象に含めます。これらは取り込み時だけ追加する任意フィールドで、既存 C0 に補完しません。従来の凍結ファイルのハッシュは変わらず、取り込んだ C0 も `eval:optimize -- --c0 <拡張子なしの名前>` で読めます。
+
+`--dry-run` は通信・書き込みをせず、式のパースと参照展開、seeded のシード検証、出力先を表示します。LLM 抽出とのブロック数照合・NCBI の実測は本実行まで未検証です。
+
+**issue #106 の受け入れ基準（R2 の危険な削除を自動採用しないこと／未捕捉シード 913749 の阻害ブロックを特定できること）の実 API 検証は未実施です。** ここでは再現用入力を指定する手段を用意するところまでとし、基準の判定は API キーとネットワークを使える環境で別途行います。
 
 ## gold の監査と凍結
 

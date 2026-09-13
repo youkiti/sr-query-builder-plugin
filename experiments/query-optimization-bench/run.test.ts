@@ -1,4 +1,9 @@
 /** @jest-environment node */
+import { cpSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { FIXTURES, loadSeedsFile, SEED, seedSplitId } from './prepare';
+import { hashC0Content, loadC0Artifact } from './c0Artifact';
+import { CASES } from './types';
 import { join } from 'node:path';
 import { decideExisting, resultDir, loggedFactory, main, memoryCheckpoint, parseArgs } from './run';
 import { reportRows, renderCsv, renderMarkdown } from './report';
@@ -28,7 +33,7 @@ test('--max-hits は事後探索の custom プロファイルを発行し、--pr
 });
 test('--seeds は分割用の乱数を受け取り、既定は SEED', () => {
   expect(parseArgs(['--seeds', '42']).seed).toBe(42);
-  expect(() => parseArgs(['--seeds', 'abc'])).toThrow();
+  expect(() => parseArgs(['--seeds', 'Invalid'])).toThrow();
 });
 test('--c0 は名前をそのまま受け取る', () => {
   expect(parseArgs(['--c0', 'seeded-draft1']).c0Name).toBe('seeded-draft1');
@@ -106,4 +111,55 @@ test('dry-run は label を表示する', async () => {
     await main(['--dry-run', '--label', 'baseline']);
     expect(stdout.mock.calls.some(([text]) => String(text).includes('label=baseline'))).toBe(true);
   } finally { stdout.mockRestore(); }
+});
+
+
+test('既存の全凍結 C0 は optimize の --c0 検証経路を通信無しで通る', async () => {
+  const network = jest.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('実 API 禁止'));
+  const stdout = jest.spyOn(process.stdout, 'write').mockReturnValue(true);
+  try {
+    for (const { id } of CASES) {
+      for (const name of ['criteria-only-draft1', 'seeded-draft1']) {
+        await main(['--case', id, '--c0', name, '--dry-run']);
+        expect(stdout).toHaveBeenLastCalledWith(expect.stringContaining(`c0=${name}`));
+        expect(stdout).toHaveBeenLastCalledWith(expect.stringContaining('dry-run OK'));
+      }
+    }
+    expect(network).not.toHaveBeenCalled();
+  } finally { network.mockRestore(); stdout.mockRestore(); }
+});
+
+test('名前付き集合と取り込み C0 を optimize が照合し、名前を結果キーに使用する', async () => {
+  const id = CASES[0].id;
+  const root = mkdtempSync(join(tmpdir(), 'run-named-'));
+  const fixturesDir = join(root, 'fixtures');
+  const resultsDir = join(root, 'results');
+  const dir = join(fixturesDir, id);
+  mkdirSync(dir, { recursive: true });
+  cpSync(join(FIXTURES, id), dir, { recursive: true });
+  const seeds = { name: 'without-one', selections: loadSeedsFile(dir, SEED).selections };
+  writeFileSync(join(dir, 'seeds-without-one.json'), JSON.stringify(seeds));
+  const { sha256, ...base } = loadC0Artifact(fixturesDir, id, 'seeded-draft1');
+  expect(hashC0Content(base)).toBe(sha256);
+  const content = { ...base, source: 'import' as const, sourceFilename: 'search_formula.md', seedSplit: 'without-one' };
+  const name = 'seeded-draft2-without-one';
+  writeFileSync(join(dir, 'c0', `${name}.json`), JSON.stringify({ ...content, sha256: hashC0Content(content) }));
+  const network = jest.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('実 API 禁止'));
+  const stdout = jest.spyOn(process.stdout, 'write').mockReturnValue(true);
+  const originalExitCode = process.exitCode;
+  try {
+    const args = ['--case', id, '--seeds', 'without-one', '--c0', name, '--dry-run'];
+    await main(args, fixturesDir, resultsDir);
+    expect(stdout).toHaveBeenLastCalledWith(expect.stringContaining(`seedSplit=without-one, c0=${name}`));
+    expect(stdout).toHaveBeenLastCalledWith(expect.stringContaining('dry-run OK'));
+    expect(resultDir(resultsDir, 'default', id, name, seedSplitId(parseArgs(['--seeds', 'without-one']).seed)))
+      .toBe(join(resultsDir, 'default', id, name, 'without-one'));
+    await main(['--case', id, '--seeds', 'without-one', '--c0', 'seeded-draft1', '--dry-run'], fixturesDir, resultsDir);
+    expect(stdout).toHaveBeenLastCalledWith(expect.stringContaining('シード分割 (s20260912) が実行時の分割 (without-one) と一致しません'));
+    writeFileSync(join(dir, 'seeds-without-one.json'), JSON.stringify({ ...seeds, name: 'other' }));
+    await main(args, fixturesDir, resultsDir);
+    expect(stdout).toHaveBeenLastCalledWith(expect.stringContaining('要求した集合'));
+    expect(network).not.toHaveBeenCalled();
+    expect(existsSync(resultsDir)).toBe(false);
+  } finally { process.exitCode = originalExitCode; network.mockRestore(); stdout.mockRestore(); }
 });
