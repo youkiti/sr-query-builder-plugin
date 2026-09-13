@@ -3,11 +3,14 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { main } from './candidates';
-import { measureRejectedCandidates } from './run';
+import { measureRejectedCandidates, resultDir } from './run';
 import { calculateMetrics, compareMetrics } from './metrics';
 import { CASES, type RunResult } from './types';
 import type { OptimizationTrial } from '../../src/features/formula/skills/optimizeQuery';
 import type { EutilsDeps } from '../../src/lib/ncbi/eutils';
+
+/** run.ts と同じキー(live / 既定分割 s20260912)で run.json を置くディレクトリ。 */
+const dirFor = (root: string, profileId: string, caseId: string) => resultDir(root, profileId, caseId, 'live', 's20260912');
 
 const groups = ['1', '2'].map((pmid) => ({ id: pmid, pmids: [pmid], members: [{ studyId: pmid, pmids: [pmid] }] }));
 const trial = (candidateId: string, accepted = false): OptimizationTrial => ({
@@ -80,7 +83,7 @@ test('API and formula failures remain unscored, while pending manual review supp
 test('candidate-only CLI preserves existing data, skips measured candidates, and dry-run is read-only', async () => {
   const root = mkdtempSync(join(tmpdir(), 'candidate-test-'));
   const result = { ...makeResult(), extraExistingData: { preserve: true } };
-  const dir = join(root, 'default', result.id);
+  const dir = dirFor(root, 'default', result.id);
   mkdirSync(dir, { recursive: true });
   const path = join(dir, 'run.json');
   const original = JSON.stringify(result);
@@ -106,7 +109,7 @@ test('no rejected candidates is an explicit no-op and missing denominator is an 
   const root = mkdtempSync(join(tmpdir(), 'candidate-empty-'));
   const result = makeResult();
   result.optimization!.trials = [trial('accepted', true)];
-  const dir = join(root, 'default', result.id);
+  const dir = dirFor(root, 'default', result.id);
   mkdirSync(dir, { recursive: true });
   const path = join(dir, 'run.json');
   const original = JSON.stringify(result);
@@ -128,7 +131,7 @@ test.each([
   const root = mkdtempSync(join(tmpdir(), 'candidate-profile-'));
   const result = makeResult();
   const originals = ['default', 'tight-1000'].map((profileId, index) => {
-    const dir = join(root, profileId, result.id);
+    const dir = dirFor(root, profileId, result.id);
     mkdirSync(dir, { recursive: true });
     const path = join(dir, 'run.json');
     const original = JSON.stringify({ ...result, profileId,
@@ -137,7 +140,7 @@ test.each([
     return { path, original };
   });
   await main(['--case', result.id, '--dry-run', ...args], root);
-  expect(output).toHaveBeenCalledWith(`${result.id}: dry-run; 却下候補=${count}, API calls=0\n`);
+  expect(output).toHaveBeenCalledWith(`${result.id}: dry-run; label=-, 却下候補=${count}, API calls=0\n`);
   for (const { path, original } of originals) expect(readFileSync(path, 'utf8')).toBe(original);
 });
 
@@ -145,7 +148,7 @@ test.each([true, false])('missing run.json logs one line and continues (dry-run=
   const root = mkdtempSync(join(tmpdir(), 'candidate-missing-'));
   const result = makeResult();
   result.optimization!.trials = [];
-  const dir = join(root, 'tight-1000', result.id);
+  const dir = dirFor(root, 'tight-1000', result.id);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'run.json'), JSON.stringify({ ...result, profileId: 'tight-1000' }));
   const fetch = jest.fn();
@@ -154,16 +157,33 @@ test.each([true, false])('missing run.json logs one line and continues (dry-run=
     expect(output.mock.calls.filter(([line]) => line === `${id}: run.json が存在しないためスキップ (profile=tight-1000)\n`)).toHaveLength(1);
   }
   expect(output).toHaveBeenCalledWith(dryRun
-    ? `${result.id}: dry-run; 却下候補=0, API calls=0\n`
+    ? `${result.id}: dry-run; label=-, 却下候補=0, API calls=0\n`
     : `${result.id}: 却下候補なし; 追加計測なし\n`);
   expect(fetch).not.toHaveBeenCalled();
 });
 
 test('invalid run.json remains an error', async () => {
   const root = mkdtempSync(join(tmpdir(), 'candidate-invalid-'));
-  const dir = join(root, 'default', CASES[0].id);
+  const dir = dirFor(root, 'default', CASES[0].id);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'run.json'), '{');
   await expect(main(['--case', CASES[0].id, '--dry-run'], root)).rejects.toThrow(SyntaxError);
   expect(output).not.toHaveBeenCalled();
+});
+
+
+test('候補の事後計測も +label のキーを読み、ラベル無し結果を変更しない', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'candidate-label-'));
+  const result = makeResult();
+  const plainDir = dirFor(root, 'default', result.id);
+  const labeledDir = resultDir(root, 'default', result.id, 'live', 's20260912', 'candidate');
+  const original = JSON.stringify(result);
+  for (const dir of [plainDir, labeledDir]) {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'run.json'), original);
+  }
+  const fetch = jest.fn().mockImplementation(async () => response(0));
+  await main(['--case', result.id, '--label', 'candidate'], root, deps(fetch));
+  expect(JSON.parse(readFileSync(join(labeledDir, 'run.json'), 'utf8')).rejectedCandidates).toHaveLength(2);
+  expect(readFileSync(join(plainDir, 'run.json'), 'utf8')).toBe(original);
 });

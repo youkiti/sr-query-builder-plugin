@@ -1,9 +1,12 @@
 /** @jest-environment node */
-import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { auditGold, buildProtocol, prepare, selectSeeds, validateSeeds, type GoldRecord, type ParsedReview } from './prepare';
-import { CASES, type StudyGroup } from './types';
+import {
+  FIXTURES, SEED, auditGold, buildProtocol, computeHeldOut, loadSeedsFile, parsePrepareArgs, prepare, selectSeeds, seedSplitId,
+  validateSeeds, type GoldRecord, type ParsedReview,
+} from './prepare';
+import { CASES, type BenchCase, type StudyGroup } from './types';
 
 const parsed: ParsedReview = { title: 'title', objectives: 'objective', eligibility: {
   types_of_studies: 'study', types_of_participants: 'people', types_of_interventions: 'intervention', types_of_outcomes: 'outcome',
@@ -58,4 +61,48 @@ test('再準備しても seeds.json を書き直さず 3 ケースを生成す�
 test('missing benchmark directory explains the environment variable to configure', () => {
   const missing = join(mkdtempSync(join(tmpdir(), 'prepare-missing-')), 'absent');
   expect(() => prepare(missing)).toThrow('COCHRANE_BENCH_DIR');
+});
+
+test('computeHeldOut は既定 split で 3 ケースすべての case.json の heldOut と一致する（実測）', () => {
+  for (const definition of CASES) {
+    const fixture = JSON.parse(readFileSync(join(FIXTURES, definition.id, 'case.json'), 'utf8')) as BenchCase;
+    expect(computeHeldOut(fixture.gold, fixture.seeds)).toEqual(fixture.heldOut);
+  }
+});
+
+test('seedSplitId は既定 SEED を s20260912 に変換し、loadSeedsFile は seeds.json/seeds-<n>.json を読み分ける', () => {
+  expect(seedSplitId(SEED)).toBe('s20260912');
+  expect(seedSplitId(42)).toBe('s42');
+  const fixtureDir = join(FIXTURES, CASES[0].id);
+  expect(loadSeedsFile(fixtureDir, SEED).seed).toBe(SEED);
+  expect(() => loadSeedsFile(fixtureDir, 424242)).toThrow('eval:prepare -- --seed 424242');
+});
+
+test('parsePrepareArgs は --seed だけを読み、未指定なら undefined', () => {
+  expect(parsePrepareArgs([])).toEqual({});
+  expect(parsePrepareArgs(['--seed', '42'])).toEqual({ seed: 42 });
+  expect(() => parsePrepareArgs(['--seed', 'abc'])).toThrow('整数');
+  expect(() => parsePrepareArgs(['--seed'])).toThrow('整数');
+});
+
+test('--seed で追加のシード分割を凍結し、default と異なる 3 群を選ぶことがある。再実行しても上書きしない', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'optimize-prepare-seed-'));
+  const fixtures = join(dir, 'fixtures');
+  mkdirSync(join(dir, 'data/processed/cc-by/gold'), { recursive: true });
+  mkdirSync(join(dir, 'data/interim/cc-by/parsed'), { recursive: true });
+  writeFileSync(join(dir, 'data/processed/cc-by/gold/task2_search_screen.jsonl'), CASES.map((c) => JSON.stringify({ ...gold, pmcid: c.pmcid })).join('\n'));
+  for (const c of CASES) writeFileSync(join(dir, `data/interim/cc-by/parsed/${c.pmcid}.json`), JSON.stringify(parsed));
+  prepare(dir, fixtures, 555);
+  const altPath = join(fixtures, CASES[0].id, `seeds-555.json`);
+  expect(existsSync(altPath)).toBe(true);
+  const alt = JSON.parse(readFileSync(altPath, 'utf8'));
+  expect(alt.seed).toBe(555);
+  validateSeeds(alt, auditGold(gold, parsed).groups);
+  const frozen = readFileSync(altPath, 'utf8') + ' ';
+  writeFileSync(altPath, frozen);
+  prepare(dir, fixtures, 555);
+  expect(readFileSync(altPath, 'utf8')).toBe(frozen);
+  // 既定 SEED を明示しても、既定分割と同じなので追加ファイルは作らない。
+  prepare(dir, fixtures, SEED);
+  expect(existsSync(join(fixtures, CASES[0].id, `seeds-${SEED}.json`))).toBe(false);
 });

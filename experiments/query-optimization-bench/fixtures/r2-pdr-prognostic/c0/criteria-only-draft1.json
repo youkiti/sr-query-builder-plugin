@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "caseId": "r2-pdr-prognostic",
+  "variant": "criteria-only",
+  "draftIndex": 1,
+  "seedSplit": null,
+  "targetHits": 2000,
+  "model": "gemini-3.5-flash",
+  "createdAt": "2026-09-13T06:57:29.387Z",
+  "gitCommit": "634d6bb8526b8a7ac43af2a342eac8500129499b",
+  "gitDirty": true,
+  "protocol": {
+    "frameworkType": "peco",
+    "researchQuestion": "What are the prognostic factors for the development and progression of proliferative diabetic retinopathy in people with diabetic retinopathy?",
+    "inclusionCriteria": "Adults (>= 18 years) with NPDR or PDR with less than HRC-PDR\nProspective or retrospective cohort and case-control longitudinal studies, and longitudinal registry data\nEvaluation of prognostic factors (demographics, clinical data, retinal biomarkers) for the development and progression of PDR\nOutcomes: development of PDR (NVD/NVE or laser treatment) or progression to HRC-PDR",
+    "exclusionCriteria": "Participants with previous treatment for DR\nRandomised controlled trials (RCTs), cross-sectional studies, case reports, editorials, and letters\nStudies evaluating general microvascular complications without specific PDR data\nPrognostic factors involving invasive procedures (e.g., aqueous/vitreous sampling)",
+    "studyDesign": "observational",
+    "blocks": [
+      {
+        "blockLabel": "Diabetic Retinopathy",
+        "description": "糖尿病網膜症（DR）または非増殖糖尿病網膜症（NPDR）の患者群を特定するための概念。"
+      },
+      {
+        "blockLabel": "Proliferative Diabetic Retinopathy",
+        "description": "増殖糖尿病網膜症（PDR）への進行や発症、または高リスクPDR（HRC-PDR）への悪化を特定するための概念。"
+      },
+      {
+        "blockLabel": "Prognosis",
+        "description": "予後因子、予測、またはコホート研究などの縦断的観察研究デザインを特定するための概念。"
+      }
+    ],
+    "combinationExpression": "#1 AND #2 AND #3",
+    "sourceType": "markdown",
+    "sourceFilename": "protocol.md",
+    "rawTextRef": null,
+    "rawTextPreview": "# Prognostic factors for the development and progression of proliferative diabetic retinopathy in people with diabetic retinopathy\r\n\r\n## Objectives\r\nTo assess prognostic factors for predicting the occurrence of PDR in individuals with diabetic retinopathy. To assess prognostic risk factors for predicting the progression of PDR from less than HRC‐PDR to HRC‐PDR.\r\n\r\n## types_of_studies\r\nEligible study designs included prospective or retrospective cohort and case‐control longitudinal studies includ",
+    "rawTextInline": "# Prognostic factors for the development and progression of proliferative diabetic retinopathy in people with diabetic retinopathy\r\n\r\n## Objectives\r\nTo assess prognostic factors for predicting the occurrence of PDR in individuals with diabetic retinopathy. To assess prognostic risk factors for predicting the progression of PDR from less than HRC‐PDR to HRC‐PDR.\r\n\r\n## types_of_studies\r\nEligible study designs included prospective or retrospective cohort and case‐control longitudinal studies including participants who have not had previous treatment for DR. Although we initially planned to include randomised controlled trials (RCTs) evaluating therapeutic interventions to prevent progression of DR where there was a control, untreated arm, ultimately we decided not to include these (see Differences between protocol and review). We also included studies based on longitudinal registry data. It was a mandatory requirement for inclusion in the review that studies had to evaluate prognostic factors specifically for the development and progression of PDR, as opposed to generalised progression of DR. Studies investigating general microvascular complications of diabetes but including a subset of data related to factors involved in the development of PDR were eligible for inclusion if specific information on this group (PDR) was given. We excluded case reports, as they would have introduced selection bias, and editorials and letters to editors not containing primary data. We did not include cross‐sectional studies, as this type of study design is less appropriate for the evaluation of prognostic factors for the development or progression of disease.\r\n\r\n## types_of_participants\r\nThe target population consisted of adults (≥ 18 years of age) of any gender with NPDR or PDR with less than HRC‐PDR, diagnosed as per standard clinical practice. Studies including participants of all ethnicities, geographical locations, and socioeconomic status were eligible for inclusion. Any appropriate studies including a subset of relevant participants were considered as potentially eligible if data from this subset were given separately.\r\n\r\n## types_of_interventions\r\nThis review considered and included prognostic factor studies only. Specific prognostic factors of interest included, but were not restricted to: routinely collected patient demographics and information, such as age, gender, ethnicity, socioeconomic status, and smoking habits;frequently obtained standard clinical data, such as comorbidities (presence/absence of cardiovascular disease, cerebrovascular disease, nephropathy and specifically chronic kidney failure (defined as estimated GFR of < 60 mL/min/1.73 m2), peripheral neuropathy and specifically foot ulcers, amputation), BMI, neck/waist circumference, glycated haemoglobin, blood pressure, low‐density lipoprotein, high‐density lipoprotein, triglycerides; andfunctional and structural retinal biomarkers in the prognostic context of the development and progression of PDR. We excluded studies evaluating prognostic factors involving invasive procedures that cannot be practically undertaken in a clinical setting (such as aqueous/vitreous sampling) and are thus unlikely to be translatable to routine clinical practice. We expected that prognostic factors would generally have been measured at the time participants entered the studies, and indeed after diagnosis of DR or PDR. If measures of prognostic factors were available at other time points, and these coincided in more than one study, we planned to consider investigating them at these other time points.\r\n\r\n## types_of_outcomes\r\nThe development of PDR was determined by the presence of NVD or NVE, as diagnosed based on fundus examination, fundus photography, or fundus fluorescein angiography. We considered participants requiring laser treatment for PDR specifically to have progressed to the outcome of PDR. Progression from less than HRC‐PDR to HRC‐PDR. HRC‐PDR was defined according to the ETDRS as: i) NVD 0.5 disc area plus vitreous haemorrhage or pre‐retinal haemorrhage; ii) vitreous haemorrhage or pre‐retinal haemorrhage obscuring more than one disc area (Diabetic Retinopathy Study Research Group 1991). These features could have been determined by clinical examination or by the grading of ophthalmic images, both fundus photography and fundus fluorescein angiograms. Participants requiring laser treatment for HRC‐PDR specifically were considered as having progressed to the outcome of HRC‐PDR. The time horizon for the evaluation of health outcomes in this review was three years (± two years), eight years (± two years), or lifelong, if available. If not, we accepted and presented other time points.\r\n"
+  },
+  "blocks": {
+    "blocks": [
+      {
+        "blockLabel": "Diabetic Retinopathy",
+        "description": "糖尿病網膜症（DR）または非増殖糖尿病網膜症（NPDR）の患者群を特定するための概念。",
+        "aiGenerated": true,
+        "note": ""
+      },
+      {
+        "blockLabel": "Proliferative Diabetic Retinopathy",
+        "description": "増殖糖尿病網膜症（PDR）への進行や発症、または高リスクPDR（HRC-PDR）への悪化を特定するための概念。",
+        "aiGenerated": true,
+        "note": ""
+      },
+      {
+        "blockLabel": "Prognosis",
+        "description": "予後因子、予測、またはコホート研究などの縦断的観察研究デザインを特定するための概念。",
+        "aiGenerated": true,
+        "note": ""
+      }
+    ],
+    "combinationExpression": "#1 AND #2 AND #3"
+  },
+  "formula": {
+    "blocks": [
+      {
+        "id": "1",
+        "expression": "(Diabetic Retinopathy[Mesh] OR \"diabetic retinopath*\"[tiab] OR \"nonproliferative diabetic retinopath*\"[tiab] OR \"non-proliferative diabetic retinopath*\"[tiab] OR \"NPDR\"[tiab] OR \"preproliferative diabetic retinopath*\"[tiab] OR \"pre-proliferative diabetic retinopath*\"[tiab])",
+        "isCombination": false
+      },
+      {
+        "id": "2",
+        "expression": "(Diabetic Retinopathy[Mesh] OR Retinal Neovascularization[Mesh] OR \"proliferative diabetic retinopath*\"[tiab] OR \"PDR\"[tiab] OR \"high-risk proliferative diabetic retinopathy\"[tiab] OR \"HR-PDR\"[tiab] OR \"HRC-PDR\"[tiab] OR \"proliferative retinopath*\"[tiab])",
+        "isCombination": false
+      },
+      {
+        "id": "3",
+        "expression": "(Prognosis[Mesh] OR Disease Progression[Mesh] OR Risk Factors[Mesh] OR Cohort Studies[Mesh] OR Incidence[Mesh] OR Longitudinal Studies[Mesh] OR prognos*[tiab] OR predict*[tiab] OR course[tiab] OR history[tiab] OR progress*[tiab] OR develop*[tiab] OR worsen*[tiab] OR deteriorat*[tiab] OR onset[tiab] OR incidence[tiab] OR risk*[tiab] OR hazard*[tiab] OR cohort*[tiab] OR longitudinal*[tiab] OR follow-up*[tiab] OR followup*[tiab] OR prospective*[tiab])",
+        "isCombination": false
+      },
+      {
+        "id": "4",
+        "expression": "#1 AND #2 AND #3",
+        "isCombination": true
+      }
+    ],
+    "combinationExpression": "#1 AND #2 AND #3"
+  },
+  "formulaMd": "## PubMed/MEDLINE\n\n```\n#1 (Diabetic Retinopathy[Mesh] OR \"diabetic retinopath*\"[tiab] OR \"nonproliferative diabetic retinopath*\"[tiab] OR \"non-proliferative diabetic retinopath*\"[tiab] OR \"NPDR\"[tiab] OR \"preproliferative diabetic retinopath*\"[tiab] OR \"pre-proliferative diabetic retinopath*\"[tiab])\n#2 (Diabetic Retinopathy[Mesh] OR Retinal Neovascularization[Mesh] OR \"proliferative diabetic retinopath*\"[tiab] OR \"PDR\"[tiab] OR \"high-risk proliferative diabetic retinopathy\"[tiab] OR \"HR-PDR\"[tiab] OR \"HRC-PDR\"[tiab] OR \"proliferative retinopath*\"[tiab])\n#3 (Prognosis[Mesh] OR Disease Progression[Mesh] OR Risk Factors[Mesh] OR Cohort Studies[Mesh] OR Incidence[Mesh] OR Longitudinal Studies[Mesh] OR prognos*[tiab] OR predict*[tiab] OR course[tiab] OR history[tiab] OR progress*[tiab] OR develop*[tiab] OR worsen*[tiab] OR deteriorat*[tiab] OR onset[tiab] OR incidence[tiab] OR risk*[tiab] OR hazard*[tiab] OR cohort*[tiab] OR longitudinal*[tiab] OR follow-up*[tiab] OR followup*[tiab] OR prospective*[tiab])\n#4 #1 AND #2 AND #3\n```\n",
+  "seedContext": null,
+  "blockApproval": "auto",
+  "sha256": "544bfb28ed3fd9c8ec1492a603c2228c9fd9e2d7049b9be84552a42bcac274bb"
+}

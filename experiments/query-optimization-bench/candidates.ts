@@ -2,15 +2,18 @@ import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { config } from 'dotenv';
 import type { EutilsDeps } from '../../src/lib/ncbi/eutils';
-import { measureRejectedCandidates, parseArgs, RESULTS } from './run';
+import { measureRejectedCandidates, parseArgs, resultDir, RESULTS } from './run';
+import { seedSplitId } from './prepare';
 import { redact } from './ncbiEval';
 import type { RunResult } from './types';
 
 export async function main(args = process.argv.slice(2), resultsDir = RESULTS, eutils?: EutilsDeps): Promise<void> {
-  const { ids, dryRun, profile } = parseArgs(args);
+  const { ids, dryRun, profile, seed, c0Name, label } = parseArgs(args);
   if (!dryRun && !eutils) config();
+  const c0Key = c0Name ?? 'live';
+  const splitKey = seedSplitId(seed);
   for (const id of ids) {
-    const path = join(resultsDir, profile.id, id, 'run.json');
+    const path = join(resultDir(resultsDir, profile.id, id, c0Key, splitKey, label), 'run.json');
     let original: string;
     try { original = readFileSync(path, 'utf8'); }
     catch (err) {
@@ -22,7 +25,7 @@ export async function main(args = process.argv.slice(2), resultsDir = RESULTS, e
     if (result.id !== id) throw new Error(`${id}: run.json のケース ID が一致しません`);
     if (dryRun) {
       const count = result.optimization?.trials.filter((trial) => trial.kind === 'proposal' && !trial.accepted).length ?? 0;
-      process.stdout.write(`${id}: dry-run; 却下候補=${count}, API calls=0\n`);
+      process.stdout.write(`${id}: dry-run; label=${label ?? '-'}, 却下候補=${count}, API calls=0\n`);
       continue;
     }
     const candidates = await measureRejectedCandidates(result, eutils ?? { fetch: globalThis.fetch, apiKey: process.env.NCBI_API_KEY, strictCounts: true });
