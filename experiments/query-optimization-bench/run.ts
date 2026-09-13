@@ -19,7 +19,7 @@ import type { ProjectStoreDeps } from '../../src/features/project/projectStore';
 import { esearch } from '../../src/lib/ncbi/eutils';
 import { installDomParser } from './domParser';
 import { FIXTURES, SEED, computeHeldOut, loadSeedsFile, seedSplitId, validateSeeds } from './prepare';
-import { capturedGold, createEvalFetch, evaluateSearch, redact, seedTitles } from './ncbiEval';
+import { capturedGold, createEvalFetch, evaluateSearch, observeRateLimiter, redact, seedTitles } from './ncbiEval';
 import { calculateMetrics, compareMetrics } from './metrics';
 import { loadC0Artifact, type C0Variant } from './c0Artifact';
 import { getGitCommit, isGitDirty } from './gitInfo';
@@ -306,6 +306,9 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     };
     try {
       if (!dryRun) mkdirSync(join(attemptDir, 'llm'), { recursive: true });
+      progress({ process: { pid: process.pid, hasApiKey: Boolean(process.env.NCBI_API_KEY), caseCount: ids.length,
+        caseExecution: 'sequential', requestConcurrency: 'caller-dependent', externalConcurrency: 'unknown',
+        gitCommit, gitDirty: result.gitDirty, runId } });
       const fixtureDir = join(FIXTURES, id);
       const fixture = JSON.parse(readFileSync(join(fixtureDir, 'case.json'), 'utf8')) as BenchCase;
       const audit = JSON.parse(readFileSync(join(fixtureDir, 'audit.json'), 'utf8')) as GoldAudit;
@@ -338,6 +341,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       }, result.llmLogs, usageTracker.record);
       result.model = llmFactory.model;
       const eutils: EutilsDeps = { fetch: observed, apiKey: dryRun ? undefined : process.env.NCBI_API_KEY, strictCounts: true };
+      eutils.rateLimiter = observeRateLimiter(eutils, (limiter) => progress({ limiter }));
       if (dryRun) {
         const checkpoint = memoryCheckpoint();
         await checkpoint.write({ probe: true });
