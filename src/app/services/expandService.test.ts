@@ -309,6 +309,50 @@ describe('fetchBoundaryCandidates', () => {
     expect(forPurpose).toHaveBeenCalledWith('pick_boundary');
   });
 
+  test('expand_recall が #1 形式の ID を返しても margin クエリで検索する', async () => {
+    const store = createStore(makeState());
+    const googleFetch = jest.fn().mockImplementation(async (url: string) => {
+      if (url.includes('/values/SeedPapers')) {
+        return jsonResponse({ values: [SHEET_HEADERS.SeedPapers, seedRowWithPmid('111', true)] });
+      }
+      return jsonResponse({});
+    });
+    const esearchTerms: string[] = [];
+    const eutilsFetch = jest.fn().mockImplementation(async (url: string) => {
+      if (url.includes('esearch.fcgi')) {
+        const term = new URL(url).searchParams.get('term') ?? '';
+        esearchTerms.push(term);
+        return jsonResponse({
+          esearchresult: { count: term.includes(') NOT (') ? '0' : '10', idlist: [] },
+        });
+      }
+      return jsonResponse({});
+    });
+    const additions = [{ term: '"Lung Diseases"[Mesh]', axis: 'mesh', rationale: '親概念' }];
+    const forPurpose = jest.fn().mockReturnValue(
+      branchingProvider({ blocks: [{ id: '#1', additions }] })
+    );
+    const result = await fetchBoundaryCandidates({
+      google: {
+        fetch: googleFetch as unknown as typeof fetch,
+        getAccessToken: jest.fn().mockResolvedValue('t'),
+      },
+      eutils: {
+        fetch: eutilsFetch as unknown as typeof fetch,
+        sleep: async () => undefined,
+        maxRetries: 0,
+      },
+      store,
+      llmFactory: { forPurpose, model: 'gemini-test' },
+    });
+    expect(forPurpose).toHaveBeenCalledWith('expand_recall');
+    expect(result.additions).toEqual([{ blockId: '1', additions }]);
+    expect(esearchTerms).toEqual(expect.arrayContaining([
+      expect.stringContaining(') NOT ('),
+    ]));
+    expect(esearchTerms.find((term) => term.includes(') NOT ('))).toContain('"Lung Diseases"[Mesh]');
+  });
+
   test('新規候補が 0 件なら skill を呼ばず空の結果を返す', async () => {
     const store = createStore(makeState());
     const googleFetch = jest.fn();

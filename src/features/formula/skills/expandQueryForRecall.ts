@@ -125,10 +125,14 @@ export async function expandQueryForRecall(
   );
   const raw = parseSkillJson<RawResponse>(response.text, SKILL_NAME);
   const allowedIds = new Set(input.blocks.map((b) => b.id));
+  const seenIds = new Set<string>();
 
   const out: BlockRecallAdditions[] = [];
   for (const block of raw.blocks ?? []) {
-    if (!block.id || !allowedIds.has(block.id)) continue;
+    const blockId = (block.id ?? '').trim().replace(/^#\s*/, '');
+    if (!blockId || !allowedIds.has(blockId) || seenIds.has(blockId)) continue;
+    // 同じ ID は最初の応答だけを使い、検索式と更新提案で採用語が食い違うのを防ぐ。
+    seenIds.add(blockId);
     const additions: RecallAdditionItem[] = [];
     for (const a of block.additions ?? []) {
       const term = (a.term ?? '').trim();
@@ -138,7 +142,7 @@ export async function expandQueryForRecall(
       if (additions.length >= limit) break;
     }
     if (additions.length > 0) {
-      out.push({ blockId: block.id, additions });
+      out.push({ blockId, additions });
     }
   }
   return out;

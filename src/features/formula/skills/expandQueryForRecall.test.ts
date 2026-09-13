@@ -49,6 +49,49 @@ describe('expandQueryForRecall', () => {
     expect(result[0]?.additions[0]).toMatchObject({ axis: 'mesh', term: '"Lung Diseases"[Mesh]' });
   });
 
+  test.each([
+    ['#1', '1'],
+    [' # 2 ', '2'],
+    [' 1 ', '1'],
+  ])('応答 ID %s を %s に正規化して追加語を採用する', async (id, blockId) => {
+    const additions = [{ term: 'new[tiab]', axis: 'freeword', rationale: '同義語' }];
+    const { provider: p } = provider(JSON.stringify({ blocks: [{ id, additions }] }));
+    const result = await expandQueryForRecall({ researchQuestion: 'RQ', blocks }, p);
+    expect(result).toEqual([{ blockId, additions }]);
+  });
+
+  test.each(['#999', '##1'])('未知または # が重複した応答 ID %s は除外する', async (id) => {
+    const additions = [{ term: 'new[tiab]', axis: 'freeword', rationale: '同義語' }];
+    const { provider: p } = provider(JSON.stringify({ blocks: [{ id, additions }] }));
+    expect(await expandQueryForRecall({ researchQuestion: 'RQ', blocks }, p)).toEqual([]);
+  });
+
+  test.each([['#1', '1'], ['1', '#1']])(
+    '正規化後の ID が重複したら先の %s を採用し、後の %s は捨てる',
+    async (firstId, secondId) => {
+      const additions = [{ term: 'first[tiab]', axis: 'freeword', rationale: '先の提案' }];
+      const { provider: p } = provider(JSON.stringify({
+        blocks: [
+          { id: firstId, additions },
+          { id: secondId, additions: [{ term: 'later[tiab]', axis: 'freeword' }] },
+        ],
+      }));
+      expect(await expandQueryForRecall({ researchQuestion: 'RQ', blocks }, p)).toEqual([
+        { blockId: '1', additions },
+      ]);
+    }
+  );
+
+  test('最初の応答の追加語が空でも同じ ID の後続応答は捨てる', async () => {
+    const { provider: p } = provider(JSON.stringify({
+      blocks: [
+        { id: '#1', additions: [] },
+        { id: '1', additions: [{ term: 'later[tiab]', axis: 'freeword' }] },
+      ],
+    }));
+    expect(await expandQueryForRecall({ researchQuestion: 'RQ', blocks }, p)).toEqual([]);
+  });
+
   test('未知の axis・空 term・未知ブロック ID は除外する', async () => {
     const json = JSON.stringify({
       blocks: [
