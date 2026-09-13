@@ -21,7 +21,7 @@ import { isSeedEligibleForValidation } from '@/domain/seedPaper';
 import { listSeedPapers } from '@/features/seeds';
 import { summarizeSeedMesh, type MeshForSeed, type SeedMeshSummary } from '@/features/validation';
 import type { GoogleApiDeps } from '@/lib/google';
-import { efetchArticles, type EutilsDeps } from '@/lib/ncbi';
+import { efetchArticles, type EfetchArticle, type EutilsDeps } from '@/lib/ncbi';
 import { nowIso } from '@/utils/iso8601';
 import { newUuid } from '@/utils/uuid';
 import type { LlmProviderFactory } from './llmProviderService';
@@ -326,6 +326,32 @@ const EMPTY_SEED_CONTEXT: SeedContext = {
 };
 
 /**
+ * efetch 済みの記事一覧から、各 skill に渡すタイトル・抄録・MeSH 要約を組み立てる純粋関数。
+ * 取得の成否（0 件・efetch 失敗）は呼び出し側（collectSeedContext / ハーネス）の責務とし、
+ * ここでは articles をそのまま集計するだけにする（拡張本体とベンチハーネスで共有するため）。
+ */
+export function buildSeedContext(articles: EfetchArticle[]): SeedContext {
+  if (articles.length === 0) {
+    return EMPTY_SEED_CONTEXT;
+  }
+  const titles = articles
+    .map((a) => a.title?.trim())
+    .filter((t): t is string => Boolean(t))
+    .slice(0, MAX_SEED_TITLES);
+  const samples: SeedSample[] = articles
+    .slice(0, MAX_SEED_SAMPLES)
+    .map((a) => ({ title: a.title, abstract: a.abstract }));
+  const meshRecords: MeshForSeed[] = articles.map((a) => ({
+    pmid: a.pmid,
+    title: a.title,
+    meshHeadings: a.meshHeadings,
+    meshDetails: a.meshDetails,
+  }));
+  const meshSummary = summarizeSeedMesh(meshRecords, articles.length);
+  return { titles, samples, meshSummary };
+}
+
+/**
  * 適格 seed 論文（isSeedEligibleForValidation）を NCBI efetch で 1 回だけ引き、
  * 各 skill に渡すタイトル・抄録・MeSH 要約をまとめて返す（requirements.md §4.4）。
  *
@@ -346,24 +372,7 @@ async function collectSeedContext(
       return EMPTY_SEED_CONTEXT;
     }
     const articles = await efetchArticles(eligiblePmids, deps.eutils);
-    if (articles.length === 0) {
-      return EMPTY_SEED_CONTEXT;
-    }
-    const titles = articles
-      .map((a) => a.title?.trim())
-      .filter((t): t is string => Boolean(t))
-      .slice(0, MAX_SEED_TITLES);
-    const samples: SeedSample[] = articles
-      .slice(0, MAX_SEED_SAMPLES)
-      .map((a) => ({ title: a.title, abstract: a.abstract }));
-    const meshRecords: MeshForSeed[] = articles.map((a) => ({
-      pmid: a.pmid,
-      title: a.title,
-      meshHeadings: a.meshHeadings,
-      meshDetails: a.meshDetails,
-    }));
-    const meshSummary = summarizeSeedMesh(meshRecords, articles.length);
-    return { titles, samples, meshSummary };
+    return buildSeedContext(articles);
   } catch (err) {
     // seed コンテクスト取得に失敗してもドラフト生成は継続する（seed なし扱い）。
     console.warn('[draft] seed 論文のコンテクスト取得に失敗したため空で続行します', err);

@@ -2,33 +2,51 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeF
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { config } from 'dotenv';
+import type { ProtocolDraft, BlocksDraft } from '../../src/app/store';
 import { generateDraftFormula } from '../../src/app/services/draftService';
 import { runQueryOptimization } from '../../src/app/services/queryOptimizationService';
 import { fetchMeshContext } from '../../src/app/services/meshContextService';
+import { DEFAULT_OPTIMIZATION_MAX_HITS } from '../../src/app/services/queryOptimizationSettingsService';
 import { extractProtocol } from '../../src/features/formula/skills/extractProtocol';
-import { HIT_THRESHOLD } from '../../src/features/formula/skills/filterDesigner';
 import { expandFormula } from '../../src/features/validation/expandFormula';
 import { GeminiProvider } from '../../src/lib/llm/GeminiProvider';
 import { withRetry } from '../../src/lib/llm/retry';
 import type { LLMProvider } from '../../src/lib/llm/LLMProvider';
 import type { LlmProviderFactory } from '../../src/app/services/llmProviderService';
+import type { PubmedFormula } from '../../src/lib/search-formula-md';
 import type { EutilsDeps } from '../../src/lib/ncbi/eutils';
 import type { ProjectStoreDeps } from '../../src/features/project/projectStore';
 import { esearch } from '../../src/lib/ncbi/eutils';
-import { FIXTURES, validateSeeds } from './prepare';
+import { installDomParser } from './domParser';
+import { FIXTURES, SEED, computeHeldOut, loadSeedsFile, seedSplitId, validateSeeds } from './prepare';
 import { capturedGold, createEvalFetch, evaluateSearch, redact, seedTitles } from './ncbiEval';
 import { calculateMetrics, compareMetrics } from './metrics';
-import { CASES, PROFILES, type BenchCase, type GoldAudit, type RunResult, type ConditionResult } from './types';
+import { loadC0Artifact, type C0Variant } from './c0Artifact';
+import { getGitCommit, isGitDirty } from './gitInfo';
+import { computeAdoptionAudit } from './adoptionAudit';
+import { computeConfirmation } from './confirmationAudit';
+import { createLlmUsageTracker } from './llmUsage';
+import { CASES, PROFILES, type BenchCase, type FrozenSeeds, type GoldAudit, type RunResult, type ConditionResult } from './types';
 
 export const RESULTS = resolve(__dirname, 'results');
+
+/** results ディレクトリ配下の 1 run の格納先。run.ts / candidates.ts / freezeC0.ts のログ置き場で共有する。 */
+export function resultDir(resultsRoot: string, profileId: string, caseId: string, c0Key: string, splitKey: string): string {
+  return join(resultsRoot, profileId, caseId, c0Key, splitKey);
+}
 
 export function memoryCheckpoint(): ProjectStoreDeps {
   const values: Record<string, unknown> = {};
   return { read: async <T>(key: string) => values[key] as T | undefined, write: async (items) => { Object.assign(values, items); } };
 }
 
+/**
+ * @param onUsage 呼び出し 1 回（リトライの各試行を含む）ごとに model/tokensIn/tokensOut を通知する。
+ *   失敗した呼び出しも通知する（tokensIn/tokensOut は null）。run.ts の RunResult.llmUsage、
+ *   freezeC0.ts の集計に使う。
+ */
 export function loggedFactory(provider: LLMProvider, write: (path: string, value: unknown) => void,
-  paths: string[]): LlmProviderFactory {
+  paths: string[], onUsage?: (model: string, tokensIn: number | null, tokensOut: number | null) => void): LlmProviderFactory {
   let sequence = 0;
   return { model: provider.model, forPurpose: (purpose, onRequestState) => withRetry({
     providerId: provider.providerId, model: provider.model,
@@ -40,31 +58,78 @@ export function loggedFactory(provider: LLMProvider, write: (path: string, value
         const response = await provider.chat(messages, options);
         write(path, { purpose, model: provider.model, messages, options, response, tokensIn: response.tokensIn,
           tokensOut: response.tokensOut, latencyMs: Date.now() - start });
+        onUsage?.(provider.model, response.tokensIn, response.tokensOut);
         return response;
       } catch (err) {
         write(path, { purpose, model: provider.model, messages, options, response: null, tokensIn: null,
           tokensOut: null, latencyMs: Date.now() - start, error: err instanceof Error ? err.message : String(err),
           responseBody: err && typeof err === 'object' && 'responseBody' in err ? err.responseBody : null });
+        onUsage?.(provider.model, null, null);
         throw err;
       }
     },
   }, { onRequestState }) };
 }
 
-export function parseArgs(args: string[]): { ids: string[]; dryRun: boolean; profile: typeof PROFILES[number] } {
+export interface ParsedArgs {
+  ids: string[];
+  dryRun: boolean;
+  profile: { id: string; maxHits: number; maxIterations: number };
+  /** --max-hits による事後探索条件かどうか（default/tight-1000 はいずれも事前登録なので false）。 */
+  postHoc: boolean;
+  /** シード分割の乱数。既定は SEED（`fixtures/<id>/seeds.json`）。 */
+  seed: number;
+  /** --c0 で指定した凍結 C0 の名前（`fixtures/<id>/c0/<name>.json`、拡張子なし）。 */
+  c0Name?: string;
+}
+
+export function parseArgs(args: string[]): ParsedArgs {
   let selected: string | undefined;
   let dryRun = false;
   let profileId: string | undefined;
+  let maxHitsArg: string | undefined;
+  let seedArg: string | undefined;
+  let c0Name: string | undefined;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--dry-run') dryRun = true;
     else if (args[i] === '--case' && selected === undefined && args[i + 1]) selected = args[++i];
     else if (args[i] === '--profile' && profileId === undefined && args[i + 1]) profileId = args[++i];
+    else if (args[i] === '--max-hits' && maxHitsArg === undefined && args[i + 1]) maxHitsArg = args[++i];
+    else if (args[i] === '--seeds' && seedArg === undefined && args[i + 1]) seedArg = args[++i];
+    else if (args[i] === '--c0' && c0Name === undefined && args[i + 1]) c0Name = args[++i];
     else throw new Error(`未対応の引数: ${args[i]}`);
   }
   if (selected && !CASES.some((item) => item.id === selected)) throw new Error('未知のケースです');
-  const profile = PROFILES.find((item) => item.id === (profileId ?? 'default'));
-  if (!profile) throw new Error('未知のプロファイルです');
-  return { profile, ids: selected ? [selected] : CASES.map((item) => item.id), dryRun };
+  if (profileId !== undefined && maxHitsArg !== undefined) throw new Error('--profile と --max-hits は同時に指定できません');
+  let profile: { id: string; maxHits: number; maxIterations: number };
+  let postHoc = false;
+  if (maxHitsArg !== undefined) {
+    const maxHits = Number(maxHitsArg);
+    if (!Number.isSafeInteger(maxHits) || maxHits <= 0) throw new Error('--max-hits には正の整数を指定してください');
+    profile = { id: `custom-${maxHits}`, maxHits, maxIterations: PROFILES.find((item) => item.id === 'default')!.maxIterations };
+    postHoc = true;
+  } else {
+    const found = PROFILES.find((item) => item.id === (profileId ?? 'default'));
+    if (!found) throw new Error('未知のプロファイルです');
+    profile = found;
+  }
+  let seed = SEED;
+  if (seedArg !== undefined) {
+    seed = Number(seedArg);
+    if (!Number.isSafeInteger(seed)) throw new Error('--seeds には整数を指定してください');
+  }
+  return { profile, ids: selected ? [selected] : CASES.map((item) => item.id), dryRun, postHoc, seed, c0Name };
+}
+
+/** --c0 で読み込み・検証済みの凍結 C0（run.ts のみで組み立て、executeCase はそのまま信用する）。 */
+export interface FrozenC0Input {
+  id: string;
+  sha256: string;
+  variant: C0Variant;
+  draftIndex: number;
+  protocol: ProtocolDraft;
+  blocks: BlocksDraft;
+  formula: PubmedFormula;
 }
 
 export interface ExecutionDeps {
@@ -72,6 +137,10 @@ export interface ExecutionDeps {
   llmFactory: LlmProviderFactory;
   progress: (event: unknown) => void;
   save: () => void;
+  /** 選択したシード分割。未指定なら fixture 埋め込みの既定分割（SEED）を使う。 */
+  seeds?: FrozenSeeds;
+  /** --c0 検証済みの凍結 C0。未指定なら従来どおり extractProtocol/generateDraftFormula でその場生成する。 */
+  frozenC0?: FrozenC0Input;
 }
 
 export async function measureRejectedCandidates(result: RunResult, eutils: EutilsDeps): Promise<NonNullable<RunResult['rejectedCandidates']>> {
@@ -105,40 +174,56 @@ export async function measureRejectedCandidates(result: RunResult, eutils: Eutil
 export async function executeCase(fixture: BenchCase, audit: GoldAudit, protocolText: string, result: RunResult,
   deps: ExecutionDeps, b1?: { query: string }): Promise<void> {
   const { eutils, llmFactory, progress, save } = deps;
-  if (HIT_THRESHOLD !== PROFILES.find((profile) => profile.id === 'default')!.maxHits) throw new Error('アプリの既定上限と固定評価条件が一致しません');
-  validateSeeds(fixture.seeds, fixture.gold);
+  if (DEFAULT_OPTIMIZATION_MAX_HITS !== PROFILES.find((profile) => profile.id === 'default')!.maxHits) throw new Error('アプリの既定上限と固定評価条件が一致しません');
+  const seeds = deps.seeds ?? fixture.seeds;
+  validateSeeds(seeds, fixture.gold);
   // gold の範囲確認は検索式生成より先に行い、捕捉結果から分母を選ばない。
   const allPmids = [...new Set(fixture.gold.flatMap((group) => group.pmids))];
   const inDate = await capturedGold('', allPmids, eutils);
   const groups = fixture.gold.map((group) => ({ ...group, pmids: group.pmids.filter((pmid) => inDate.includes(pmid)),
     members: group.members.map((study) => ({ ...study, pmids: study.pmids.filter((pmid) => inDate.includes(pmid)) }))
       .filter((study) => study.pmids.length > 0) })).filter((group) => group.pmids.length > 0);
-  const heldOut = fixture.heldOut.filter((id) => groups.some((group) => group.id === id));
+  // held-out は「選択した分割のシード群を除いた残り全群」。分割ごとに実行時に求め、case.json の値は既定分割にしか対応しない。
+  const heldOut = computeHeldOut(groups, seeds);
+  result.seedSplit = seedSplitId(seeds.seed);
   result.denominator = { groups, heldOut, outsideDatePmids: allPmids.filter((pmid) => !inDate.includes(pmid)),
     outsideDateGroups: fixture.gold.filter((group) => !groups.some((g) => g.id === group.id)).map((g) => g.id),
     manualReviewPending: audit.manual_review };
   save();
-  const seedPmids = fixture.seeds.selections.map((seed) => seed.pmid);
+  const seedPmids = seeds.selections.map((seed) => seed.pmid);
   if (seedPmids.some((pmid) => !inDate.includes(pmid))) throw new Error('凍結済みシードが検索日範囲外です。自動で差し替えません');
   const papers = await seedTitles(seedPmids, eutils);
-  const extracted = await extractProtocol(protocolText, llmFactory.forPurpose('extract_protocol'));
-  const protocol = { ...extracted, sourceType: 'markdown' as const, sourceFilename: 'protocol.md', rawTextRef: null,
-    rawTextPreview: protocolText.slice(0, 500), rawTextInline: protocolText };
-  const blocks = { blocks: extracted.blocks.map((block) => ({ ...block, aiGenerated: true, note: '' })),
-    combinationExpression: extracted.combinationExpression };
-  // C0 は適格基準だけから生成し、既知 3 群を与える追加工程の効果を C1 で測る。
-  const draft = await generateDraftFormula({ protocol, blocks, targetHits: result.maxHits,
-    seedContext: { titles: [], samples: [], meshSummary: { seedCount: 0, concepts: [], checkTags: [] } } },
-  { llmFactory, onProgress: progress, countBlockHits: async (query) => (await esearch(query, eutils, { retmax: 0 })).count });
+  let protocol: ProtocolDraft;
+  let blocks: BlocksDraft;
+  let formula: PubmedFormula;
+  if (deps.frozenC0) {
+    protocol = deps.frozenC0.protocol;
+    blocks = deps.frozenC0.blocks;
+    formula = deps.frozenC0.formula;
+    result.c0 = { source: 'frozen', id: deps.frozenC0.id, sha256: deps.frozenC0.sha256,
+      variant: deps.frozenC0.variant, draftIndex: deps.frozenC0.draftIndex };
+  } else {
+    const extracted = await extractProtocol(protocolText, llmFactory.forPurpose('extract_protocol'));
+    protocol = { ...extracted, sourceType: 'markdown' as const, sourceFilename: 'protocol.md', rawTextRef: null,
+      rawTextPreview: protocolText.slice(0, 500), rawTextInline: protocolText };
+    blocks = { blocks: extracted.blocks.map((block) => ({ ...block, aiGenerated: true, note: '' })),
+      combinationExpression: extracted.combinationExpression };
+    // C0 は適格基準だけから生成し、既知 3 群を与える追加工程の効果を C1 で測る。
+    const draft = await generateDraftFormula({ protocol, blocks, targetHits: result.maxHits,
+      seedContext: { titles: [], samples: [], meshSummary: { seedCount: 0, concepts: [], checkTags: [] } } },
+    { llmFactory, onProgress: progress, countBlockHits: async (query) => (await esearch(query, eutils, { retmax: 0 })).count });
+    formula = draft.formula;
+    result.c0 = { source: 'live' };
+  }
   const measure = async (query: string): Promise<ConditionResult> => {
     const measurement = await evaluateSearch(query, inDate, eutils);
     return { query, measurement, metrics: measurement.status === 'success' && !audit.manual_review
       ? calculateMetrics(groups, heldOut, measurement.capturedPmids, measurement.hits) : null };
   };
-  result.conditions.C0 = { ...await measure(expandFormula(draft.formula)), formula: draft.formula };
+  result.conditions.C0 = { ...await measure(expandFormula(formula)), formula };
   save();
   result.optimization = await runQueryOptimization({ projectId: fixture.id, runId: result.runId,
-    initialFormula: draft.formula, seedPmids, seedPapers: papers, maxHits: result.maxHits, maxIterations: result.maxIterations,
+    initialFormula: formula, seedPmids, seedPapers: papers, maxHits: result.maxHits, maxIterations: result.maxIterations,
     approvedBlocks: blocks.blocks.map((block, index) => ({ id: String(index + 1), approvedBlockId: String(index + 1), label: block.blockLabel })),
     criteria: { researchQuestion: protocol.researchQuestion, inclusionCriteria: protocol.inclusionCriteria, exclusionCriteria: protocol.exclusionCriteria } },
   { eutils, llmFactory, checkpoint: memoryCheckpoint(), fetchMeshContext: (request, observed) => fetchMeshContext(request, observed ?? eutils),
@@ -153,26 +238,42 @@ export async function executeCase(fixture: BenchCase, audit: GoldAudit, protocol
   result.comparison = c0 && c1 ? compareMetrics(c0, c1) : null;
   const candidates = await measureRejectedCandidates(result, eutils);
   if (candidates.length) { result.rejectedCandidates = candidates; save(); }
+  // 有害採用の監査と確認負荷の集計は、既存の測定失敗判定とは独立させる（両方とも失敗しても run を
+  // failed にはしない。前者は分母欠落時のみ例外を投げるが、それ以外は自身のエラーを記録して続行する）。
+  result.adoptionAudit = await computeAdoptionAudit(result, eutils);
+  result.confirmation = await computeConfirmation(result, protocol, seedPmids, { eutils, llmFactory });
+  save();
   result.status = result.optimization.status === 'error' || candidates.some((candidate) => candidate.error)
     || Object.values(result.conditions).some((condition) => condition.measurement.status === 'failure') ? 'failed' : 'completed';
 }
 
 export async function main(args = process.argv.slice(2)): Promise<void> {
-  const { ids, dryRun, profile } = parseArgs(args);
-  if (!dryRun) config();
+  const { ids, dryRun, profile, postHoc, seed, c0Name } = parseArgs(args);
+  if (!dryRun) {
+    config();
+    // searchOutsideCandidates（confirmation の集計）が efetchArticles を使うため、非 dry-run では必ず補う。
+    installDomParser();
+  }
   const secrets = [process.env.GEMINI_API_KEY ?? '', process.env.NCBI_API_KEY ?? ''];
+  const splitId = seedSplitId(seed);
+  const c0Key = c0Name ?? 'live';
   for (const id of ids) {
-    const dir = join(RESULTS, profile.id, id);
+    const dir = resultDir(RESULTS, profile.id, id, c0Key, splitId);
     const resultPath = join(dir, 'run.json');
-    if (!dryRun && existsSync(resultPath) && (JSON.parse(readFileSync(resultPath, 'utf8')) as RunResult).status === 'completed') {
-      process.stdout.write(`${id}: 完了済みのためスキップ\n`); continue;
+    if (!dryRun && existsSync(resultPath)) {
+      const existing = JSON.parse(readFileSync(resultPath, 'utf8')) as RunResult;
+      if (existing.status === 'completed' && existing.maxHits === profile.maxHits) {
+        process.stdout.write(`${id}: 完了済みのためスキップ\n`); continue;
+      }
     }
     const start = Date.now();
     const runId = `${id}-${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID().slice(0, 8)}`;
     const attemptDir = join(dir, runId);
+    const role = CASES.find((item) => item.id === id)!.role;
     const result: RunResult = { id, runId, profileId: profile.id, status: dryRun ? 'dry-run' : 'running', startedAt: new Date().toISOString(),
       model: '', searchDate: '', maxHits: profile.maxHits, maxIterations: profile.maxIterations, conditions: {}, apiCalls: { ncbi: 0, llm: 0 },
-      apiElapsedMs: { ncbi: 0, llm: 0 }, elapsedMs: 0, llmLogs: [] };
+      apiElapsedMs: { ncbi: 0, llm: 0 }, elapsedMs: 0, llmLogs: [], gitCommit: getGitCommit(), gitDirty: isGitDirty(),
+      seedSplit: splitId, role, postHoc };
     const serialize = (value: unknown) => redact(JSON.stringify(value, null, 2), secrets) + '\n';
     const save = () => {
       if (dryRun) return;
@@ -190,8 +291,19 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       const fixture = JSON.parse(readFileSync(join(fixtureDir, 'case.json'), 'utf8')) as BenchCase;
       const audit = JSON.parse(readFileSync(join(fixtureDir, 'audit.json'), 'utf8')) as GoldAudit;
       const protocolText = readFileSync(join(fixtureDir, fixture.protocolPath), 'utf8');
-      validateSeeds(fixture.seeds, fixture.gold);
+      const seeds = loadSeedsFile(fixtureDir, seed);
+      validateSeeds(seeds, fixture.gold);
       result.searchDate = fixture.searchDate;
+      // --c0 の検証（ケース ID・ハッシュ・シード分割の整合）はネットワーク不要なので dry-run でも行う。
+      let frozenC0: FrozenC0Input | undefined;
+      if (c0Name) {
+        const artifact = loadC0Artifact(FIXTURES, id, c0Name);
+        if (artifact.seedSplit !== null && artifact.seedSplit !== splitId) {
+          throw new Error(`凍結 C0 のシード分割 (${artifact.seedSplit}) が実行時の分割 (${splitId}) と一致しません`);
+        }
+        frozenC0 = { id: c0Name, sha256: artifact.sha256, variant: artifact.variant, draftIndex: artifact.draftIndex,
+          protocol: artifact.protocol, blocks: artifact.blocks, formula: artifact.formula };
+      }
       const network: typeof fetch = dryRun ? async () => { throw new Error('dry-run での通信は禁止です'); } : globalThis.fetch;
       const observed = createEvalFetch(fixture.searchDate, network, (event) => {
         const category = new URL(event.url).hostname === 'generativelanguage.googleapis.com' ? 'llm' : 'ncbi';
@@ -200,17 +312,21 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
         progress({ api: category, ...event });
       }, secrets);
       const provider = new GeminiProvider({ apiKey: dryRun ? '' : process.env.GEMINI_API_KEY ?? '', fetch: observed });
+      const usageTracker = createLlmUsageTracker();
+      result.llmUsage = usageTracker.usage;
       const llmFactory = loggedFactory(provider, (path, value) => {
         if (!dryRun) writeFileSync(join(attemptDir, path), serialize(value));
-      }, result.llmLogs);
+      }, result.llmLogs, usageTracker.record);
       result.model = llmFactory.model;
       const eutils: EutilsDeps = { fetch: observed, apiKey: dryRun ? undefined : process.env.NCBI_API_KEY, strictCounts: true };
       if (dryRun) {
         const checkpoint = memoryCheckpoint();
         await checkpoint.write({ probe: true });
-        if (!await checkpoint.read('probe') || !protocolText.trim() || HIT_THRESHOLD !== PROFILES.find((profile) => profile.id === 'default')!.maxHits) throw new Error('配線確認に失敗しました');
+        if (!await checkpoint.read('probe') || !protocolText.trim()
+          || DEFAULT_OPTIMIZATION_MAX_HITS !== PROFILES.find((profile) => profile.id === 'default')!.maxHits) throw new Error('配線確認に失敗しました');
         llmFactory.forPurpose('extract_protocol');
-        process.stdout.write(`${id}: dry-run OK (profile=${profile.id}, maxHits=${profile.maxHits}, maxIterations=${profile.maxIterations}, API calls=0, groups=${fixture.gold.length}, heldOut=${fixture.heldOut.length})\n`);
+        process.stdout.write(`${id}: dry-run OK (profile=${profile.id}, maxHits=${profile.maxHits}, maxIterations=${profile.maxIterations}, `
+          + `seedSplit=${splitId}, c0=${c0Key}, API calls=0, groups=${fixture.gold.length}, heldOut=${computeHeldOut(fixture.gold, seeds).length})\n`);
         continue;
       }
       save();
@@ -218,7 +334,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       const b1Path = join(fixtureDir, 'b1.json');
       const b1 = existsSync(b1Path) ? JSON.parse(readFileSync(b1Path, 'utf8')) as { query: string } : undefined;
       if (b1 && (typeof b1.query !== 'string' || !b1.query.trim())) throw new Error('b1.json には query が必要です');
-      await executeCase(fixture, audit, protocolText, result, { eutils, llmFactory, save, progress }, b1);
+      await executeCase(fixture, audit, protocolText, result, { eutils, llmFactory, save, progress, seeds, frozenC0 }, b1);
     } catch (err) {
       result.status = 'failed';
       result.error = redact(err instanceof Error ? err.message : String(err), secrets);

@@ -3,17 +3,34 @@ import { loggedFactory, main, memoryCheckpoint, parseArgs } from './run';
 import { reportRows, renderCsv, renderMarkdown } from './report';
 import type { RunResult } from './types';
 
-test('CLI から評価上限を変更できず、未知ケースを拒否する', () => {
+test('CLI から未知ケース・未知プロファイルを拒否し、既定値を解決する', () => {
   expect(parseArgs(['--dry-run']).dryRun).toBe(true);
-  expect(parseArgs([]).profile).toEqual({ id: 'default', maxHits: 10000, maxIterations: 5 });
+  expect(parseArgs([]).profile).toEqual({ id: 'default', maxHits: 2000, maxIterations: 5 });
+  expect(parseArgs([]).seed).toBe(20260912);
+  expect(parseArgs([]).postHoc).toBe(false);
   expect(parseArgs(['--profile', 'tight-1000']).profile).toEqual({ id: 'tight-1000', maxHits: 1000, maxIterations: 5 });
   expect(() => parseArgs(['--profile', 'unknown'])).toThrow('未知のプロファイル');
   expect(() => parseArgs(['--profile'])).toThrow();
   expect(() => parseArgs(['--maxHits', '5'])).toThrow();
-  expect(() => parseArgs(['--max-hits', '1000'])).toThrow();
   expect(() => parseArgs(['--max-hits=1000'])).toThrow();
   expect(() => parseArgs(['--max-iterations', '10'])).toThrow();
   expect(() => parseArgs(['--case', 'unknown'])).toThrow();
+});
+test('--max-hits は事後探索の custom プロファイルを発行し、--profile と同時指定できない', () => {
+  const parsed = parseArgs(['--max-hits', '1000']);
+  expect(parsed.profile).toEqual({ id: 'custom-1000', maxHits: 1000, maxIterations: 5 });
+  expect(parsed.postHoc).toBe(true);
+  expect(() => parseArgs(['--max-hits', '0'])).toThrow('正の整数');
+  expect(() => parseArgs(['--max-hits', 'abc'])).toThrow('正の整数');
+  expect(() => parseArgs(['--profile', 'tight-1000', '--max-hits', '1000'])).toThrow('同時に指定できません');
+});
+test('--seeds は分割用の乱数を受け取り、既定は SEED', () => {
+  expect(parseArgs(['--seeds', '42']).seed).toBe(42);
+  expect(() => parseArgs(['--seeds', 'abc'])).toThrow();
+});
+test('--c0 は名前をそのまま受け取る', () => {
+  expect(parseArgs(['--c0', 'seeded-draft1']).c0Name).toBe('seeded-draft1');
+  expect(parseArgs([]).c0Name).toBeUndefined();
 });
 test('checkpoint はメモリだけを使う', async () => {
   const checkpoint = memoryCheckpoint();
@@ -38,6 +55,8 @@ test('dry-run は実ネットワークを呼ばず全 fixture を読む', async 
   try {
     await main(['--dry-run']);
     await main(['--profile', 'tight-1000', '--dry-run']);
+    await main(['--max-hits', '500', '--dry-run']);
+    await main(['--seeds', '20260912', '--dry-run']);
     expect(fetch).not.toHaveBeenCalled();
   }
   finally { fetch.mockRestore(); }

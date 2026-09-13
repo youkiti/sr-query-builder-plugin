@@ -41,13 +41,48 @@ test('実 API 無しで C0 → C1 → B1 を配線し、段階ごとに保存す
   const fetch = jest.fn().mockRejectedValue(new Error('実 API 禁止'));
   await executeCase(fixture, audit, 'protocol', result, { eutils: { fetch }, llmFactory, progress: jest.fn(), save }, { query: 'baseline' });
   expect(result.status).toBe('completed');
-  expect(save).toHaveBeenCalledTimes(4);
+  // denominator / C0 / C1(+B1) / (adoptionAudit + confirmation まとめて 1 回) の 4 段階 + B1 の 1 回。
+  expect(save).toHaveBeenCalledTimes(5);
   expect(fetch).not.toHaveBeenCalled();
   expect(generateDraftFormula).toHaveBeenCalledWith(expect.objectContaining({ seedContext: expect.objectContaining({ titles: [] }) }), expect.anything());
   expect(runQueryOptimization).toHaveBeenCalledWith(expect.objectContaining({ maxHits: 10000, maxIterations: 5, seedPmids: ['1', '2', '3'] }), expect.objectContaining({ checkpoint: expect.anything(), fetchMeshContext: expect.any(Function) }));
   expect(result.optimization!.trials[0]!.reason).toBe('reason');
   expect(result.conditions.B1!.query).toBe('baseline');
   expect(result.conditions.C0!.metrics!.heldOutRecall).toBe(1);
+  // c0 は live 生成扱い、seedSplit は fixture 埋め込みの既定分割（20260912）の id。
+  expect(result.c0).toEqual({ source: 'live' });
+  expect(result.seedSplit).toBe('s20260912');
+});
+
+test('deps.frozenC0 を渡すと extractProtocol/generateDraftFormula を呼ばず、凍結内容をそのまま C0 に使う', async () => {
+  const result = makeResult();
+  const frozenFormula = { blocks: [{ id: '1', expression: 'frozen[tiab]', isCombination: false }], combinationExpression: null };
+  const frozenProtocol = { frameworkType: 'custom' as const, researchQuestion: 'frozen RQ', inclusionCriteria: 'frozen include',
+    exclusionCriteria: '', studyDesign: 'any', sourceType: 'markdown' as const, sourceFilename: 'protocol.md',
+    rawTextRef: null, rawTextPreview: 'protocol', rawTextInline: 'protocol' };
+  const frozenBlocks = { blocks: [{ blockLabel: 'Concept', description: 'description', aiGenerated: true as const, note: '' }], combinationExpression: '#1' };
+  await executeCase(fixture, audit, 'protocol', result, {
+    eutils: { fetch: jest.fn() }, llmFactory, progress: jest.fn(), save: jest.fn(),
+    frozenC0: { id: 'seeded-draft1', sha256: 'deadbeef', variant: 'seeded', draftIndex: 1,
+      protocol: frozenProtocol, blocks: frozenBlocks, formula: frozenFormula },
+  });
+  expect(extractProtocol).not.toHaveBeenCalled();
+  expect(generateDraftFormula).not.toHaveBeenCalled();
+  expect(result.c0).toEqual({ source: 'frozen', id: 'seeded-draft1', sha256: 'deadbeef', variant: 'seeded', draftIndex: 1 });
+  expect(result.conditions.C0!.formula).toEqual(frozenFormula);
+  expect(runQueryOptimization).toHaveBeenCalledWith(expect.objectContaining({ initialFormula: frozenFormula,
+    criteria: expect.objectContaining({ researchQuestion: 'frozen RQ' }) }), expect.anything());
+});
+
+test('deps.seeds で分割を上書きすると、その分割基準で heldOut と seedPmids を求める', async () => {
+  const result = makeResult();
+  const overrideSeeds = { seed: 999, selections: groups.slice(1, 4).map((g) => ({ groupId: g.id, pmid: g.pmids[0]!, year: null })) };
+  await executeCase(fixture, audit, 'protocol', result, {
+    eutils: { fetch: jest.fn() }, llmFactory, progress: jest.fn(), save: jest.fn(), seeds: overrideSeeds,
+  });
+  expect(result.seedSplit).toBe('s999');
+  expect(result.denominator!.heldOut).toEqual(['a']);
+  expect(runQueryOptimization).toHaveBeenCalledWith(expect.objectContaining({ seedPmids: ['2', '3', '4'] }), expect.anything());
 });
 test('範囲外の gold を先に除外し、範囲外シードは再抽選しない', async () => {
   jest.mocked(capturedGold).mockResolvedValue(['1', '2', '3']);
@@ -98,7 +133,7 @@ test('proposal measurements are saved after optimization using the same gold den
   expect(jest.mocked(evaluateSearch).mock.calls.map((call) => call[1])).toEqual([
     ['1', '2', '3', '4'], ['1', '2', '3', '4'], ['1', '2', '3', '4'],
   ]);
-  expect(save).toHaveBeenCalledTimes(4);
+  expect(save).toHaveBeenCalledTimes(5);
   expect(fetch).not.toHaveBeenCalled();
 });
 

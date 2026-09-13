@@ -4,7 +4,7 @@
 
 ## 前提と出典
 
-Node 18 以上、既存の開発依存（tsx / dotenv）が必要です。Chrome・Sheets・DOMParser は使用しません。
+Node 18 以上、既存の開発依存（tsx / dotenv）が必要です。Chrome・Sheets は使用しません。`efetchArticles`（seeded 版の C0 凍結と、`eval:optimize` の確認負荷集計で使用）はブラウザの DOMParser に依存するため、`freezeC0.ts` と `run.ts`（dry-run 以外）は起動時に jsdom の DOMParser を補います（`domParser.ts`）。
 入力の既定ディレクトリは `C:\Users\youki\codes\Cochrane-bench`。`COCHRANE_BENCH_DIR` で変更できます。
 
 fixtures の出典は [Cochrane-bench](https://github.com/youkiti/Cochrane-bench) の cc-by データです。各レビューの本文抜粋は CC BY ライセンスで、タイトルと PMCID を各 fixture に保持しています。
@@ -30,17 +30,60 @@ npm run eval:report
 
 `eval:prepare` はローカルファイルだけを読みます。protocol.md は title・objectives・eligibility の指定 4 項目だけで組み立て、検索方法・検索式・結果節を入力しません。fixtures は版管理対象、results は無視対象です。
 
-実行時だけルート `.env` を dotenv で読みます。`GEMINI_API_KEY` が必須、`NCBI_API_KEY` は任意です。キーをコマンドラインへ書かないでください。モデルは GeminiProvider の既定値を使用し、実際のモデル ID と各呼び出し設定を保存します。条件は `types.ts` に事前登録した `PROFILES` から `--profile <id>` で選びます。未指定は `default`（maxHits=10,000、maxIterations=5）、追加条件は `tight-1000`（maxHits=1,000、maxIterations=5）です。任意の数値は渡せず、未知の ID はエラーになります。1 プロセスでケースを逐次実行してください。NCBI の共有レート制御はキー無しで 3 req/s です。
+実行時だけルート `.env` を dotenv で読みます。`GEMINI_API_KEY` が必須、`NCBI_API_KEY` は任意です。キーをコマンドラインへ書かないでください。モデルは GeminiProvider の既定値を使用し、実際のモデル ID と各呼び出し設定を保存します。条件は `types.ts` に事前登録した `PROFILES` から `--profile <id>` で選びます。未指定は `default`（maxHits=2,000。アプリ既定 `DEFAULT_OPTIMIZATION_MAX_HITS` と同値、maxIterations=5）、追加条件は `tight-1000`（maxHits=1,000、maxIterations=5）です。1 プロセスでケースを逐次実行してください。NCBI の共有レート制御はキー無しで 3 req/s です。
 
 dry-run は環境ファイルも API も使わず、全 fixture・サービスの import・provider と checkpoint の配線を確認します。LLM 出力を使う処理の実行確認ではありません。実行結果を上書きせず、完了マーカーも作りません。Jest はモックとローカル fixture のみを使います。
 
-2026-09-12 の初期生成への目安件数の追加以降、両プロファイルの `maxHits` は C1 の調整ループに加え、C0（初期式生成）にも上限ではなく目安として渡ります。それ以前の結果では C1 にのみ効いているため、過去の結果との比較ではこの条件差に注意してください。
+2026-09-12 の初期生成への目安件数の追加以降、両プロファイルの `maxHits` は C1 の調整ループに加え、C0（初期式生成）にも上限ではなく目安として渡ります。それ以前の結果では C1 にのみ効いているため、過去の結果との比較ではこの条件差に注意してください。**ただし C0 を `--c0` で凍結 fixture から読む場合は、C0 生成時の目安件数は常に `DEFAULT_OPTIMIZATION_MAX_HITS`（2,000）で固定され、実行時の `--profile`/`--max-hits` には依存しません**（後述）。
 
-`tight-1000` は default の結果を見てから追加した事後探索（post-hoc）の条件です。事前に定めた `default` とは解釈の強さが異なり、確認的な結果として同等には扱えません。
+`tight-1000` は default の結果を見てから追加した事後探索（post-hoc）の条件です。事前に定めた `default` とは解釈の強さが異なり、確認的な結果として同等には扱えません。`--max-hits <n>` を渡すと、その場で `custom-<n>` という事後探索プロファイルを発行できます（`--profile` と同時指定は不可。maxIterations は default と同じ 5）。
 
 ```powershell
 npm run eval:optimize -- --profile tight-1000
+npm run eval:optimize -- --max-hits 500
 ```
+
+## 凍結 C0 とシード分割
+
+C0（初期式生成）は毎回 LLM で作り直すため、実測 hits が実行間で数倍ぶれることがある。**再生成された C0 どうしの差を自動調整ポリシーの効果として解釈してはいけない**。この揺れを切り離すため、C0 を一度生成してハッシュ付きで凍結し、複数回の `eval:optimize` で使い回せるようにしてある。
+
+```powershell
+# criteria-only: 適格基準だけから C0 を作る（従来の C0 と同じ入力）
+npm run eval:freeze-c0 -- --case r1-mindfulness-smoking --variant criteria-only
+# seeded: 凍結シード（既定分割）のタイトル・抄録・MeSH も渡して C0 を作る
+npm run eval:freeze-c0 -- --case r1-mindfulness-smoking --variant seeded
+npm run eval:freeze-c0 -- --dry-run --case r1-mindfulness-smoking --variant seeded
+```
+
+- 出力は `fixtures/<case>/c0/<variant>-draft<n>.json`（既定シード分割のときは接尾辞なし。既定以外の分割だけ `-<splitId>` を付ける。例: `seeded-draft1-s42.json`）。`--draft <n>`（既定 1）で同じ条件の複数ドラフトを別ファイルに残せる
+- 既存ファイルは上書きしない（`wx`）。作り直したいときは手動で削除してから再実行する
+- 内容には `caseId` / `variant` / `draftIndex` / `seedSplit`（seeded は既定分割でも `s20260912` を記録する。ファイル名の接尾辞省略とは別の話） / `targetHits`（常に 2,000）/ `model` / `gitCommit` / `gitDirty` / 生成した `protocol` / `blocks` / `formula` / `formulaMd` / `seedContext` を保持し、これらから計算した `sha256` を同梱する
+- seeded で凍結シードの一部を efetch で取得できなければ（NCBI 側の一時的な欠落等）、空の `seedContext` にフォールバックせず失敗させる。「seeded を名乗るが実質シード無しの C0」を静かに凍結しない
+- `--seeds <int>` は分割の乱数そのもの。ファイル内の `seed` が要求値と食い違っていれば（手動編集・コピー間違い等）実行前に拒否する
+- LLM のプロンプト・レスポンス全文は評価計画 §6 のとおり `results/freeze-c0/<caseId>/<出力ファイル名>/llm/` に保存する（run.ts の実行と同じ `loggedFactory` を再利用。`results/` は gitignore 対象）。ハッシュ対象の内容にはログパスを含めない
+- `eval:optimize -- --c0 <name>`（`fixtures/<case>/c0/<name>.json` の拡張子抜きファイル名）を渡すと、その run は `extractProtocol` / `generateDraftFormula` を呼ばず、凍結内容をそのまま C0 として使う。ケース ID 不一致・ハッシュ不一致（改ざん・破損）・シード分割の不一致は実行前に拒否する
+
+```powershell
+npm run eval:optimize -- --case r1-mindfulness-smoking --c0 seeded-draft1
+```
+
+シード分割（既知シード 3 群の選び方）も複数用意できる。既定分割は `fixtures/<id>/seeds.json`（乱数 20260912、id `s20260912`）で、これは変えない。
+
+```powershell
+npm run eval:prepare -- --seed 42          # fixtures/<id>/seeds-42.json を追加で凍結（上書きしない）
+npm run eval:optimize -- --seeds 42        # そのケースの分割で実行（held-out は実行時にその分割から再計算する）
+npm run eval:freeze-c0 -- --case r1-mindfulness-smoking --variant seeded --seeds 42
+```
+
+結果ディレクトリは `results/<profileId>/<caseId>/<c0Key>/<splitKey>/run.json`（`c0Key` は `--c0` の名前、無指定なら `live`。`splitKey` は分割 id、既定 `s20260912`）で、その下に従来どおり試行単位の `<runId>/` を残す。同じキーで完了済み（`status: 'completed'` かつ `maxHits` も一致）なら再実行時にスキップする。`eval:candidates`（却下候補の事後計測）も同じ `--case` / `--profile` / `--max-hits` / `--c0` / `--seeds` を受け取り、`run.ts` と同じキーで `run.json` を探す。
+
+`eval:compare` は、C0 が同一の凍結 fixture（`sha256` 一致）である 2 run だけを比較する（C0 が `live` だったり sha256 が違う組み合わせは拒否する）。
+
+```powershell
+npm run eval:compare -- results/default/r1-mindfulness-smoking/seeded-draft1/s20260912/run.json results/custom-500/r1-mindfulness-smoking/seeded-draft1/s20260912/run.json
+```
+
+`CASES` の各ケースには `role`（`development` | `confirmation`）を付けてある。現行 3 件はすべて `development`（ハーネスの弱点発見用）。`confirmation` ケースの追加は別途、事前登録した選定基準で行う（このチャンクでは追加しない）。
 
 ## gold の監査と凍結
 
@@ -66,7 +109,7 @@ PubMed ESearch だけに `datetype=crdt`、`mindate=1800/01/01`、ケース検�
 
 C0 はシード文脈を空にして適格基準だけから作り、C1 で凍結シードと esummary(JSON) のタイトルを渡します。シードのタイトルや gold の held-out は C0 の LLM に渡しません。C1 の trial 採否理由はサービスの結果をそのまま記録します。
 
-ケースの各段階で `results/<profileId>/<caseId>/run.json` を更新し、同じ条件の完了ケースは再実行時にスキップします。別条件の完了結果はスキップ判定に使いません。失敗ケースは次の実行で最初からやり直し、他ケースを止めません。最適化の途中からの再開ではありません。再実行履歴は `results/<profileId>/<caseId>/<runId>/` に残り、その下の `llm/` に呼び出し単位（リトライ含む）の目的・モデル・プロンプト・応答全文・トークン・所要時間、`progress.jsonl` に進捗・API 通信・最終状態を保存します。run.json の llmLogs はこの runId ディレクトリからの相対パスです。
+ケースの各段階で `results/<profileId>/<caseId>/<c0Key>/<splitKey>/run.json` を更新し、同じキー（profile・case・C0・シード分割のすべて）かつ `maxHits` も一致する完了ケースは再実行時にスキップします。それ以外の組み合わせの完了結果はスキップ判定に使いません。失敗ケースは次の実行で最初からやり直し、他ケースを止めません。最適化の途中からの再開ではありません。再実行履歴は `results/<profileId>/<caseId>/<c0Key>/<splitKey>/<runId>/` に残り、その下の `llm/` に呼び出し単位（リトライ含む）の目的・モデル・プロンプト・応答全文・トークン・所要時間、`progress.jsonl` に進捗・API 通信・最終状態を保存します。run.json の llmLogs はこの runId ディレクトリからの相対パスです。
 
 API コール数は実 fetch 回数、API 所要時間は fetch の応答までの合計です。ケースの elapsedMs は待機・処理時間込みです。サービス内の apiCalls は別の予算単位なので optimization の中へそのまま残しています。URL の api_key/key および環境変数のキー値は保存前にマスクします。
 
@@ -74,7 +117,14 @@ API コール数は実 fetch 回数、API 所要時間は fetch の応答まで�
 
 B1 は任意の `fixtures/<id>/b1.json` に `{ "query": "展開済みの PubMed 検索式" }` として与えます。変換根拠は `b1.md` に残してください。存在すれば同じ分母と日付で実行し、無ければ summary の B1 は「欠測」です。完了後に B1 を追加した場合は report に式と「未計測」が表示されます。自動で実 API を再実行しません。
 
-集計は条件列（profile）を先頭に付け、全条件を `results/summary.md` と `results/summary.csv` にまとめます。旧レイアウト `results/<caseId>/run.json` も読み、profileId が無ければ `default` として扱います。既存の結果の移動・削除は行いません。
+集計は条件列（profile）を先頭に付け、全条件を `results/summary.md` と `results/summary.csv` にまとめます。列には `role` / `c0`（`live` または `frozen:<name>`） / `seedSplit` / `maxHits` / `gitCommit` も含みます。`resultsDir` 配下は「その系列で最初に見つかった run.json」を再帰的に集めるだけなので、旧レイアウト `results/<caseId>/run.json`・現行 `results/<profileId>/<caseId>/run.json`・新レイアウト `results/<profileId>/<caseId>/<c0Key>/<splitKey>/run.json` のいずれも読めます（profileId が無ければ `default` として扱います）。既存の結果の移動・削除は行いません。
+
+### 有害採用・確認負荷・LLM コストの計測
+
+- **有害採用（`adoptionAudit`）**: C0→C1 の間に採用されたすべての候補（`optimization.trials` の `kind: 'proposal'` かつ `accepted: true`）について、**採用直前の基準式**（その候補より前で最後に採用された候補、無ければ C0）と比べて held-out 捕捉を失っていないかを監査する。1 件でも held-out を失った採用を「有害な採用」（`harmfulAdopted`）と数える。C0 の測定・却下候補の既存計測（`rejectedCandidates`）・C1 の測定は再利用し、同じ gold クエリを重複して投げない。`manualReviewPending` のときは採点そのものを保留する（`harmfulAdopted: null`）。計測に失敗した候補は `error` を記録し、`lostHeldOut: []` を「0 件確定」とは読まない
+- **確認負荷（`confirmation`）**: C1 が `achieved`/`needs_review` で最良式があるとき、`searchOutsideCandidates`（`#/expand` の margin 探索と同じ処理）で「人が確認すべき候補」の件数だけを数える。**候補は自動調整へ一切フィードバックしない**（採否も readjustment もしない）。`existingPmids` には常にシード PMID だけを渡し、gold（held-out を含む）は渡さない。gold への対応付け（`heldOutStudiesAmongCandidates` / `nonGoldCandidates`）は、検索・LLM 呼び出しがすべて終わったあと、この集計のためだけに事後に行う。`total` は outside 候補と、held（レビュー保留）だった候補の `impact.inspected`（シード PMID を除く）を合わせて重複除去した件数。outside check 自体の失敗は `status: 'error'` を記録するだけで run を failed にはしない
+- **LLM 使用量とコスト（`llmUsage`）**: `loggedFactory` の呼び出し 1 回（リトライの各試行を含む）ごとに tokensIn/tokensOut を積算し、`src/lib/llm/pricing.ts` の単価表でコストを概算する。失敗した呼び出しも `calls` に数える（トークンは加算しない）。価格表に無いモデルの呼び出しが 1 回でもあれば `costUsd` は恒久的に `null`（`unpricedCalls` で件数を確認できる）。失敗呼び出し（トークン無し）は 0 円加算として扱い、それだけでは `costUsd` を null にしない
+- summary.md の後半に **頑健性の集計**（`role` / `profile` / `case` / C0（`live` または `variant`） / シード分割ごとにグループ化した run 数・C0 hits / C1 hits / C1 heldOutRecall の min・median・max・outcome 件数・`harmfulAdopted` 合計・`confirmationTotal` の中央値）を出す（`results/summary-aggregate.csv` にも同じ内容）。`c0` が `live` の行は run ごとに C0 が再生成されるため、行内の散らばりを自動調整ポリシーの効果と解釈しない注記を付ける
 
 ## 解釈の限界
 

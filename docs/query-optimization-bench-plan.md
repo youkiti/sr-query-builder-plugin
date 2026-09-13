@@ -69,12 +69,26 @@ Cochrane-bench parsed JSON
   ↓ extractProtocol（LLM）
   ↓ ブロックは自動承認（人の承認工程はスキップ。影響の向きは不明とだけ記す）
   ↓ generateDraftFormula → C0
-  ↓ runQueryOptimization（seeds = 3 群, maxHits 10,000 固定, maxIterations 5）→ C1
+  ↓ runQueryOptimization（seeds = 3 群, maxHits 既定プロファイルは 2,000, maxIterations 5）→ C1
 ```
 
 **実行規模: 3 レビュー × シード分割 1 通り × 1 反復 = 3 ラン。** 目的がハーネスの弱点発見なので、
 分散推定より 1 ケースを深く見る（trial 履歴・採否理由・失った研究を全部残す）。
 LLM の出力変動もシード選択への頑健性も、この設計では測っていない。
+
+**C0 の再生成による揺れと、その切り離し（凍結 C0）**: C0 は毎回 LLM で作り直すため、実測 hits が
+実行間で数倍ぶれることを確認した。**再生成された C0 どうしの差を自動調整ポリシーの効果として
+解釈してはならない**。この揺れを条件間比較から切り離すため、`eval:freeze-c0` で C0 を一度生成して
+ハッシュ付きで凍結し、以後の `eval:optimize -- --c0 <name>` はハッシュ検証つきでその内容を
+再利用する（実装は [experiments/query-optimization-bench/README.md](../experiments/query-optimization-bench/README.md) の
+「凍結 C0 とシード分割」節）。凍結には 2 種類の variant がある:
+
+- **criteria-only**: 適格基準だけから C0 を作る（従来の C0 と同じ入力）
+- **seeded**: 適格基準に加え、凍結シード（3 群）のタイトル・抄録・MeSH も渡して C0 を作る
+
+C0 の目安件数（`targetHits`）は凍結時点で `DEFAULT_OPTIMIZATION_MAX_HITS`（2,000）に固定し、
+実行時の `--profile`/`--max-hits` に依存させない。これにより同じ凍結 C0 を複数プロファイルの
+比較に使い回せる。**凍結していない（`live` な）C0 どうしを条件間で比較しない**。
 
 ### 3-2. gold 監査と分割（先に凍結）
 
@@ -108,7 +122,7 @@ esearch にだけ付与**する（式には書かない＝自動調整の禁止�
 
 | 条件 | 内容 | 扱い |
 |---|---|---|
-| C0 | AI ドラフト | C1 の出発点として同一ランのものを対応付けて比較 |
+| C0 | AI ドラフト（`live`: その場生成 / `frozen`: `eval:freeze-c0` で凍結した fixture） | C1 の出発点として同一ランのものを対応付けて比較。**条件間比較は frozen（sha256 一致）でしか成立しない** |
 | C1 | C0 → 自動調整 | 「既知シード 3 件を与える自動調整工程全体」の追加効果 |
 | B1 | Cochrane 元 MEDLINE 式を再構成して PubMed 実行 | 「専門家作成検索の**再構成参照**」。上限や正解ではない |
 | B0 | 論文報告のスクリーニング件数 | **比較表から外し背景情報として併記のみ**（全 DB 合算・重複除去後で土俵が違う） |
@@ -135,12 +149,42 @@ $H$ = $G_U$ からシード群を除いたもの。$R$ = 検索結果。
 **この 2 つで検索効率の優劣を結論しない。** gold に無い適格文献を多く拾った式が分母だけ増えて
 不当に低く出るため、下限同士の順位は真の適合率の順位を保証しない。絶対 precision の主張はしない。
 
+### 4-2-1. 有害採用・確認負荷・LLM コスト
+
+形成的評価として、平均再現率だけでなく「失った/回復した研究の実名」「有害な採用候補数」
+「ユーザー確認項目数」「API 呼び出し数 / コスト」も残す。実名の喪失/回復リストは 4-1 の
+Comparison（`lostStudies`/`gainedStudies`/`lostHeldOut`/`gainedHeldOut`）で既に満たしている。
+残り 3 つをこのハーネスでは次のように実装する。
+
+- **有害採用（`adoptionAudit`）**: C0→C1 の間に採用されたすべての候補（`kind: 'proposal'` かつ `accepted`）を、
+  **採用直前の基準式**（その候補より前で最後に採用された候補、無ければ C0）と比較し、held-out を 1 件でも
+  失った採用を有害採用として数える。既存の C0/C1/却下候補の測定は再利用し、gold 検索を重複させない。
+  `manual_review` のケースは採点そのものを保留する（`harmfulAdopted: null`）
+- **確認負荷（`confirmation`）**: `#/expand` の margin 探索（`searchOutsideCandidates`）を C1 の最終式に対して
+  実行し、**人が確認すべき候補の件数だけを数える**。この集計は候補を自動調整へフィードバックしない
+  （採否判定も readjustment もしない）。`existingPmids`（=「既に知っている」として除外する集合）には
+  常にシード PMID だけを渡し、gold（held-out を含む）は渡さない。gold への対応付けは、検索・LLM 呼び出しが
+  すべて終わった後、この集計のためだけに事後に行う。これは「outside check の判断材料」と
+  「最終的な held-out 採点」を混同しない、という設計上の境界線である
+- **LLM コスト（`llmUsage`）**: すべての LLM 呼び出し（リトライの各試行を含む）の tokensIn/tokensOut を
+  積算し、`src/lib/llm/pricing.ts` の単価表で概算する。価格表に無いモデルを 1 回でも呼べば `costUsd` は
+  恒久的に null（`unpricedCalls` で件数を示す）。失敗呼び出しは calls に数えるが、トークンが取れない
+  （0 円扱いになる）だけでは costUsd を null にしない
+
+実装は [experiments/query-optimization-bench/adoptionAudit.ts](../experiments/query-optimization-bench/adoptionAudit.ts) /
+[confirmationAudit.ts](../experiments/query-optimization-bench/confirmationAudit.ts) /
+[llmUsage.ts](../experiments/query-optimization-bench/llmUsage.ts)、詳細は
+[experiments/query-optimization-bench/README.md](../experiments/query-optimization-bench/README.md) の
+「有害採用・確認負荷・LLM コストの計測」節を参照。
+
 ### 4-3. 「改善」の事前定義（Q2 の判定規則）
 
 > **C0 で捕捉していた held-out 群を 1 つも失わず、かつ 捕捉群が増えるか hits が減る**場合を改善とする。
 
 捕捉を失って hits も減った場合は改善と一括せず `tradeoff` として両方の数字を出す。
-`maxHits` はアプリ既定の 10,000（`HIT_THRESHOLD`）で事前固定し、gold の成績を見て動かさない。
+`maxHits` は事前登録した `default` プロファイルの 2,000（アプリ既定 `DEFAULT_OPTIMIZATION_MAX_HITS`）で
+固定し、gold の成績を見て動かさない。`--max-hits <n>` による事後探索（`custom-<n>`）は
+事前登録の対象外で、`tight-1000` と同様に確認的な結果としては扱わない。
 `achieved`（サービスの条件達成）はシード捕捉と件数上限の達成であって held-out への一般化ではない。
 
 ### 4-4. 採点実装の注意
