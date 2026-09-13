@@ -16,6 +16,7 @@ import { parsePubmedFormulaMd } from '../../src/lib/search-formula-md';
 
 const APP_URL = '/app/app.html#/draft';
 const PMID = '20000001';
+const OUTSIDE_PMID = '40000001';
 const INITIAL_MD = '## PubMed/MEDLINE\n\n```\n#1 "ARDS"[tiab] OR "broad"[tiab]\n#2 "ECMO"[tiab]\n#3 #1 AND #2\n```\n';
 
 async function setup(page: Page, options: { hasSeeds: boolean; holdAi: boolean; heldLost?: number; missedByFilter?: boolean; checkpoint?: QueryOptimizationCheckpoint }
@@ -34,6 +35,10 @@ async function setup(page: Page, options: { hasSeeds: boolean; holdAi: boolean; 
   await registerMeshRdfStub(page);
   await registerNcbiStub(page, { esearch: (url) => {
     const query = new URL(url).searchParams.get('term')!;
+    // margin も差集合なので、拡張語を目印に削除影響より先に判定する。
+    if (query.includes(') NOT (') && query.includes('"extracorporeal"[tiab]')) {
+      return { count: '1', idlist: [OUTSIDE_PMID] };
+    }
     if (query.includes(') NOT (')) {
       const lost = options.heldLost !== undefined && query.split(') NOT (')[0]!.includes('broad');
       return { count: String(lost ? options.heldLost : 0), idlist: lost ? ['30000001'] : [] };
@@ -43,11 +48,22 @@ async function setup(page: Page, options: { hasSeeds: boolean; holdAi: boolean; 
     }
     return url.includes(PMID) ? { count: '1', idlist: [PMID] }
       : { count: url.includes('broad') ? '250' : '50', idlist: [] };
-  }, efetchXml: '<PubmedArticleSet><PubmedArticle><PMID>30000001</PMID><ArticleTitle>確認対象の研究</ArticleTitle><PubDate><Year>2024</Year></PubDate></PubmedArticle></PubmedArticleSet>' });
+  }, efetchXml: (url) => {
+    const pmids = new URL(url).searchParams.get('id')?.split(',') ?? [];
+    return `<PubmedArticleSet>${pmids.filter((pmid) => pmid === '30000001' || pmid === OUTSIDE_PMID).map((pmid) =>
+      `<PubmedArticle><PMID>${pmid}</PMID><ArticleTitle>${pmid === OUTSIDE_PMID ? '外側の研究' : '確認対象の研究'}</ArticleTitle><PubDate><Year>2024</Year></PubDate><Abstract><AbstractText>確認対象の抄録</AbstractText></Abstract></PubmedArticle>`).join('')}</PubmedArticleSet>`;
+  } });
   await registerGeminiStub(page, { responses: { 'optimize-query': {
     target_block_id: '1', proposed_expression: '"ARDS"[tiab]', added_terms: [], removed_terms: ['"broad"[tiab]'],
     replaced_terms: [], rationale: '研究基準に合う ARDS を維持し、広すぎる語を削除しました。', measurement_ids: [], mesh_requests: [],
-  } }, usage: { promptTokenCount: 1000, candidatesTokenCount: 1000 } });
+  }, 'expand-query-for-recall': { blocks: [{ id: '2', additions: [
+    { term: '"extracorporeal"[tiab]', axis: 'freeword', rationale: '別の用語を確認する' },
+  ] }] }, 'pick-boundary-cases': { picks: [{ pmid: OUTSIDE_PMID, reason: '介入の適格性を確認する' }] } },
+  usage: { promptTokenCount: 1000, candidatesTokenCount: 1000 },
+  usageBySkill: {
+    'expand-query-for-recall': { promptTokenCount: 0, candidatesTokenCount: 0 },
+    'pick-boundary-cases': { promptTokenCount: 0, candidatesTokenCount: 0 },
+  } });
   let release = (): void => {};
   if (options.holdAi) {
     const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -113,7 +129,7 @@ test.describe('検索式の自動調整', () => {
       await route.fallback();
     });
     await page.route('**/generativelanguage.googleapis.com/**', async (route) => {
-      prompt = route.request().postData() ?? '';
+      prompt += route.request().postData() ?? '';
       await route.fallback();
     });
     await page.goto(APP_URL);
@@ -149,6 +165,8 @@ test.describe('検索式の自動調整', () => {
     await page.getByText('試行1の変更詳細', { exact: true }).click();
     await expect(page.getByText('失う集合: 150 件 / 増える集合: 0 件', { exact: true })).toBeVisible();
     await expect(page.locator('.optimization__review')).toContainText('保留した候補 1 件');
+    await expect(page.getByRole('article', { name: '判定候補 PMID 30000001', exact: true }))
+      .toContainText('保留候補 candidate-1 で失う文献');
     await expect(page.locator('.optimization__final-formula')).toContainText('"broad"[tiab]');
     await expect(page.locator('.optimization__review')).toContainText('初期式からの変更はありません');
     const adopt = page.getByRole('button', { name: '採用して保存', exact: true });
@@ -221,7 +239,28 @@ test.describe('検索式の自動調整', () => {
     await setup(page);
     await start(page);
     await expectReview(page, '条件達成');
+    await expect(page.getByRole('article', { name: `判定候補 PMID ${OUTSIDE_PMID}`, exact: true })).toBeVisible();
     const result = await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze();
     expect(result.violations).toEqual([]);
+  });
+
+  test('4 区分を確認して外側の文献を include 保存すると保護再調整を選べる', async ({ page }) => {
+    const { fake } = await setup(page);
+    await start(page);
+    await expectReview(page, '条件達成');
+    await expect(page.getByRole('heading', { name: '確認の状況', exact: true })).toBeVisible();
+    const sections = page.locator('.optimization__review-section');
+    await expect(sections).toHaveCount(4);
+    for (const label of ['既知文献の捕捉', '件数目標', '外側の確認', '削除影響の確認']) {
+      await expect(sections.getByRole('heading', { name: new RegExp(label) })).toBeVisible();
+    }
+    const candidate = page.getByRole('article', { name: `判定候補 PMID ${OUTSIDE_PMID}`, exact: true });
+    await candidate.getByRole('button', { name: 'include', exact: true }).click();
+    await expect(candidate).toContainText('include：保存済み');
+    await expect(page.getByRole('button', { name: 'include した文献を保護して再調整する', exact: true })).toBeEnabled();
+    const rows = fake.tabs['SeedPapers']!;
+    const row = rows.find((values) => values[SHEET_HEADERS.SeedPapers.indexOf('pmid')] === OUTSIDE_PMID)!;
+    expect(row[SHEET_HEADERS.SeedPapers.indexOf('source')]).toBe('interactive');
+    expect(row[SHEET_HEADERS.SeedPapers.indexOf('user_decision')]).toBe('include');
   });
 });

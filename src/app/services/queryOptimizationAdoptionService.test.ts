@@ -7,6 +7,7 @@ import * as googleApi from '@/lib/google';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
 import { createEditView } from '../views/editView';
 import { evaluateGuards } from '../guards';
+import { buildOptimizationReviewSections } from './queryOptimizationReviewSections';
 
 const md = '## PubMed/MEDLINE\n\n```\n#1 asthma[tiab]\n```\n';
 function setup() {
@@ -43,6 +44,16 @@ function setup() {
   return { store, google, run, versions, append, validation, find, upload };
 }
 afterEach(() => { jest.restoreAllMocks(); document.body.innerHTML = ''; });
+
+test.each([true, false])('採用ログは現在の4区分と外側の確認（存在=%s）を保存する', async (present) => {
+  const f = setup();
+  if (present) f.run.outsideCheck = { status: 'ready', reason: null, originalHits: 10, marginHits: 0,
+    evaluatedCount: 0, candidates: [], decisions: {} };
+  await adoptQueryOptimization(f);
+  const log = JSON.parse(f.upload.mock.calls[0]![0].content);
+  expect(log.reviewSections).toEqual(buildOptimizationReviewSections(f.run).sections);
+  expect(log.outsideCheck).toEqual(f.run.outsideCheck ?? null);
+});
 
 test('採用保存は親版・プロトコル・最終検証・実行ログを関連づけ、履歴を保持する', async () => {
   const f = setup();

@@ -4,8 +4,10 @@ import { DEFAULT_MAX_ITERATIONS } from './queryOptimizationService';
 import { MAX_SAVED_OPTIMIZATION_PROJECTS, DEFAULT_QUERY_OPTIMIZATION_SETTINGS, getQueryOptimizationSettings, saveQueryOptimizationSettings,
   resolveTargetHits, validateQueryOptimizationSettings } from './queryOptimizationSettingsService';
 
-test('既定値は既存閾値と反復サービスの既定値を参照する', () => {
-  expect(DEFAULT_QUERY_OPTIMIZATION_SETTINGS).toEqual({ maxHits: HIT_THRESHOLD, maxIterations: DEFAULT_MAX_ITERATIONS });
+test('自動調整の既定件数はフィルタ提案の閾値から独立している', () => {
+  expect(DEFAULT_QUERY_OPTIMIZATION_SETTINGS).toEqual({ maxHits: 2000, maxIterations: DEFAULT_MAX_ITERATIONS });
+  expect(HIT_THRESHOLD).toBe(10000);
+  expect(resolveTargetHits(undefined)).toBe(2000);
 });
 
 test('単一キーの設定を同じプロジェクトでだけ復元する', async () => {

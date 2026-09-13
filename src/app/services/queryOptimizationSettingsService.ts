@@ -1,5 +1,4 @@
 import type { ProjectStoreDeps } from '@/features/project';
-import { HIT_THRESHOLD } from '@/features/formula/skills/filterDesigner';
 import { DEFAULT_MAX_ITERATIONS } from './queryOptimizationService';
 
 const SETTINGS_KEY = 'queryOptimizationSettings';
@@ -21,8 +20,10 @@ export interface ProjectQueryOptimizationSettings extends QueryOptimizationSetti
   projectId: string;
 }
 
+export const DEFAULT_OPTIMIZATION_MAX_HITS = 2000;
+
 export const DEFAULT_QUERY_OPTIMIZATION_SETTINGS: Readonly<QueryOptimizationSettings> = {
-  maxHits: HIT_THRESHOLD,
+  maxHits: DEFAULT_OPTIMIZATION_MAX_HITS,
   maxIterations: DEFAULT_MAX_ITERATIONS,
 };
 

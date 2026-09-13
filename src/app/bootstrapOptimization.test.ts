@@ -1,4 +1,7 @@
-import { runOptimizeQuery, startApp } from './bootstrap';
+import { runOptimizeQuery, runDecideOutsideCandidate, runReadjustOptimization, startApp } from './bootstrap';
+import * as expand from './services/expandService';
+import * as checkpointService from './services/queryOptimizationCheckpointService';
+import { buildOptimizationReviewSections } from './services/queryOptimizationReviewSections';
 import { createStore, INITIAL_STATE } from './store';
 import type { ChromeRuntimeDeps } from './services/factories';
 import * as optimization from './services/queryOptimizationService';
@@ -421,4 +424,193 @@ test('自動調整の固定最大件数が初期式の生成プロンプトに�
   expect(prompts).toHaveLength(1);
   expect(prompts[0]).toContain('目安であって上限ではない）: 4321');
   expect(f.run).toHaveBeenCalledWith(expect.objectContaining({ maxHits: 4321 }), expect.anything());
+});
+
+function setupOutside() {
+  const f = setup();
+  const measurement = { id: 'm', fingerprint: 'fp', measuredAt: '', totalHits: 10,
+    capturedPmids: ['11'], missedPmids: [], blocks: [] };
+  const best: optimization.VerifiedOptimizationCandidate = { formula: { ...formula,
+    blocks: [{ id: '1', expression: 'best[tiab]', isCombination: false }] }, measurement,
+    evaluation: { status: 'success', fingerprint: 'fp', measuredAt: '', seedPmids: ['11'], lineHits: [],
+      finalQuery: { status: 'success', error: null, finalQuery: 'best[tiab]', totalHits: 10, captureRate: 1,
+        capturedPmids: ['11'], missedPmids: [] } } };
+  const completed: optimization.QueryOptimizationResult = { ...result, status: 'achieved', stopReason: 'conditions_met', best };
+  f.run.mockResolvedValue(completed);
+  const outside: expand.BoundaryCasesResult = { mode: 'margin', originalHits: 10, broadenedHits: 15, marginHits: 5,
+    evaluatedCount: 5, additions: [], insideStrategy: null, specific: null,
+    candidates: [{ pmid: '99', title: '外側の研究', year: 1990, abstract: '抄録', reason: '迷う理由', meshHeadings: [] }] };
+  const search = jest.spyOn(expand, 'searchOutsideCandidates').mockResolvedValue(outside);
+  return { ...f, completed, outside, search };
+}
+
+test.each(['achieved', 'needs_review'] as const)('%s の最良式で外側を調べ、全シード行を除外対象に渡す', async (status) => {
+  const f = setupOutside();
+  f.completed.status = status;
+  f.list.mockResolvedValue([seed('11'), seed('22', { userDecision: 'maybe' }), seed('33', { userDecision: 'exclude' })]);
+  const pending = deferred<expand.BoundaryCasesResult>();
+  f.search.mockReturnValue(pending.promise);
+  const running = f.invoke();
+  await flush();
+  expect(f.store.getState().queryOptimizationRun).toMatchObject({ status: 'running', result: f.completed,
+    progress: { step: 'outside_check' }, outsideCheck: { status: 'running' } });
+  expect(f.search).toHaveBeenCalledWith(expect.objectContaining({ formula: f.completed.best!.formula,
+    researchQuestion: 'RQ', inclusionCriteria: '組入', exclusionCriteria: '除外', existingPmids: new Set(['11', '22', '33']) }));
+  pending.resolve(f.outside);
+  await running;
+  expect(f.store.getState().queryOptimizationRun).toMatchObject({ status: 'ready', result: { status },
+    outsideCheck: { status: 'ready', marginHits: 5, candidates: [{ pmid: '99', source: 'outside' }] } });
+});
+
+test.each(['stop', 'error'] as const)('外側の確認の %s は本体の条件達成と停止理由を変えない', async (kind) => {
+  const f = setupOutside();
+  const pending = deferred<expand.BoundaryCasesResult>();
+  f.search.mockReturnValue(pending.promise);
+  const running = f.invoke();
+  await flush();
+  if (kind === 'stop') {
+    f.store.setState((s) => ({ ...s, queryOptimizationRun: { ...s.queryOptimizationRun!, stopRequested: true } }));
+    pending.resolve(f.outside);
+  } else pending.reject(new Error('探索失敗'));
+  await running;
+  expect(f.store.getState().queryOptimizationRun).toMatchObject({ status: 'ready',
+    result: { status: 'achieved', stopReason: 'conditions_met' },
+    outsideCheck: { status: kind === 'stop' ? 'skipped' : 'error',
+      reason: kind === 'stop' ? 'ユーザーの停止要求で外側の確認を中止しました' : '探索失敗' } });
+});
+
+test.each(['stopped', 'error', 'no-best'] as const)('本体が %s のときは外側探索をスキップする', async (kind) => {
+  const f = setupOutside();
+  if (kind === 'no-best') f.completed.best = null;
+  else f.completed.status = kind;
+  await f.invoke();
+  expect(f.search).not.toHaveBeenCalled();
+  expect(f.store.getState().queryOptimizationRun?.outsideCheck?.status).toBe('skipped');
+});
+
+test.each(['ready', 'error'] as const)('探索 %s でも保留書誌は重複と全シード行を除外して残す', async (status) => {
+  const f = setupOutside();
+  f.list.mockResolvedValue([seed('11'), seed('22', { userDecision: 'exclude' })]);
+  const held = { kind: 'proposal' as const, candidateId: 'candidate-1', formula, accepted: false, held: true,
+    before: null, after: null, reason: '保留', rationale: '', apiEvents: [],
+    impact: { lostHits: 150, gainedHits: 0, error: null,
+      inspected: ['11', '22', '88', '88'].map((pmid) => ({ pmid, title: '失う研究', year: 2000 })) } };
+  f.completed.trials = [held, { ...held, candidateId: 'candidate-2' }];
+  if (status === 'error') f.search.mockRejectedValue(new Error('探索失敗'));
+  await f.invoke();
+  expect(f.store.getState().queryOptimizationRun?.outsideCheck?.candidates.filter((item) => item.source === 'lost'))
+    .toEqual([{ pmid: '88', title: '失う研究', year: 2000, abstract: null, source: 'lost', reason: '',
+      heldCandidateId: 'candidate-1', lostHits: 150 }]);
+});
+
+test.each(['project', 'run'] as const)('外側の探索中に %s が変わったら結果を書き込まない', async (kind) => {
+  const f = setupOutside();
+  const pending = deferred<expand.BoundaryCasesResult>();
+  f.search.mockReturnValue(pending.promise);
+  const running = f.invoke();
+  await flush();
+  f.store.setState((s) => kind === 'project' ? { ...s, project: null }
+    : { ...s, queryOptimizationRun: { ...s.queryOptimizationRun!, runId: 'new' } });
+  const before = f.store.getState();
+  pending.resolve(f.outside);
+  await running;
+  expect(f.store.getState()).toBe(before);
+});
+
+test.each(['include', 'exclude', 'maybe'] as const)('判定 %s を saving → saved にし二重押しを無視する', async (decision) => {
+  const f = setupOutside();
+  await f.invoke();
+  const pending = deferred<void>();
+  const append = jest.spyOn(seeds, 'appendSeedPaper').mockReturnValue(pending.promise);
+  const first = runDecideOutsideCandidate(f.store, f.runtime, '99', decision);
+  expect(f.store.getState().queryOptimizationRun?.outsideCheck?.decisions['99']).toMatchObject({ status: 'saving', decision });
+  await runDecideOutsideCandidate(f.store, f.runtime, '99', 'include');
+  await flush();
+  expect(append).toHaveBeenCalledTimes(1);
+  expect(append).toHaveBeenCalledWith('s', expect.objectContaining({ pmid: '99', source: 'interactive',
+    userDecision: decision, note: '迷う理由' }), f.runtime.google);
+  pending.resolve();
+  await first;
+  expect(f.store.getState().queryOptimizationRun?.outsideCheck?.decisions['99']).toEqual({ status: 'saved', decision, error: null });
+  await runDecideOutsideCandidate(f.store, f.runtime, '99', 'include');
+  expect(append).toHaveBeenCalledTimes(1);
+});
+
+test('判定失敗は再試行でき、失う文献の理由に run と保留候補を記録する', async () => {
+  const f = setupOutside();
+  await f.invoke();
+  const run = f.store.getState().queryOptimizationRun!;
+  run.outsideCheck!.candidates[0] = { ...run.outsideCheck!.candidates[0]!, source: 'lost', heldCandidateId: 'candidate-1' };
+  const append = jest.spyOn(seeds, 'appendSeedPaper').mockRejectedValueOnce(new Error('保存失敗')).mockResolvedValue();
+  await runDecideOutsideCandidate(f.store, f.runtime, '99', 'maybe');
+  expect(f.store.getState().queryOptimizationRun?.outsideCheck?.decisions['99']).toMatchObject({ status: 'error', error: '保存失敗' });
+  await runDecideOutsideCandidate(f.store, f.runtime, '99', 'maybe');
+  expect(append).toHaveBeenLastCalledWith('s', expect.objectContaining({ userDecision: 'maybe',
+    note: `自動調整 run ${run.runId}: 保留候補 candidate-1 で失う文献` }), f.runtime.google);
+  expect(f.store.getState().queryOptimizationRun?.outsideCheck?.decisions['99']?.status).toBe('saved');
+});
+
+test('include 保護再調整は最良式・同じ設定・更新シードを使い新しい runId で始まる', async () => {
+  const f = setupOutside();
+  await f.invoke();
+  const old = f.store.getState().queryOptimizationRun!;
+  old.outsideCheck!.decisions['99'] = { decision: 'include', status: 'saved', error: null };
+  f.list.mockResolvedValue([seed('11'), seed('99', { userDecision: 'include', source: 'interactive' })]);
+  await runReadjustOptimization(f.store, f.runtime, { google: f.runtime.google, store: f.runtime.store });
+  expect(f.run).toHaveBeenCalledTimes(2);
+  const input = f.run.mock.calls[1]![0];
+  expect(input).toMatchObject({ initialFormula: old.result!.best!.formula, maxHits: old.maxHits,
+    maxIterations: old.maxIterations, seedPmids: ['11', '99'] });
+  expect(input.runId).not.toBe(old.runId);
+  expect(input.resumeBudget).toBeUndefined();
+});
+
+test.each(['ready', 'error', 'skipped'] as const)('探索終了 %s と判定保存時に4区分を終了記録へ反映する', async (status) => {
+  const f = setupOutside();
+  f.run.mockImplementation(async (input) => {
+    f.data.queryOptimizationCheckpoint = { projectId: 'p', runId: input.runId, maxHits: 123, savedAt: '', trials: [],
+      completion: { status: 'achieved', stopReason: 'conditions_met', unmetReasons: [] } };
+    if (status === 'skipped') f.store.setState((s) => ({ ...s, queryOptimizationRun: { ...s.queryOptimizationRun!, stopRequested: true } }));
+    return f.completed;
+  });
+  if (status === 'error') f.search.mockRejectedValue(new Error('探索失敗'));
+  await f.invoke();
+  const current = f.store.getState().queryOptimizationRun!;
+  expect((await checkpointService.getQueryOptimizationCheckpoint('p', f.runtime.store))?.completion?.reviewSections)
+    .toEqual(buildOptimizationReviewSections(current).sections);
+  if (status === 'ready') {
+    jest.spyOn(seeds, 'appendSeedPaper').mockResolvedValue();
+    await runDecideOutsideCandidate(f.store, f.runtime, '99', 'include');
+    expect((await checkpointService.getQueryOptimizationCheckpoint('p', f.runtime.store))?.completion?.reviewSections)
+      .toEqual(buildOptimizationReviewSections(f.store.getState().queryOptimizationRun!).sections);
+    expect((await checkpointService.getQueryOptimizationCheckpoint('p', f.runtime.store))?.completion?.reviewSections?.[2]?.state).toBe('unmet');
+  }
+});
+
+test('確認状況の保存失敗は警告し、最終レビューを維持する', async () => {
+  const f = setupOutside();
+  jest.spyOn(checkpointService, 'updateQueryOptimizationReviewSections').mockRejectedValue(new Error('保存失敗'));
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  await f.invoke();
+  expect(warn).toHaveBeenCalledTimes(1);
+  expect(f.store.getState().queryOptimizationRun).toMatchObject({ status: 'ready', outsideCheck: { status: 'ready' } });
+});
+
+test.each(['email', 'append'] as const)('判定の %s 待ちで run が切り替わっても古い結果を反映しない', async (phase) => {
+  const f = setupOutside();
+  await f.invoke();
+  const pending = deferred<void>();
+  const append = jest.spyOn(seeds, 'appendSeedPaper').mockImplementation(async () => { if (phase === 'append') await pending.promise; });
+  f.runtime.profile.getProfileUserInfo = async () => {
+    if (phase === 'email') await pending.promise;
+    return { email: 'reviewer@example.test', id: 'reviewer' };
+  };
+  const saving = runDecideOutsideCandidate(f.store, f.runtime, '99', 'include');
+  await flush();
+  f.store.setState((s) => ({ ...s, queryOptimizationRun: { ...s.queryOptimizationRun!, runId: 'next' } }));
+  const before = f.store.getState();
+  pending.resolve();
+  await saving;
+  expect(f.store.getState()).toBe(before);
+  expect(append).toHaveBeenCalledTimes(phase === 'email' ? 0 : 1);
 });
