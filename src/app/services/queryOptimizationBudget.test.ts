@@ -13,8 +13,9 @@ function fixture(words: number, mesh: number, rounds: number) {
     criteria: { researchQuestion: 'RQ', inclusionCriteria: '', exclusionCriteria: '' },
   };
   const queries: string[] = [];
-  const fetch = jest.fn(async (url) => {
-    const query = new URL(String(url)).searchParams.get('term')!;
+  const fetch = jest.fn(async (url, init?: RequestInit) => {
+    const params = init?.method === 'POST' ? new URLSearchParams(init.body as string) : new URL(String(url)).searchParams;
+    const query = params.get('term')!;
     queries.push(query);
     // 固有寄与は内側にも NOT を持つため、候補間の差集合だけを空にする。
     if (query.includes(') NOT (') && query.split(' NOT ').length === 2) {
@@ -222,7 +223,8 @@ test('差集合の書誌取得で候補を保留した後も最終再検証1回�
       return { ok: true, status: 200, text: async () => '<PubmedArticleSet><PubmedArticle><PMID>11</PMID><ArticleTitle>失う研究</ArticleTitle></PubmedArticle></PubmedArticleSet>' } as Response;
     }
     const response = await original(url, init);
-    const query = new URL(String(url)).searchParams.get('term')!;
+    const params = init?.method === 'POST' ? new URLSearchParams(init.body as string) : new URL(String(url)).searchParams;
+    const query = params.get('term')!;
     const hits = query.includes('[uid]') || query.includes(' NOT ') ? 1 : query.includes('b1v1') ? 100 : 200;
     return { ...response, json: async () => ({ esearchresult: { count: String(hits), idlist: ['11'] } }) } as Response;
   };
