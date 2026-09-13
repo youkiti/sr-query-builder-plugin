@@ -13,6 +13,8 @@
     "eval:import-c0": "tsx experiments/query-optimization-bench/importC0.ts",
     "eval:compare": "tsx experiments/query-optimization-bench/compare.ts",
     "eval:candidates": "tsx experiments/query-optimization-bench/candidates.ts",
+    "eval:freeze-margin": "tsx experiments/query-optimization-bench/freezeMargin.ts",
+    "eval:outside-stages": "tsx experiments/query-optimization-bench/outsideStages.ts",
     "eval:b1": "tsx experiments/query-optimization-bench/b1.ts",
     "eval:prepare": "tsx experiments/query-optimization-bench/prepare.ts",
     "eval:report": "tsx experiments/query-optimization-bench/report.ts",
