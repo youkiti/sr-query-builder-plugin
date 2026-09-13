@@ -149,6 +149,7 @@ export interface BoundaryCaseView {
 }
 
 export interface BoundaryCasesResult {
+  stages?: OutsideSearchStages;
   /** この取得がどちらのモードで走ったか。UI のメッセージ切替に使う。 */
   mode: ExpandMode;
   candidates: BoundaryCaseView[];
@@ -240,12 +241,27 @@ export interface OutsideSearchInput extends Pick<ExpandServiceDeps,
   inclusionCriteria: string;
   exclusionCriteria: string;
   existingPmids: ReadonlySet<string>;
+  additions?: BlockRecallAdditions[];
+  sort?: 'relevance';
+}
+
+/** 外側探索の各段階で通過した PMID。配列はその段階の順序を保持する。 */
+export interface OutsideSearchStages {
+  broadenedQuery: string | null;
+  marginQuery: string | null;
+  retrievedPmids: string[];
+  novelPmids: string[];
+  requestedPmids: string[];
+  fetchedPmids: string[];
+  pickedPmids: string[];
 }
 
 /** 指定された式の外側から、人が判定する境界事例を取得する。 */
 export async function searchOutsideCandidates(deps: OutsideSearchInput): Promise<BoundaryCasesResult> {
   const { formula, existingPmids } = deps;
   const protocol = deps;
+  const stages: OutsideSearchStages = { broadenedQuery: null, marginQuery: null,
+    retrievedPmids: [], novelPmids: [], requestedPmids: [], fetchedPmids: [], pickedPmids: [] };
   const originalQuery = expandFormula(formula).trim();
   if (!originalQuery) throw new Error('検索式の展開結果が空です');
   // 各概念ブロックを 2 軸（MeSH 一段上 / フリーワード）で広げる拡張語を LLM に提案させる。
@@ -253,7 +269,7 @@ export async function searchOutsideCandidates(deps: OutsideSearchInput): Promise
   const conceptBlocks = formula.blocks
     .filter((b) => !b.isCombination)
     .map((b) => ({ id: b.id, expression: b.expression }));
-  const additions = await expandQueryForRecall(
+  const additions = deps.additions ?? await expandQueryForRecall(
     { researchQuestion: protocol.researchQuestion, blocks: conceptBlocks },
     deps.llmFactory.forPurpose('expand_recall')
   );
@@ -263,6 +279,7 @@ export async function searchOutsideCandidates(deps: OutsideSearchInput): Promise
     const original = await esearch(originalQuery, deps.eutils, { retmax: 0 });
     return {
       mode: 'margin',
+      stages,
       candidates: [],
       originalHits: original.count,
       broadenedHits: original.count,
@@ -277,11 +294,14 @@ export async function searchOutsideCandidates(deps: OutsideSearchInput): Promise
   const broadenedFormula = buildBroadenedFormula(formula, additions);
   const broadenedQuery = expandFormula(broadenedFormula).trim();
   const marginQuery = buildMarginQuery(broadenedQuery, originalQuery);
+  stages.broadenedQuery = broadenedQuery;
+  stages.marginQuery = marginQuery;
 
   // 式の外側（margin）を検索。現式は拡張式の部分集合なので broadenedHits = originalHits + marginHits。
   deps.onProgress?.('esearch');
   const marginResult = await esearch(marginQuery, deps.eutils, {
     retmax: deps.retmax ?? 50,
+    ...(deps.sort ? { sort: deps.sort } : {}),
   });
   const original = await esearch(originalQuery, deps.eutils, { retmax: 0 });
   const originalHits = original.count;
@@ -291,9 +311,13 @@ export async function searchOutsideCandidates(deps: OutsideSearchInput): Promise
   const novelPmids = marginResult.pmids.filter((p) => !existingPmids.has(p));
   const limit = deps.skillCandidateLimit ?? 20;
   const toFetch = novelPmids.slice(0, limit);
+  stages.retrievedPmids = [...marginResult.pmids];
+  stages.novelPmids = [...novelPmids];
+  stages.requestedPmids = [...toFetch];
   if (toFetch.length === 0) {
     return {
       mode: 'margin',
+      stages,
       candidates: [],
       originalHits,
       broadenedHits: originalHits + marginHits,
@@ -306,6 +330,7 @@ export async function searchOutsideCandidates(deps: OutsideSearchInput): Promise
   }
   deps.onProgress?.('efetch');
   const { articleMap, candidates } = await fetchCandidateArticles(toFetch, deps);
+  stages.fetchedPmids = candidates.map((candidate) => candidate.pmid);
 
   deps.onProgress?.('pick-boundary');
   const picks = await pickBoundaryCases(
@@ -318,9 +343,12 @@ export async function searchOutsideCandidates(deps: OutsideSearchInput): Promise
     deps.llmFactory.forPurpose('pick_boundary')
   );
 
+  const views = picksToViews(picks, articleMap);
+  stages.pickedPmids = views.map((candidate) => candidate.pmid);
   return {
     mode: 'margin',
-    candidates: picksToViews(picks, articleMap),
+    stages,
+    candidates: views,
     originalHits,
     broadenedHits: originalHits + marginHits,
     marginHits,

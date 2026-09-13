@@ -204,6 +204,59 @@ npm run eval:optimize -- --case r2-pdr-prognostic --c0 criteria-only-draft2 --se
 - `npm run eval:report` の `summary.csv` は行ごとに `replay` 列（fixture 名。自由生成は `-`）を出す。`summary-aggregate.csv`（頑健性の集計）からは replay run を常に除外し、除外件数を `summary.md` に注記する（固定提案は自由生成のばらつきの一部ではないため）。
 - `npm run eval:compare` は、比較する 2 run の片方だけが replay、または両方 replay でも fixture の内容（sha256）が異なる場合は比較を拒否する（差が自動調整の効果か固定提案の有無・内容の違いかを区別できないため）。
 
+## 外側の候補の段階別ログ（issue #126）
+
+`eval:freeze-margin` は凍結 C0 から拡張語を一度生成し、拡張式と margin（拡張式 NOT 現式）を固定します。`eval:outside-stages` はその固定拡張語で製品の `searchOutsideCandidates` を実行し、既知の取りこぼし研究がどの段階まで到達したかを記録します。取得戦略や製品の既定値（retmax=50、書誌取得上限=20）は変更しません。
+
+凍結の引数は `--case <id>` と `--c0 <name>` が必須、`--draft <正の整数>` は既定 1、`--dry-run` は任意です。`fixtures/<case>/c0/<name>.json` をハッシュ検証して読み、拡張語が 0 件なら凍結せず終了コード 1 にします。現式・margin の件数はケースの検索日で制限した ESearch（retmax=0、strictCounts）で測ります。
+
+出力は `fixtures/<case>/margin/<c0Name>-margin<draft>.json`。C0 の名前・ハッシュ、拡張語、拡張式・margin、件数、検索日、モデル、作成日時、gitCommit/gitDirty、内容のハッシュを保存します。名前は英小文字で始まる英小文字・数字・ハイフンの 1〜64 文字です。`wx` で上書きを禁止し、既存ファイルがあれば dry-run でも停止します。LLM のプロンプト・応答全文は `results/freeze-margin/<case>/<name>/llm/` に保存します。
+
+段階測定の引数:
+
+| 引数 | 指定・既定値 |
+|---|---|
+| `--case <id>` | 必須 |
+| `--margin <name>` | 必須。拡張子なし、英小文字で始まる英小文字・数字・ハイフンの 1〜64 文字 |
+| `--seeds <split>` | 既定分割 20260912。整数・名前付き集合は既存コマンドと同じ |
+| `--retmax <n>` | 既定 50、1〜10000 |
+| `--candidate-limit <n>` | 書誌取得上限。既定 20、正の整数 |
+| `--sort relevance` | 省略時は NCBI 既定順。margin の取得だけに適用 |
+| `--rank-depth <n>` | 既定 10000、1〜10000。0 で追加取得を省略 |
+| `--label <name>` | 英数字・`.`・`_`・`-` の 1〜40 文字。`replay-` 始まりは禁止 |
+| `--dry-run` | 引数・artifact・C0 ハッシュ・シード分割・保存先を確認 |
+
+両コマンドの dry-run は `.env` を読まず、通信・書き込みを行いません。margin が無ければ「margin fixture が見つかりません: <path>」で終了コード 1 です。参照先 C0 のハッシュや、C0 に記録されたシード分割が実行条件と違う場合も停止します。製品が組んだ margin が凍結クエリと一致しなければ failed とし、別の式の段階結果は保存しません。
+
+段階測定の保存先は `results/outside-stages/<case>/<marginName>/<splitId>/r<retmax>-l<limit>-<relevance|default>[+<label>]/run.json`。同じ階層の `<runId>/llm/` に LLM ログ、`<runId>/progress.jsonl` に進捗・実 API 通信・共有リミッタ・バックオフを保存します。完了結果は gitCommit が同じときだけスキップし、別コミットなら `--label` を促して停止します。失敗は再試行でき、試行ログは残ります。`rankDepth` は保存先キーに含まれないため、同じコミットで値を変えて再測定する場合も別の `--label` を付けてください。API キーは保存前に既存の redact で除去します。
+
+`stages` は取得順の `retrievedPmids`、既知除外後の `novelPmids`、上限適用後の `requestedPmids`、書誌が返って AI 入力になった `fetchedPmids`、最終候補順の `pickedPmids` を持ちます。研究の複数 PMID のどれか一つが通過すれば、その研究がその段階に到達したと判定します。
+
+| 判定 | 意味 |
+|---|---|
+| `not_in_margin` | 検索日内の研究 PMID と margin の積集合が空 |
+| `beyond_retmax` | margin 内だが取得一覧に無い |
+| `excluded_as_known` | 取得されたが既知 PMID として除外された |
+| `beyond_candidate_limit` | 既知除外を通過したが書誌取得上限の外 |
+| `efetch_missing` | 書誌を要求したが返らず、AI 入力に無い |
+| `not_picked` | AI 入力にはあるが最終候補に選ばれなかった |
+| `presented` | 最終候補に含まれる |
+
+gold（held-out を含む）は候補検索・LLM の入力に渡しません。既知集合は選択した分割のシード PMID だけです。候補選定終了後の事後集計で初めて gold 全 PMID の検索日内存在を確認し、`computeHeldOut` で分母を固定して研究単位に照合します。正常な群分割では held-out とシードは重ならないため、held-out の `excluded_as_known` は通常 0 件です。`retrievedRank` は取得一覧での 1 始まりの最小順位、無ければ null。`deepRank` は同じ margin・sort を rankDepth 件まで別途取得した一覧での順位です。この追加取得は事後集計専用であり、候補選定には戻しません。研究名・判定・両順位の表と判定別研究数を標準出力にも表示します（0 件も明示）。
+
+R3 の実行例（凍結の本実行は API 通信を伴います）:
+
+```powershell
+npm run eval:freeze-margin -- --case r3-vascular-bleeding --c0 criteria-only-draft1 --dry-run
+npm run eval:freeze-margin -- --case r3-vascular-bleeding --c0 criteria-only-draft1
+npm run eval:freeze-margin -- --case r3-vascular-bleeding --c0 seeded-draft1
+npm run eval:outside-stages -- --case r3-vascular-bleeding --margin criteria-only-draft1-margin1
+npm run eval:outside-stages -- --case r3-vascular-bleeding --margin seeded-draft1-margin1
+npm run eval:outside-stages -- --case r3-vascular-bleeding --margin criteria-only-draft1-margin1 --retmax 500 --candidate-limit 100 --sort relevance
+```
+
+通信量の目安（再送なし）: 凍結は LLM 1 回＋ESearch 2 回。段階測定は ESearch 数回＋EFetch 1 回＋LLM 1 回です。内訳は margin 取得と現式件数で ESearch 2 回、事後の gold 日付確認で 100 PMID ごとに 1 回、held-out 各研究の margin 照合で研究内 100 PMID ごとに 1 回、rankDepth > 0 なら追加 1 回です。書誌取得対象が空なら EFetch・LLM を省略し、書誌が全件欠落した場合も LLM 通信はありません。対象は 1 ケースずつ逐次実行します。
+
 ## gold の監査と凍結
 
 `audit.json` に含入・除外 PMID の重複、複数 study 対応、PMID の無い study、対応不明 PMID を記録します。群は PMID 共有の推移的な連結成分で、各研究名とその研究に属する PMID を保持します。分割は群単位、採点は研究単位です。各研究の報告を 1 件でも捕捉すれば、その研究を捕捉したと数えます。
