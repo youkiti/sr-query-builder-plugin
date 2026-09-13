@@ -188,7 +188,6 @@ test('候補の事後計測も +label のキーを読み、ラベル無し結果
   expect(readFileSync(join(plainDir, 'run.json'), 'utf8')).toBe(original);
 });
 
-
 test('名前付き集合も run.ts と同じ分割キーで結果を読む', async () => {
   const root = mkdtempSync(join(tmpdir(), 'candidate-named-'));
   const result = { ...makeResult(), seedSplit: 'without-one' };

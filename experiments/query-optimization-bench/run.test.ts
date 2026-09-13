@@ -151,7 +151,6 @@ test('dry-run は label を表示する', async () => {
   } finally { stdout.mockRestore(); }
 });
 
-
 test('既存の全凍結 C0 は optimize の --c0 検証経路を通信無しで通る', async () => {
   const network = jest.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('実 API 禁止'));
   const stdout = jest.spyOn(process.stdout, 'write').mockReturnValue(true);

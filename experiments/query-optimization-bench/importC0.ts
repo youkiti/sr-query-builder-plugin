@@ -31,7 +31,11 @@ export function parseImportArgs(args: string[]): ImportArgs {
 /** 既存パーサと参照展開によるローカル検証。LLM の抽出結果との比較・実測は本実行で行う。 */
 function parseImportFormula(markdown: string) {
   const formula = parsePubmedFormulaMd(markdown);
-  if (!formula.blocks.some((block) => !block.isCombination)) throw new Error('取り込む検索式に非結合ブロックがありません');
+  const ids = formula.blocks.filter((block) => !block.isCombination).map((block) => block.id);
+  if (ids.length === 0) throw new Error('取り込む検索式に非結合ブロックがありません');
+  if (ids.some((id, index) => id !== String(index + 1))) {
+    throw new Error(`取り込む検索式の非結合ブロック ID は出現順に 1〜${ids.length} である必要があります（実際の ID: ${ids.join(', ')}）`);
+  }
   for (const block of formula.blocks) expandFormula(formula, block.id);
   return formula;
 }
@@ -40,10 +44,17 @@ export async function importC0Content(input: GenerateC0Input & { formulaMd: stri
   deps: GenerateC0Deps): Promise<C0Content> {
   const formula = parseImportFormula(input.formulaMd);
   const context = await prepareC0Context(input, deps);
-  const blockCount = formula.blocks.filter((block) => !block.isCombination).length;
+  const nonCombinationBlocks = formula.blocks.filter((block) => !block.isCombination);
+  const blockCount = nonCombinationBlocks.length;
   if (blockCount !== context.blocks.blocks.length) {
     throw new Error(`取り込んだ式の非結合ブロック数（${blockCount}）とプロトコルから抽出した blocks.blocks の数（${context.blocks.blocks.length}）が一致しません`);
   }
+  process.stdout.write('目視で対応を確認してください（自動では検証していません）\n');
+  nonCombinationBlocks.forEach((block, index) => {
+    const label = context.blocks.blocks[index]!.blockLabel.replace(/\s+/g, ' ');
+    const expression = block.expression.length > 80 ? `${block.expression.slice(0, 80)}…` : block.expression;
+    process.stdout.write(`#${index + 1} ⇔ 抽出ラベル ${label} ⇔ ${expression}\n`);
+  });
   const content = await finalizeC0Content(input, deps, context, { formula, markdown: input.formulaMd });
   return { ...content, source: 'import', sourceFilename: basename(input.formulaPath) };
 }

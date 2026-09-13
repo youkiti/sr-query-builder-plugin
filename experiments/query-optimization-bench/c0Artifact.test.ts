@@ -49,12 +49,24 @@ test('loadC0Artifact はケース ID 不一致・ハッシュ不一致を拒否�
   expect(() => loadC0Artifact(dir, 'case-a', 'missing')).toThrow('見つかりません');
 });
 
+test('従来の凍結 C0 は由来フィールド無しのままハッシュ検証を通る', () => {
+  const legacyFiles = [
+    ['r1-mindfulness-smoking', 'criteria-only-draft1.json'],
+    ['r1-mindfulness-smoking', 'seeded-draft1.json'],
+    ['r2-pdr-prognostic', 'criteria-only-draft1.json'],
+    ['r2-pdr-prognostic', 'seeded-draft1.json'],
+    ['r3-vascular-bleeding', 'criteria-only-draft1.json'],
+    ['r3-vascular-bleeding', 'seeded-draft1.json'],
+  ] as const;
+  for (const [id, name] of legacyFiles) expect(loadC0Artifact(FIXTURES, id, name.slice(0, -5))).not.toHaveProperty('source');
+});
 
-test('既存の全凍結 C0 は由来フィールド無しのままハッシュ検証を通る', () => {
-  const loaded = CASES.flatMap(({ id }) => readdirSync(c0Dir(FIXTURES, id)).filter((name) => name.endsWith('.json'))
-    .map((name) => loadC0Artifact(FIXTURES, id, name.slice(0, -5))));
-  expect(loaded).toHaveLength(6);
-  for (const artifact of loaded) expect(artifact).not.toHaveProperty('source');
+test('追加分を含む全凍結 C0 はハッシュ検証を通る', () => {
+  for (const { id } of CASES) {
+    for (const name of readdirSync(c0Dir(FIXTURES, id)).filter((name) => name.endsWith('.json'))) {
+      expect(() => loadC0Artifact(FIXTURES, id, name.slice(0, -5))).not.toThrow();
+    }
+  }
 });
 
 test('取り込みの由来もハッシュに含まれ、元ファイル名の改変を検出する', () => {

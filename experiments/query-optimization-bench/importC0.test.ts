@@ -98,6 +98,54 @@ test('式を生成せず extractProtocol だけを呼び、非結合ブロック
   expect(network).not.toHaveBeenCalled();
 });
 
+test('抽出ラベルと式の対応を各行に表示し、長い式は省略する', async () => {
+  const { deps } = fakeDeps();
+  const expression = 'smoking[tiab] OR '.repeat(8) + 'tobacco[tiab]';
+  await importC0Content({ ...input, formulaMd: markdown.replace('smoking[tiab]', expression) }, deps);
+  expect(stdout).toHaveBeenCalledWith('目視で対応を確認してください（自動では検証していません）\n');
+  expect(stdout).toHaveBeenCalledWith(`#1 ⇔ 抽出ラベル Smoking ⇔ ${expression.slice(0, 80)}…\n`);
+  expect(stdout).toHaveBeenCalledWith('#2 ⇔ 抽出ラベル Mindfulness ⇔ mindfulness[tiab]\n');
+});
+
+test('非結合 ID が 1, 2, 4 の式は抽出・通信前に拒否する', async () => {
+  const { deps, chat, fetch } = fakeDeps();
+  const formulaMd = '## PubMed\n```\n#1 A\n#2 B\n#3 #1 OR #2\n#4 C\n#5 #3 AND #4\n```';
+  await expect(importC0Content({ ...input, formulaMd }, deps)).rejects.toThrow('実際の ID: 1, 2, 4');
+  expect(chat).not.toHaveBeenCalled();
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+test.each([
+  '#1 A\n#2 B\n#3 C\n#4 #1 OR #2\n#5 #4 AND #3',
+  '#1 A\n#2 B\n#4 #1 OR #2\n#3 C\n#5 #4 AND #3',
+])('非結合 ID が出現順に 1, 2, 3 なら結合行の位置によらず取り込める: %s', async (body) => {
+  const { deps, chat } = fakeDeps();
+  chat.mockResolvedValue(llmResponse({ ...extracted, blocks: [...extracted.blocks, { block_label: 'Third', description: '第三概念' }] }));
+  const content = await importC0Content({ ...input, formulaMd: '## PubMed\n```\n' + body + '\n```' }, deps);
+  expect(content.formula.blocks.filter((block) => !block.isCombination).map((block) => block.id)).toEqual(['1', '2', '3']);
+});
+
+test.each([false, true])('CLI の非結合 ID 検査は環境変数の読み込み前に効く（dry-run=%s）', async (dryRun) => {
+  const { fixtures, results, formulaPath } = fixture();
+  writeFileSync(formulaPath, '## PubMed\n```\n#1 A\n#2 B\n#3 #1 OR #2\n#4 C\n#5 #3 AND #4\n```');
+  await expect(main([...cliArgs(formulaPath), ...(dryRun ? ['--dry-run'] : [])], fixtures, results)).rejects.toThrow('実際の ID: 1, 2, 4');
+  expect(config).not.toHaveBeenCalled();
+  expect(network).not.toHaveBeenCalled();
+  expect(existsSync(results)).toBe(false);
+});
+
+test('取り込みの dry-run も既存 C0 との衝突を通信・環境変数の読み込み前に拒否する', async () => {
+  const { fixtures, results, dir, formulaPath } = fixture();
+  mkdirSync(join(dir, 'c0'));
+  const path = join(dir, 'c0', 'criteria-only-draft2.json');
+  writeFileSync(path, '{}');
+  await expect(main([...cliArgs(formulaPath), '--dry-run'], fixtures, results)).rejects.toThrow('既に存在します');
+  expect(config).not.toHaveBeenCalled();
+  expect(network).not.toHaveBeenCalled();
+  expect(readFileSync(path, 'utf8')).toBe('{}');
+  expect(existsSync(results)).toBe(false);
+});
+
 test('非結合ブロック数と抽出 blocks の数が不一致なら実測前に拒否する', async () => {
   const { deps, chat, fetch } = fakeDeps();
   chat.mockResolvedValue(llmResponse({ ...extracted, blocks: extracted.blocks.slice(0, 1) }));

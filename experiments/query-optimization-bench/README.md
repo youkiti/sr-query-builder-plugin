@@ -54,15 +54,16 @@ C0（初期式生成）は毎回 LLM で作り直すため、実測 hits が実�
 npm run eval:freeze-c0 -- --case r1-mindfulness-smoking --variant criteria-only
 # seeded: 凍結シード（既定分割）のタイトル・抄録・MeSH も渡して C0 を作る
 npm run eval:freeze-c0 -- --case r1-mindfulness-smoking --variant seeded
-npm run eval:freeze-c0 -- --dry-run --case r1-mindfulness-smoking --variant seeded
+# dry-run も出力先の既存ファイルと衝突すれば止まる（draft1 はコミット済みなので別番号で確認する）
+npm run eval:freeze-c0 -- --dry-run --case r1-mindfulness-smoking --variant seeded --draft 2
 ```
 
 - 出力は `fixtures/<case>/c0/<variant>-draft<n>.json`（既定シード分割のときは接尾辞なし。既定以外の分割だけ `-<splitId>` を付ける。例: `seeded-draft1-s42.json`）。`--draft <n>`（既定 1）で同じ条件の複数ドラフトを別ファイルに残せる
-- 既存ファイルは上書きしない（`wx`）。作り直したいときは手動で削除してから再実行する
+- 既存ファイルは上書きしない（`wx`）。`--dry-run` でも出力先に既存ファイルがあれば停止する。作り直したいときは手動で削除してから再実行する
 - 内容には `caseId` / `variant` / `draftIndex` / `seedSplit`（seeded は既定分割でも `s20260912` を記録する。ファイル名の接尾辞省略とは別の話） / `targetHits`（常に 2,000）/ `model` / `gitCommit` / `gitDirty` / 生成した `protocol` / `blocks` / `formula` / `formulaMd` / `seedContext` を保持し、これらから計算した `sha256` を同梱する
 - seeded で凍結シードの一部を efetch で取得できなければ（NCBI 側の一時的な欠落等）、空の `seedContext` にフォールバックせず失敗させる。「seeded を名乗るが実質シード無しの C0」を静かに凍結しない
 - criteria-only の凍結・取り込みではシードファイルを読み込まず、`--seeds` の同時指定は意味が無いため拒否する
-- `--seeds <int>` は分割の乱数そのもの。ファイル内の `seed` が要求値と食い違っていれば（手動編集・コピー間違い等）実行前に拒否する
+- `--seeds <int>` は分割の乱数そのもの。数値は `^(0|[1-9]\d*)$` に一致する 10 進の非負整数で、`Number.isSafeInteger` を満たすものだけを受け付ける（先頭ゼロ・符号・空白・16 進・指数・小数表記は不可）。ファイル内の `seed` が要求値と食い違っていれば（手動編集・コピー間違い等）実行前に拒否する
 - LLM のプロンプト・レスポンス全文は評価計画 §6 のとおり `results/freeze-c0/<caseId>/<出力ファイル名>/llm/` に保存する（run.ts の実行と同じ `loggedFactory` を再利用。`results/` は gitignore 対象）。ハッシュ対象の内容にはログパスを含めない
 - `eval:optimize -- --c0 <name>`（`fixtures/<case>/c0/<name>.json` の拡張子抜きファイル名）を渡すと、その run は `extractProtocol` / `generateDraftFormula` を呼ばず、凍結内容をそのまま C0 として使う。ケース ID 不一致・ハッシュ不一致（改ざん・破損）・シード分割の不一致は実行前に拒否する
 
@@ -129,6 +130,9 @@ npm run eval:candidates -- --case r2-pdr-prognostic --seeds without-one --c0 see
 
 `eval:import-c0` は `search_formula.md` 形式（`## PubMed/MEDLINE` セクション内にコードブロックと `#N` 行）を既存パーサで読み込みます。式の生成は行わず、`protocol` と `blocks` は通常の凍結と同じ `extractProtocol` の LLM 呼び出しで作ります。取り込んだ非結合ブロック数と抽出した `blocks.blocks` の数が一致しなければ停止します。
 
+非結合ブロックの ID は出現順に `1, 2, ..., N` である必要があり、不一致なら dry-run を含め LLM 呼び出し・API キー確認前に停止します。結合行は途中や末尾に置けます。
+本実行で表示する `#N ⇔ 抽出ラベル ⇔ 式の先頭` の対応表を目視で確認してください。ラベルと式の意味の対応は自動では検証していないため、最適化へ進む前に取り違えがないことを確認します。
+
 ```powershell
 npm run eval:import-c0 -- --case r2-pdr-prognostic --variant criteria-only --formula ./search_formula.md --draft 2 --dry-run
 # 本実行には Gemini / NCBI への通信が必要
@@ -136,7 +140,7 @@ npm run eval:import-c0 -- --case r2-pdr-prognostic --variant criteria-only --for
 npm run eval:import-c0 -- --case r2-pdr-prognostic --variant seeded --formula ./search_formula.md --seeds without-one --draft 2
 ```
 
-`--draft` は既定 1、seeded の `--seeds` は整数・名前付き集合の両方に対応します。seeded は通常の凍結と共通の efetch → シード文脈構築を使い、部分欠落でも停止します。凍結前の非結合ブロックごと＋式全体の ESearch（`retmax: 0`、構文エラー時は停止）も共通です。
+`--draft` は既定 1、seeded の `--seeds` は上記の 10 進の非負整数・名前付き集合の両方に対応します。seeded は通常の凍結と共通の efetch → シード文脈構築を使い、部分欠落でも停止します。凍結前の非結合ブロックごと＋式全体の ESearch（`retmax: 0`、構文エラー時は停止）も共通です。
 
 出力名・ハッシュ・上書き禁止（`wx`）・LLM ログ保存先は `eval:freeze-c0` と同じです。生成済みファイルがある場合は別の `--draft` 番号を指定してください。由来として `source: "import"` と `sourceFilename`（元ファイルのベース名）をハッシュ対象に含めます。これらは取り込み時だけ追加する任意フィールドで、既存 C0 に補完しません。従来の凍結ファイルのハッシュは変わらず、取り込んだ C0 も `eval:optimize -- --c0 <拡張子なしの名前>` で読めます。
 

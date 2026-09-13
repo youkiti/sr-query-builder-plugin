@@ -160,6 +160,27 @@ test('main: 既存の凍結 C0 を上書きせず拒否する', async () => {
   await expect(main(['--case', 'r1-mindfulness-smoking', '--variant', 'criteria-only'], fixturesDir)).rejects.toThrow('既に存在します');
 });
 
+test('main: dry-run も既存の凍結 C0 を環境変数・通信無しで拒否する', async () => {
+  const fixturesDir = mkdtempSync(join(tmpdir(), 'freezec0-dry-exists-'));
+  writeFixture(fixturesDir, 'r1-mindfulness-smoking');
+  const dir = join(fixturesDir, 'r1-mindfulness-smoking', 'c0');
+  mkdirSync(dir);
+  const path = join(dir, 'criteria-only-draft1.json');
+  writeFileSync(path, '{}');
+  const originalKey = process.env.GEMINI_API_KEY;
+  delete process.env.GEMINI_API_KEY;
+  const network = jest.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('実 API 禁止'));
+  try {
+    await expect(main(['--case', 'r1-mindfulness-smoking', '--variant', 'criteria-only', '--dry-run'], fixturesDir)).rejects.toThrow('既に存在します');
+    expect(network).not.toHaveBeenCalled();
+    expect(extractProtocol).not.toHaveBeenCalled();
+    expect(readFileSync(path, 'utf8')).toBe('{}');
+  } finally {
+    network.mockRestore();
+    if (originalKey !== undefined) process.env.GEMINI_API_KEY = originalKey;
+  }
+});
+
 test('main: 生成した内容をハッシュ付きで書き出し、既定 split では split 接尾辞を付けない', async () => {
   const fixturesDir = mkdtempSync(join(tmpdir(), 'freezec0-write-'));
   const resultsDir = mkdtempSync(join(tmpdir(), 'freezec0-results-'));
@@ -241,7 +262,6 @@ test('main: 既定分割は接尾辞なし、既定以外の分割は名前に s
   }
 });
 
-
 test('criteria-only は --seeds を拒否し、未指定ならシードの読み込み・検証を省く', () => {
   expect(() => parseFreezeArgs(['--case', 'r1-mindfulness-smoking', '--variant', 'criteria-only', '--seeds', '42']))
     .toThrow('criteria-only では --seeds は指定できません');
@@ -260,7 +280,6 @@ test('main: seeded はシードファイル必須で seed の自己申告不一�
   writeFileSync(join(fixturesDir, 'r1-mindfulness-smoking', 'seeds-42.json'), JSON.stringify(seeds));
   await expect(main(args, fixturesDir)).rejects.toThrow('要求した分割（42）と一致しません');
 });
-
 
 test('名前付き集合も seeded の分割指定として受け取り、criteria-only では拒否する', () => {
   const args = ['--case', 'r1-mindfulness-smoking', '--variant', 'seeded', '--seeds', 'without-one'];

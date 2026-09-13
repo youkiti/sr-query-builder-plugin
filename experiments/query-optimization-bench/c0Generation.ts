@@ -79,4 +79,3 @@ export async function finalizeC0Content(input: GenerateC0Input, deps: GenerateC0
     seedContext: input.variant === 'seeded' ? seedContext : null, blockApproval: 'auto',
   };
 }
-

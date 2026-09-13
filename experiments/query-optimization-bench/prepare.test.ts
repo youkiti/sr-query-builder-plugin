@@ -107,9 +107,8 @@ test('--seed で追加のシード分割を凍結し、default と異なる 3 �
   expect(existsSync(join(fixtures, CASES[0].id, `seeds-${SEED}.json`))).toBe(false);
 });
 
-
-test('分割指定は従来の数値解釈を維持し、名前は命名規則に制限する', () => {
-  for (const raw of ['42', '-42', '0', '0042', '+42', '42.0', '4.2e1', '0x2a', ' 42 ', '9007199254740991']) {
+test('分割指定は10 進の非負整数表記に限定し、名前は命名規則に制限する', () => {
+  for (const raw of ['42', '0', String(SEED), '9007199254740991']) {
     expect(parseSeedSplit(raw)).toBe(Number(raw));
     expect(seedSplitId(parseSeedSplit(raw))).toBe(`s${Number(raw)}`);
   }
@@ -120,6 +119,9 @@ test('分割指定は従来の数値解釈を維持し、名前は命名規則�
   }
   for (const raw of ['s42', 's20260912', 's-42', 'Upper', 'a_b', '../other', 'a/b', 'a'.repeat(33), '42name', '1.5', '9007199254740992', 'a\n']) {
     expect(() => parseSeedSplit(raw)).toThrow('--seeds');
+  }
+  for (const raw of ['-42', '-1', '0042', '042', '+42', '42.0', '4.2e1', '1e3', '0x2a', ' 42 ', '', ' ', '42\n']) {
+    expect(() => parseSeedSplit(raw)).toThrow('10 進の非負整数');
   }
 });
 

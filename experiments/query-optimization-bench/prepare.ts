@@ -13,12 +13,12 @@ function isSeedName(name: unknown): name is string {
   return typeof name === 'string' && name.trim() === name && /^[a-z][a-z0-9-]{0,31}$/.test(name) && !/^s-?\d+$/.test(name);
 }
 
-/** 数値としての解釈を先に行い、既存 CLI の整数指定を維持する。 */
+/** 10 進の非負整数表記を先に判定し、それ以外は集合名として検証する。 */
 export function parseSeedSplit(raw: string): SeedSplit {
   const seed = Number(raw);
-  if (Number.isSafeInteger(seed)) return seed;
+  if (raw.trim() === raw && /^(0|[1-9]\d*)$/.test(raw) && Number.isSafeInteger(seed)) return seed;
   if (isSeedName(raw)) return raw;
-  throw new Error('--seeds には整数または名前（英小文字で始まる英小文字・数字・ハイフンの 1〜32 文字）を指定してください。s または s- に数字だけを続けた名前は整数分割の id と衝突するため使用できません');
+  throw new Error('--seeds には10 進の非負整数または名前（英小文字で始まる英小文字・数字・ハイフンの 1〜32 文字）を指定してください。s または s- に数字だけを続けた名前は整数分割の id と衝突するため使用できません');
 }
 
 /** 分割を指す短い id（結果ディレクトリのキーやログ表示に使う）。 */

@@ -85,13 +85,13 @@ export async function freezeC0(options: FreezeArgs, fixturesDir: string, results
   const outName = c0FileName(variant, draftIndex, variant === 'seeded' && seed !== SEED ? splitId : null);
   const outDir = c0Dir(fixturesDir, caseId);
   const outPath = c0FixturePath(fixturesDir, caseId, outName);
+  if (existsSync(outPath)) {
+    throw new Error(`${outPath} は既に存在します。再生成する場合は手動で削除してから実行してください`);
+  }
   if (dryRun) {
     process.stdout.write(`${caseId}: dry-run OK (variant=${variant}, draft=${draftIndex}, `
       + `seedSplit=${variant === 'seeded' ? splitId : 'なし'}) -> ${outPath}\n`);
     return;
-  }
-  if (existsSync(outPath)) {
-    throw new Error(`${outPath} は既に存在します。再生成する場合は手動で削除してから実行してください`);
   }
   config();
   if (!process.env.GEMINI_API_KEY) throw new Error('GEMINI_API_KEY が未設定です');

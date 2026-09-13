@@ -145,7 +145,6 @@ test('tight profile passes its registered limits to optimization without network
   expect(fetch).not.toHaveBeenCalled();
 });
 
-
 test('名前付き集合の id は保存対象の run.json と held-out・シード入力に伝わる', async () => {
   const result = makeResult();
   const seeds = { name: 'without-one', selections: groups.slice(1, 4).map((g) => ({ groupId: g.id, pmid: g.pmids[0]!, year: null })) };
