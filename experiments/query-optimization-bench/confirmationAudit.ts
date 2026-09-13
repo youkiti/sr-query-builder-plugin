@@ -20,8 +20,8 @@ export async function computeConfirmation(result: RunResult,
   seedPmids: readonly string[], deps: { eutils: EutilsDeps; llmFactory: LlmProviderFactory }): Promise<ConfirmationAudit> {
   const optimization = result.optimization;
   const best = optimization?.best;
-  if (!best || !(optimization?.status === 'achieved' || optimization?.status === 'needs_review')) {
-    return EMPTY('skipped', '有効な最良式が無いか、状態が achieved/needs_review ではありません');
+  if (!best || optimization?.status === 'error') {
+    return EMPTY('skipped', '有効な最良式が無いか、状態が error です');
   }
   const seedSet = new Set(seedPmids);
   const heldTrials = optimization.trials.filter((trial) => trial.kind === 'proposal' && trial.held);

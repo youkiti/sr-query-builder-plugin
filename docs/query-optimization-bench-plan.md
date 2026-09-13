@@ -90,6 +90,22 @@ C0 の目安件数（`targetHits`）は凍結時点で `DEFAULT_OPTIMIZATION_MAX
 実行時の `--profile`/`--max-hits` に依存させない。これにより同じ凍結 C0 を複数プロファイルの
 比較に使い回せる。**凍結していない（`live` な）C0 どうしを条件間で比較しない**。
 
+`--label <name>` は任意で 1 回だけ指定でき、英数字・`.`・`_`・`-` の 1〜40 文字（`^[A-Za-z0-9._-]{1,40}$`）に限る。ラベルを付けると保存先は `results/<profileId>/<caseId>/<c0Key>/<splitKey>+<label>/run.json` となる。ラベル無しは従来の `<splitKey>/run.json` のまま。ラベルは子ディレクトリにせず分割名に連結するため、ラベル無し結果と併存しても report が両方を読む。`RunResult.label` にも記録し、dry-run は `label=` を表示する。
+
+現行版と改善版は、同じ凍結 C0・同じシード分割・同じ上限条件で、別コミットにそれぞれラベルを付けて実行する。以下は同じチェックアウトで、各コード版に切り替えた後に実行する例（凍結 fixture は同一内容を保持する）。
+
+```powershell
+# 現行版のコミットで実行
+npm run eval:optimize -- --case r1-mindfulness-smoking --c0 seeded-draft1 --seeds 20260912 --label baseline
+# 改善版のコミットへ切り替えた後に実行
+npm run eval:optimize -- --case r1-mindfulness-smoking --c0 seeded-draft1 --seeds 20260912 --label candidate
+npm run eval:compare -- results/default/r1-mindfulness-smoking/seeded-draft1/s20260912+baseline/run.json results/default/r1-mindfulness-smoking/seeded-draft1/s20260912+candidate/run.json
+```
+
+**比較できるのは、凍結 C0（`--c0`）と `eval:compare` に対応したハーネスを含むコミットどうしに限る。** それより前のコミットの自動調整ポリシー（削除影響の検査などが入る前のもの）は、同じ凍結 C0 では測れない。上の例には `--label` 対応も必要。別コミットの完了結果が同じキーにあるとき、`--label` 無しの再実行はエラーになる。同じラベルを別コミットで使い回した場合もエラーであり、上書き・スキップはしない。
+
+`eval:compare` は、両方が凍結 C0（sha256 付き）であり、その sha256・ケース・シード分割・`maxHits`・`maxIterations` が一致する場合だけ比較する。不一致なら拒否する。表には `label`・`model`・`gitDirty`・`postHoc`（欠落は「欠測」）を表示する。モデルが違う場合は拒否せず、表の直後に「⚠ モデルが異なるため、差にはモデルの違いが混ざる」、どちらかの `gitDirty` が true なら「⚠ 作業ツリーが汚れた状態の run を含む」を表示する。
+
 ### 3-2. gold 監査と分割（先に凍結）
 
 1. **研究群の構築**: study 間で PMID を共有する study を 1 群にまとめる。群は分割で同じ側に置く
@@ -161,7 +177,7 @@ Comparison（`lostStudies`/`gainedStudies`/`lostHeldOut`/`gainedHeldOut`）で�
   失った採用を有害採用として数える。既存の C0/C1/却下候補の測定は再利用し、gold 検索を重複させない。
   `manual_review` のケースは採点そのものを保留する（`harmfulAdopted: null`）。比較元または候補自身の metrics が無く比較できなかった採用件数を `unscoredAdopted` に記録し、1 件以上あれば手動監査待ちでなくても `harmfulAdopted: null`（未採点）とする。測定失敗や比較元欠測の原因は trial の `error` に残す（手動監査待ちだけの場合を除く）
 - **確認負荷（`confirmation`）**: `#/expand` の margin 探索（`searchOutsideCandidates`）を C1 の最終式に対して
-  実行し、**人が確認すべき候補の件数だけを数える**。この集計は候補を自動調整へフィードバックしない
+  最良式（`best`）があり、最適化の `status !== 'error'` の場合（`stopped` も含む）に実行し、**人が確認すべき候補の件数だけを数える**。最良式が無いか `error` なら skipped とする。この集計は候補を自動調整へフィードバックしない
   （採否判定も readjustment もしない）。`existingPmids`（=「既に知っている」として除外する集合）には
   常にシード PMID だけを渡し、gold（held-out を含む）は渡さない。gold への対応付けは、検索・LLM 呼び出しが
   すべて終わった後、この集計のためだけに事後に行う。これは「outside check の判断材料」と
@@ -169,13 +185,20 @@ Comparison（`lostStudies`/`gainedStudies`/`lostHeldOut`/`gainedHeldOut`）で�
 - **LLM コスト（`llmUsage`）**: すべての LLM 呼び出し（リトライの各試行を含む）の tokensIn/tokensOut を
   積算し、`src/lib/llm/pricing.ts` の単価表で概算する。価格表に無いモデルを 1 回でも呼べば `costUsd` は
   恒久的に null（`unpricedCalls` で件数を示す）。失敗呼び出しは calls に数えるが、トークンが取れない
-  （0 円扱いになる）だけでは costUsd を null にしない
+  （0 円扱いになる）だけでは costUsd を null にしない。成功呼び出しで tokensIn/tokensOut が両方 null なら
+  `untrackedCalls` を増やし、costUsd は恒久的に null とする。report の cost 列は「欠測（価格表外 N 件）」/
+  「欠測（トークン不明 N 件）」で原因を区別し、両方なら併記する。llmUsage の無い古い記録は「欠測」のまま
 
 実装は [experiments/query-optimization-bench/adoptionAudit.ts](../experiments/query-optimization-bench/adoptionAudit.ts) /
 [confirmationAudit.ts](../experiments/query-optimization-bench/confirmationAudit.ts) /
 [llmUsage.ts](../experiments/query-optimization-bench/llmUsage.ts)、詳細は
 [experiments/query-optimization-bench/README.md](../experiments/query-optimization-bench/README.md) の
 「有害採用・確認負荷・LLM コストの計測」節を参照。
+
+頑健性の集計は role・profile・case・C0 variant・シード分割に加え、`label`（無ければ `-`）と
+`gitCommit`（先頭 12 文字、無ければ「欠測」）でグループ化し、`seedSplit` の後ろに両列を置く。
+個々の run の表にも gitCommit の隣に label 列を置く。live の再生成に関する既存注記は保持する。
+凍結 C0 のグループで `c0.id` が複数混ざる場合は「複数ドラフト（N 種）を含む。散らばりには C0 の違いが混ざる」と注記する。
 
 ### 4-3. 「改善」の事前定義（Q2 の判定規則）
 

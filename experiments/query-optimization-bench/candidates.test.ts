@@ -140,7 +140,7 @@ test.each([
     return { path, original };
   });
   await main(['--case', result.id, '--dry-run', ...args], root);
-  expect(output).toHaveBeenCalledWith(`${result.id}: dry-run; 却下候補=${count}, API calls=0\n`);
+  expect(output).toHaveBeenCalledWith(`${result.id}: dry-run; label=-, 却下候補=${count}, API calls=0\n`);
   for (const { path, original } of originals) expect(readFileSync(path, 'utf8')).toBe(original);
 });
 
@@ -157,7 +157,7 @@ test.each([true, false])('missing run.json logs one line and continues (dry-run=
     expect(output.mock.calls.filter(([line]) => line === `${id}: run.json が存在しないためスキップ (profile=tight-1000)\n`)).toHaveLength(1);
   }
   expect(output).toHaveBeenCalledWith(dryRun
-    ? `${result.id}: dry-run; 却下候補=0, API calls=0\n`
+    ? `${result.id}: dry-run; label=-, 却下候補=0, API calls=0\n`
     : `${result.id}: 却下候補なし; 追加計測なし\n`);
   expect(fetch).not.toHaveBeenCalled();
 });
@@ -169,4 +169,21 @@ test('invalid run.json remains an error', async () => {
   writeFileSync(join(dir, 'run.json'), '{');
   await expect(main(['--case', CASES[0].id, '--dry-run'], root)).rejects.toThrow(SyntaxError);
   expect(output).not.toHaveBeenCalled();
+});
+
+
+test('候補の事後計測も +label のキーを読み、ラベル無し結果を変更しない', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'candidate-label-'));
+  const result = makeResult();
+  const plainDir = dirFor(root, 'default', result.id);
+  const labeledDir = resultDir(root, 'default', result.id, 'live', 's20260912', 'candidate');
+  const original = JSON.stringify(result);
+  for (const dir of [plainDir, labeledDir]) {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'run.json'), original);
+  }
+  const fetch = jest.fn().mockImplementation(async () => response(0));
+  await main(['--case', result.id, '--label', 'candidate'], root, deps(fetch));
+  expect(JSON.parse(readFileSync(join(labeledDir, 'run.json'), 'utf8')).rejectedCandidates).toHaveLength(2);
+  expect(readFileSync(join(plainDir, 'run.json'), 'utf8')).toBe(original);
 });

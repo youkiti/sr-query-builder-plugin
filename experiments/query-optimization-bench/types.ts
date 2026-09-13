@@ -142,9 +142,10 @@ export interface LlmUsage {
   calls: number;
   tokensIn: number;
   tokensOut: number;
-  /** 1 回でも価格表に無いモデル呼び出しがあれば null（unpricedCalls を参照）。 */
+  /** 1 回でも価格表に無いモデル呼び出しがあるか、または成功時のトークン数が両方不明なら null（unpricedCalls / untrackedCalls を参照）。 */
   costUsd: number | null;
   unpricedCalls: number;
+  untrackedCalls: number;
 }
 
 export interface RunResult {
@@ -160,6 +161,7 @@ export interface RunResult {
   maxIterations: number;
   /** 使用した gitHEAD（取得失敗時は null）。 */
   gitCommit?: string | null;
+  label?: string;
   /** 実行時に作業ツリーが汚れていたか（取得失敗時は null）。 */
   gitDirty?: boolean | null;
   /** C0 が凍結 fixture 由来か、その場で生成した live かを記録する。 */

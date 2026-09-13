@@ -31,16 +31,21 @@ const makeResult = (overrides: Partial<RunResult> = {}): RunResult => ({
 
 beforeEach(() => jest.resetAllMocks());
 
-test('最良式が無い、または achieved/needs_review でなければ skipped', async () => {
+test('最良式が無い、または error なら skipped', async () => {
   const noBest = makeResult({ optimization: { status: 'stopped', stopReason: 'user_stop', best: null, unmetReasons: [], iterations: 0, apiCalls: 0, elapsedMs: 0, trials: [] } });
   expect(await computeConfirmation(noBest, protocol, seedPmids, deps)).toMatchObject({ status: 'skipped' });
+  const error = makeResult();
+  error.optimization!.status = 'error';
+  expect(await computeConfirmation(error, protocol, seedPmids, deps)).toMatchObject({ status: 'skipped' });
   expect(searchOutsideCandidates).not.toHaveBeenCalled();
 });
 
-test('候補は seed PMID だけを既知集合として渡す（gold の held-out は渡さない）', async () => {
+test.each(['achieved', 'needs_review', 'stopped'] as const)('%s + best ありでは実行し、seed PMID だけを既知集合として渡す', async (status) => {
   jest.mocked(searchOutsideCandidates).mockResolvedValue({ mode: 'margin', candidates: [], originalHits: 0, broadenedHits: 0,
     marginHits: 5, evaluatedCount: 0, additions: [], insideStrategy: null, specific: null });
-  await computeConfirmation(makeResult(), protocol, seedPmids, deps);
+  const result = makeResult();
+  result.optimization!.status = status;
+  expect(await computeConfirmation(result, protocol, seedPmids, deps)).toMatchObject({ status: 'ready' });
   const call = jest.mocked(searchOutsideCandidates).mock.calls[0]![0];
   expect(call.existingPmids).toEqual(new Set(seedPmids));
   // gold の held-out（4, 5）や、その他の gold PMID が existingPmids に紛れ込んでいないことを確認する。

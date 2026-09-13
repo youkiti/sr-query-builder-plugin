@@ -131,7 +131,7 @@ test('aggregateRows は role・profile・case・C0・分割ごとに min/median/
 
   const rows = aggregateRows([base, second, liveRun]);
   const frozenRow = rows.find((row) => row[3] === 'seeded');
-  expect(frozenRow).toEqual(['development', 'default', 'r1-mindfulness-smoking', 'seeded', 's20260912', '2',
+  expect(frozenRow).toEqual(['development', 'default', 'r1-mindfulness-smoking', 'seeded', 's20260912', '-', '欠測', '2',
     '100', '150', '200', // c0 hits min/median/max
     '60', '70', '80', // c1 hits min/median/max
     '0.5', '0.6', '0.7', // heldOutRecall min/median/max
@@ -144,4 +144,56 @@ test('aggregateRows は role・profile・case・C0・分割ごとに min/median/
   const harmfulIndex = rows[0]!.indexOf('harmfulAdoptedTotal');
   expect(aggregateRows([base, second, unscored]).find((row) => row[3] === 'seeded')![harmfulIndex]).toBe('1（未採点 1 run を除く）');
   expect(aggregateRows([unscored]).find((row) => row[3] === 'seeded')![harmfulIndex]).toBe('欠測');
+});
+
+
+const labeledRun: RunResult = { id: 'case', runId: 'run', profileId: 'default', status: 'completed', startedAt: '',
+  model: 'fake', searchDate: '', maxHits: 2000, maxIterations: 5, conditions: {}, apiCalls: { ncbi: 0, llm: 0 },
+  apiElapsedMs: { ncbi: 0, llm: 0 }, elapsedMs: 0, llmLogs: [], seedSplit: 's42', gitCommit: '123456789012aaa',
+  c0: { source: 'frozen', id: 'seeded-draft1', variant: 'seeded', sha256: 'a', draftIndex: 1 } };
+
+test('ラベル無しと +label 付き run は両方読み、各試行履歴は除く', () => {
+  const root = mkdtempSync(join(tmpdir(), 'bench-label-'));
+  for (const [split, label] of [['s42', undefined], ['s42+baseline', 'baseline']] as const) {
+    const dir = join(root, 'default', 'case', 'seeded-draft1', split);
+    mkdirSync(join(dir, 'attempt'), { recursive: true });
+    writeFileSync(join(dir, 'run.json'), JSON.stringify({ ...labeledRun, label }));
+    writeFileSync(join(dir, 'attempt', 'run.json'), JSON.stringify({ ...labeledRun, id: 'ignored' }));
+  }
+  report(root, join(root, 'fixtures'));
+  const csv = readFileSync(join(root, 'summary.csv'), 'utf8');
+  const rows = csv.trim().split('\n').filter((row) => row.includes('"C0"'));
+  expect(rows).toHaveLength(2);
+  expect(rows.filter((row) => row.includes('"baseline"'))).toHaveLength(1);
+  expect(csv).not.toContain('ignored');
+});
+
+test('集計は label とコミットを分け、同一グループの複数ドラフトだけ注記する', () => {
+  const second = { ...labeledRun, c0: { ...labeledRun.c0!, id: 'seeded-draft2', sha256: 'b', draftIndex: 2 } };
+  const rows = aggregateRows([labeledRun, second, { ...labeledRun, label: 'candidate' }, { ...labeledRun, gitCommit: 'abcdef123456bbb' }]);
+  expect(rows).toHaveLength(4);
+  const column = (name: string) => rows[0]!.indexOf(name);
+  expect(rows[0]!.slice(4, 7)).toEqual(['seedSplit', 'label', 'gitCommit']);
+  const mixed = rows.slice(1).find((row) => row[column('runs')] === '2')!;
+  expect(mixed[column('label')]).toBe('-');
+  expect(mixed[column('gitCommit')]).toBe('123456789012');
+  expect(mixed[column('note')]).toBe('複数ドラフト（2 種）を含む。散らばりには C0 の違いが混ざる');
+  expect(rows.slice(1).filter((row) => row[column('runs')] === '1').every((row) => row[column('note')] === '')).toBe(true);
+});
+
+test('コスト欠測は価格表外とトークン不明を区別し、古い記録も表示する', () => {
+  const usage = { calls: 3, tokensIn: 0, tokensOut: 0, costUsd: null, unpricedCalls: 0, untrackedCalls: 0 };
+  const cost = (llmUsage?: RunResult['llmUsage']) => {
+    const rows = reportRows([{ ...labeledRun, label: 'baseline', llmUsage }]);
+    expect(rows[2]![rows[0]!.indexOf('label')]).toBe('baseline');
+    return rows[2]![rows[0]!.indexOf('llmCostUsd')];
+  };
+  expect(cost()).toBe('欠測');
+  expect(cost({ ...usage, unpricedCalls: 1 })).toBe('欠測（価格表外 1 件）');
+  expect(cost({ ...usage, untrackedCalls: 2 })).toBe('欠測（トークン不明 2 件）');
+  expect(cost({ ...usage, unpricedCalls: 1, untrackedCalls: 2 })).toBe('欠測（価格表外 1 件・トークン不明 2 件）');
+  const legacy = { ...usage, unpricedCalls: 1 };
+  Reflect.deleteProperty(legacy, 'untrackedCalls');
+  expect(cost(legacy)).toBe('欠測（価格表外 1 件）');
+  expect(cost({ ...usage, costUsd: 0 })).toBe('0');
 });

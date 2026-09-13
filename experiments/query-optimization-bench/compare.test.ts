@@ -29,6 +29,7 @@ test('ケース・シード分割・maxHits の不一致も拒否する', () => 
   expect(() => renderComparison(a, { ...a, id: 'other' })).toThrow('ケースが一致しません');
   expect(() => renderComparison(a, { ...a, seedSplit: 's1' })).toThrow('シード分割が一致しません');
   expect(() => renderComparison(a, { ...a, maxHits: 1000 })).toThrow('maxHits が一致しません');
+  expect(() => renderComparison(a, { ...a, maxIterations: 3 })).toThrow('maxIterations が一致しません');
 });
 
 test('同一凍結 C0 の 2 run を比較し、C1 の増減を研究名で表示する', () => {
@@ -63,4 +64,21 @@ test('loadRun/main は run.json を読んで標準出力へ書き出す', () => 
     main([pathA, pathB]);
     expect(stdout.mock.calls.some((call) => String(call[0]).includes('outcome: unchanged'))).toBe(true);
   } finally { stdout.mockRestore(); }
+});
+
+
+test('label・model・gitDirty・postHoc と欠測を表示し、モデル差と汚れを注意する', () => {
+  const a = { ...base, label: 'baseline', gitDirty: false, postHoc: false };
+  const b = { ...base, label: 'candidate', model: 'other', gitDirty: true, postHoc: true };
+  const text = renderComparison(a, b);
+  expect(text).toContain('| label | baseline | candidate |');
+  expect(text).toContain('| model | fake | other |');
+  expect(text).toContain('| gitDirty | false | true |');
+  expect(text).toContain('| postHoc | false | true |');
+  expect(text).toContain('⚠ モデルが異なるため、差にはモデルの違いが混ざる');
+  expect(text).toContain('⚠ 作業ツリーが汚れた状態の run を含む');
+  expect(renderComparison(b, a)).toContain('⚠ 作業ツリー');
+  const plain = renderComparison(base, base);
+  for (const field of ['label', 'gitDirty', 'postHoc']) expect(plain).toContain(`| ${field} | 欠測 | 欠測 |`);
+  expect(plain).not.toContain('⚠');
 });

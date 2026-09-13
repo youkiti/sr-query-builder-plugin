@@ -20,6 +20,7 @@ export function renderComparison(a: RunResult, b: RunResult): string {
   if (a.id !== b.id) throw new Error(`ケースが一致しません（A=${a.id}, B=${b.id}）`);
   if (a.seedSplit !== b.seedSplit) throw new Error(`シード分割が一致しません（A=${a.seedSplit ?? '欠測'}, B=${b.seedSplit ?? '欠測'}）`);
   if (a.maxHits !== b.maxHits) throw new Error(`maxHits が一致しません（A=${a.maxHits}, B=${b.maxHits}）`);
+  if (a.maxIterations !== b.maxIterations) throw new Error(`maxIterations が一致しません（A=${a.maxIterations}, B=${b.maxIterations}）`);
   const lines = [
     `# ${a.id} 比較（C0 sha256=${a.c0.sha256.slice(0, 12)}…, seedSplit=${a.seedSplit ?? '欠測'}, maxHits=${a.maxHits}）`,
     '',
@@ -28,12 +29,17 @@ export function renderComparison(a: RunResult, b: RunResult): string {
     `| runId | ${a.runId} | ${b.runId} |`,
     `| gitCommit | ${a.gitCommit ?? '欠測'} | ${b.gitCommit ?? '欠測'} |`,
   ];
+  for (const field of ['label', 'model', 'gitDirty', 'postHoc'] as const) {
+    lines.push(`| ${field} | ${a[field] ?? '欠測'} | ${b[field] ?? '欠測'} |`);
+  }
   const am = a.conditions.C1?.metrics;
   const bm = b.conditions.C1?.metrics;
   const summarize = (run: RunResult, metrics: typeof am) => metrics
     ? `${metrics.hits} / ${metrics.heldOutRecall ?? '欠測'}`
     : run.conditions.C1 ? '指標なし（要手動監査または失敗）' : '未計測';
   lines.push(`| C1 hits / heldOutRecall | ${summarize(a, am)} | ${summarize(b, bm)} |`, '');
+  if (a.model !== b.model) lines.push('⚠ モデルが異なるため、差にはモデルの違いが混ざる', '');
+  if (a.gitDirty === true || b.gitDirty === true) lines.push('⚠ 作業ツリーが汚れた状態の run を含む', '');
   if (am && bm) {
     const comparison = compareMetrics(am, bm);
     lines.push('## A → B の差分',

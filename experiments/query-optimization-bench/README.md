@@ -75,13 +75,23 @@ npm run eval:optimize -- --seeds 42        # そのケースの分割で実行�
 npm run eval:freeze-c0 -- --case r1-mindfulness-smoking --variant seeded --seeds 42
 ```
 
-結果ディレクトリは `results/<profileId>/<caseId>/<c0Key>/<splitKey>/run.json`（`c0Key` は `--c0` の名前、無指定なら `live`。`splitKey` は分割 id、既定 `s20260912`）で、その下に従来どおり試行単位の `<runId>/` を残す。同じキーで完了済み（`status: 'completed'` かつ `maxHits` も一致）なら再実行時にスキップする。`eval:candidates`（却下候補の事後計測）も同じ `--case` / `--profile` / `--max-hits` / `--c0` / `--seeds` を受け取り、`run.ts` と同じキーで `run.json` を探す。
+結果ディレクトリは `results/<profileId>/<caseId>/<c0Key>/<splitKey>/run.json`（`c0Key` は `--c0` の名前、無指定なら `live`。`splitKey` は分割 id、既定 `s20260912`）で、その下に従来どおり試行単位の `<runId>/` を残す。同じキーで完了済み（`status: 'completed'` かつ `maxHits` も一致）なら、`gitCommit` が厳密一致する場合（両方 null を含む）だけ再実行時にスキップする。別コミットならそのケースをエラーにして他ケースへ進み、既存の完了結果は書き換えない。`eval:candidates`（却下候補の事後計測）も同じ `--case` / `--profile` / `--max-hits` / `--c0` / `--seeds` / `--label` を受け取り、`run.ts` と同じキーで `run.json` を探す。
 
-`eval:compare` は、C0 が同一の凍結 fixture（`sha256` 一致）である 2 run だけを比較する（C0 が `live` だったり sha256 が違う組み合わせは拒否する）。
+`--label <name>` は任意で 1 回だけ指定でき、英数字・`.`・`_`・`-` の 1〜40 文字（`^[A-Za-z0-9._-]{1,40}$`）に限る。ラベルを付けると保存先は `results/<profileId>/<caseId>/<c0Key>/<splitKey>+<label>/run.json` となる。ラベル無しは従来の `<splitKey>/run.json` のまま。ラベルは子ディレクトリにせず分割名に連結するため、ラベル無し結果と併存しても report が両方を読む。`RunResult.label` にも記録し、dry-run は `label=` を表示する。
+
+現行版と改善版は、同じ凍結 C0・同じシード分割・同じ上限条件で、別コミットにそれぞれラベルを付けて実行する。以下は同じチェックアウトで、各コード版に切り替えた後に実行する例（凍結 fixture は同一内容を保持する）。
 
 ```powershell
-npm run eval:compare -- results/default/r1-mindfulness-smoking/seeded-draft1/s20260912/run.json results/custom-500/r1-mindfulness-smoking/seeded-draft1/s20260912/run.json
+# 現行版のコミットで実行
+npm run eval:optimize -- --case r1-mindfulness-smoking --c0 seeded-draft1 --seeds 20260912 --label baseline
+# 改善版のコミットへ切り替えた後に実行
+npm run eval:optimize -- --case r1-mindfulness-smoking --c0 seeded-draft1 --seeds 20260912 --label candidate
+npm run eval:compare -- results/default/r1-mindfulness-smoking/seeded-draft1/s20260912+baseline/run.json results/default/r1-mindfulness-smoking/seeded-draft1/s20260912+candidate/run.json
 ```
+
+**比較できるのは、凍結 C0（`--c0`）と `eval:compare` に対応したハーネスを含むコミットどうしに限る。** それより前のコミットの自動調整ポリシー（削除影響の検査などが入る前のもの）は、同じ凍結 C0 では測れない。上の例には `--label` 対応も必要。別コミットの完了結果が同じキーにあるとき、`--label` 無しの再実行はエラーになる。同じラベルを別コミットで使い回した場合もエラーであり、上書き・スキップはしない。
+
+`eval:compare` は、両方が凍結 C0（sha256 付き）であり、その sha256・ケース・シード分割・`maxHits`・`maxIterations` が一致する場合だけ比較する。不一致なら拒否する。表には `label`・`model`・`gitDirty`・`postHoc`（欠落は「欠測」）を表示する。モデルが違う場合は拒否せず、表の直後に「⚠ モデルが異なるため、差にはモデルの違いが混ざる」、どちらかの `gitDirty` が true なら「⚠ 作業ツリーが汚れた状態の run を含む」を表示する。
 
 `CASES` の各ケースには `role`（`development` | `confirmation`）を付けてある。現行 3 件はすべて `development`（ハーネスの弱点発見用）。`confirmation` ケースの追加は別途、事前登録した選定基準で行う（このチャンクでは追加しない）。
 
@@ -109,7 +119,7 @@ PubMed ESearch だけに `datetype=crdt`、`mindate=1800/01/01`、ケース検�
 
 C0 はシード文脈を空にして適格基準だけから作り、C1 で凍結シードと esummary(JSON) のタイトルを渡します。シードのタイトルや gold の held-out は C0 の LLM に渡しません。C1 の trial 採否理由はサービスの結果をそのまま記録します。
 
-ケースの各段階で `results/<profileId>/<caseId>/<c0Key>/<splitKey>/run.json` を更新し、同じキー（profile・case・C0・シード分割のすべて）かつ `maxHits` も一致する完了ケースは再実行時にスキップします。それ以外の組み合わせの完了結果はスキップ判定に使いません。失敗ケースは次の実行で最初からやり直し、他ケースを止めません。最適化の途中からの再開ではありません。再実行履歴は `results/<profileId>/<caseId>/<c0Key>/<splitKey>/<runId>/` に残り、その下の `llm/` に呼び出し単位（リトライ含む）の目的・モデル・プロンプト・応答全文・トークン・所要時間、`progress.jsonl` に進捗・API 通信・最終状態を保存します。run.json の llmLogs はこの runId ディレクトリからの相対パスです。
+ケースの各段階で `results/<profileId>/<caseId>/<c0Key>/<splitKey>/run.json` を更新し、同じキー（profile・case・C0・シード分割・label のすべて）かつ `maxHits` と `gitCommit` も一致する完了ケースは再実行時にスキップします。同じキーで `maxHits` が一致してもコミットが異なる完了結果は、エラーとして保持します。ラベル指定時は以下の保存先・履歴の `<splitKey>` を `<splitKey>+<label>` と読み替えてください。失敗ケースは次の実行で最初からやり直し、他ケースを止めません。最適化の途中からの再開ではありません。再実行履歴は `results/<profileId>/<caseId>/<c0Key>/<splitKey>/<runId>/` に残り、その下の `llm/` に呼び出し単位（リトライ含む）の目的・モデル・プロンプト・応答全文・トークン・所要時間、`progress.jsonl` に進捗・API 通信・最終状態を保存します。run.json の llmLogs はこの runId ディレクトリからの相対パスです。
 
 API コール数は実 fetch 回数、API 所要時間は fetch の応答までの合計です。ケースの elapsedMs は待機・処理時間込みです。サービス内の apiCalls は別の予算単位なので optimization の中へそのまま残しています。URL の api_key/key および環境変数のキー値は保存前にマスクします。
 
@@ -117,14 +127,14 @@ API コール数は実 fetch 回数、API 所要時間は fetch の応答まで�
 
 B1 は任意の `fixtures/<id>/b1.json` に `{ "query": "展開済みの PubMed 検索式" }` として与えます。変換根拠は `b1.md` に残してください。存在すれば同じ分母と日付で実行し、無ければ summary の B1 は「欠測」です。完了後に B1 を追加した場合は report に式と「未計測」が表示されます。自動で実 API を再実行しません。
 
-集計は条件列（profile）を先頭に付け、全条件を `results/summary.md` と `results/summary.csv` にまとめます。列には `role` / `c0`（`live` または `frozen:<name>`） / `seedSplit` / `maxHits` / `gitCommit` も含みます。`resultsDir` 配下は「その系列で最初に見つかった run.json」を再帰的に集めるだけなので、旧レイアウト `results/<caseId>/run.json`・現行 `results/<profileId>/<caseId>/run.json`・新レイアウト `results/<profileId>/<caseId>/<c0Key>/<splitKey>/run.json` のいずれも読めます（profileId が無ければ `default` として扱います）。既存の結果の移動・削除は行いません。
+集計は条件列（profile）を先頭に付け、全条件を `results/summary.md` と `results/summary.csv` にまとめます。列には `role` / `c0`（`live` または `frozen:<name>`） / `seedSplit` / `maxHits` / `gitCommit` / `label`（gitCommit の隣）も含みます。`resultsDir` 配下は「その系列で最初に見つかった run.json」を再帰的に集めるだけなので、旧レイアウト `results/<caseId>/run.json`・現行 `results/<profileId>/<caseId>/run.json`・新レイアウト `results/<profileId>/<caseId>/<c0Key>/<splitKey>/run.json` のいずれも読めます（profileId が無ければ `default` として扱います）。既存の結果の移動・削除は行いません。
 
 ### 有害採用・確認負荷・LLM コストの計測
 
 - **有害採用（`adoptionAudit`）**: C0→C1 の間に採用されたすべての候補（`optimization.trials` の `kind: 'proposal'` かつ `accepted: true`）について、**採用直前の基準式**（その候補より前で最後に採用された候補、無ければ C0）と比べて held-out 捕捉を失っていないかを監査する。1 件でも held-out を失った採用を「有害な採用」（`harmfulAdopted`）と数える。C0 の測定・却下候補の既存計測（`rejectedCandidates`）・C1 の測定は再利用し、同じ gold クエリを重複して投げない。`manualReviewPending` のときは採点そのものを保留する（`harmfulAdopted: null`）。比較元または候補自身の metrics が無く比較できなかった採用件数を `unscoredAdopted` に記録し、1 件以上あれば `harmfulAdopted: null`（未採点）とする。候補自身の測定失敗や比較元の欠測は原因を `error` に記録し（手動監査待ちだけの場合を除く）、`lostHeldOut: []` を「0 件確定」とは読まない
-- **確認負荷（`confirmation`）**: C1 が `achieved`/`needs_review` で最良式があるとき、`searchOutsideCandidates`（`#/expand` の margin 探索と同じ処理）で「人が確認すべき候補」の件数だけを数える。**候補は自動調整へ一切フィードバックしない**（採否も readjustment もしない）。`existingPmids` には常にシード PMID だけを渡し、gold（held-out を含む）は渡さない。gold への対応付け（`heldOutStudiesAmongCandidates` / `nonGoldCandidates`）は、検索・LLM 呼び出しがすべて終わったあと、この集計のためだけに事後に行う。`total` は outside 候補と、held（レビュー保留）だった候補の `impact.inspected`（シード PMID を除く）を合わせて重複除去した件数。outside check 自体の失敗は `status: 'error'` を記録するだけで run を failed にはしない
-- **LLM 使用量とコスト（`llmUsage`）**: `loggedFactory` の呼び出し 1 回（リトライの各試行を含む）ごとに tokensIn/tokensOut を積算し、`src/lib/llm/pricing.ts` の単価表でコストを概算する。失敗した呼び出しも `calls` に数える（トークンは加算しない）。価格表に無いモデルの呼び出しが 1 回でもあれば `costUsd` は恒久的に `null`（`unpricedCalls` で件数を確認できる）。失敗呼び出し（トークン無し）は 0 円加算として扱い、それだけでは `costUsd` を null にしない
-- summary.md の後半に **頑健性の集計**（`role` / `profile` / `case` / C0（`live` または `variant`） / シード分割ごとにグループ化した run 数・C0 hits / C1 hits / C1 heldOutRecall の min・median・max・outcome 件数・`harmfulAdopted` 合計・`confirmationTotal` の中央値）を出す（`results/summary-aggregate.csv` にも同じ内容）。`c0` が `live` の行は run ごとに C0 が再生成されるため、行内の散らばりを自動調整ポリシーの効果と解釈しない注記を付ける
+- **確認負荷（`confirmation`）**: 最良式（`best`）があり、自動調整の `status !== 'error'` のとき（`stopped` も含む）、`searchOutsideCandidates`（`#/expand` の margin 探索と同じ処理）で「人が確認すべき候補」の件数だけを数える。**候補は自動調整へ一切フィードバックしない**（採否も readjustment もしない）。`existingPmids` には常にシード PMID だけを渡し、gold（held-out を含む）は渡さない。gold への対応付け（`heldOutStudiesAmongCandidates` / `nonGoldCandidates`）は、検索・LLM 呼び出しがすべて終わったあと、この集計のためだけに事後に行う。`total` は outside 候補と、held（レビュー保留）だった候補の `impact.inspected`（シード PMID を除く）を合わせて重複除去した件数。outside check 自体の失敗は `status: 'error'` を記録するだけで run を failed にはしない
+- **LLM 使用量とコスト（`llmUsage`）**: `loggedFactory` の呼び出し 1 回（リトライの各試行を含む）ごとに tokensIn/tokensOut を積算し、`src/lib/llm/pricing.ts` の単価表でコストを概算する。失敗した呼び出しも `calls` に数える（トークンは加算しない）。価格表に無いモデルの呼び出しが 1 回でもあれば `costUsd` は恒久的に `null`（`unpricedCalls` で件数を確認できる）。失敗呼び出し（トークン無し）は 0 円加算として扱い、それだけでは `costUsd` を null にしない。成功しても tokensIn/tokensOut が両方 null なら `untrackedCalls` を増やし、`costUsd` は恒久的に null とする。cost 列は「欠測（価格表外 N 件）」「欠測（トークン不明 N 件）」で原因を区別し、両方あれば併記する。llmUsage の無い古い記録は従来どおり「欠測」
+- summary.md の後半に **頑健性の集計**（`role` / `profile` / `case` / C0（`live` または `variant`） / シード分割 / `label` / `gitCommit` ごとにグループ化した run 数・C0 hits / C1 hits / C1 heldOutRecall の min・median・max・outcome 件数・`harmfulAdopted` 合計・`confirmationTotal` の中央値）を出す（`results/summary-aggregate.csv` にも同じ内容）。`c0` が `live` の行は run ごとに C0 が再生成されるため、行内の散らばりを自動調整ポリシーの効果と解釈しない注記を付ける。`seedSplit` の後ろに `label`（無ければ `-`）・`gitCommit`（先頭 12 文字、無ければ「欠測」）列を置き、この値でコード版を分ける。同じ凍結 C0 の variant 内で `c0.id` が複数なら「複数ドラフト（N 種）を含む。散らばりには C0 の違いが混ざる」と注記する
 
 ## 解釈の限界
 

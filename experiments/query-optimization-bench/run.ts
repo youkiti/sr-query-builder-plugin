@@ -30,9 +30,9 @@ import { CASES, PROFILES, type BenchCase, type FrozenSeeds, type GoldAudit, type
 
 export const RESULTS = resolve(__dirname, 'results');
 
-/** results ディレクトリ配下の 1 run の格納先。run.ts / candidates.ts / freezeC0.ts のログ置き場で共有する。 */
-export function resultDir(resultsRoot: string, profileId: string, caseId: string, c0Key: string, splitKey: string): string {
-  return join(resultsRoot, profileId, caseId, c0Key, splitKey);
+/** results ディレクトリ配下の 1 run の格納先。run.ts / candidates.ts で共有する。 */
+export function resultDir(resultsRoot: string, profileId: string, caseId: string, c0Key: string, splitKey: string, label?: string): string {
+  return join(resultsRoot, profileId, caseId, c0Key, label ? `${splitKey}+${label}` : splitKey);
 }
 
 export function memoryCheckpoint(): ProjectStoreDeps {
@@ -41,12 +41,12 @@ export function memoryCheckpoint(): ProjectStoreDeps {
 }
 
 /**
- * @param onUsage 呼び出し 1 回（リトライの各試行を含む）ごとに model/tokensIn/tokensOut を通知する。
+ * @param onUsage 呼び出し 1 回（リトライの各試行を含む）ごとに model/tokensIn/tokensOut と成否を通知する。
  *   失敗した呼び出しも通知する（tokensIn/tokensOut は null）。run.ts の RunResult.llmUsage、
- *   freezeC0.ts の集計に使う。
+ *   run の使用量集計に使う。
  */
 export function loggedFactory(provider: LLMProvider, write: (path: string, value: unknown) => void,
-  paths: string[], onUsage?: (model: string, tokensIn: number | null, tokensOut: number | null) => void): LlmProviderFactory {
+  paths: string[], onUsage?: (model: string, tokensIn: number | null, tokensOut: number | null, succeeded: boolean) => void): LlmProviderFactory {
   let sequence = 0;
   return { model: provider.model, forPurpose: (purpose, onRequestState) => withRetry({
     providerId: provider.providerId, model: provider.model,
@@ -58,13 +58,13 @@ export function loggedFactory(provider: LLMProvider, write: (path: string, value
         const response = await provider.chat(messages, options);
         write(path, { purpose, model: provider.model, messages, options, response, tokensIn: response.tokensIn,
           tokensOut: response.tokensOut, latencyMs: Date.now() - start });
-        onUsage?.(provider.model, response.tokensIn, response.tokensOut);
+        onUsage?.(provider.model, response.tokensIn, response.tokensOut, true);
         return response;
       } catch (err) {
         write(path, { purpose, model: provider.model, messages, options, response: null, tokensIn: null,
           tokensOut: null, latencyMs: Date.now() - start, error: err instanceof Error ? err.message : String(err),
           responseBody: err && typeof err === 'object' && 'responseBody' in err ? err.responseBody : null });
-        onUsage?.(provider.model, null, null);
+        onUsage?.(provider.model, null, null, false);
         throw err;
       }
     },
@@ -81,6 +81,7 @@ export interface ParsedArgs {
   seed: number;
   /** --c0 で指定した凍結 C0 の名前（`fixtures/<id>/c0/<name>.json`、拡張子なし）。 */
   c0Name?: string;
+  label?: string;
 }
 
 export function parseArgs(args: string[]): ParsedArgs {
@@ -90,6 +91,7 @@ export function parseArgs(args: string[]): ParsedArgs {
   let maxHitsArg: string | undefined;
   let seedArg: string | undefined;
   let c0Name: string | undefined;
+  let label: string | undefined;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--dry-run') dryRun = true;
     else if (args[i] === '--case' && selected === undefined && args[i + 1]) selected = args[++i];
@@ -97,8 +99,10 @@ export function parseArgs(args: string[]): ParsedArgs {
     else if (args[i] === '--max-hits' && maxHitsArg === undefined && args[i + 1]) maxHitsArg = args[++i];
     else if (args[i] === '--seeds' && seedArg === undefined && args[i + 1]) seedArg = args[++i];
     else if (args[i] === '--c0' && c0Name === undefined && args[i + 1]) c0Name = args[++i];
+    else if (args[i] === '--label' && label === undefined && args[i + 1] !== undefined) label = args[++i];
     else throw new Error(`未対応の引数: ${args[i]}`);
   }
+  if (label !== undefined && (!/^[A-Za-z0-9._-]{1,40}$/.test(label) || label.trim() !== label)) throw new Error('--label は英数字・.・_・- の 1〜40 文字で指定してください');
   if (selected && !CASES.some((item) => item.id === selected)) throw new Error('未知のケースです');
   if (profileId !== undefined && maxHitsArg !== undefined) throw new Error('--profile と --max-hits は同時に指定できません');
   let profile: { id: string; maxHits: number; maxIterations: number };
@@ -119,7 +123,7 @@ export function parseArgs(args: string[]): ParsedArgs {
     seed = Number(seedArg);
     if (!Number.isSafeInteger(seed)) throw new Error('--seeds には整数を指定してください');
   }
-  return { profile, ids: selected ? [selected] : CASES.map((item) => item.id), dryRun, postHoc, seed, c0Name };
+  return { profile, ids: selected ? [selected] : CASES.map((item) => item.id), dryRun, postHoc, seed, c0Name, label };
 }
 
 /** --c0 で読み込み・検証済みの凍結 C0（run.ts のみで組み立て、executeCase はそのまま信用する）。 */
@@ -248,8 +252,15 @@ export async function executeCase(fixture: BenchCase, audit: GoldAudit, protocol
     || Object.values(result.conditions).some((condition) => condition.measurement.status === 'failure') ? 'failed' : 'completed';
 }
 
+/** 完了結果を別コミットで上書きしないため、保存処理より前に判定する。 */
+export function decideExisting(existing: RunResult, profile: Pick<ParsedArgs['profile'], 'maxHits'>, gitCommit: string | null): 'run' | 'skip' {
+  if (existing.status !== 'completed' || existing.maxHits !== profile.maxHits) return 'run';
+  if (existing.gitCommit === gitCommit) return 'skip';
+  throw new Error(`別コミット（既存=${existing.gitCommit?.slice(0, 12) ?? '欠測'}, 現在=${gitCommit?.slice(0, 12) ?? '欠測'}）の完了結果があります。比較用に残すなら --label を付けて実行してください`);
+}
+
 export async function main(args = process.argv.slice(2)): Promise<void> {
-  const { ids, dryRun, profile, postHoc, seed, c0Name } = parseArgs(args);
+  const { ids, dryRun, profile, postHoc, seed, c0Name, label } = parseArgs(args);
   if (!dryRun) {
     config();
     // searchOutsideCandidates（confirmation の集計）が efetchArticles を使うため、非 dry-run では必ず補う。
@@ -258,13 +269,20 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   const secrets = [process.env.GEMINI_API_KEY ?? '', process.env.NCBI_API_KEY ?? ''];
   const splitId = seedSplitId(seed);
   const c0Key = c0Name ?? 'live';
+  const gitCommit = getGitCommit();
   for (const id of ids) {
-    const dir = resultDir(RESULTS, profile.id, id, c0Key, splitId);
+    const dir = resultDir(RESULTS, profile.id, id, c0Key, splitId, label);
     const resultPath = join(dir, 'run.json');
     if (!dryRun && existsSync(resultPath)) {
-      const existing = JSON.parse(readFileSync(resultPath, 'utf8')) as RunResult;
-      if (existing.status === 'completed' && existing.maxHits === profile.maxHits) {
-        process.stdout.write(`${id}: 完了済みのためスキップ\n`); continue;
+      try {
+        const existing = JSON.parse(readFileSync(resultPath, 'utf8')) as RunResult;
+        if (decideExisting(existing, profile, gitCommit) === 'skip') {
+          process.stdout.write(`${id}: 完了済みのためスキップ\n`); continue;
+        }
+      } catch (err) {
+        process.stdout.write(`${id}: failed (${redact(err instanceof Error ? err.message : String(err), secrets)})\n`);
+        process.exitCode = 1;
+        continue;
       }
     }
     const start = Date.now();
@@ -273,8 +291,8 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     const role = CASES.find((item) => item.id === id)!.role;
     const result: RunResult = { id, runId, profileId: profile.id, status: dryRun ? 'dry-run' : 'running', startedAt: new Date().toISOString(),
       model: '', searchDate: '', maxHits: profile.maxHits, maxIterations: profile.maxIterations, conditions: {}, apiCalls: { ncbi: 0, llm: 0 },
-      apiElapsedMs: { ncbi: 0, llm: 0 }, elapsedMs: 0, llmLogs: [], gitCommit: getGitCommit(), gitDirty: isGitDirty(),
-      seedSplit: splitId, role, postHoc };
+      apiElapsedMs: { ncbi: 0, llm: 0 }, elapsedMs: 0, llmLogs: [], gitCommit, gitDirty: isGitDirty(),
+      seedSplit: splitId, role, postHoc, label };
     const serialize = (value: unknown) => redact(JSON.stringify(value, null, 2), secrets) + '\n';
     const save = () => {
       if (dryRun) return;
@@ -327,7 +345,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
           || DEFAULT_OPTIMIZATION_MAX_HITS !== PROFILES.find((profile) => profile.id === 'default')!.maxHits) throw new Error('配線確認に失敗しました');
         llmFactory.forPurpose('extract_protocol');
         process.stdout.write(`${id}: dry-run OK (profile=${profile.id}, maxHits=${profile.maxHits}, maxIterations=${profile.maxIterations}, `
-          + `seedSplit=${splitId}, c0=${c0Key}, API calls=0, groups=${fixture.gold.length}, heldOut=${computeHeldOut(fixture.gold, seeds).length})\n`);
+          + `seedSplit=${splitId}, c0=${c0Key}, label=${label ?? '-'}, API calls=0, groups=${fixture.gold.length}, heldOut=${computeHeldOut(fixture.gold, seeds).length})\n`);
         continue;
       }
       save();
