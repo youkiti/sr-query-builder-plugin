@@ -17,6 +17,13 @@ export function renderComparison(a: RunResult, b: RunResult): string {
   if (a.c0.sha256 !== b.c0.sha256) {
     throw new Error(`C0 の sha256 が一致しません（A=${a.c0.sha256}, B=${b.c0.sha256}）`);
   }
+  // 片方だけ固定提案の replay だと、差が自動調整の効果か固定提案の有無かを区別できない。
+  if (Boolean(a.replay) !== Boolean(b.replay)) {
+    throw new Error('片方だけ replay の run です。比較には両方とも replay か、両方とも自由生成の run が必要です');
+  }
+  if (a.replay && b.replay && a.replay.sha256 !== b.replay.sha256) {
+    throw new Error(`replay の sha256 が一致しません（A=${a.replay.sha256}, B=${b.replay.sha256}）`);
+  }
   if (a.id !== b.id) throw new Error(`ケースが一致しません（A=${a.id}, B=${b.id}）`);
   if (a.seedSplit !== b.seedSplit) throw new Error(`シード分割が一致しません（A=${a.seedSplit ?? '欠測'}, B=${b.seedSplit ?? '欠測'}）`);
   if (a.maxHits !== b.maxHits) throw new Error(`maxHits が一致しません（A=${a.maxHits}, B=${b.maxHits}）`);

@@ -8,12 +8,12 @@ import { redact } from './ncbiEval';
 import type { RunResult } from './types';
 
 export async function main(args = process.argv.slice(2), resultsDir = RESULTS, eutils?: EutilsDeps): Promise<void> {
-  const { ids, dryRun, profile, seed, c0Name, label } = parseArgs(args);
+  const { ids, dryRun, profile, seed, c0Name, label, replayName } = parseArgs(args);
   if (!dryRun && !eutils) config();
   const c0Key = c0Name ?? 'live';
   const splitKey = seedSplitId(seed);
   for (const id of ids) {
-    const path = join(resultDir(resultsDir, profile.id, id, c0Key, splitKey, label), 'run.json');
+    const path = join(resultDir(resultsDir, profile.id, id, c0Key, splitKey, label, replayName), 'run.json');
     let original: string;
     try { original = readFileSync(path, 'utf8'); }
     catch (err) {

@@ -1,0 +1,31 @@
+{
+  "name": "pr104-r2",
+  "caseId": "r2-pdr-prognostic",
+  "c0": {
+    "name": "criteria-only-draft2",
+    "sha256": "1f4c1220ac606d5c51bed961c02bc825921c1456a19a62cc583b511d33178d29"
+  },
+  "source": {
+    "runId": "r2-pdr-prognostic-2026-09-11T23-20-18-741Z-19721433",
+    "logs": [
+      {
+        "file": "0011_optimize_query.json",
+        "sha256": "7284d4feed31b32b5864acae0ae44b464719067c64553885b0353cfa35afc6c2"
+      },
+      {
+        "file": "0012_optimize_query.json",
+        "sha256": "d57fd28cb312e8cb1d496494a59e109c064dc37d890dd66a8fc246cdc26a2859"
+      },
+      {
+        "file": "0013_optimize_query.json",
+        "sha256": "74ebc51827ff88c68818551a5cc51fe22b8fde0575d3a37e56578e265f06bfdf"
+      }
+    ],
+    "description": "issue #128 の R2 再現用。PR #104 の r2-pdr-prognostic run (r2-pdr-prognostic-2026-09-11T23-20-18-741Z-19721433) の optimize_query 応答 3 件（MeSH 情報要求 → ブロック2から Diabetic Retinopathy[Mesh] を削除 → ブロック3から汎用語 5 件を削除）を一字一句そのまま複製した。"
+  },
+  "responses": [
+    "{\n  \"target_block_id\": \"2\",\n  \"proposed_expression\": \"(Diabetic Retinopathy[Mesh] OR Retinal Neovascularization[Mesh] OR \\\"proliferative diabetic retinopath*\\\"[tiab] OR \\\"proliferative retinopath*\\\"[tiab] OR \\\"PDR\\\"[tiab])\",\n  \"added_terms\": [],\n  \"removed_terms\": [],\n  \"replaced_terms\": [],\n  \"rationale\": \"ブロック2に広範な概念である「Diabetic Retinopathy[Mesh]」が含まれているため、ブロック1とのAND結合が十分に機能せず、全体のヒット数が16409件と目標上限（10000件）を超えて高止まりしています。PDR（増殖糖尿病網膜症）に特化した適切なMeSH（例えば「Diabetic Retinopathy, Proliferative」など）が存在するか、およびそのツリー構造を確認するため、MeSHの追加取得要求を行います。今回は式を変更せず、情報を取得した上で次ステップで修正案を提示します。\",\n  \"measurement_ids\": [\n    \"r2-pdr-prognostic-2026-09-11T23-20-18-741Z-19721433:initial\"\n  ],\n  \"mesh_requests\": [\n    {\n      \"descriptor\": \"Diabetic Retinopathy\",\n      \"tree_number\": \"\"\n    },\n    {\n      \"descriptor\": \"Diabetic Retinopathy, Proliferative\",\n      \"tree_number\": \"\"\n    }\n  ]\n}",
+    "{\n  \"target_block_id\": \"2\",\n  \"proposed_expression\": \"(Retinal Neovascularization[Mesh] OR \\\"proliferative diabetic retinopath*\\\"[tiab] OR \\\"proliferative retinopath*\\\"[tiab] OR \\\"PDR\\\"[tiab])\",\n  \"added_terms\": [],\n  \"removed_terms\": [\n    \"Diabetic Retinopathy[Mesh]\"\n  ],\n  \"replaced_terms\": [],\n  \"rationale\": \"ブロック2（Proliferative Diabetic Retinopathy）に広範な概念である「Diabetic Retinopathy[Mesh]」が含まれているため、ブロック1とのAND結合が十分に機能せず、全体のヒット数が16,409件と目標上限（10,000件）を超えていました。ブロック2から「Diabetic Retinopathy[Mesh]」を削除し、増殖型や新生血管に関連する「Retinal Neovascularization[Mesh]」およびテキスト用語のみに限定することで、検索の適合性を高め、ヒット数を目標範囲内に抑制します。\",\n  \"measurement_ids\": [\n    \"r2-pdr-prognostic-2026-09-11T23-20-18-741Z-19721433:initial\"\n  ],\n  \"mesh_requests\": []\n}",
+    "{\n  \"target_block_id\": \"3\",\n  \"proposed_expression\": \"(Prognosis[Mesh] OR Risk Factors[Mesh] OR Disease Progression[Mesh] OR Predictive Value of Tests[Mesh] OR Biomarkers[Mesh] OR prognos*[tiab] OR predict*[tiab] OR \\\"risk factor*\\\"[tiab] OR \\\"risk assessment*\\\"[tiab] OR \\\"risk score*\\\"[tiab] OR progress*[tiab] OR biomarker*[tiab] OR marker*[tiab] OR indicator*[tiab] OR determinant*[tiab] OR onset[tiab])\",\n  \"added_terms\": [],\n  \"removed_terms\": [\n    \"associate*[tiab]\",\n    \"association*[tiab]\",\n    \"development[tiab]\",\n    \"course[tiab]\",\n    \"history[tiab]\"\n  ],\n  \"replaced_terms\": [],\n  \"rationale\": \"ブロック2から「Diabetic Retinopathy[Mesh]」を削除すると、PDRに関するMeSHインデックス文献を広く取りこぼすリスクがあるため、ブロック2の構成は初期式の状態（Diabetic Retinopathy[Mesh]を含む）を維持することが望ましいと考えられます。一方で、全体のヒット数が目標上限（10000件）を超えている課題を解決するため、ブロック3（予後因子）の適合性を向上させるアプローチをとります。ブロック3に含まれる「associate*[tiab]」「association*[tiab]」「development[tiab]」「course[tiab]」「history[tiab]」は、予後予測における専門性が低く、膨大なノイズ（横断的研究や一般的な関連性研究）を拾い上げている原因となっています。これらを削除することで、主要なシード文献（34574686, 29183104）の回収を維持しつつ、全体のヒット数を目標の10000件以下に抑え、検索の精度を大幅に向上させます。\",\n  \"measurement_ids\": [\n    \"r2-pdr-prognostic-2026-09-11T23-20-18-741Z-19721433:initial\",\n    \"r2-pdr-prognostic-2026-09-11T23-20-18-741Z-19721433:candidate-2\"\n  ],\n  \"mesh_requests\": []\n}"
+  ]
+}

@@ -137,6 +137,22 @@ export interface ConfirmationAudit {
   nonGoldCandidates: number;
 }
 
+/**
+ * issue #128 の手順 4「固定提案による replay」の適用記録。`optimize_query` の応答を
+ * fixture から固定して流したことを示す。存在すれば自由生成ではなく replay run。
+ */
+export interface ReplaySummary {
+  name: string;
+  /** 適用した fixture 内容（responses・c0 参照を含む）から計算したハッシュ。compare.ts の突合に使う。 */
+  sha256: string;
+  /** fixture に用意されていた応答の総数。 */
+  responseCount: number;
+  /** 実際に `optimize_query` へ返した応答の数（使い切る前に他の理由で停止すれば responseCount 未満）。 */
+  usedCount: number;
+  /** 用意した応答をすべて使い切って停止したか。 */
+  exhausted: boolean;
+}
+
 /** LLM 呼び出しの使用量とコスト概算。失敗した呼び出しも calls に数え、tokens は null。 */
 export interface LlmUsage {
   calls: number;
@@ -178,6 +194,8 @@ export interface RunResult {
   confirmation?: ConfirmationAudit;
   /** LLM 呼び出しの使用量とコスト概算。 */
   llmUsage?: LlmUsage;
+  /** 固定提案の replay で実行した run のときだけ設定する。 */
+  replay?: ReplaySummary;
   conditions: Partial<Record<'C0' | 'C1' | 'B1', ConditionResult>>;
   optimization?: QueryOptimizationResult;
   rejectedCandidates?: {

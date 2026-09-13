@@ -5,7 +5,7 @@ import { FIXTURES, loadSeedsFile, SEED, seedSplitId } from './prepare';
 import { hashC0Content, loadC0Artifact } from './c0Artifact';
 import { CASES } from './types';
 import { join } from 'node:path';
-import { decideExisting, resultDir, loggedFactory, main, memoryCheckpoint, parseArgs, reportError } from './run';
+import { decideExisting, resultDir, loggedFactory, main, memoryCheckpoint, parseArgs, reportError, RESULTS } from './run';
 import { reportRows, renderCsv, renderMarkdown } from './report';
 import type { RunResult } from './types';
 
@@ -77,6 +77,13 @@ test('--c0 は名前をそのまま受け取る', () => {
   expect(parseArgs(['--c0', 'seeded-draft1']).c0Name).toBe('seeded-draft1');
   expect(parseArgs([]).c0Name).toBeUndefined();
 });
+test('--replay は --c0 と併用必須で、名前は C0 と同じ命名規則を要求する', () => {
+  expect(parseArgs(['--c0', 'seeded-draft1', '--replay', 'pr104-r2']).replayName).toBe('pr104-r2');
+  expect(parseArgs([]).replayName).toBeUndefined();
+  expect(() => parseArgs(['--replay', 'pr104-r2'])).toThrow('--c0 と併用してください');
+  expect(() => parseArgs(['--c0', 'x', '--replay', 'Bad_Name'])).toThrow('英小文字');
+  expect(() => parseArgs(['--c0', 'x', '--replay', '1abc'])).toThrow('英小文字');
+});
 test('checkpoint はメモリだけを使う', async () => {
   const checkpoint = memoryCheckpoint();
   expect(await checkpoint.read('x')).toBeUndefined();
@@ -129,6 +136,13 @@ test('--label は安全な名前を 1 回だけ受け取り、分割と同じ階
   expect(resultDir('results', 'default', 'case', 'draft', 's42')).toBe(join('results', 'default', 'case', 'draft', 's42'));
 });
 
+test('resultDir は replay 名を分割キーへ +replay-<name> で連結し、label があればその後ろに続ける', () => {
+  expect(resultDir('results', 'default', 'case', 'draft', 's42', undefined, 'pr104-r2'))
+    .toBe(join('results', 'default', 'case', 'draft', 's42+replay-pr104-r2'));
+  expect(resultDir('results', 'default', 'case', 'draft', 's42', 'baseline', 'pr104-r2'))
+    .toBe(join('results', 'default', 'case', 'draft', 's42+baseline+replay-pr104-r2'));
+});
+
 test('完了結果は maxHits とコミットの厳密一致でだけスキップし、別コミットなら変更せず拒否する', () => {
   const existing = Object.freeze({ status: 'completed', maxHits: 2000, gitCommit: 'aaaaaaaaaaaa111' }) as RunResult;
   const original = JSON.stringify(existing);
@@ -164,6 +178,30 @@ test('既存の全凍結 C0 は optimize の --c0 検証経路を通信無しで
     }
     expect(network).not.toHaveBeenCalled();
   } finally { network.mockRestore(); stdout.mockRestore(); }
+});
+
+test('--replay は --c0 とのハッシュ照合まで dry-run で検証し、通信なしで通る', async () => {
+  const network = jest.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('実 API 禁止'));
+  const stdout = jest.spyOn(process.stdout, 'write').mockReturnValue(true);
+  try {
+    await main(['--case', 'r2-pdr-prognostic', '--c0', 'criteria-only-draft2', '--replay', 'pr104-r2', '--dry-run']);
+    expect(stdout).toHaveBeenLastCalledWith(expect.stringContaining('replay=pr104-r2'));
+    expect(stdout).toHaveBeenLastCalledWith(expect.stringContaining('dry-run OK'));
+    expect(resultDir(RESULTS, 'default', 'r2-pdr-prognostic', 'criteria-only-draft2', 's20260912', undefined, 'pr104-r2'))
+      .toBe(join(RESULTS, 'default', 'r2-pdr-prognostic', 'criteria-only-draft2', 's20260912+replay-pr104-r2'));
+    expect(network).not.toHaveBeenCalled();
+  } finally { network.mockRestore(); stdout.mockRestore(); }
+});
+
+test('--replay の適用先 C0 が実行時の --c0 と一致しなければ dry-run でも拒否する', async () => {
+  const network = jest.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('実 API 禁止'));
+  const stdout = jest.spyOn(process.stdout, 'write').mockReturnValue(true);
+  const originalExitCode = process.exitCode;
+  try {
+    await main(['--case', 'r2-pdr-prognostic', '--c0', 'criteria-only-draft1', '--replay', 'pr104-r2', '--dry-run']);
+    expect(stdout).toHaveBeenLastCalledWith(expect.stringContaining('一致しない'));
+    expect(network).not.toHaveBeenCalled();
+  } finally { process.exitCode = originalExitCode; network.mockRestore(); stdout.mockRestore(); }
 });
 
 test('名前付き集合と取り込み C0 を optimize が照合し、名前を結果キーに使用する', async () => {

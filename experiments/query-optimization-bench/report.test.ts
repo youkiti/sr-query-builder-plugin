@@ -181,6 +181,30 @@ test('集計は label とコミットを分け、同一グループの複数ド�
   expect(rows.slice(1).filter((row) => row[column('runs')] === '1').every((row) => row[column('note')] === '')).toBe(true);
 });
 
+test('replay 列は run.replay.name を出し、頑健性の集計からは replay run を除外して注記する', () => {
+  const freeGeneration: RunResult = { ...labeledRun, label: 'baseline' };
+  const replayRun: RunResult = { ...labeledRun, label: 'replay-check',
+    replay: { name: 'pr104-r2', sha256: 'replay-x', responseCount: 3, usedCount: 3, exhausted: true } };
+  const rows = reportRows([freeGeneration, replayRun]);
+  const column = rows[0]!.indexOf('replay');
+  expect(column).toBeGreaterThan(-1);
+  expect(rows[2]![column]).toBe('-');
+  expect(rows[4]![column]).toBe('pr104-r2');
+
+  const root = mkdtempSync(join(tmpdir(), 'bench-replay-'));
+  const dir = (label: string) => join(root, 'default', 'case', 'seeded-draft1', `s42+${label}`);
+  for (const [label, run] of [['baseline', freeGeneration], ['replay-check', replayRun]] as const) {
+    mkdirSync(dir(label), { recursive: true });
+    writeFileSync(join(dir(label), 'run.json'), JSON.stringify(run));
+  }
+  report(root, join(root, 'fixtures'));
+  expect(readFileSync(join(root, 'summary.md'), 'utf8')).toContain('replay run は 1 件をこの集計から除外した');
+  const aggregate = aggregateRows([freeGeneration, replayRun]);
+  // replay run は自身のグループにすら現れない（総 run 数に含まれない）。
+  expect(aggregate.some((row) => row.includes('replay-check'))).toBe(false);
+  expect(aggregate.find((row) => row[5] === 'baseline')![7]).toBe('1');
+});
+
 test('コスト欠測は価格表外とトークン不明を区別し、古い記録も表示する', () => {
   const usage = { calls: 3, tokensIn: 0, tokensOut: 0, costUsd: null, unpricedCalls: 0, untrackedCalls: 0 };
   const cost = (llmUsage?: RunResult['llmUsage']) => {
