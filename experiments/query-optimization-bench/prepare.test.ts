@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  FIXTURES, SEED, auditGold, buildProtocol, computeHeldOut, loadSeedsFile, parsePrepareArgs, prepare, selectSeeds, seedSplitId,
+  FIXTURES, SEED, auditGold, buildProtocol, computeHeldOut, loadSeedsFile, parseSeedSplit, seedFileName, parsePrepareArgs, prepare, selectSeeds, seedSplitId,
   validateSeeds, type GoldRecord, type ParsedReview,
 } from './prepare';
 import { CASES, type BenchCase, type StudyGroup } from './types';
@@ -105,4 +105,43 @@ test('--seed で追加のシード分割を凍結し、default と異なる 3 �
   // 既定 SEED を明示しても、既定分割と同じなので追加ファイルは作らない。
   prepare(dir, fixtures, SEED);
   expect(existsSync(join(fixtures, CASES[0].id, `seeds-${SEED}.json`))).toBe(false);
+});
+
+test('分割指定は10 進の非負整数表記に限定し、名前は命名規則に制限する', () => {
+  for (const raw of ['42', '0', String(SEED), '9007199254740991']) {
+    expect(parseSeedSplit(raw)).toBe(Number(raw));
+    expect(seedSplitId(parseSeedSplit(raw))).toBe(`s${Number(raw)}`);
+  }
+  for (const raw of ['abc', 'without-one', 'a', 'a'.repeat(32), 's42-extra']) {
+    expect(parseSeedSplit(raw)).toBe(raw);
+    expect(seedSplitId(raw)).toBe(raw);
+    expect(seedFileName(raw)).toBe(`seeds-${raw}.json`);
+  }
+  for (const raw of ['s42', 's20260912', 's-42', 'Upper', 'a_b', '../other', 'a/b', 'a'.repeat(33), '42name', '1.5', '9007199254740992', 'a\n']) {
+    expect(() => parseSeedSplit(raw)).toThrow('--seeds');
+  }
+  for (const raw of ['-42', '-1', '0042', '042', '+42', '42.0', '4.2e1', '1e3', '0x2a', ' 42 ', '', ' ', '42\n']) {
+    expect(() => parseSeedSplit(raw)).toThrow('10 進の非負整数');
+  }
+});
+
+test('名前付き集合は name の一致と識別形式・3 群の整合を検証する', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'named-seeds-'));
+  const fixture = JSON.parse(readFileSync(join(FIXTURES, CASES[0].id, 'case.json'), 'utf8')) as BenchCase;
+  const named = { name: 'without-one', selections: fixture.seeds.selections };
+  const path = join(dir, 'seeds-without-one.json');
+  expect(() => loadSeedsFile(dir, named.name)).toThrow(path);
+  expect(() => loadSeedsFile(dir, named.name)).toThrow('"name":"without-one","selections"');
+  writeFileSync(path, JSON.stringify(named));
+  expect(loadSeedsFile(dir, named.name)).toEqual(named);
+  expect(() => validateSeeds(named, fixture.gold)).not.toThrow();
+  for (const invalid of [{ ...named, name: 'other' }, fixture.seeds, { ...named, seed: 42 }]) {
+    writeFileSync(path, JSON.stringify(invalid));
+    expect(() => loadSeedsFile(dir, named.name)).toThrow('要求した集合');
+  }
+  writeFileSync(join(dir, 'seeds-42.json'), JSON.stringify(named));
+  expect(() => loadSeedsFile(dir, 42)).toThrow('要求した分割');
+  expect(() => validateSeeds({ ...named, name: 's42' }, fixture.gold)).toThrow('群構造');
+  expect(() => validateSeeds({ ...named, selections: named.selections.slice(1) }, fixture.gold)).toThrow('群構造');
+  expect(() => validateSeeds({ ...named, selections: [named.selections[0]!, named.selections[0]!, named.selections[1]!] }, fixture.gold)).toThrow('群構造');
 });

@@ -144,3 +144,16 @@ test('tight profile passes its registered limits to optimization without network
   expect(runQueryOptimization).toHaveBeenCalledWith(expect.objectContaining({ maxHits: 1000, maxIterations: 5 }), expect.anything());
   expect(fetch).not.toHaveBeenCalled();
 });
+
+test('名前付き集合の id は保存対象の run.json と held-out・シード入力に伝わる', async () => {
+  const result = makeResult();
+  const seeds = { name: 'without-one', selections: groups.slice(1, 4).map((g) => ({ groupId: g.id, pmid: g.pmids[0]!, year: null })) };
+  const saved: string[] = [];
+  await executeCase(fixture, audit, 'protocol', result, {
+    eutils: { fetch: jest.fn() }, llmFactory, progress: jest.fn(), save: () => { saved.push(JSON.stringify(result)); }, seeds,
+  });
+  expect(saved.length).toBeGreaterThan(0);
+  for (const json of saved) expect(JSON.parse(json).seedSplit).toBe('without-one');
+  expect(result.denominator!.heldOut).toEqual(['a']);
+  expect(runQueryOptimization).toHaveBeenCalledWith(expect.objectContaining({ seedPmids: ['2', '3', '4'] }), expect.anything());
+});

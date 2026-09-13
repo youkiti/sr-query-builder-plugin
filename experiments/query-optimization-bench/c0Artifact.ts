@@ -11,6 +11,9 @@ export type C0Variant = 'criteria-only' | 'seeded';
 /** freezeC0 が書き出す固定 C0 の内容（sha256 を除く）。ハッシュはこの形をそのまま対象にする。 */
 export interface C0Content {
   schemaVersion: 1;
+  /** 取り込み時だけ付与する由来。既存ファイルには補完せず、従来のハッシュを維持する。 */
+  source?: 'import';
+  sourceFilename?: string;
   caseId: string;
   variant: C0Variant;
   draftIndex: number;

@@ -1,28 +1,24 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { config } from 'dotenv';
+import { prepareC0Context, finalizeC0Content, type GenerateC0Input, type GenerateC0Deps } from './c0Generation';
 import { installDomParser } from './domParser';
-import { buildSeedContext, generateDraftFormula } from '../../src/app/services/draftService';
-import { extractProtocol } from '../../src/features/formula/skills/extractProtocol';
-import { expandFormula } from '../../src/features/validation/expandFormula';
+import { generateDraftFormula } from '../../src/app/services/draftService';
 import { DEFAULT_OPTIMIZATION_MAX_HITS } from '../../src/app/services/queryOptimizationSettingsService';
 import { GeminiProvider } from '../../src/lib/llm/GeminiProvider';
-import { efetchArticles } from '../../src/lib/ncbi';
 import { esearch, type EutilsDeps } from '../../src/lib/ncbi/eutils';
-import type { LlmProviderFactory } from '../../src/app/services/llmProviderService';
-import { FIXTURES, SEED, loadSeedsFile, seedSplitId, validateSeeds } from './prepare';
+import { FIXTURES, SEED, loadSeedsFile, parseSeedSplit, seedSplitId, validateSeeds, type SeedSplit } from './prepare';
 import { createEvalFetch, redact } from './ncbiEval';
 import { loggedFactory, RESULTS } from './run';
 import { CASES, type BenchCase, type FrozenSeeds } from './types';
 import { c0Dir, c0FileName, c0FixturePath, hashC0Content, type C0Content, type C0Variant } from './c0Artifact';
-import { getGitCommit, isGitDirty } from './gitInfo';
 
 export interface FreezeArgs {
   caseId: string;
   variant: C0Variant;
   draftIndex: number;
-  /** シード分割の乱数。既定は SEED（seeded 版でのみ意味を持つ）。 */
-  seed: number;
+  /** シード分割の乱数または集合名。既定は SEED（seeded 版でのみ意味を持つ）。 */
+  seed: SeedSplit;
   dryRun: boolean;
 }
 
@@ -42,87 +38,46 @@ export function parseFreezeArgs(args: string[]): FreezeArgs {
   }
   if (!caseId || !CASES.some((item) => item.id === caseId)) throw new Error('--case には既知のケース ID を指定してください');
   if (variant !== 'criteria-only' && variant !== 'seeded') throw new Error('--variant には criteria-only または seeded を指定してください');
+  if (variant === 'criteria-only' && seedArg !== undefined) throw new Error('criteria-only では --seeds は指定できません（シードを使用しないため）');
   // 直前のガードで実行時には criteria-only | seeded に限定済みだが、string は有限リテラルへ絞り込めないため明示キャストする。
   const resolvedVariant = variant as C0Variant;
   const draftIndex = draftArg === undefined ? 1 : Number(draftArg);
   if (!Number.isSafeInteger(draftIndex) || draftIndex <= 0) throw new Error('--draft には正の整数を指定してください');
-  let seed = SEED;
-  if (seedArg !== undefined) {
-    seed = Number(seedArg);
-    if (!Number.isSafeInteger(seed)) throw new Error('--seeds には整数を指定してください');
-  }
+  const seed = seedArg === undefined ? SEED : parseSeedSplit(seedArg);
   return { caseId, variant: resolvedVariant, draftIndex, seed, dryRun };
 }
 
-export interface GenerateC0Input {
-  caseId: string;
-  variant: C0Variant;
-  draftIndex: number;
-  seedSplit: string | null;
-  protocolText: string;
-  seeds: FrozenSeeds;
-}
+export type { GenerateC0Input, GenerateC0Deps } from './c0Generation';
 
-export interface GenerateC0Deps {
-  llmFactory: LlmProviderFactory;
-  eutils: EutilsDeps;
-}
-
-/**
- * LLM/NCBI 呼び出しを伴う本体。main() から CLI 解析・fs・GeminiProvider 配線を切り離してあり、
- * テストでは llmFactory/eutils をフェイクに差し替えて実ネットワーク無しで検証する。
- */
+/** 通信依存はテストでフェイクに差し替え、生成後の実測と内容の組み立てを取り込み経路と共有する。 */
 export async function generateC0Content(input: GenerateC0Input, deps: GenerateC0Deps): Promise<C0Content> {
-  const extracted = await extractProtocol(input.protocolText, deps.llmFactory.forPurpose('extract_protocol'));
-  const protocol = { ...extracted, sourceType: 'markdown' as const, sourceFilename: 'protocol.md', rawTextRef: null,
-    rawTextPreview: input.protocolText.slice(0, 500), rawTextInline: input.protocolText };
-  const blocks = { blocks: extracted.blocks.map((block) => ({ ...block, aiGenerated: true, note: '' })),
-    combinationExpression: extracted.combinationExpression };
-  let seedContext: Awaited<ReturnType<typeof buildSeedContext>> = { titles: [], samples: [], meshSummary: { seedCount: 0, concepts: [], checkTags: [] } };
-  if (input.variant === 'seeded') {
-    const seedPmids = input.seeds.selections.map((selection) => selection.pmid);
-    const articles = await efetchArticles(seedPmids, deps.eutils);
-    const fetchedPmids = new Set(articles.map((article) => article.pmid));
-    const missing = seedPmids.filter((pmid) => !fetchedPmids.has(pmid));
-    // 一部でも取得できなければ、seeded を名乗りながら実質シード無しの C0 を凍結してしまう
-    // （静かな劣化）ため、空の seedContext へフォールバックせず失敗させる。
-    if (missing.length > 0 || articles.length !== seedPmids.length) {
-      throw new Error(`凍結シードの一部を efetch で取得できませんでした（missing: ${missing.join(', ') || '重複/不足'}）。`
-        + 'seeded の凍結を中止します（空の seedContext では凍結しない）');
-    }
-    seedContext = buildSeedContext(articles);
-  }
-  // C0 はどのプロファイルにも依存させない（--profile / --max-hits をまたいで使い回すため）目安を固定する。
-  const draft = await generateDraftFormula({ protocol, blocks, targetHits: DEFAULT_OPTIMIZATION_MAX_HITS, seedContext },
+  const context = await prepareC0Context(input, deps);
+  // C0 の目安はプロファイルに依存させず固定する。
+  const draft = await generateDraftFormula({ ...context, targetHits: DEFAULT_OPTIMIZATION_MAX_HITS },
     { llmFactory: deps.llmFactory, countBlockHits: async (query) => (await esearch(query, deps.eutils, { retmax: 0 })).count });
-  const checks = draft.formula.blocks.filter((block) => !block.isCombination)
-    .map((block) => ({ label: `#${block.id}`, query: block.expression }));
-  checks.push({ label: '式全体', query: expandFormula(draft.formula) });
-  const errors: string[] = [];
-  for (const { label, query } of checks) {
-    try {
-      await esearch(query, deps.eutils, { retmax: 0 });
-    } catch (err) {
-      errors.push(`${label}: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-  if (errors.length > 0) {
-    throw new Error(`${errors.join('\n')}\n実測できない C0 は凍結しない。再生成するには --draft で別番号を指定する`);
-  }
-  return {
-    schemaVersion: 1, caseId: input.caseId, variant: input.variant, draftIndex: input.draftIndex, seedSplit: input.seedSplit,
-    targetHits: DEFAULT_OPTIMIZATION_MAX_HITS, model: deps.llmFactory.model, createdAt: new Date().toISOString(),
-    gitCommit: getGitCommit(), gitDirty: isGitDirty(), protocol, blocks, formula: draft.formula, formulaMd: draft.markdown,
-    seedContext: input.variant === 'seeded' ? seedContext : null, blockApproval: 'auto',
-  };
+  return finalizeC0Content(input, deps, context, draft);
+}
+
+/** criteria-only はシードの読み込み自体を省く。読み込み関数は通信・fs 無しのテスト用に差し替え可能。 */
+export function loadFreezeSeeds(variant: C0Variant, fixtureDir: string, seed: SeedSplit, gold: BenchCase['gold'],
+  load = loadSeedsFile): FrozenSeeds | undefined {
+  if (variant === 'criteria-only') return undefined;
+  const seeds = load(fixtureDir, seed);
+  validateSeeds(seeds, gold);
+  return seeds;
 }
 
 export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES, resultsDir = RESULTS): Promise<void> {
-  const { caseId, variant, draftIndex, seed, dryRun } = parseFreezeArgs(args);
+  return freezeC0(parseFreezeArgs(args), fixturesDir, resultsDir);
+}
+
+/** 生成・取り込みで出力名、ログ保存、ハッシュと上書き禁止を統一する。 */
+export async function freezeC0(options: FreezeArgs, fixturesDir: string, resultsDir: string,
+  generateContent = generateC0Content): Promise<void> {
+  const { caseId, variant, draftIndex, seed, dryRun } = options;
   const fixtureDir = join(fixturesDir, caseId);
   const fixture = JSON.parse(readFileSync(join(fixtureDir, 'case.json'), 'utf8')) as BenchCase;
-  const seeds = loadSeedsFile(fixtureDir, seed);
-  validateSeeds(seeds, fixture.gold);
+  const seeds = loadFreezeSeeds(variant, fixtureDir, seed, fixture.gold);
   const splitId = seedSplitId(seed);
   // ファイル名の接尾辞は既定分割（SEED）では付けない（README の命名規則。--c0 で拡張子抜きの名前を
   // そのまま指定するため、既定分割の名前には分割 id を含めない）。
@@ -130,13 +85,13 @@ export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES,
   const outName = c0FileName(variant, draftIndex, variant === 'seeded' && seed !== SEED ? splitId : null);
   const outDir = c0Dir(fixturesDir, caseId);
   const outPath = c0FixturePath(fixturesDir, caseId, outName);
+  if (existsSync(outPath)) {
+    throw new Error(`${outPath} は既に存在します。再生成する場合は手動で削除してから実行してください`);
+  }
   if (dryRun) {
     process.stdout.write(`${caseId}: dry-run OK (variant=${variant}, draft=${draftIndex}, `
       + `seedSplit=${variant === 'seeded' ? splitId : 'なし'}) -> ${outPath}\n`);
     return;
-  }
-  if (existsSync(outPath)) {
-    throw new Error(`${outPath} は既に存在します。再生成する場合は手動で削除してから実行してください`);
   }
   config();
   if (!process.env.GEMINI_API_KEY) throw new Error('GEMINI_API_KEY が未設定です');
@@ -155,7 +110,7 @@ export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES,
   }, llmLogPaths);
   const eutils: EutilsDeps = { fetch: observed, apiKey: process.env.NCBI_API_KEY, strictCounts: true };
   const protocolText = readFileSync(join(fixtureDir, fixture.protocolPath), 'utf8');
-  const content = await generateC0Content({ caseId, variant, draftIndex, seedSplit: variant === 'seeded' ? splitId : null, protocolText, seeds },
+  const content = await generateContent({ caseId, variant, draftIndex, seedSplit: variant === 'seeded' ? splitId : null, protocolText, seeds },
     { llmFactory, eutils });
   const sha256 = hashC0Content(content);
   mkdirSync(outDir, { recursive: true });
