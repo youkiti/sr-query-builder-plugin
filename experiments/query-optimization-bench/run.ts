@@ -115,6 +115,9 @@ export function parseArgs(args: string[]): ParsedArgs {
     else throw new Error(`未対応の引数: ${args[i]}`);
   }
   if (label !== undefined && (!/^[A-Za-z0-9._-]{1,40}$/.test(label) || label.trim() !== label)) throw new Error('--label は英数字・.・_・- の 1〜40 文字で指定してください');
+  // resultDir は label と --replay の接尾辞をどちらも `+` 連結だけで区別するため、label が
+  // `replay-` で始まると自由生成の保存先が --replay の保存先と衝突する（大文字小文字を区別しない）。
+  if (label !== undefined && /^replay-/i.test(label)) throw new Error('--label は "replay-" で始められません（--replay の保存先と衝突します）');
   if (replayName !== undefined && !/^[a-z][a-z0-9-]{0,31}$/.test(replayName)) throw new Error('--replay には英小文字で始まる英小文字・数字・ハイフンの 1〜32 文字を指定してください');
   if (replayName !== undefined && c0Name === undefined) throw new Error('--replay は --c0 と併用してください（固定した式に対する応答のため）');
   if (selected && !CASES.some((item) => item.id === selected)) throw new Error('未知のケースです');
@@ -320,6 +323,8 @@ export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES,
     const progress = (event: unknown) => {
       if (!dryRun) appendFileSync(join(attemptDir, 'progress.jsonl'), redact(JSON.stringify({ at: new Date().toISOString(), event }), secrets) + '\n');
     };
+    // try の外で宣言し、runQueryOptimization 前の例外・中断でも finally から usedCount/exhausted を読めるようにする。
+    let replayFactory: ReplayLlmFactory | undefined;
     try {
       if (!dryRun) mkdirSync(join(attemptDir, 'llm'), { recursive: true });
       progress({ process: { pid: process.pid, hasApiKey: Boolean(process.env.NCBI_API_KEY), caseCount: ids.length,
@@ -366,12 +371,19 @@ export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES,
       const realFactory = loggedFactory(provider, write, result.llmLogs, usageTracker.record);
       // replay は optimize_query だけを固定応答に差し替える。usage tracker には計上しない
       // （onUsage を渡さない）ため実 LLM 使用量から除外され、実 fetch もしないので apiCalls.llm にも入らない。
-      const replayFactory = replayFixture
+      replayFactory = replayFixture
         ? createReplayLlmFactory(replayName!, replayFixture.responses, realFactory,
           (fixedProvider) => loggedFactory(fixedProvider, write, result.llmLogs, undefined, 'replay-'))
         : undefined;
       const llmFactory = replayFactory ?? realFactory;
       result.model = realFactory.model;
+      if (replayFactory) {
+        // 最初の保存（非 dry-run では下の save()）より前に識別情報を入れる。runQueryOptimization
+        // 前後の例外・中断で保存された run にも replay が残り、report.ts の aggregateRows が
+        // 自由生成の集計に混ぜない（除外条件は !result.replay だけのため）。
+        result.replay = { name: replayName!, sha256: replaySha256!, responseCount: replayFixture!.responses.length,
+          usedCount: replayFactory.used(), exhausted: replayFactory.exhausted() };
+      }
       const eutils: EutilsDeps = { fetch: observed, apiKey: dryRun ? undefined : process.env.NCBI_API_KEY, strictCounts: true,
         sleep: observeBackoff((backoff) => progress({ backoff })) };
       eutils.rateLimiter = observeRateLimiter(eutils, (limiter) => progress({ limiter }));
@@ -398,6 +410,11 @@ export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES,
       result.error = redact(err instanceof Error ? err.message : String(err), secrets);
       process.exitCode = 1;
     } finally {
+      // 例外・中断で executeCase の完了後更新（used/exhausted）に届かなかった場合も、
+      // 最後の保存には factory の実測値を反映する。
+      if (replayFactory && result.replay) {
+        result.replay = { ...result.replay, usedCount: replayFactory.used(), exhausted: replayFactory.exhausted() };
+      }
       if (!dryRun && existsSync(attemptDir)) {
         progress({ status: result.status, error: result.error ?? null });
         save();

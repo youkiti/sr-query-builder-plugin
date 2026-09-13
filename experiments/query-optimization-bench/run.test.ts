@@ -1,13 +1,19 @@
 /** @jest-environment node */
-import { cpSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { FIXTURES, loadSeedsFile, SEED, seedSplitId } from './prepare';
 import { hashC0Content, loadC0Artifact } from './c0Artifact';
 import { CASES } from './types';
 import { join } from 'node:path';
 import { decideExisting, resultDir, loggedFactory, main, memoryCheckpoint, parseArgs, reportError, RESULTS } from './run';
-import { reportRows, renderCsv, renderMarkdown } from './report';
+import { aggregateRows, reportRows, renderCsv, renderMarkdown } from './report';
 import type { RunResult } from './types';
+
+// 非 dry-run の main() はリポジトリの実 .env を dotenv で読む。手元の .env に本物の
+// GEMINI_API_KEY があると、テストで削除した process.env.GEMINI_API_KEY を config() が
+// 復元してしまい、実ネットワークへ到達する（1 回、実際にこれで NCBI へ実クエリが飛んだ）。
+// テストでは常に無効化する。
+jest.mock('dotenv', () => ({ config: jest.fn() }));
 
 describe('CLI のエラー表示', () => {
   const originalExitCode = process.exitCode;
@@ -83,6 +89,21 @@ test('--replay は --c0 と併用必須で、名前は C0 と同じ命名規則�
   expect(() => parseArgs(['--replay', 'pr104-r2'])).toThrow('--c0 と併用してください');
   expect(() => parseArgs(['--c0', 'x', '--replay', 'Bad_Name'])).toThrow('英小文字');
   expect(() => parseArgs(['--c0', 'x', '--replay', '1abc'])).toThrow('英小文字');
+});
+
+test('--label は "replay-" で始まる名前を大文字小文字を問わず拒否し、--replay の保存先との衝突を防ぐ', () => {
+  // 現状の resultDir は [splitKey, label, replay-<name>] を `+` で連結するだけなので、
+  // label が replay-<name> と同じ文字列だと --replay 単体の保存先と同一キーになる
+  // （このテストは resultDir 自体の形式は変えず、その衝突を parseArgs 側で防ぐことを固定する）。
+  const collidingKey = resultDir('results', 'default', 'case', 'c0key', 's1', 'replay-pr104-r2');
+  expect(collidingKey).toBe(resultDir('results', 'default', 'case', 'c0key', 's1', undefined, 'pr104-r2'));
+  for (const label of ['replay-pr104-r2', 'REPLAY-pr104-r2', 'Replay-X', 'replay-']) {
+    expect(() => parseArgs(['--label', label])).toThrow('"replay-" で始められません');
+  }
+  // 先頭が一致しない・大小文字混在でも "replay-" で始まらないものは許可する。
+  for (const label of ['my-replay-x', 'x-replay-y', 'replayed', 'baseline']) {
+    expect(parseArgs(['--label', label]).label).toBe(label);
+  }
 });
 test('checkpoint はメモリだけを使う', async () => {
   const checkpoint = memoryCheckpoint();
@@ -202,6 +223,56 @@ test('--replay の適用先 C0 が実行時の --c0 と一致しなければ dry
     expect(stdout).toHaveBeenLastCalledWith(expect.stringContaining('一致しない'));
     expect(network).not.toHaveBeenCalled();
   } finally { process.exitCode = originalExitCode; network.mockRestore(); stdout.mockRestore(); }
+});
+
+test('replay の識別情報は最初の保存より前に入り、実行が例外で終わっても保存された run.json に残る', async () => {
+  const id = 'r2-pdr-prognostic';
+  const root = mkdtempSync(join(tmpdir(), 'run-replay-early-'));
+  const fixturesDir = join(root, 'fixtures');
+  const resultsDir = join(root, 'results');
+  const dir = join(fixturesDir, id);
+  mkdirSync(dir, { recursive: true });
+  cpSync(join(FIXTURES, id), dir, { recursive: true });
+
+  // run.json への書き込みだけを観測する。実体は本物の writeFileSync に委譲するため、
+  // 保存されたファイルは通常どおりディスクに残る。
+  // `import * as fs from 'node:fs'` は TS の名前空間 import ヘルパーが凍結済みコピーを返し
+  // spyOn できないため、ライブな module.exports を得られる CJS require を直接使う。
+  // eslint-disable-next-line @typescript-eslint/no-var-requires -- fs の実体を spyOn するため
+  const fsModule = require('node:fs') as typeof import('node:fs');
+  const writeSpy = jest.spyOn(fsModule, 'writeFileSync');
+  const network = jest.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('実 API 禁止'));
+  const originalKey = process.env.GEMINI_API_KEY;
+  const originalExitCode = process.exitCode;
+  delete process.env.GEMINI_API_KEY;
+  try {
+    // GEMINI_API_KEY 未設定は、executeCase（runQueryOptimization）に届く前・最初の save() の
+    // 直後に投げる例外として使う。通信は一切発生しない。
+    await main(['--case', id, '--c0', 'criteria-only-draft2', '--replay', 'pr104-r2'], fixturesDir, resultsDir);
+    expect(network).not.toHaveBeenCalled();
+
+    const runJsonWrites = writeSpy.mock.calls
+      .filter(([path]) => String(path).endsWith('run.json'))
+      .map(([, data]) => JSON.parse(String(data)) as RunResult);
+    expect(runJsonWrites.length).toBeGreaterThan(0);
+    const expectedReplay = { name: 'pr104-r2', sha256: expect.any(String), responseCount: 3, usedCount: 0, exhausted: false };
+    // 最初に書き出された run.json の時点で、すでに replay 識別情報が入っている。
+    expect(runJsonWrites[0]!.replay).toEqual(expectedReplay);
+
+    const savedPath = join(resultDir(resultsDir, 'default', id, 'criteria-only-draft2', 's20260912', undefined, 'pr104-r2'), 'run.json');
+    const saved = JSON.parse(readFileSync(savedPath, 'utf8')) as RunResult;
+    expect(saved.status).toBe('failed');
+    expect(saved.error).toContain('GEMINI_API_KEY');
+    expect(saved.replay).toEqual(expectedReplay);
+
+    // 失敗・実行中の replay run も自由生成の頑健性集計には混ぜない（ヘッダ行だけになる）。
+    expect(aggregateRows([saved])).toHaveLength(1);
+  } finally {
+    if (originalKey !== undefined) process.env.GEMINI_API_KEY = originalKey;
+    process.exitCode = originalExitCode;
+    network.mockRestore();
+    writeSpy.mockRestore();
+  }
 });
 
 test('名前付き集合と取り込み C0 を optimize が照合し、名前を結果キーに使用する', async () => {
