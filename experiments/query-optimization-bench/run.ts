@@ -368,4 +368,9 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   }
 }
 
-if (require.main === module) void main().catch(() => { process.stderr.write('引数または実行環境を確認してください。\n'); process.exitCode = 1; });
+export function reportError(err: unknown): void {
+  process.stderr.write(`${redact(err instanceof Error ? err.message : String(err), [process.env.GEMINI_API_KEY ?? '', process.env.NCBI_API_KEY ?? ''])}\n`);
+  process.exitCode = 1;
+}
+
+if (require.main === module) void main().catch(reportError);
