@@ -4,6 +4,7 @@ import { config } from 'dotenv';
 import { installDomParser } from './domParser';
 import { buildSeedContext, generateDraftFormula } from '../../src/app/services/draftService';
 import { extractProtocol } from '../../src/features/formula/skills/extractProtocol';
+import { expandFormula } from '../../src/features/validation/expandFormula';
 import { DEFAULT_OPTIMIZATION_MAX_HITS } from '../../src/app/services/queryOptimizationSettingsService';
 import { GeminiProvider } from '../../src/lib/llm/GeminiProvider';
 import { efetchArticles } from '../../src/lib/ncbi';
@@ -94,6 +95,20 @@ export async function generateC0Content(input: GenerateC0Input, deps: GenerateC0
   // C0 はどのプロファイルにも依存させない（--profile / --max-hits をまたいで使い回すため）目安を固定する。
   const draft = await generateDraftFormula({ protocol, blocks, targetHits: DEFAULT_OPTIMIZATION_MAX_HITS, seedContext },
     { llmFactory: deps.llmFactory, countBlockHits: async (query) => (await esearch(query, deps.eutils, { retmax: 0 })).count });
+  const checks = draft.formula.blocks.filter((block) => !block.isCombination)
+    .map((block) => ({ label: `#${block.id}`, query: block.expression }));
+  checks.push({ label: '式全体', query: expandFormula(draft.formula) });
+  const errors: string[] = [];
+  for (const { label, query } of checks) {
+    try {
+      await esearch(query, deps.eutils, { retmax: 0 });
+    } catch (err) {
+      errors.push(`${label}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  if (errors.length > 0) {
+    throw new Error(`${errors.join('\n')}\n実測できない C0 は凍結しない。再生成するには --draft で別番号を指定する`);
+  }
   return {
     schemaVersion: 1, caseId: input.caseId, variant: input.variant, draftIndex: input.draftIndex, seedSplit: input.seedSplit,
     targetHits: DEFAULT_OPTIMIZATION_MAX_HITS, model: deps.llmFactory.model, createdAt: new Date().toISOString(),

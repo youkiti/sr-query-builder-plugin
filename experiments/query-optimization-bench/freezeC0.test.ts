@@ -7,6 +7,7 @@ import { hashC0Content } from './c0Artifact';
 import { extractProtocol } from '../../src/features/formula/skills/extractProtocol';
 import { generateDraftFormula } from '../../src/app/services/draftService';
 import { efetchArticles, type EfetchArticle } from '../../src/lib/ncbi';
+import { esearch } from '../../src/lib/ncbi/eutils';
 import type { LlmProviderFactory } from '../../src/app/services/llmProviderService';
 import type { BenchCase, FrozenSeeds } from './types';
 
@@ -17,6 +18,7 @@ jest.mock('../../src/app/services/draftService', () => {
   return { ...actual, generateDraftFormula: jest.fn() };
 });
 jest.mock('../../src/lib/ncbi', () => ({ ...jest.requireActual('../../src/lib/ncbi'), efetchArticles: jest.fn() }));
+jest.mock('../../src/lib/ncbi/eutils', () => ({ ...jest.requireActual('../../src/lib/ncbi/eutils'), esearch: jest.fn() }));
 
 const formula = { blocks: [{ id: '1', expression: 'smoking[tiab]', isCombination: false }], combinationExpression: null };
 const fakeDraft = { formula, markdown: '#1 smoking[tiab]', filter: { excessFilters: [], excessHitCount: 0 },
@@ -32,6 +34,7 @@ beforeEach(() => {
   jest.mocked(extractProtocol).mockResolvedValue({ frameworkType: 'custom', researchQuestion: 'RQ', inclusionCriteria: 'include',
     exclusionCriteria: '', studyDesign: 'any', blocks: [{ blockLabel: 'Concept', description: 'description' }], combinationExpression: '#1' });
   jest.mocked(generateDraftFormula).mockResolvedValue(fakeDraft);
+  jest.mocked(esearch).mockResolvedValue({ count: 10, pmids: [] });
   // 既定は 3 件の凍結シードすべてが efetch で取得できるケース。欠落ケースは専用テストで上書きする。
   jest.mocked(efetchArticles).mockResolvedValue(['1', '2', '3'].map(seedArticle));
 });
@@ -59,6 +62,43 @@ test('generateC0Content: criteria-only は efetchArticles を呼ばず、seedCon
   expect(content.blockApproval).toBe('auto');
   expect(generateDraftFormula).toHaveBeenCalledWith(expect.objectContaining({ targetHits: 2000,
     seedContext: expect.objectContaining({ titles: [] }) }), expect.anything());
+});
+
+test.each([false, true])('generateC0Content: 実測エラーを全件集めて凍結を中止する（式全体も失敗: %s）', async (wholeFails) => {
+  jest.mocked(generateDraftFormula).mockResolvedValue({ ...fakeDraft, formula: { blocks: [
+    { id: '1', expression: 'invalid[Mesh]', isCombination: false },
+    { id: '2', expression: 'smoking[tiab]', isCombination: false },
+    { id: '3', expression: '#1 AND #2', isCombination: true },
+  ], combinationExpression: '#1 AND #2' } });
+  jest.mocked(esearch).mockImplementation(async (query) => {
+    if (query === 'invalid[Mesh]') throw new Error('構文エラー: phrase not found invalid');
+    if (wholeFails && query === '(invalid[Mesh]) AND (smoking[tiab])') throw new Error('式の実測エラー');
+    return { count: 10, pmids: [] };
+  });
+  const eutils = { fetch: jest.fn(), strictCounts: true };
+  await expect(generateC0Content({ caseId: 'r1-mindfulness-smoking', variant: 'criteria-only', draftIndex: 1,
+    seedSplit: null, protocolText: 'protocol', seeds }, { llmFactory, eutils })).rejects.toThrow(
+    '#1: 構文エラー: phrase not found invalid\n'
+    + (wholeFails ? '式全体: 式の実測エラー\n' : '')
+    + '実測できない C0 は凍結しない。再生成するには --draft で別番号を指定する');
+  expect(jest.mocked(esearch).mock.calls).toEqual([
+    ['invalid[Mesh]', eutils, { retmax: 0 }],
+    ['smoking[tiab]', eutils, { retmax: 0 }],
+    ['(invalid[Mesh]) AND (smoking[tiab])', eutils, { retmax: 0 }],
+  ]);
+});
+
+test.each([[10, 0], [0, 0]])('generateC0Content: 実測がすべて成功すれば 0 件でも内容を返す（ブロック %i 件、式全体 %i 件）', async (blockCount, wholeCount) => {
+  jest.mocked(esearch).mockResolvedValueOnce({ count: blockCount, pmids: [] }).mockResolvedValueOnce({ count: wholeCount, pmids: [] });
+  const eutils = { fetch: jest.fn(), strictCounts: true };
+  const content = await generateC0Content({ caseId: 'r1-mindfulness-smoking', variant: 'criteria-only', draftIndex: 1,
+    seedSplit: null, protocolText: 'protocol', seeds }, { llmFactory, eutils });
+  expect(content.formula).toEqual(formula);
+  expect(content.formulaMd).toBe(fakeDraft.markdown);
+  expect(jest.mocked(esearch).mock.calls).toEqual([
+    ['smoking[tiab]', eutils, { retmax: 0 }],
+    ['smoking[tiab]', eutils, { retmax: 0 }],
+  ]);
 });
 
 test('generateC0Content: seeded は凍結シードのタイトルを efetchArticles 経由で渡す', async () => {
