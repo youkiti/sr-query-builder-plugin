@@ -5,10 +5,11 @@ import type { RunResult } from './types';
 
 test('CLI から未知ケース・未知プロファイルを拒否し、既定値を解決する', () => {
   expect(parseArgs(['--dry-run']).dryRun).toBe(true);
-  expect(parseArgs([]).profile).toEqual({ id: 'default', maxHits: 2000, maxIterations: 5 });
+  expect(parseArgs([]).profile).toEqual({ id: 'default', maxHits: 2000, maxIterations: 5, postHoc: false });
   expect(parseArgs([]).seed).toBe(20260912);
   expect(parseArgs([]).postHoc).toBe(false);
-  expect(parseArgs(['--profile', 'tight-1000']).profile).toEqual({ id: 'tight-1000', maxHits: 1000, maxIterations: 5 });
+  expect(parseArgs(['--profile', 'tight-1000']).profile).toEqual({ id: 'tight-1000', maxHits: 1000, maxIterations: 5, postHoc: true });
+  expect(parseArgs(['--profile', 'tight-1000']).postHoc).toBe(true);
   expect(() => parseArgs(['--profile', 'unknown'])).toThrow('未知のプロファイル');
   expect(() => parseArgs(['--profile'])).toThrow();
   expect(() => parseArgs(['--maxHits', '5'])).toThrow();

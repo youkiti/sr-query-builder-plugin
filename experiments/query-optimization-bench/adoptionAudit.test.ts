@@ -29,8 +29,8 @@ const trial = (candidateId: string, accepted: boolean, formula: ReturnType<typeo
 beforeEach(() => jest.resetAllMocks());
 
 test('候補が無ければ 0 件・harmfulAdopted 0（manualReviewPending なら null）で即座に返す', async () => {
-  expect(await computeAdoptionAudit(makeResult(), eutils)).toEqual({ adopted: 0, harmfulAdopted: 0, trials: [] });
-  expect(await computeAdoptionAudit(makeResult(true), eutils)).toEqual({ adopted: 0, harmfulAdopted: null, trials: [] });
+  expect(await computeAdoptionAudit(makeResult(), eutils)).toEqual({ adopted: 0, unscoredAdopted: 0, harmfulAdopted: 0, trials: [] });
+  expect(await computeAdoptionAudit(makeResult(true), eutils)).toEqual({ adopted: 0, unscoredAdopted: 0, harmfulAdopted: null, trials: [] });
   expect(evaluateSearch).not.toHaveBeenCalled();
 });
 
@@ -79,13 +79,14 @@ test('manualReviewPending では採点を保留する(metrics を作らず harmf
   expect(audit.trials[0]).toMatchObject({ hitsBefore: 100, hitsAfter: 50, lostHeldOut: [], gainedHeldOut: [] });
 });
 
-test('計測失敗は 0 件喪失として扱わず error を記録し、harmfulAdopted には数えない', async () => {
+test('計測失敗は error と未採点件数を記録し、harmfulAdopted を null にする', async () => {
   const result = makeResult();
   result.optimization = { status: 'achieved', stopReason: 'conditions_met', best: null, unmetReasons: [], iterations: 1, apiCalls: 0, elapsedMs: 0,
     trials: [trial('candidate-1', true, formulaFor('c1'))] };
   jest.mocked(evaluateSearch).mockResolvedValue({ status: 'failure', error: 'NCBI offline' });
   const audit = await computeAdoptionAudit(result, eutils);
-  expect(audit.harmfulAdopted).toBe(0); // 失敗を安全（0 件喪失）とは数えない
+  expect(audit.harmfulAdopted).toBeNull();
+  expect(audit.unscoredAdopted).toBe(1);
   expect(audit.trials[0]).toMatchObject({ hitsAfter: null, lostHeldOut: [], error: 'NCBI offline' });
 });
 
@@ -95,4 +96,53 @@ test('denominator が無ければ例外を投げる', async () => {
   result.optimization = { status: 'achieved', stopReason: 'conditions_met', best: null, unmetReasons: [], iterations: 1, apiCalls: 0, elapsedMs: 0,
     trials: [trial('candidate-1', true, formulaFor('c1'))] };
   await expect(computeAdoptionAudit(result, eutils)).rejects.toThrow('分母');
+});
+
+test('採用候補の測定失敗は次の採用でも比較元欠測として記録する', async () => {
+  const result = makeResult();
+  result.optimization = { status: 'achieved', stopReason: 'conditions_met', best: null, unmetReasons: [], iterations: 2, apiCalls: 0, elapsedMs: 0,
+    trials: [trial('candidate-1', true, formulaFor('c1')), trial('candidate-2', true, formulaFor('c2'))] };
+  jest.mocked(evaluateSearch)
+    .mockResolvedValueOnce({ status: 'failure', error: 'NCBI offline' })
+    .mockResolvedValueOnce({ status: 'success', hits: 90, capturedPmids: ['1', '2', '3', '4'] });
+  const audit = await computeAdoptionAudit(result, eutils);
+  expect(audit).toMatchObject({ adopted: 2, unscoredAdopted: 2, harmfulAdopted: null });
+  expect(audit.trials[0]).toMatchObject({ error: 'NCBI offline' });
+  expect(audit.trials[1]).toMatchObject({ hitsAfter: 90, error: '比較元 candidate-1 の測定が欠測: NCBI offline' });
+});
+
+test('比較可能な有害採用があっても比較不能な採用があれば全体を未採点にする', async () => {
+  const result = makeResult();
+  result.optimization = { status: 'achieved', stopReason: 'conditions_met', best: null, unmetReasons: [], iterations: 2, apiCalls: 0, elapsedMs: 0,
+    trials: [trial('candidate-1', true, formulaFor('c1')), trial('candidate-2', true, formulaFor('c2'))] };
+  jest.mocked(evaluateSearch)
+    .mockResolvedValueOnce({ status: 'success', hits: 90, capturedPmids: ['1', '2', '3'] })
+    .mockResolvedValueOnce({ status: 'failure', error: 'NCBI offline' });
+  const audit = await computeAdoptionAudit(result, eutils);
+  expect(audit).toMatchObject({ adopted: 2, unscoredAdopted: 1, harmfulAdopted: null });
+  expect(audit.trials[0]).toMatchObject({ lostHeldOut: ['d'] });
+});
+
+test.each(['C0', 'C1'] as const)('%s のキャッシュでも測定失敗の原因を保持する', async (condition) => {
+  const result = makeResult();
+  result.conditions[condition] = { query: condition, formula: formulaFor(condition),
+    measurement: { status: 'failure', error: 'NCBI offline' }, metrics: null };
+  result.optimization = { status: 'achieved', stopReason: 'conditions_met', best: null, unmetReasons: [], iterations: 1, apiCalls: 0, elapsedMs: 0,
+    trials: [trial('candidate-1', true, formulaFor('c1'))] };
+  jest.mocked(evaluateSearch).mockResolvedValue({ status: 'success', hits: 90, capturedPmids: ['4'] });
+  const audit = await computeAdoptionAudit(result, eutils);
+  expect(audit).toMatchObject({ adopted: 1, unscoredAdopted: 1, harmfulAdopted: null });
+  expect(audit.trials[0]!.error).toBe(condition === 'C0' ? '比較元 C0 の測定が欠測: NCBI offline' : 'NCBI offline');
+  expect(evaluateSearch).toHaveBeenCalledTimes(condition === 'C0' ? 1 : 0);
+});
+
+test('手動監査待ちだけによる比較元欠測は error にしない', async () => {
+  const result = makeResult(true);
+  result.conditions.C0!.metrics = null;
+  result.optimization = { status: 'achieved', stopReason: 'conditions_met', best: null, unmetReasons: [], iterations: 2, apiCalls: 0, elapsedMs: 0,
+    trials: [trial('candidate-1', true, formulaFor('c1')), trial('candidate-2', true, formulaFor('c2'))] };
+  jest.mocked(evaluateSearch).mockResolvedValue({ status: 'success', hits: 90, capturedPmids: ['4'] });
+  const audit = await computeAdoptionAudit(result, eutils);
+  expect(audit).toMatchObject({ adopted: 2, unscoredAdopted: 2, harmfulAdopted: null });
+  for (const item of audit.trials) expect(item).not.toHaveProperty('error');
 });

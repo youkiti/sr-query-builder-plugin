@@ -116,7 +116,7 @@ test.each(PROFILES)('$id: 初期生成にも目安を渡し、抽出・調整ま
     expect(saved[3]!.adoptionAudit).toBeDefined();
     // 有害採用の監査は C0/C1 の既存測定を再利用するので、追加の gold 検索を発生させない
     // （唯一の accepted 候補は best.formula と同一で、C1 の測定結果を再利用できる）。
-    expect(result.adoptionAudit).toEqual({ adopted: 1, harmfulAdopted: 0, trials: [expect.objectContaining({
+    expect(result.adoptionAudit).toEqual({ adopted: 1, unscoredAdopted: 0, harmfulAdopted: 0, trials: [expect.objectContaining({
       candidateId: 'candidate-1', accepted: true, hitsBefore: 100, hitsAfter: 200, lostHeldOut: [], gainedHeldOut: ['d'] })] });
     // confirmation は seed PMID だけを existingPmids として渡し、gold（held-out を含む）を渡さない。
     expect(searchOutsideCandidates).toHaveBeenCalledWith(expect.objectContaining({ existingPmids: new Set(['1', '2', '3']) }));

@@ -75,7 +75,7 @@ export interface ParsedArgs {
   ids: string[];
   dryRun: boolean;
   profile: { id: string; maxHits: number; maxIterations: number };
-  /** --max-hits による事後探索条件かどうか（default/tight-1000 はいずれも事前登録なので false）。 */
+  /** tight-1000 または --max-hits による事後探索条件かどうか（default は false）。 */
   postHoc: boolean;
   /** シード分割の乱数。既定は SEED（`fixtures/<id>/seeds.json`）。 */
   seed: number;
@@ -112,6 +112,7 @@ export function parseArgs(args: string[]): ParsedArgs {
     const found = PROFILES.find((item) => item.id === (profileId ?? 'default'));
     if (!found) throw new Error('未知のプロファイルです');
     profile = found;
+    postHoc = found.postHoc;
   }
   let seed = SEED;
   if (seedArg !== undefined) {

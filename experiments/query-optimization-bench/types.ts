@@ -12,8 +12,8 @@ export const CASES = [
 ] as const satisfies readonly { id: string; pmcid: string; searchDate: string; role: CaseRole }[];
 
 export const PROFILES = [
-  { id: 'default', maxHits: DEFAULT_OPTIMIZATION_MAX_HITS, maxIterations: 5 },
-  { id: 'tight-1000', maxHits: 1000, maxIterations: 5 },
+  { id: 'default', maxHits: DEFAULT_OPTIMIZATION_MAX_HITS, maxIterations: 5, postHoc: false },
+  { id: 'tight-1000', maxHits: 1000, maxIterations: 5, postHoc: true },
 ] as const;
 
 export interface StudyGroup {
@@ -110,7 +110,9 @@ export interface AdoptionTrialAudit {
 /** C0→C1 の間に採用されたすべての候補の有害採用（held-out を失った採用）監査。 */
 export interface AdoptionAudit {
   adopted: number;
-  /** manualReviewPending のときは採点を保留し null。 */
+  /** 比較元または候補自身の metrics が無く、比較できなかった採用件数。 */
+  unscoredAdopted: number;
+  /** manualReviewPending または比較できない採用があるときは採点を保留し null。 */
   harmfulAdopted: number | null;
   trials: AdoptionTrialAudit[];
 }
@@ -148,7 +150,7 @@ export interface LlmUsage {
 export interface RunResult {
   id: string;
   runId: string;
-  // 事前登録の default/tight-1000 に加え、--max-hits 指定時は `custom-<n>` を動的に発行するため string。
+  // 登録済みの default/tight-1000 に加え、--max-hits 指定時は `custom-<n>` を動的に発行するため string。
   profileId: string;
   status: 'running' | 'completed' | 'failed' | 'dry-run';
   startedAt: string;
@@ -166,7 +168,7 @@ export interface RunResult {
   seedSplit?: string;
   /** development/confirmation の別（selection は別途）。 */
   role?: CaseRole;
-  /** --max-hits による事後探索条件かどうか。 */
+  /** tight-1000 または --max-hits による事後探索条件かどうか。 */
   postHoc?: boolean;
   /** C0→C1 で採用された候補のうち、held-out 捕捉を失った「有害な採用」の監査。 */
   adoptionAudit?: AdoptionAudit;

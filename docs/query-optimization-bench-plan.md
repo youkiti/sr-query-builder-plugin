@@ -159,7 +159,7 @@ Comparison（`lostStudies`/`gainedStudies`/`lostHeldOut`/`gainedHeldOut`）で�
 - **有害採用（`adoptionAudit`）**: C0→C1 の間に採用されたすべての候補（`kind: 'proposal'` かつ `accepted`）を、
   **採用直前の基準式**（その候補より前で最後に採用された候補、無ければ C0）と比較し、held-out を 1 件でも
   失った採用を有害採用として数える。既存の C0/C1/却下候補の測定は再利用し、gold 検索を重複させない。
-  `manual_review` のケースは採点そのものを保留する（`harmfulAdopted: null`）
+  `manual_review` のケースは採点そのものを保留する（`harmfulAdopted: null`）。比較元または候補自身の metrics が無く比較できなかった採用件数を `unscoredAdopted` に記録し、1 件以上あれば手動監査待ちでなくても `harmfulAdopted: null`（未採点）とする。測定失敗や比較元欠測の原因は trial の `error` に残す（手動監査待ちだけの場合を除く）
 - **確認負荷（`confirmation`）**: `#/expand` の margin 探索（`searchOutsideCandidates`）を C1 の最終式に対して
   実行し、**人が確認すべき候補の件数だけを数える**。この集計は候補を自動調整へフィードバックしない
   （採否判定も readjustment もしない）。`existingPmids`（=「既に知っている」として除外する集合）には

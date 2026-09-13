@@ -33,7 +33,10 @@ export function reportRows(results: RunResult[], baselines: Record<string, strin
         item?.query ?? (condition === 'B1' ? baselines[result.id] ?? '欠測' : ''),
         result.role ?? '欠測', c0Label, result.seedSplit ?? '欠測', String(result.maxHits ?? '欠測'), result.gitCommit ?? '欠測',
         c1Only ? String(result.adoptionAudit?.adopted ?? '欠測') : '',
-        c1Only ? (result.adoptionAudit?.harmfulAdopted == null ? '欠測' : String(result.adoptionAudit.harmfulAdopted)) : '',
+        c1Only ? (result.adoptionAudit?.harmfulAdopted == null
+          ? result.adoptionAudit?.harmfulAdopted === null && (result.adoptionAudit.unscoredAdopted ?? 0) > 0
+            ? `未採点（${result.adoptionAudit.unscoredAdopted} 件）` : '欠測'
+          : String(result.adoptionAudit.harmfulAdopted)) : '',
         c1Only ? (result.confirmation ? String(result.confirmation.total) : '欠測') : '',
         c1Only ? (result.confirmation ? result.confirmation.heldOutStudiesAmongCandidates.join('; ') : '欠測') : '',
         c1Only ? (result.llmUsage?.costUsd == null ? '欠測' : String(result.llmUsage.costUsd)) : '',
@@ -108,16 +111,19 @@ export function renderMarkdown(rows: string[][]): string {
 
 /**
  * resultsDir 配下を再帰的に探索し、各系列の「最新の」run.json だけを集める。
- * ディレクトリ直下に run.json があればそこで打ち切り（それより下は runId 単位の試行履歴の
- * コピーなので二重集計しない）、無ければサブディレクトリへ潜る。この 1 つのルールで
+ * 直下の run.json を集めたうえでサブディレクトリへ潜る。ただし親と子の両方が直下に
+ * run.json を持つ場合、その子は試行履歴なので集めず探索もしない。このルールで
  * 旧レイアウト（results/<case>/run.json）・現行（results/<profile>/<case>/run.json）・
  * 新レイアウト（results/<profile>/<case>/<c0Key>/<splitKey>/run.json）のすべてを読める。
  */
 function findRunFiles(dir: string): string[] {
   const runPath = join(dir, 'run.json');
-  if (existsSync(runPath)) return [runPath];
-  return readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isDirectory())
-    .flatMap((entry) => findRunFiles(join(dir, entry.name)));
+  const hasRun = existsSync(runPath);
+  return [...(hasRun ? [runPath] : []), ...readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isDirectory())
+    .flatMap((entry) => {
+      const child = join(dir, entry.name);
+      return hasRun && existsSync(join(child, 'run.json')) ? [] : findRunFiles(child);
+    })];
 }
 
 export function report(resultsDir = RESULTS, fixturesDir = FIXTURES): void {
@@ -137,7 +143,7 @@ export function report(resultsDir = RESULTS, fixturesDir = FIXTURES): void {
   const aggregate = aggregateRows(results);
   writeFileSync(join(resultsDir, 'summary-aggregate.csv'), renderCsv(aggregate));
   const context = '分割は共有 PMID の群単位、再現率と捕捉・喪失・追加は研究単位。各研究の報告を 1 件以上捕捉すれば捕捉研究とする。recordsPerKnownIncludedStudy は hits / 捕捉研究数。現在の PubMed に作成日上限を適用した後ろ向き評価。完成レビューの適格基準を使い、ブロックは自動承認した（影響の向きは不明）。学習混入を排除できず、PMID のある既知研究に限定する。新規レビューの性能や専門家検索への非劣性は示さない。hits は選考時間ではない。補助指標だけで検索効率の優劣を結論しない。'
-    + 'adopted/harmfulAdopted は C0→C1 で採用された候補のうち held-out を失った件数、confirmationTotal/heldOutAmongCandidates は outside check が'
+    + 'adopted/harmfulAdopted は C0→C1 で採用された候補のうち held-out を失った件数。比較できない採用があると harmfulAdopted は null（未採点）。confirmationTotal/heldOutAmongCandidates は outside check が'
     + '数えた確認対象候補（自動調整へは反映しない）、llmCostUsd 等は概算で未価格化モデルを含むと null。\n\n';
   writeFileSync(join(resultsDir, 'summary.md'), context + renderMarkdown(rows)
     + '\n\n## 頑健性の集計（role・profile・case・C0・シード分割ごと）\n\n'
