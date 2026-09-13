@@ -35,6 +35,9 @@ export interface EutilsDeps {
 const BASE_URL = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils';
 const DEFAULT_TOOL = 'sr-query-builder-plugin';
 
+// 実測で通った GET URL の最長 4,026 文字に余裕を持たせ、2,000 文字を超えたら POST にする。
+export const ESEARCH_GET_URL_LENGTH_LIMIT = 2000;
+
 /** NCBI E-utilities のレート上限（req/s）。API キー無しは 3、あり は 10。
  * https://www.ncbi.nlm.nih.gov/books/NBK25497/#chapter2.Usage_Guidelines_and_Requiremen */
 export const NCBI_RATE_LIMIT_WITHOUT_API_KEY = 3;
@@ -225,9 +228,15 @@ export async function esearch(
       // バックオフの待機（既定 1 秒〜）はトークンの補充時間（3〜10 req/s なら数百 ms）より
       // 通常長いため、リトライ時に acquire() が実際に待つことは稀で、二重待機にはならない。
       await rateLimiter.acquire();
-      const res = await deps.fetch(url);
+      const res = url.length > ESEARCH_GET_URL_LENGTH_LIMIT
+        ? await deps.fetch(`${BASE_URL}/esearch.fcgi`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: params.toString(),
+        })
+        : await deps.fetch(url);
       if (!res.ok) {
-        throw new EutilsError(`esearch failed: HTTP ${res.status}`, res.status);
+        throw new EutilsError(`esearch failed: HTTP ${res.status}`, res.status, res.status === 414);
       }
       const body = (await res.json()) as EsearchResponseJson;
       if (body.error) {

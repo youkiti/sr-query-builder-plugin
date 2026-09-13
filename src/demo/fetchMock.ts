@@ -83,7 +83,7 @@ export async function demoFetch(input: RequestInfo | URL, init?: RequestInit): P
 
   if (url.startsWith('https://eutils.ncbi.nlm.nih.gov/entrez/eutils')) {
     await sleep(LATENCY_MS.eutils * latencyFactor);
-    return handleEutilsRequest(url);
+    return handleEutilsRequest(url, method, bodyText);
   }
   if (url.startsWith('https://id.nlm.nih.gov/mesh/sparql')) {
     // MeSH ツリー UI（#58）接続時に本実装へ差し替えるプレースホルダ。現状 UI からは呼ばれない。

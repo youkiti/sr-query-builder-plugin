@@ -1,5 +1,6 @@
 import {
   EutilsError,
+  ESEARCH_GET_URL_LENGTH_LIMIT,
   NCBI_RATE_LIMIT_WITHOUT_API_KEY,
   NCBI_RATE_LIMIT_WITH_API_KEY,
   efetchArticles,
@@ -48,6 +49,52 @@ function makeErrorResponse(status: number): Response {
 }
 
 describe('esearch', () => {
+  test.each([1999, 2000, 2001])('GET URL が %i 文字のとき境界どおりに送信する', async (length) => {
+    const fetch = jest.fn().mockResolvedValue(makeJsonResponse({ esearchresult: { count: '0', idlist: [] } }));
+    const baseUrl = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi';
+    const params = new URLSearchParams({
+      db: 'pubmed', term: '', retmode: 'json', retmax: '20', retstart: '0', tool: 'sr-query-builder-plugin',
+    });
+    const term = 'x'.repeat(length - `${baseUrl}?${params}`.length);
+    params.set('term', term);
+    expect(ESEARCH_GET_URL_LENGTH_LIMIT).toBe(2000);
+    await esearch(term, { fetch });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    if (length <= ESEARCH_GET_URL_LENGTH_LIMIT) {
+      expect(fetch.mock.calls[0]).toEqual([`${baseUrl}?${params}`]);
+    } else {
+      expect(fetch.mock.calls[0]).toEqual([baseUrl, {
+        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params.toString(),
+      }]);
+    }
+  });
+
+  test('長い検索式と共通パラメータを POST 本文に保持する', async () => {
+    const fetch = jest.fn().mockResolvedValue(makeJsonResponse({ esearchresult: { count: '0', idlist: [] } }));
+    const term = '日本語 & + "diabetes"[tiab] OR '.repeat(100);
+    await esearch(term, { fetch, apiKey: 'fake-key', email: 'test@example.com', tool: 'test-tool' },
+      { retmax: 50, retstart: 100, sort: 'relevance' });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe('https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi');
+    const init = fetch.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe('POST');
+    expect(init.headers).toEqual({ 'Content-Type': 'application/x-www-form-urlencoded' });
+    expect(Object.fromEntries(new URLSearchParams(init.body as string))).toEqual({
+      db: 'pubmed', term, retmode: 'json', retmax: '50', retstart: '100', sort: 'relevance',
+      api_key: 'fake-key', email: 'test@example.com', tool: 'test-tool',
+    });
+  });
+
+  test.each([1, 2000])('HTTP 414 は GET / POST とも再送しない（term 長 %i）', async (length) => {
+    const fetch = jest.fn().mockResolvedValue(makeErrorResponse(414));
+    const sleep = jest.fn().mockResolvedValue(undefined);
+    const promise = esearch('x'.repeat(length), { fetch, sleep });
+    await expect(promise).rejects.toBeInstanceOf(EutilsError);
+    await expect(promise).rejects.toMatchObject({ status: 414, permanent: true });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
   test('成功レスポンスから count と pmids を抽出する', async () => {
     const fetch = jest
       .fn()

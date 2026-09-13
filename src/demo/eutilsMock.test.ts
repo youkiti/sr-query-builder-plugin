@@ -1,5 +1,6 @@
 import { efetchArticles, esearch, fetchMeshTreeNumbers, type EutilsDeps } from '@/lib/ncbi';
 import { handleEutilsRequest } from './eutilsMock';
+import { demoFetch } from './fetchMock';
 import { buildBlockExpressions } from './scenario';
 import { SEED_PMIDS } from './corpus';
 
@@ -14,6 +15,23 @@ function makeDeps(): EutilsDeps {
 }
 
 describe('esearch モック', () => {
+  it('長い検索式の POST を demoFetch 経由で評価し、本文のページ指定を使う', async () => {
+    const term = Array(100).fill('90000001[uid] OR 90000002[uid]').join(' OR ');
+    const result = await esearch(term, { fetch: demoFetch }, { retmax: 1, retstart: 1 });
+    expect(result).toEqual({ count: 2, pmids: ['90000002'] });
+  });
+
+  it('POST 本文の db と term から MeSH を検索する', async () => {
+    const res = handleEutilsRequest(
+      'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi', 'POST',
+      new URLSearchParams({ db: 'mesh', term: 'Respiratory Distress Syndrome[mh]' }).toString()
+    );
+    const getRes = handleEutilsRequest(
+      'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=mesh&term=Respiratory+Distress+Syndrome%5Bmh%5D'
+    );
+    expect(await res.json()).toEqual(await getRes.json());
+  });
+
   it('#1(ARDS) のヒット数はコーパス評価結果と一致する', async () => {
     const v1 = buildBlockExpressions();
     const result = await esearch(v1.ards, makeDeps(), { retmax: 0 });

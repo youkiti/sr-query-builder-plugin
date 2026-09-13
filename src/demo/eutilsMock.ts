@@ -29,11 +29,11 @@ function handlePubmedEsearch(term: string, retmax: number, retstart: number): Re
   return jsonResponse({ esearchresult: { count: String(matches.length), idlist } });
 }
 
-function handleEsearch(url: URL): Response {
-  const db = url.searchParams.get('db') ?? 'pubmed';
-  const term = url.searchParams.get('term') ?? '';
-  const retmax = Number.parseInt(url.searchParams.get('retmax') ?? '20', 10);
-  const retstart = Number.parseInt(url.searchParams.get('retstart') ?? '0', 10);
+function handleEsearch(params: URLSearchParams): Response {
+  const db = params.get('db') ?? 'pubmed';
+  const term = params.get('term') ?? '';
+  const retmax = Number.parseInt(params.get('retmax') ?? '20', 10);
+  const retstart = Number.parseInt(params.get('retstart') ?? '0', 10);
   if (db === 'mesh') {
     return handleMeshEsearch(term);
   }
@@ -147,10 +147,10 @@ function handleEfetch(url: URL): Response {
  * 対応外のエンドポイントは明示的にエラーを投げる（気づかないまま実ネットワークに
  * 出るのを防ぐ設計方針。video/REQUIREMENTS.md ブリーフ参照）。
  */
-export function handleEutilsRequest(rawUrl: string): Response {
+export function handleEutilsRequest(rawUrl: string, method = 'GET', bodyText = ''): Response {
   const url = new URL(rawUrl);
   if (url.pathname.endsWith('/esearch.fcgi')) {
-    return handleEsearch(url);
+    return handleEsearch(method.toUpperCase() === 'POST' ? new URLSearchParams(bodyText) : url.searchParams);
   }
   if (url.pathname.endsWith('/efetch.fcgi')) {
     return handleEfetch(url);

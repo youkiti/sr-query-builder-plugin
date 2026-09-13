@@ -185,7 +185,13 @@ export async function registerNcbiStub(page: Page, options: NcbiStubOptions = {}
     }
 
     // esearch.fcgi（既定は他パターンにマッチしない場合のフォールバックとしても使う）
-    const result = options.esearch?.(url) ?? { count: '0', idlist: [] };
+    const request = route.request();
+    const esearchUrl = new URL(request.url());
+    if (request.method() === 'POST') {
+      // 既存の spec が GET と同じ形でパラメータを読めるよう、フォーム本文を URL に載せる。
+      esearchUrl.search = new URLSearchParams(request.postData() ?? '').toString();
+    }
+    const result = options.esearch?.(decodeURIComponent(esearchUrl.toString())) ?? { count: '0', idlist: [] };
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
