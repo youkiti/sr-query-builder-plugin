@@ -5,9 +5,47 @@ import { FIXTURES, loadSeedsFile, SEED, seedSplitId } from './prepare';
 import { hashC0Content, loadC0Artifact } from './c0Artifact';
 import { CASES } from './types';
 import { join } from 'node:path';
-import { decideExisting, resultDir, loggedFactory, main, memoryCheckpoint, parseArgs } from './run';
+import { decideExisting, resultDir, loggedFactory, main, memoryCheckpoint, parseArgs, reportError } from './run';
 import { reportRows, renderCsv, renderMarkdown } from './report';
 import type { RunResult } from './types';
+
+describe('CLI のエラー表示', () => {
+  const originalExitCode = process.exitCode;
+  let stderr: jest.SpyInstance;
+
+  beforeEach(() => {
+    stderr = jest.spyOn(process.stderr, 'write').mockReturnValue(true);
+    jest.replaceProperty(process, 'env', { ...process.env });
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.NCBI_API_KEY;
+    process.exitCode = 0;
+  });
+  afterEach(() => {
+    jest.restoreAllMocks();
+    process.exitCode = originalExitCode;
+  });
+
+  test.each([
+    [['--dry-run', '--label', 'bad/label'], '--label は英数字・.・_・- の 1〜40 文字で指定してください'],
+    [['--profile', 'tight-1000', '--max-hits', '1000'], '--profile と --max-hits は同時に指定できません'],
+  ])('引数エラーの理由を stderr に表示して終了コードを 1 にする: %j', async (args, message) => {
+    await main(args).catch(reportError);
+    expect(stderr).toHaveBeenCalledTimes(1);
+    expect(stderr).toHaveBeenCalledWith(`${message}\n`);
+    expect(process.exitCode).toBe(1);
+  });
+
+  test.each([true, false])('Error かどうかにかかわらず環境変数と URL のキーをマスクする: %s', (isError) => {
+    process.env.GEMINI_API_KEY = 'テスト用 Gemini 秘密値';
+    process.env.NCBI_API_KEY = 'テスト用 NCBI 秘密値';
+    const message = `実行失敗: ${process.env.GEMINI_API_KEY} ${process.env.NCBI_API_KEY} `
+      + 'https://example.invalid/?api_key=テスト値&key=別のテスト値&mode=test';
+    reportError(isError ? new Error(message) : message);
+    expect(stderr).toHaveBeenCalledTimes(1);
+    expect(stderr).toHaveBeenCalledWith('実行失敗: [REDACTED] [REDACTED] https://example.invalid/?api_key=[REDACTED]&key=[REDACTED]&mode=test\n');
+    expect(process.exitCode).toBe(1);
+  });
+});
 
 test('CLI から未知ケース・未知プロファイルを拒否し、既定値を解決する', () => {
   expect(parseArgs(['--dry-run']).dryRun).toBe(true);
