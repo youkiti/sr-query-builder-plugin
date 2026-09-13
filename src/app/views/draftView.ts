@@ -51,6 +51,8 @@ export interface DraftViewCallbacks extends ValidationResultsCallbacks {
   /** 編集導線を提供しない描画用途では省略する。 */
   onEditOptimization?: () => void;
   onBlocksFromOptimization?: () => void;
+  onDecideOutsideCandidate?: (pmid: string, decision: 'include' | 'exclude' | 'maybe') => Promise<void>;
+  onReadjustOptimization?: () => Promise<void>;
   /** 「生成して検証する」ボタンが押されたとき。進捗・エラーは store.draftRun 経由で反映される */
   onGenerate?: () => Promise<void>;
   /**
@@ -166,7 +168,8 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
     renderCurrentHistory(ctx.state);
     renderOptimizationReview(container,
       ctx.state.queryOptimizationRun?.projectId === ctx.state.project.projectId ? ctx.state.queryOptimizationRun : null,
-      { adopt: callbacks.onAdoptOptimization, edit: callbacks.onEditOptimization, blocks: callbacks.onBlocksFromOptimization });
+      { adopt: callbacks.onAdoptOptimization, edit: callbacks.onEditOptimization, blocks: callbacks.onBlocksFromOptimization,
+        decide: callbacks.onDecideOutsideCandidate, readjust: callbacks.onReadjustOptimization });
     if (!ctx.state.queryOptimizationSetup && callbacks.onPrepareOptimization) {
       void Promise.resolve().then(() => callbacks.onPrepareOptimization?.());
     }
@@ -892,7 +895,7 @@ function renderQueryOptimization(container: HTMLElement, state: AppState, callba
     stages.setAttribute('aria-live', 'off');
     for (const [step, label] of [
       ['initial_formula', '初期式作成'], ['measuring', '実測'], ['adjusting', '調整'],
-      ['revalidating', '再検証'], ['review', 'レビュー'],
+      ['revalidating', '再検証'], ['outside_check', '外側の確認'], ['review', 'レビュー'],
     ]) {
       const item = doc.createElement('li');
       item.textContent = label!;

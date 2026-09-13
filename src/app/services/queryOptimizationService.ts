@@ -60,6 +60,8 @@ export type QueryOptimizationStep =
   | 'adjusting'
   /** 条件達成候補をキャッシュに依存せず測り直す最終確認。 */
   | 'revalidating'
+  /** 最良候補の式の外側から判定候補を取得する。 */
+  | 'outside_check'
   /** 処理が終了し、人によるレビューへ渡す段階。 */
   | 'review';
 

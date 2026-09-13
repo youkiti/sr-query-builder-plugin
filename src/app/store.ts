@@ -140,8 +140,29 @@ export interface DraftRunState {
   blockHits: DraftBlockHit[];
 }
 
+export interface OptimizationOutsideCheckState {
+  status: 'running' | 'ready' | 'error' | 'skipped';
+  reason: string | null;
+  originalHits: number | null;
+  marginHits: number | null;
+  evaluatedCount: number;
+  candidates: {
+    pmid: string; title: string | null; year: number | null; abstract: string | null;
+    source: 'outside' | 'lost';
+    reason: string;
+    heldCandidateId?: string;
+    lostHits?: number | null;
+  }[];
+  decisions: Record<string, {
+    decision: 'include' | 'exclude' | 'maybe';
+    status: 'saving' | 'saved' | 'error';
+    error: string | null;
+  }>;
+}
+
 /** 自動調整の実測候補を、実行終了後もレビュー用に保持する。 */
 export interface QueryOptimizationRunState {
+  outsideCheck?: OptimizationOutsideCheckState;
   /** 未指定は人がまだ採用保存を要求していない状態。 */
   save?: FormulaSaveState;
   /** 初期式の準備が完了した時点で固定する。準備前は存在しない。 */

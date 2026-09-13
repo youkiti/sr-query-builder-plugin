@@ -22,6 +22,75 @@ function run(status: 'achieved' | 'needs_review' | 'stopped' | 'error'): QueryOp
 const actions = { adopt: jest.fn(async () => {}), edit: jest.fn(), blocks: jest.fn() };
 beforeEach(() => { jest.clearAllMocks(); });
 
+test('4区分と未確認事項を文字で表示し、捕捉の限界は1回だけ示す', () => {
+  const container = document.createElement('div');
+  renderOptimizationReview(container, run('achieved'), actions);
+  expect(container.querySelectorAll('.optimization__review-section')).toHaveLength(4);
+  expect(Array.from(container.querySelectorAll('h5')).map((node) => node.textContent)).toEqual([
+    '確認済み：既知文献の捕捉', '確認済み：件数目標', '未確認：外側の確認', '確認済み：削除影響の確認',
+  ]);
+  expect(container.textContent).toContain('未確認事項');
+  expect(container.textContent!.match(/既知シードの捕捉は、/g)).toHaveLength(1);
+});
+
+test.each(['unjudged', 'saving', 'saved', 'error'] as const)('候補カードは判定 %s を再描画して操作状態を復元する', (status) => {
+  const current = run('achieved');
+  current.outsideCheck = { status: 'ready', reason: null, originalHits: 12, marginHits: 1, evaluatedCount: 1,
+    candidates: [{ pmid: '22', title: '外側の研究', year: 1990, abstract: '抄録本文', source: 'outside', reason: 'AI の理由' }],
+    decisions: status === 'unjudged' ? {} : { '22': { decision: 'include', status, error: status === 'error' ? '失敗' : null } } };
+  const container = document.createElement('div');
+  const decide = jest.fn(async () => {});
+  const readjust = jest.fn(async () => {});
+  for (let i = 0; i < 2; i += 1) {
+    container.replaceChildren();
+    renderOptimizationReview(container, current, { ...actions, decide, readjust });
+    const card = container.querySelector('.optimization__candidate')!;
+    expect(card.textContent).toContain('式の外側（AI が選んだ境界事例）');
+    expect(card.textContent).toContain('AI の理由');
+    expect(card.querySelector('details')?.textContent).toContain('抄録本文');
+    expect(card.querySelector('details button')).toBeNull();
+    expect(card.querySelector('a')?.href).toContain('22');
+    expect(card.querySelector('[aria-live]')?.textContent).toContain(status === 'saving' ? '保存中' : status === 'saved' ? '保存済み' : status === 'error' ? '再試行' : '未判定');
+    const button = card.querySelector('button')!;
+    expect(button.disabled).toBe(status === 'saving' || status === 'saved');
+    expect(button.getAttribute('aria-pressed')).toBe(String(status !== 'unjudged'));
+    button.click();
+    const retry = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'include した文献を保護して再調整する');
+    expect(!!retry).toBe(status === 'saved');
+    retry?.click();
+  }
+  expect(decide).toHaveBeenCalledTimes(status === 'saving' || status === 'saved' ? 0 : 2);
+  expect(readjust).toHaveBeenCalledTimes(status === 'saved' ? 2 : 0);
+});
+
+test.each(['saving-decision', 'saving-formula', 'maybe', 'exclude'] as const)('再調整の制約: %s', (kind) => {
+  const current = run('achieved');
+  current.outsideCheck = { status: 'ready', reason: null, originalHits: 12, marginHits: 0, evaluatedCount: 0, candidates: [],
+    decisions: { '22': { decision: kind === 'maybe' || kind === 'exclude' ? kind : 'include', status: 'saved', error: null } } };
+  if (kind === 'saving-decision') current.outsideCheck.decisions['33'] = { decision: 'include', status: 'saving', error: null };
+  if (kind === 'saving-formula') current.save = { status: 'saving', error: null, formulaVersionId: 'r' };
+  const container = document.createElement('div');
+  renderOptimizationReview(container, current, { ...actions, readjust: jest.fn(async () => {}) });
+  const button = Array.from(container.querySelectorAll('button')).find((node) => node.textContent === 'include した文献を保護して再調整する');
+  if (kind === 'maybe' || kind === 'exclude') expect(button).toBeUndefined();
+  else {
+    expect(button!.disabled).toBe(true);
+    expect(container.textContent).toContain('現在の最終候補は保存されません');
+  }
+});
+
+test('失う文献は保留候補の由来だけを示し、AI の理由を表示しない', () => {
+  const current = run('needs_review');
+  current.outsideCheck = { status: 'error', reason: '探索失敗', originalHits: null, marginHits: null, evaluatedCount: 0,
+    candidates: [{ pmid: '22', title: null, year: null, abstract: null, source: 'lost', reason: '表示しない', heldCandidateId: 'candidate-1' }], decisions: {} };
+  const container = document.createElement('div');
+  renderOptimizationReview(container, current, actions);
+  expect(container.textContent).toContain('探索失敗');
+  const card = container.querySelector('.optimization__candidate')!;
+  expect(card.textContent).toContain('保留候補 candidate-1 で失う文献');
+  expect(card.textContent).not.toContain('表示しない');
+});
+
 test.each([true, false])('診断の回収見込み %s に応じてブロック承認への導線を出す', (recoverableByTerms) => {
   const current = run('needs_review');
   current.result!.seedDiagnoses = [{ pmid: '22', title: '研究22', year: 2024, hasAbstract: true,
@@ -78,15 +147,17 @@ test.each(['achieved', 'needs_review', 'stopped', 'error'] as const)('最終状�
   const current = run(status);
   const container = document.createElement('div');
   renderOptimizationReview(container, current, actions);
-  expect(container.textContent).toContain('削除影響の確認: 保留した候補はありません');
+  expect(container.textContent).toContain('保留した候補はありません（採用した変更の失う集合はすべて 0 件）');
   current.trials.push({ ...current.trials[0]!, kind: 'proposal', candidateId: 'candidate-1', held: true, accepted: false });
   container.replaceChildren();
   renderOptimizationReview(container, current, actions);
-  expect(container.textContent).toContain('失う集合があるため保留した候補 1 件（candidate-1。試行履歴の「削除影響」を確認してください）');
+  expect(container.textContent).toContain('保留した候補 1 件の削除影響の確認');
+  expect(container.textContent).toContain('保留候補 candidate-1: 失う集合 未測定 件のうち書誌を確認できたのは先頭 0 件');
   current.trials.push({ ...current.trials[1]!, candidateId: 'candidate-2' });
   container.replaceChildren();
   renderOptimizationReview(container, current, actions);
-  expect(container.textContent).toContain('保留した候補 2 件（candidate-1、candidate-2。試行履歴の「削除影響」を確認してください）');
+  expect(container.textContent).toContain('保留した候補 2 件の削除影響の確認');
+  expect(container.textContent).toContain('保留候補 candidate-2: 失う集合 未測定 件のうち書誌を確認できたのは先頭 0 件');
 });
 
 test.each([['achieved', '条件達成'], ['needs_review', '要確認'], ['stopped', '停止'], ['error', 'エラー']] as const)(

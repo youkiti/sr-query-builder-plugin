@@ -5,6 +5,7 @@ import { serializePubmedFormulaMd } from '@/lib/search-formula-md';
 import { nowIso } from '@/utils/iso8601';
 import { resolveProtocolContext, type EditServiceDeps } from './editService';
 import type { AppStore, FormulaSaveState } from '../store';
+import { buildOptimizationReviewSections } from './queryOptimizationReviewSections';
 
 /** 採用の意思表示はこの入口だけで受け、途中の候補を正式版にしない。 */
 export async function adoptQueryOptimization(deps: EditServiceDeps): Promise<void> {
@@ -40,7 +41,8 @@ export async function adoptQueryOptimization(deps: EditServiceDeps): Promise<voi
         name: `${run.runId}.json`, parentId: folder.id, mimeType: 'application/json',
         content: JSON.stringify({ runId: run.runId, versionId, parentVersionId: state.currentFormulaVersionId,
           maxHits: run.maxHits, maxIterations: run.maxIterations, input: run.inputSnapshot ?? null,
-          result, meshContext: run.meshContext }, null, 2),
+          result, meshContext: run.meshContext, reviewSections: buildOptimizationReviewSections(run).sections,
+          outsideCheck: run.outsideCheck ?? null }, null, 2),
       }, deps.google);
       const detailRef = file.webViewLink ?? `https://drive.google.com/file/d/${file.id}/view`;
       // 検証ログも同じ ID で照会し、版保存だけ失敗した後の再試行で重複させない。

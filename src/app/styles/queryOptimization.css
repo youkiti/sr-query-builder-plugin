@@ -110,6 +110,27 @@
   color: var(--color-danger);
 }
 
+.optimization__review a {
+  text-decoration: underline;
+}
+
+.optimization__review-section,
+.optimization__candidate {
+  margin-block: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+}
+
+.optimization__review-section[data-state=unmet],
+.optimization__review-section[data-state=needs_decision],
+.optimization__review-section[data-state=unconfirmed] {
+  border-left: 4px solid var(--color-warning);
+}
+
+.optimization__candidate details {
+  margin-block: var(--space-3);
+}
+
 .optimization__capture-table {
   overflow-x: auto;
 }

@@ -3,6 +3,7 @@ import type { OptimizationTrial, PreviousOptimizationRejection } from '@/feature
 import type { PubmedFormula } from '@/lib/search-formula-md';
 import { nowIso } from '@/utils/iso8601';
 import type { OptimizationStopReason, QueryOptimizationResult } from './queryOptimizationService';
+import type { OptimizationReviewSection } from './queryOptimizationReviewSections';
 import type { BlocksDraft, ProtocolDraft } from '../store';
 
 const CHECKPOINT_KEY = 'queryOptimizationCheckpoint';
@@ -82,6 +83,7 @@ export interface OptimizationTrialSummary {
 }
 
 export interface QueryOptimizationCompletion {
+  reviewSections?: OptimizationReviewSection[];
   status: QueryOptimizationResult['status'];
   stopReason: OptimizationStopReason;
   unmetReasons: string[];
@@ -130,6 +132,7 @@ export async function saveQueryOptimizationCheckpoint(
     resume: JSON.parse(JSON.stringify(resume)) as OptimizationResumeData,
     ...(completion ? { completion: {
       status: completion.status, stopReason: completion.stopReason, unmetReasons: [...completion.unmetReasons],
+      ...(completion.reviewSections ? { reviewSections: completion.reviewSections.map((section) => ({ ...section, lines: [...section.lines] })) } : {}),
     } } : {}),
     trials: trials.map((trial) => ({
       candidateId: trial.candidateId,
@@ -164,4 +167,16 @@ export async function getQueryOptimizationCheckpoint(
 
 export async function clearQueryOptimizationCheckpoint(deps: ProjectStoreDeps): Promise<void> {
   await deps.write({ [CHECKPOINT_KEY]: null });
+}
+
+/** 同じ実行の終了記録だけに、人の判定を反映した確認状況を追記する。 */
+export async function updateQueryOptimizationReviewSections(
+  projectId: string, runId: string,
+  reviewSections: OptimizationReviewSection[],
+  deps: ProjectStoreDeps,
+  owns: () => boolean = () => true
+): Promise<void> {
+  const checkpoint = await deps.read<QueryOptimizationCheckpoint | null>(CHECKPOINT_KEY);
+  if (!owns() || !checkpoint?.completion || checkpoint.projectId !== projectId || checkpoint.runId !== runId) return;
+  await deps.write({ [CHECKPOINT_KEY]: { ...checkpoint, completion: { ...checkpoint.completion, reviewSections } } });
 }

@@ -1,4 +1,6 @@
 import type { ProjectStoreDeps } from '@/features/project';
+import { updateQueryOptimizationReviewSections } from './queryOptimizationCheckpointService';
+import type { OptimizationReviewSection } from './queryOptimizationReviewSections';
 import { createStore, INITIAL_STATE, type BlocksDraft, type ProtocolDraft } from '../store';
 import type { OptimizationTrial } from '@/features/formula/skills/optimizeQuery';
 import { saveQueryOptimizationCheckpoint, getQueryOptimizationCheckpoint, clearQueryOptimizationCheckpoint, getQueryOptimizationResumeAvailability, createQueryOptimizationInputIdentity, type OptimizationResumeData } from './queryOptimizationCheckpointService';
@@ -22,6 +24,26 @@ function setup() {
   const options = { projectId: 'p', runId: 'run', maxHits: 100, trials: [trial], resume };
   return { data, deps, trial, options };
 }
+
+test.each(['matching', 'run', 'project', 'incomplete', 'missing', 'ownership'] as const)('確認状況の差し替え: %s', async (kind) => {
+  const { deps, options, data } = setup();
+  if (kind !== 'missing') await saveQueryOptimizationCheckpoint({ ...options,
+    ...(kind === 'incomplete' ? {} : { completion: { status: 'achieved' as const, stopReason: 'conditions_met' as const, unmetReasons: [] } }),
+  }, deps);
+  const before = data.queryOptimizationCheckpoint;
+  const write = jest.spyOn(deps, 'write');
+  const sections: OptimizationReviewSection[] = [{ key: 'outside_check', label: '外側の確認', state: 'needs_decision', lines: ['未判定'] }];
+  await updateQueryOptimizationReviewSections(kind === 'project' ? 'other' : 'p', kind === 'run' ? 'other' : 'run', sections,
+    deps, () => kind !== 'ownership');
+  if (kind === 'matching') {
+    expect(write).toHaveBeenCalledTimes(1);
+    expect((await getQueryOptimizationCheckpoint('p', deps))?.completion?.reviewSections).toEqual(sections);
+    expect(data.queryOptimizationCheckpoint).toMatchObject({ runId: 'run', completion: { status: 'achieved', stopReason: 'conditions_met' } });
+  } else {
+    expect(write).not.toHaveBeenCalled();
+    expect(data.queryOptimizationCheckpoint).toBe(before);
+  }
+});
 
 test('保留と差集合件数だけを射影し、書誌は保存せず旧形式も復元する', async () => {
   const { data, deps, trial, options } = setup();

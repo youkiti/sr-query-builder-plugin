@@ -29,7 +29,7 @@ import {
   type EfetchArticle,
   type EutilsDeps,
 } from '@/lib/ncbi';
-import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
+import { parsePubmedFormulaMd, type PubmedFormula } from '@/lib/search-formula-md';
 import { nowIso } from '@/utils/iso8601';
 import type { AppStore } from '../store';
 import type { LlmProviderFactory } from './llmProviderService';
@@ -218,7 +218,7 @@ export async function fetchBoundaryCandidates(
   if (eligibleSeedCount === 0) {
     return fetchInsideCandidates(deps, protocol, formula, originalQuery, existingPmids);
   }
-  return fetchMarginCandidates(deps, protocol, formula, originalQuery, existingPmids);
+  return fetchMarginCandidates(deps, protocol, formula, existingPmids);
 }
 
 /**
@@ -228,9 +228,26 @@ async function fetchMarginCandidates(
   deps: ExpandServiceDeps,
   protocol: BoundaryProtocol,
   formula: ReturnType<typeof parsePubmedFormulaMd>,
-  originalQuery: string,
   existingPmids: ReadonlySet<string>
 ): Promise<BoundaryCasesResult> {
+  return searchOutsideCandidates({ ...deps, formula, ...protocol, existingPmids });
+}
+
+export interface OutsideSearchInput extends Pick<ExpandServiceDeps,
+  'eutils' | 'llmFactory' | 'retmax' | 'skillCandidateLimit' | 'onProgress'> {
+  formula: PubmedFormula;
+  researchQuestion: string;
+  inclusionCriteria: string;
+  exclusionCriteria: string;
+  existingPmids: ReadonlySet<string>;
+}
+
+/** 指定された式の外側から、人が判定する境界事例を取得する。 */
+export async function searchOutsideCandidates(deps: OutsideSearchInput): Promise<BoundaryCasesResult> {
+  const { formula, existingPmids } = deps;
+  const protocol = deps;
+  const originalQuery = expandFormula(formula).trim();
+  if (!originalQuery) throw new Error('検索式の展開結果が空です');
   // 各概念ブロックを 2 軸（MeSH 一段上 / フリーワード）で広げる拡張語を LLM に提案させる。
   deps.onProgress?.('broaden');
   const conceptBlocks = formula.blocks
@@ -475,7 +492,7 @@ async function searchSpecificQuery(
 /** efetch して articleMap と pick skill 用の候補配列を組み立てる（margin / inside 共通）。 */
 async function fetchCandidateArticles(
   pmids: string[],
-  deps: ExpandServiceDeps
+  deps: Pick<ExpandServiceDeps, 'eutils'>
 ): Promise<{ articleMap: Map<string, EfetchArticle>; candidates: BoundaryCandidate[] }> {
   const articles = await efetchArticles(pmids, deps.eutils);
   const articleMap = new Map(articles.map((a) => [a.pmid, a]));

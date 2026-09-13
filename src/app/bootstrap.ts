@@ -10,6 +10,8 @@ declare const __BUILD_DATE__: string;
 
 import { adoptQueryOptimization, editQueryOptimization } from './services/queryOptimizationAdoptionService';
 import { createOptimizationProgressPublisher } from './services/queryOptimizationProgressPublisher';
+import { searchOutsideCandidates } from './services/expandService';
+import { buildOptimizationReviewSections } from './services/queryOptimizationReviewSections';
 
 import {
   approveBlocks,
@@ -69,11 +71,11 @@ import {
 } from './services';
 import { isSeedEligibleForValidation, type SeedPaper } from '@/domain/seedPaper';
 import { listSeedPapers } from '@/features/seeds';
-import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
+import { parsePubmedFormulaMd, type PubmedFormula } from '@/lib/search-formula-md';
 import { newUuid } from '@/utils/uuid';
 import { fetchMeshContext } from './services/meshContextService';
 import { createQueryOptimizationInputIdentity, getQueryOptimizationCheckpoint,
-  getQueryOptimizationResumeAvailability } from './services/queryOptimizationCheckpointService';
+  getQueryOptimizationResumeAvailability, updateQueryOptimizationReviewSections } from './services/queryOptimizationCheckpointService';
 import {
   efetchArticles,
   esearch,
@@ -102,7 +104,7 @@ import {
   listProtocols,
 } from '@/features/protocol';
 import type { Protocol, ProtocolBlock } from '@/domain/protocol';
-import type { BlocksDraft, ProtocolDraft } from './store';
+import type { BlocksDraft, ProtocolDraft, OptimizationOutsideCheckState } from './store';
 import { buildSpreadsheetUrl, getCurrentUserEmail } from '@/lib/google';
 import { PICKER_GRANT_MESSAGE, type PickerGrantResult } from '@/background/pickerGrant';
 import { evaluateGuards } from './guards';
@@ -440,6 +442,8 @@ function buildDefaultViewOptions(
       onAdoptOptimization: () => adoptQueryOptimization({ store, google: runtime.google }),
       onEditOptimization: () => { if (editQueryOptimization(store)) navigate('edit'); },
       onBlocksFromOptimization: () => navigate('blocks'),
+      onDecideOutsideCandidate: (pmid, decision) => runDecideOutsideCandidate(store, runtime, pmid, decision),
+      onReadjustOptimization: () => runReadjustOptimization(store, runtime, llmFactoryDepsBase()),
       onStopOptimization: () => {
         store.setState((s) => s.queryOptimizationRun?.status !== 'running' ? s : {
           ...s, queryOptimizationRun: { ...s.queryOptimizationRun, stopRequested: true },
@@ -1145,7 +1149,8 @@ export async function runOptimizeQuery(
   store: AppStore, runtime: ChromeRuntimeDeps,
   baseDeps: Omit<LlmFactoryDeps, 'llmLogFolderId' | 'spreadsheetId'>,
   settings: QueryOptimizationSettings,
-  resumeRunId?: string
+  resumeRunId?: string,
+  startingFormula?: PubmedFormula
 ): Promise<void> {
   const state = store.getState();
   if (state.queryOptimizationRun?.status === 'running' || state.queryOptimizationRun?.save?.status === 'saving'
@@ -1198,8 +1203,10 @@ export async function runOptimizeQuery(
     if (!state.protocolDraft || !state.blocksDraft?.blocks.length || !state.protocolDraftPersisted) {
       throw new Error('プロトコルとブロックを承認してください。');
     }
-    const seeds = (await listSeedPapers(project.spreadsheetId, runtime.google)).filter(isSeedEligibleForValidation);
+    const allSeeds = await listSeedPapers(project.spreadsheetId, runtime.google);
     check();
+    const seeds = allSeeds.filter(isSeedEligibleForValidation);
+    const existingPmids = new Set(allSeeds.flatMap((seed) => seed.pmid ? [seed.pmid] : []));
     const seedPmids = [...new Set(seeds.map((seed) => seed.pmid).filter((pmid): pmid is string => pmid !== null))];
     update({ seedCount: seedPmids.length });
     const incompatible = validateQueryOptimizationSettings(fixedSettings, seedPmids.length);
@@ -1236,6 +1243,7 @@ export async function runOptimizeQuery(
     const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
     check();
     const initialFormula = resume?.available ? resume.data.bestFormula!
+      : startingFormula ? startingFormula
       : state.currentFormulaMarkdown ? parsePubmedFormulaMd(state.currentFormulaMarkdown)
       : (await generateDraftFormula({ protocol: state.protocolDraft, blocks: state.blocksDraft,
         targetHits: fixedSettings.maxHits,
@@ -1268,10 +1276,63 @@ export async function runOptimizeQuery(
       onProgress: publisher.publish,
     });
     publisher.flush();
+    if (!owns(store.getState())) return;
+    update({ result, trials: result.trials });
+    const outsideCheck: OptimizationOutsideCheckState = {
+      status: 'skipped', reason: '自動調整が停止・エラーで終了したため外側の確認は未実行です',
+      originalHits: null, marginHits: null, evaluatedCount: 0, candidates: [], decisions: {},
+    };
+    const seen = new Set(existingPmids);
+    for (const trial of result.trials.filter((trial) => trial.held)) {
+      for (const paper of trial.impact?.inspected ?? []) {
+        if (seen.has(paper.pmid)) continue;
+        seen.add(paper.pmid);
+        outsideCheck.candidates.push({ ...paper, abstract: null, source: 'lost', reason: '',
+          heldCandidateId: trial.candidateId, lostHits: trial.impact?.lostHits ?? null });
+      }
+    }
+    if (result.best && (result.status === 'achieved' || result.status === 'needs_review')) {
+      outsideCheck.status = 'running';
+      outsideCheck.reason = null;
+      update({ outsideCheck: { ...outsideCheck, candidates: [...outsideCheck.candidates] }, progress: { ...store.getState().queryOptimizationRun!.progress,
+        step: 'outside_check', task: null, apiWaiting: null } });
+      try {
+        check();
+        // サービス終了後の外側の確認は、自動調整の通信予算（200 回）とは別枠で行う。
+        const outside = await searchOutsideCandidates({ formula: result.best.formula,
+          researchQuestion: state.protocolDraft.researchQuestion,
+          inclusionCriteria: state.protocolDraft.inclusionCriteria,
+          exclusionCriteria: state.protocolDraft.exclusionCriteria,
+          existingPmids, eutils, llmFactory: factory, onProgress: () => check() });
+        if (!owns(store.getState())) return;
+        check();
+        outsideCheck.status = 'ready';
+        outsideCheck.originalHits = outside.originalHits;
+        outsideCheck.marginHits = outside.marginHits;
+        outsideCheck.evaluatedCount = outside.evaluatedCount;
+        const outsideSeen = new Set(existingPmids);
+        for (const candidate of outside.candidates) {
+          if (outsideSeen.has(candidate.pmid)) continue;
+          outsideSeen.add(candidate.pmid);
+          outsideCheck.candidates.push({ ...candidate, source: 'outside' });
+        }
+      } catch (err) {
+        if (!owns(store.getState())) return;
+        outsideCheck.status = shouldStop() ? 'skipped' : 'error';
+        outsideCheck.reason = shouldStop() ? 'ユーザーの停止要求で外側の確認を中止しました'
+          : err instanceof Error ? err.message : String(err);
+      }
+    }
+    update({ outsideCheck: { ...outsideCheck }, progress: { ...store.getState().queryOptimizationRun!.progress, step: 'review' } });
+    await persistOptimizationReview(store, runtime, runId);
+    if (!owns(store.getState())) return;
     update({ status: result.status === 'error' ? 'error' : 'ready', finishedAtMs: Date.now(), result, trials: result.trials,
       error: result.status === 'error' ? result.unmetReasons.join(' / ') : null });
   } catch (err) {
     publisher.flush();
+    if (!owns(store.getState())) return;
+    update({ outsideCheck: { status: 'skipped', reason: '自動調整が停止・エラーで終了したため外側の確認は未実行です',
+      originalHits: null, marginHits: null, evaluatedCount: 0, candidates: [], decisions: {} } });
     if (err instanceof QueryOptimizationStopError && err.stopReason === 'user_stop') {
       const run = store.getState().queryOptimizationRun;
       update({ status: 'ready', finishedAtMs: Date.now(), result: { status: 'stopped', stopReason: 'user_stop', best: null,
@@ -1280,9 +1341,75 @@ export async function runOptimizeQuery(
     } else {
       update({ status: 'error', finishedAtMs: Date.now(), error: err instanceof Error ? err.message : String(err) });
     }
+    await persistOptimizationReview(store, runtime, runId);
   } finally {
     publisher.dispose();
   }
+}
+
+async function persistOptimizationReview(store: AppStore, runtime: ChromeRuntimeDeps, runId: string): Promise<void> {
+  const run = store.getState().queryOptimizationRun;
+  if (!run || run.runId !== runId || store.getState().project?.projectId !== run.projectId) return;
+  try {
+    await updateQueryOptimizationReviewSections(run.projectId, runId, buildOptimizationReviewSections(run).sections,
+      runtime.store, () => store.getState().project?.projectId === run.projectId
+        && store.getState().queryOptimizationRun?.runId === runId);
+  } catch (err) {
+    console.warn('自動調整の確認状況をチェックポイントに保存できませんでした', err);
+  }
+}
+
+/** 判定中の状態を store に保持し、再描画や二重押しでも追記を重複させない。 */
+export async function runDecideOutsideCandidate(
+  store: AppStore, runtime: ChromeRuntimeDeps, pmid: string, decision: 'include' | 'exclude' | 'maybe'
+): Promise<void> {
+  const run = store.getState().queryOptimizationRun;
+  const candidate = run?.outsideCheck?.candidates.find((item) => item.pmid === pmid);
+  const previous = run?.outsideCheck?.decisions[pmid];
+  if (!run || !candidate || run.status === 'running' || run.projectId !== store.getState().project?.projectId
+    || previous?.status === 'saving' || previous?.status === 'saved') return;
+  const owns = (): boolean => store.getState().project?.projectId === run.projectId
+    && store.getState().queryOptimizationRun?.runId === run.runId;
+  const setDecision = (status: 'saving' | 'saved' | 'error', error: string | null = null): void => {
+    if (!owns()) return;
+    store.setState((s) => ({ ...s, queryOptimizationRun: { ...s.queryOptimizationRun!,
+      outsideCheck: { ...s.queryOptimizationRun!.outsideCheck!, decisions: {
+        ...s.queryOptimizationRun!.outsideCheck!.decisions, [pmid]: { decision, status, error },
+      } },
+    } }));
+  };
+  setDecision('saving');
+  try {
+    const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
+    if (!owns()) return;
+    const userEmail = await getCurrentUserEmail(runtime.profile);
+    if (!owns()) return;
+    await recordDecision({ pmid, title: candidate.title, year: candidate.year, decision,
+      reason: candidate.source === 'outside' ? candidate.reason
+        : `自動調整 run ${run.runId}: 保留候補 ${candidate.heldCandidateId} で失う文献`,
+    }, { google: runtime.google, eutils, store, userEmail,
+      llmFactory: { forPurpose: neverCalledProvider, model: 'unused' } });
+    if (!owns()) return;
+    setDecision('saved');
+    await persistOptimizationReview(store, runtime, run.runId);
+    if (!owns()) return;
+  } catch (err) {
+    setDecision('error', err instanceof Error ? err.message : String(err));
+  }
+}
+
+/** 保存済み include を読み直し、最良候補から新しい予算で調整を開始する。 */
+export async function runReadjustOptimization(
+  store: AppStore, runtime: ChromeRuntimeDeps,
+  baseDeps: Omit<LlmFactoryDeps, 'llmLogFolderId' | 'spreadsheetId'>
+): Promise<void> {
+  const run = store.getState().queryOptimizationRun;
+  const decisions = Object.values(run?.outsideCheck?.decisions ?? {});
+  if (!run?.result?.best || run.projectId !== store.getState().project?.projectId || run.status === 'running'
+    || run.save?.status === 'saving' || decisions.some((item) => item.status === 'saving')
+    || !decisions.some((item) => item.status === 'saved' && item.decision === 'include')) return;
+  await runOptimizeQuery(store, runtime, baseDeps, { maxHits: run.maxHits, maxIterations: run.maxIterations },
+    undefined, run.result.best.formula);
 }
 
 /**

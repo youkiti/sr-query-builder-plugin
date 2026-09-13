@@ -154,8 +154,8 @@ export async function registerDriveStub(page: Page): Promise<void> {
 export interface NcbiStubOptions {
   /** esearch.fcgi の応答をクエリ文字列（decodeURIComponent 済み）から動的に組み立てる。省略時は { count: '0', idlist: [] } */
   esearch?: (decodedUrl: string) => { count: string; idlist: string[] };
-  /** efetch.fcgi が返す PubMed XML 文字列。省略時は空の PubmedArticleSet */
-  efetchXml?: string;
+  /** efetch.fcgi が返す PubMed XML 文字列または URL ごとの応答。省略時は空の PubmedArticleSet */
+  efetchXml?: string | ((decodedUrl: string) => string);
   /** esummary.fcgi の応答 JSON。省略時は { result: { uids: [] } } */
   esummary?: unknown;
 }
@@ -170,7 +170,7 @@ export async function registerNcbiStub(page: Page, options: NcbiStubOptions = {}
       await route.fulfill({
         status: 200,
         contentType: 'text/xml',
-        body: options.efetchXml ?? EMPTY_EFETCH_XML,
+        body: typeof options.efetchXml === 'function' ? options.efetchXml(url) : options.efetchXml ?? EMPTY_EFETCH_XML,
       });
       return;
     }
@@ -296,6 +296,8 @@ export interface GeminiStubOptions {
   responses: Partial<Record<GeminiSkillName, unknown | ((decodedPrompt: string) => unknown)>>;
   /** usageMetadata。既定 { promptTokenCount: 300, candidatesTokenCount: 150 } */
   usage?: { promptTokenCount?: number; candidatesTokenCount?: number };
+  /** 特定のスキルだけ使用量を変え、追加探索と既存の費用検証を独立させる。 */
+  usageBySkill?: Partial<Record<GeminiSkillName, { promptTokenCount: number; candidatesTokenCount: number }>>;
 }
 
 export async function registerGeminiStub(page: Page, options: GeminiStubOptions): Promise<void> {
@@ -343,7 +345,7 @@ export async function registerGeminiStub(page: Page, options: GeminiStubOptions)
       contentType: 'application/json',
       body: JSON.stringify({
         candidates: [{ content: { parts: [{ text: JSON.stringify(json) }] } }],
-        usageMetadata: usage,
+        usageMetadata: options.usageBySkill?.[skill] ?? usage,
       }),
     });
   });
