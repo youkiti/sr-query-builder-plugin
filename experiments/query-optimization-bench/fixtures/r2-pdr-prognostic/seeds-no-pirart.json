@@ -1,0 +1,8 @@
+{
+  "name": "no-pirart",
+  "selections": [
+    { "groupId": "lee 2021", "pmid": "34574686", "year": 2021 },
+    { "groupId": "voigt 2018", "pmid": "29183104", "year": 2018 },
+    { "groupId": "klein 1984", "pmid": "6709313", "year": 1984 }
+  ]
+}
