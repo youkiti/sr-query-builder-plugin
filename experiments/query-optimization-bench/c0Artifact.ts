@@ -36,8 +36,8 @@ export interface C0Artifact extends C0Content {
   sha256: string;
 }
 
-/** キー順序に依存しないハッシュにするため、オブジェクトキーを再帰的にソートする。 */
-function canonicalize(value: unknown): unknown {
+/** キー順序に依存しないハッシュにするため、オブジェクトキーを再帰的にソートする。replay.ts のハッシュ計算とも共有する。 */
+export function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map(canonicalize);
   }

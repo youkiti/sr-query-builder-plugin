@@ -24,6 +24,17 @@ test('C0 が live または sha256 不一致なら比較を拒否する', () => 
   expect(() => renderComparison(a, mismatched)).toThrow('sha256 が一致しません');
 });
 
+test('片方だけ replay、または replay の sha256 が異なる 2 run の比較は拒否する', () => {
+  const a = withC1({ ...base, replay: { name: 'pr104-r2', sha256: 'replay-x', responseCount: 3, usedCount: 3, exhausted: true } }, ['x'], 100);
+  const freeGeneration = withC1(base, ['x'], 100);
+  expect(() => renderComparison(a, freeGeneration)).toThrow('片方だけ replay');
+  expect(() => renderComparison(freeGeneration, a)).toThrow('片方だけ replay');
+  const mismatchedReplay = withC1({ ...base, replay: { ...a.replay!, sha256: 'replay-y' } }, ['x'], 100);
+  expect(() => renderComparison(a, mismatchedReplay)).toThrow('replay の sha256 が一致しません');
+  const sameReplay = withC1({ ...base, replay: { ...a.replay! } }, ['x'], 100);
+  expect(() => renderComparison(a, sameReplay)).not.toThrow();
+});
+
 test('ケース・シード分割・maxHits の不一致も拒否する', () => {
   const a = withC1(base, ['x'], 100);
   expect(() => renderComparison(a, { ...a, id: 'other' })).toThrow('ケースが一致しません');

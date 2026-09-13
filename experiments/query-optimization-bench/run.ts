@@ -26,13 +26,18 @@ import { getGitCommit, isGitDirty } from './gitInfo';
 import { computeAdoptionAudit } from './adoptionAudit';
 import { computeConfirmation } from './confirmationAudit';
 import { createLlmUsageTracker } from './llmUsage';
+import { createReplayLlmFactory, hashReplayFixture, loadReplayFixture, type ReplayFixtureContent, type ReplayLlmFactory } from './replay';
 import { CASES, PROFILES, type BenchCase, type FrozenSeeds, type GoldAudit, type RunResult, type ConditionResult } from './types';
 
 export const RESULTS = resolve(__dirname, 'results');
 
-/** results ディレクトリ配下の 1 run の格納先。run.ts / candidates.ts で共有する。 */
-export function resultDir(resultsRoot: string, profileId: string, caseId: string, c0Key: string, splitKey: string, label?: string): string {
-  return join(resultsRoot, profileId, caseId, c0Key, label ? `${splitKey}+${label}` : splitKey);
+/**
+ * results ディレクトリ配下の 1 run の格納先。run.ts / candidates.ts で共有する。
+ * label・replay はどちらも省略可で、指定順に `+` で連結する（分割キーと同じ階層）。
+ */
+export function resultDir(resultsRoot: string, profileId: string, caseId: string, c0Key: string, splitKey: string, label?: string, replayName?: string): string {
+  const suffix = [splitKey, label, replayName ? `replay-${replayName}` : undefined].filter((part): part is string => Boolean(part)).join('+');
+  return join(resultsRoot, profileId, caseId, c0Key, suffix);
 }
 
 export function memoryCheckpoint(): ProjectStoreDeps {
@@ -43,15 +48,18 @@ export function memoryCheckpoint(): ProjectStoreDeps {
 /**
  * @param onUsage 呼び出し 1 回（リトライの各試行を含む）ごとに model/tokensIn/tokensOut と成否を通知する。
  *   失敗した呼び出しも通知する（tokensIn/tokensOut は null）。run.ts の RunResult.llmUsage、
- *   run の使用量集計に使う。
+ *   run の使用量集計に使う。replay（onUsage 省略）は計上しない。
+ * @param filePrefix ログファイル名に付ける接頭辞。既定は空文字。replay 用の別インスタンスと
+ *   採番が衝突しないよう、run.ts は replay 側に `'replay-'` を渡す。
  */
 export function loggedFactory(provider: LLMProvider, write: (path: string, value: unknown) => void,
-  paths: string[], onUsage?: (model: string, tokensIn: number | null, tokensOut: number | null, succeeded: boolean) => void): LlmProviderFactory {
+  paths: string[], onUsage?: (model: string, tokensIn: number | null, tokensOut: number | null, succeeded: boolean) => void,
+  filePrefix = ''): LlmProviderFactory {
   let sequence = 0;
   return { model: provider.model, forPurpose: (purpose, onRequestState) => withRetry({
     providerId: provider.providerId, model: provider.model,
     chat: async (messages, options) => {
-      const path = `llm/${String(++sequence).padStart(4, '0')}_${purpose}.json`;
+      const path = `llm/${filePrefix}${String(++sequence).padStart(4, '0')}_${purpose}.json`;
       const start = Date.now();
       paths.push(path);
       try {
@@ -82,6 +90,8 @@ export interface ParsedArgs {
   /** --c0 で指定した凍結 C0 の名前（`fixtures/<id>/c0/<name>.json`、拡張子なし）。 */
   c0Name?: string;
   label?: string;
+  /** --replay で指定した固定提案 fixture の名前（`fixtures/<id>/replay/<name>.json`、拡張子なし）。 */
+  replayName?: string;
 }
 
 export function parseArgs(args: string[]): ParsedArgs {
@@ -92,6 +102,7 @@ export function parseArgs(args: string[]): ParsedArgs {
   let seedArg: string | undefined;
   let c0Name: string | undefined;
   let label: string | undefined;
+  let replayName: string | undefined;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--dry-run') dryRun = true;
     else if (args[i] === '--case' && selected === undefined && args[i + 1]) selected = args[++i];
@@ -100,9 +111,15 @@ export function parseArgs(args: string[]): ParsedArgs {
     else if (args[i] === '--seeds' && seedArg === undefined && args[i + 1]) seedArg = args[++i];
     else if (args[i] === '--c0' && c0Name === undefined && args[i + 1]) c0Name = args[++i];
     else if (args[i] === '--label' && label === undefined && args[i + 1] !== undefined) label = args[++i];
+    else if (args[i] === '--replay' && replayName === undefined && args[i + 1]) replayName = args[++i];
     else throw new Error(`未対応の引数: ${args[i]}`);
   }
   if (label !== undefined && (!/^[A-Za-z0-9._-]{1,40}$/.test(label) || label.trim() !== label)) throw new Error('--label は英数字・.・_・- の 1〜40 文字で指定してください');
+  // resultDir は label と --replay の接尾辞をどちらも `+` 連結だけで区別するため、label が
+  // `replay-` で始まると自由生成の保存先が --replay の保存先と衝突する（大文字小文字を区別しない）。
+  if (label !== undefined && /^replay-/i.test(label)) throw new Error('--label は "replay-" で始められません（--replay の保存先と衝突します）');
+  if (replayName !== undefined && !/^[a-z][a-z0-9-]{0,31}$/.test(replayName)) throw new Error('--replay には英小文字で始まる英小文字・数字・ハイフンの 1〜32 文字を指定してください');
+  if (replayName !== undefined && c0Name === undefined) throw new Error('--replay は --c0 と併用してください（固定した式に対する応答のため）');
   if (selected && !CASES.some((item) => item.id === selected)) throw new Error('未知のケースです');
   if (profileId !== undefined && maxHitsArg !== undefined) throw new Error('--profile と --max-hits は同時に指定できません');
   let profile: { id: string; maxHits: number; maxIterations: number };
@@ -119,7 +136,7 @@ export function parseArgs(args: string[]): ParsedArgs {
     postHoc = found.postHoc;
   }
   const seed = seedArg === undefined ? SEED : parseSeedSplit(seedArg);
-  return { profile, ids: selected ? [selected] : CASES.map((item) => item.id), dryRun, postHoc, seed, c0Name, label };
+  return { profile, ids: selected ? [selected] : CASES.map((item) => item.id), dryRun, postHoc, seed, c0Name, label, replayName };
 }
 
 /** --c0 で読み込み・検証済みの凍結 C0（run.ts のみで組み立て、executeCase はそのまま信用する）。 */
@@ -142,6 +159,8 @@ export interface ExecutionDeps {
   seeds?: FrozenSeeds;
   /** --c0 検証済みの凍結 C0。未指定なら従来どおり extractProtocol/generateDraftFormula でその場生成する。 */
   frozenC0?: FrozenC0Input;
+  /** --replay 検証済みの固定提案。未指定なら従来どおり自由生成（llmFactory がそのまま optimize_query に使われる）。 */
+  replay?: { name: string; sha256: string; responseCount: number; factory: ReplayLlmFactory };
 }
 
 export async function measureRejectedCandidates(result: RunResult, eutils: EutilsDeps): Promise<NonNullable<RunResult['rejectedCandidates']>> {
@@ -228,7 +247,11 @@ export async function executeCase(fixture: BenchCase, audit: GoldAudit, protocol
     approvedBlocks: blocks.blocks.map((block, index) => ({ id: String(index + 1), approvedBlockId: String(index + 1), label: block.blockLabel })),
     criteria: { researchQuestion: protocol.researchQuestion, inclusionCriteria: protocol.inclusionCriteria, exclusionCriteria: protocol.exclusionCriteria } },
   { eutils, llmFactory, checkpoint: memoryCheckpoint(), fetchMeshContext: (request, observed) => fetchMeshContext(request, observed ?? eutils),
-    onProgress: progress, measureTermDetails: true });
+    onProgress: progress, measureTermDetails: true, ...(deps.replay ? { shouldStop: deps.replay.factory.shouldStop } : {}) });
+  if (deps.replay) {
+    result.replay = { name: deps.replay.name, sha256: deps.replay.sha256, responseCount: deps.replay.responseCount,
+      usedCount: deps.replay.factory.used(), exhausted: deps.replay.factory.exhausted() };
+  }
   const best = result.optimization.best;
   if (best) result.conditions.C1 = { ...await measure(expandFormula(best.formula)), formula: best.formula };
   else result.conditions.C1 = { query: '', measurement: { status: 'failure', error: '自動調整の有効な最良式がありません' }, metrics: null };
@@ -256,7 +279,7 @@ export function decideExisting(existing: RunResult, profile: Pick<ParsedArgs['pr
 }
 
 export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES, resultsDir = RESULTS): Promise<void> {
-  const { ids, dryRun, profile, postHoc, seed, c0Name, label } = parseArgs(args);
+  const { ids, dryRun, profile, postHoc, seed, c0Name, label, replayName } = parseArgs(args);
   if (!dryRun) {
     config();
     // searchOutsideCandidates（confirmation の集計）が efetchArticles を使うため、非 dry-run では必ず補う。
@@ -267,7 +290,7 @@ export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES,
   const c0Key = c0Name ?? 'live';
   const gitCommit = getGitCommit();
   for (const id of ids) {
-    const dir = resultDir(resultsDir, profile.id, id, c0Key, splitId, label);
+    const dir = resultDir(resultsDir, profile.id, id, c0Key, splitId, label, replayName);
     const resultPath = join(dir, 'run.json');
     if (!dryRun && existsSync(resultPath)) {
       try {
@@ -300,6 +323,8 @@ export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES,
     const progress = (event: unknown) => {
       if (!dryRun) appendFileSync(join(attemptDir, 'progress.jsonl'), redact(JSON.stringify({ at: new Date().toISOString(), event }), secrets) + '\n');
     };
+    // try の外で宣言し、runQueryOptimization 前の例外・中断でも finally から usedCount/exhausted を読めるようにする。
+    let replayFactory: ReplayLlmFactory | undefined;
     try {
       if (!dryRun) mkdirSync(join(attemptDir, 'llm'), { recursive: true });
       progress({ process: { pid: process.pid, hasApiKey: Boolean(process.env.NCBI_API_KEY), caseCount: ids.length,
@@ -322,6 +347,16 @@ export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES,
         frozenC0 = { id: c0Name, sha256: artifact.sha256, variant: artifact.variant, draftIndex: artifact.draftIndex,
           protocol: artifact.protocol, blocks: artifact.blocks, formula: artifact.formula };
       }
+      // --replay の検証（fixture の形式・適用先 C0 との名前・ハッシュ一致）も通信不要なので dry-run でも行う。
+      let replayFixture: ReplayFixtureContent | undefined;
+      let replaySha256: string | undefined;
+      if (replayName) {
+        replayFixture = loadReplayFixture(fixturesDir, id, replayName);
+        if (replayFixture.c0.name !== c0Name || replayFixture.c0.sha256 !== frozenC0!.sha256) {
+          throw new Error(`replay ${replayName} の適用先 C0（${replayFixture.c0.name}）が実行時の --c0（${c0Name}）と一致しないか、ハッシュが一致しません`);
+        }
+        replaySha256 = hashReplayFixture(replayFixture);
+      }
       const network: typeof fetch = dryRun ? async () => { throw new Error('dry-run での通信は禁止です'); } : globalThis.fetch;
       const observed = createEvalFetch(fixture.searchDate, network, (event) => {
         const category = new URL(event.url).hostname === 'generativelanguage.googleapis.com' ? 'llm' : 'ncbi';
@@ -332,10 +367,23 @@ export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES,
       const provider = new GeminiProvider({ apiKey: dryRun ? '' : process.env.GEMINI_API_KEY ?? '', fetch: observed });
       const usageTracker = createLlmUsageTracker();
       result.llmUsage = usageTracker.usage;
-      const llmFactory = loggedFactory(provider, (path, value) => {
-        if (!dryRun) writeFileSync(join(attemptDir, path), serialize(value));
-      }, result.llmLogs, usageTracker.record);
-      result.model = llmFactory.model;
+      const write = (path: string, value: unknown) => { if (!dryRun) writeFileSync(join(attemptDir, path), serialize(value)); };
+      const realFactory = loggedFactory(provider, write, result.llmLogs, usageTracker.record);
+      // replay は optimize_query だけを固定応答に差し替える。usage tracker には計上しない
+      // （onUsage を渡さない）ため実 LLM 使用量から除外され、実 fetch もしないので apiCalls.llm にも入らない。
+      replayFactory = replayFixture
+        ? createReplayLlmFactory(replayName!, replayFixture.responses, realFactory,
+          (fixedProvider) => loggedFactory(fixedProvider, write, result.llmLogs, undefined, 'replay-'))
+        : undefined;
+      const llmFactory = replayFactory ?? realFactory;
+      result.model = realFactory.model;
+      if (replayFactory) {
+        // 最初の保存（非 dry-run では下の save()）より前に識別情報を入れる。runQueryOptimization
+        // 前後の例外・中断で保存された run にも replay が残り、report.ts の aggregateRows が
+        // 自由生成の集計に混ぜない（除外条件は !result.replay だけのため）。
+        result.replay = { name: replayName!, sha256: replaySha256!, responseCount: replayFixture!.responses.length,
+          usedCount: replayFactory.used(), exhausted: replayFactory.exhausted() };
+      }
       const eutils: EutilsDeps = { fetch: observed, apiKey: dryRun ? undefined : process.env.NCBI_API_KEY, strictCounts: true,
         sleep: observeBackoff((backoff) => progress({ backoff })) };
       eutils.rateLimiter = observeRateLimiter(eutils, (limiter) => progress({ limiter }));
@@ -346,7 +394,7 @@ export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES,
           || DEFAULT_OPTIMIZATION_MAX_HITS !== PROFILES.find((profile) => profile.id === 'default')!.maxHits) throw new Error('配線確認に失敗しました');
         llmFactory.forPurpose('extract_protocol');
         process.stdout.write(`${id}: dry-run OK (profile=${profile.id}, maxHits=${profile.maxHits}, maxIterations=${profile.maxIterations}, `
-          + `seedSplit=${splitId}, c0=${c0Key}, label=${label ?? '-'}, API calls=0, groups=${fixture.gold.length}, heldOut=${computeHeldOut(fixture.gold, seeds).length})\n`);
+          + `seedSplit=${splitId}, c0=${c0Key}, label=${label ?? '-'}, replay=${replayName ?? '-'}, API calls=0, groups=${fixture.gold.length}, heldOut=${computeHeldOut(fixture.gold, seeds).length})\n`);
         continue;
       }
       save();
@@ -354,12 +402,19 @@ export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES,
       const b1Path = join(fixtureDir, 'b1.json');
       const b1 = existsSync(b1Path) ? JSON.parse(readFileSync(b1Path, 'utf8')) as { query: string } : undefined;
       if (b1 && (typeof b1.query !== 'string' || !b1.query.trim())) throw new Error('b1.json には query が必要です');
-      await executeCase(fixture, audit, protocolText, result, { eutils, llmFactory, save, progress, seeds, frozenC0 }, b1);
+      const replay = replayFactory ? { name: replayName!, sha256: replaySha256!,
+        responseCount: replayFixture!.responses.length, factory: replayFactory } : undefined;
+      await executeCase(fixture, audit, protocolText, result, { eutils, llmFactory, save, progress, seeds, frozenC0, replay }, b1);
     } catch (err) {
       result.status = 'failed';
       result.error = redact(err instanceof Error ? err.message : String(err), secrets);
       process.exitCode = 1;
     } finally {
+      // 例外・中断で executeCase の完了後更新（used/exhausted）に届かなかった場合も、
+      // 最後の保存には factory の実測値を反映する。
+      if (replayFactory && result.replay) {
+        result.replay = { ...result.replay, usedCount: replayFactory.used(), exhausted: replayFactory.exhausted() };
+      }
       if (!dryRun && existsSync(attemptDir)) {
         progress({ status: result.status, error: result.error ?? null });
         save();

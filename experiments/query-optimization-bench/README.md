@@ -81,7 +81,7 @@ npm run eval:freeze-c0 -- --case r1-mindfulness-smoking --variant seeded --seeds
 
 結果ディレクトリは `results/<profileId>/<caseId>/<c0Key>/<splitKey>/run.json`（`c0Key` は `--c0` の名前、無指定なら `live`。`splitKey` は分割 id、既定 `s20260912`）で、その下に従来どおり試行単位の `<runId>/` を残す。同じキーで完了済み（`status: 'completed'` かつ `maxHits` も一致）なら、`gitCommit` が厳密一致する場合（両方 null を含む）だけ再実行時にスキップする。別コミットならそのケースをエラーにして他ケースへ進み、既存の完了結果は書き換えない。`eval:candidates`（却下候補の事後計測）も同じ `--case` / `--profile` / `--max-hits` / `--c0` / `--seeds` / `--label` を受け取り、`run.ts` と同じキーで `run.json` を探す。
 
-`--label <name>` は任意で 1 回だけ指定でき、英数字・`.`・`_`・`-` の 1〜40 文字（`^[A-Za-z0-9._-]{1,40}$`）に限る。ラベルを付けると保存先は `results/<profileId>/<caseId>/<c0Key>/<splitKey>+<label>/run.json` となる。ラベル無しは従来の `<splitKey>/run.json` のまま。ラベルは子ディレクトリにせず分割名に連結するため、ラベル無し結果と併存しても report が両方を読む。`RunResult.label` にも記録し、dry-run は `label=` を表示する。
+`--label <name>` は任意で 1 回だけ指定でき、英数字・`.`・`_`・`-` の 1〜40 文字（`^[A-Za-z0-9._-]{1,40}$`）に限る。ラベルを付けると保存先は `results/<profileId>/<caseId>/<c0Key>/<splitKey>+<label>/run.json` となる。ラベル無しは従来の `<splitKey>/run.json` のまま。ラベルは子ディレクトリにせず分割名に連結するため、ラベル無し結果と併存しても report が両方を読む。`RunResult.label` にも記録し、dry-run は `label=` を表示する。**`replay-` で始まるラベル（大文字小文字を区別しない）は指定できない**（後述の `--replay` の保存先接尾辞と同じ形になり、自由生成と replay run が同じキーへ保存されてしまうため）。
 
 現行版と改善版は、同じ凍結 C0・同じシード分割・同じ上限条件で、別コミットにそれぞれラベルを付けて実行する。以下は同じチェックアウトで、各コード版に切り替えた後に実行する例（凍結 fixture は同一内容を保持する）。
 
@@ -158,7 +158,51 @@ npm run eval:optimize -- --case r2-pdr-prognostic --c0 criteria-only-draft2 --se
 npm run eval:optimize -- --case r2-pdr-prognostic --c0 criteria-only-draft2 --label issue128-diagnosis
 ```
 
-2026-09-13 の実 API 検証（master `149df53`）の結果は issue #128 のコメントに記録した。LLM が対象の削除候補を自由生成で出すとは限らないため、危険削除の基準は固定提案の replay（#128 手順 4）で判定する。
+2026-09-13 の実 API 検証（master `149df53`）の結果は issue #128 のコメントに記録した。LLM が対象の削除候補を自由生成で出すとは限らないため、危険削除の基準は固定提案の replay（#128 手順 4、次節）で判定する。
+
+## 固定提案による replay（issue #128 手順 4）
+
+自由生成では `optimize_query` が毎回同じ提案を出すとは限らず、狙った削除候補（例: 危険削除シナリオでの `Diabetic Retinopathy[Mesh]` 削除）が出ない回は判定にならない。`--replay` は `optimize_query` の LLM 応答だけを fixture の固定テキストに差し替え、それ以外（実測・採否判定・NCBI 通信・confirmation の `expand_recall`/`pick_boundary` 等）は通常どおり実行する。自由生成の性能評価とは別物として扱う（後述のとおり `summary-aggregate.csv` から除外し、`compare` は自由生成の run と混ぜて比較させない）。
+
+### fixture の形式
+
+`fixtures/<case>/replay/<name>.json`（`<name>` は C0 と同じ命名規則: 英小文字で始まる英小文字・数字・ハイフンの 1〜32 文字）。
+
+```json
+{
+  "name": "<ファイル名と一致させる>",
+  "caseId": "<対象ケース ID>",
+  "c0": { "name": "<適用先の凍結 C0 の名前>", "sha256": "<その C0 の sha256>" },
+  "source": { "runId": "<出所の run ID>", "logs": [{ "file": "<元 LLM ログのファイル名>", "sha256": "<そのファイルの sha256>" }], "description": "<日本語の説明>" },
+  "responses": ["<optimize_query の response.text をそのまま>", "..."]
+}
+```
+
+- `c0` は実行時の `--c0` と名前・sha256 の両方が一致しなければ拒否する（**dry-run でも**）。狙った C0 以外に固定提案を流さないための保護。
+- `responses` は 1 件以上必須で、各要素は `optimizeQuery` スキルと同じ前提（JSON としてパースでき、`target_block_id` と `proposed_expression` を持つ）を満たすことを読み込み時に検証する。不正なら実行前に拒否する。
+- `source` は出所の記録（元 run の runId、元 LLM ログのファイル名と sha256、説明）。読み込み時の検証はしないが、後から「この応答がどこから来たか」を追えるようにするための必須フィールド。
+- 応答は創作・要約・整形をせず、元 LLM ログの `response.text` を一字一句そのまま複製すること。`fixtures/r2-pdr-prognostic/replay/pr104-r2.json` が実例（PR #104 の r2-pdr-prognostic run から `optimize_query` の応答 3 件をそのまま複製）。
+
+### 使い方
+
+`--replay` は `--c0` と併用必須（固定提案は特定の凍結式に対する応答のため、`--c0` なしの指定は拒否する）。
+
+```powershell
+npm run eval:optimize -- --case r2-pdr-prognostic --c0 criteria-only-draft2 --seeds no-pirart --replay pr104-r2 --label issue128-replay --dry-run
+# 本実行には Gemini / NCBI への通信が必要（optimize_query 以外の purpose と、実測・採否判定に使う）
+npm run eval:optimize -- --case r2-pdr-prognostic --c0 criteria-only-draft2 --seeds no-pirart --replay pr104-r2 --label issue128-replay
+```
+
+`--dry-run` でも fixture の読み込み・検証・C0 ハッシュ照合までは行い、表示行に `replay=<name>` を出す。結果の保存先は自由生成と衝突しないよう分割キーに `+replay-<name>` を連結する（`--label` があればその後ろに続ける。例: `s20260912+issue128-replay+replay-pr104-r2`）。`eval:candidates`（却下候補の事後計測）も `--replay` を受け取り、同じキーで `run.json` を探す。
+
+### 応答を使い切ったときの `stopped`
+
+用意した応答をすべて使い切った後にサービスが次の `optimize_query` を要求すると、LLM を実際に呼ぶ直前で安全に停止する（`run.json` は `error` にならない）。最後の応答による判定まで終わってから止まるため、`trials` には用意した応答 1 件につき試行が 1 件残る（`mesh_requests` を含む応答は `kind: 'information'` の試行になり候補評価そのものを保留する。それ以外は `kind: 'proposal'` として実測・採否判定まで進む。queryOptimizationService.ts の `proposal.meshRequests.length > 0` 分岐を参照）。`pr104-r2` の 1 件目（MeSH 情報要求）は前者、2〜3 件目は後者にあたる。この場合 `optimization.stopReason` は `user_stop`、`optimization.status` は `stopped` になる（他の理由で `user_stop` になったときと区別が付かないので、`run.json` の `replay.exhausted` が `true` かどうかで「応答切れによる停止」を判定すること）。`replay.usedCount` が `replay.responseCount` と一致していれば使い切っている。
+
+### 自由生成の評価とは別扱い
+
+- `npm run eval:report` の `summary.csv` は行ごとに `replay` 列（fixture 名。自由生成は `-`）を出す。`summary-aggregate.csv`（頑健性の集計）からは replay run を常に除外し、除外件数を `summary.md` に注記する（固定提案は自由生成のばらつきの一部ではないため）。
+- `npm run eval:compare` は、比較する 2 run の片方だけが replay、または両方 replay でも fixture の内容（sha256）が異なる場合は比較を拒否する（差が自動調整の効果か固定提案の有無・内容の違いかを区別できないため）。
 
 ## gold の監査と凍結
 

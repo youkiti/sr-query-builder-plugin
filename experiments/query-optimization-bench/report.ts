@@ -8,7 +8,7 @@ export function reportRows(results: RunResult[], baselines: Record<string, strin
   const rows = [['profile', 'case', 'condition', 'status', 'hits', 'heldOutRecall', 'allStudyRecall', 'knownIncludedReportShare',
     'recordsPerKnownIncludedStudy', 'lostStudies', 'gainedStudies', 'lostHeldOut', 'gainedHeldOut', 'outcome', 'stopReason', 'iterations', 'apiCalls', 'elapsedMs', 'query',
     'role', 'c0', 'seedSplit', 'maxHits', 'gitCommit', 'label', 'adopted', 'harmfulAdopted', 'confirmationTotal', 'heldOutAmongCandidates',
-    'llmCostUsd', 'llmTokensIn', 'llmTokensOut']];
+    'llmCostUsd', 'llmTokensIn', 'llmTokensOut', 'replay']];
   for (const result of results) {
     const c0Label = result.c0 ? `${result.c0.source}${result.c0.id ? `:${result.c0.id}` : ''}` : '欠測';
     for (const condition of ['C0', 'C1', 'B1'] as const) {
@@ -41,7 +41,8 @@ export function reportRows(results: RunResult[], baselines: Record<string, strin
         c1Only ? (result.confirmation ? result.confirmation.heldOutStudiesAmongCandidates.join('; ') : '欠測') : '',
         c1Only ? formatCost(result.llmUsage) : '',
         c1Only ? String(result.llmUsage?.tokensIn ?? '欠測') : '',
-        c1Only ? String(result.llmUsage?.tokensOut ?? '欠測') : '']);
+        c1Only ? String(result.llmUsage?.tokensOut ?? '欠測') : '',
+        result.replay?.name ?? '-']);
     }
   }
   return rows;
@@ -73,10 +74,13 @@ function c0VariantOf(result: RunResult): string {
  * role・profile・case・C0（live/variant）・シード分割・label・gitCommit でまとめ、頑健性（run 間のばらつき）を集計する。
  * 個々の run 行では見えない「同一条件で複数 run したときの散らばり」を可視化するための集計で、
  * 新しい指標を追加するものではない。
+ *
+ * replay run（固定提案を流した run）は自由生成の性能のばらつきではないため、この集計からは
+ * 常に除外する（除外件数は report() が summary.md の注記として出す）。
  */
 export function aggregateRows(results: readonly RunResult[]): string[][] {
   const groups = new Map<string, RunResult[]>();
-  for (const result of results) {
+  for (const result of results.filter((result) => !result.replay)) {
     const key = [result.role ?? '欠測', result.profileId ?? 'default', result.id, c0VariantOf(result), result.seedSplit ?? '欠測',
       result.label ?? '-', result.gitCommit?.slice(0, 12) ?? '欠測'].join('|');
     groups.set(key, [...(groups.get(key) ?? []), result]);
@@ -160,9 +164,11 @@ export function report(resultsDir = RESULTS, fixturesDir = FIXTURES): void {
   const context = '分割は共有 PMID の群単位、再現率と捕捉・喪失・追加は研究単位。各研究の報告を 1 件以上捕捉すれば捕捉研究とする。recordsPerKnownIncludedStudy は hits / 捕捉研究数。現在の PubMed に作成日上限を適用した後ろ向き評価。完成レビューの適格基準を使い、ブロックは自動承認した（影響の向きは不明）。学習混入を排除できず、PMID のある既知研究に限定する。新規レビューの性能や専門家検索への非劣性は示さない。hits は選考時間ではない。補助指標だけで検索効率の優劣を結論しない。'
     + 'adopted/harmfulAdopted は C0→C1 で採用された候補のうち held-out を失った件数。比較できない採用があると harmfulAdopted は null（未採点）。confirmationTotal/heldOutAmongCandidates は outside check が'
     + '数えた確認対象候補（自動調整へは反映しない）、llmCostUsd 等は概算で未価格化モデルや成功時のトークン不明を含むと null。\n\n';
+  const replayExcluded = results.filter((result) => result.replay).length;
   writeFileSync(join(resultsDir, 'summary.md'), context + renderMarkdown(rows)
     + '\n\n## 頑健性の集計（role・profile・case・C0・シード分割・label・gitCommit ごと）\n\n'
-    + '同一条件を複数 run したときの散らばりを示す（c0 が live の行は run ごとに C0 が再生成されるため、行間の差をポリシーの効果と解釈しない）。\n\n'
+    + '同一条件を複数 run したときの散らばりを示す（c0 が live の行は run ごとに C0 が再生成されるため、行間の差をポリシーの効果と解釈しない）。'
+    + (replayExcluded > 0 ? ` 固定提案の replay run は ${replayExcluded} 件をこの集計から除外した（自由生成の性能のばらつきではないため）。` : '') + '\n\n'
     + renderMarkdown(aggregate));
   process.stdout.write(`${results.length} ケースを集計しました\n`);
 }
