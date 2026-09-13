@@ -150,12 +150,15 @@ npm run eval:import-c0 -- --case r2-pdr-prognostic --variant seeded --formula ./
 
 - `fixtures/r2-pdr-prognostic/c0/criteria-only-draft2.json`: PR #104 当時の R2 の C0（16,409 件、913749 未捕捉）を `eval:import-c0 --variant criteria-only --draft 2` で取り込んだもの。出所は当時の `results/default/r2-pdr-prognostic/run.json`（runId `r2-pdr-prognostic-2026-09-11T23-20-18-741Z-19721433`、ファイル sha256 `8da775d2…6f0b40`）の `optimization.trials[initial].formula`。元の C0 は適格基準だけから生成されたため criteria-only とした
 - `fixtures/r2-pdr-prognostic/seeds-no-pirart.json`: 既定分割から pirart 1977（913749）を除き、klein 1984（6709313）に差し替えた集合。klein 1984 は C0 が捕捉し、PR #104 の削除候補（`Diabetic Retinopathy[Mesh]` 削除）でも失われない研究から選んだ
+- `fixtures/r2-pdr-prognostic/replay/pr104-r2-info.json`: `pr104-r2.json` の 1 件目の応答（MeSH 情報要求。式は変えない）だけを一字一句複製した replay。自由生成では 1 手目で 913749 を回収してしまい、未捕捉のまま終わる局面の `seedDiagnoses` を確認できないため、応答切れで 2 回目の `optimize_query` の直前に停止させてその局面を作る
 
 ```powershell
 # 危険削除シナリオ（913749 を除く）
 npm run eval:optimize -- --case r2-pdr-prognostic --c0 criteria-only-draft2 --seeds no-pirart --label issue128-danger
 # 原因診断シナリオ（913749 を含む既定分割）
 npm run eval:optimize -- --case r2-pdr-prognostic --c0 criteria-only-draft2 --label issue128-diagnosis
+# 原因診断シナリオで、913749 が未捕捉のまま終わる局面の seedDiagnoses を確認する
+npm run eval:optimize -- --case r2-pdr-prognostic --c0 criteria-only-draft2 --replay pr104-r2-info --label issue128-diagnosis
 ```
 
 2026-09-13 の実 API 検証（master `149df53`）の結果は issue #128 のコメントに記録した。LLM が対象の削除候補を自由生成で出すとは限らないため、危険削除の基準は固定提案の replay（#128 手順 4、次節）で判定する。

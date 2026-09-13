@@ -1,0 +1,21 @@
+{
+  "name": "pr104-r2-info",
+  "caseId": "r2-pdr-prognostic",
+  "c0": {
+    "name": "criteria-only-draft2",
+    "sha256": "1f4c1220ac606d5c51bed961c02bc825921c1456a19a62cc583b511d33178d29"
+  },
+  "source": {
+    "runId": "r2-pdr-prognostic-2026-09-11T23-20-18-741Z-19721433",
+    "logs": [
+      {
+        "file": "0011_optimize_query.json",
+        "sha256": "7284d4feed31b32b5864acae0ae44b464719067c64553885b0353cfa35afc6c2"
+      }
+    ],
+    "description": "issue #128 の原因診断シナリオ用。PR #104 の r2-pdr-prognostic run (r2-pdr-prognostic-2026-09-11T23-20-18-741Z-19721433) の optimize_query 応答のうち 1 件目（MeSH 情報要求。式は変更しない）だけを pr104-r2.json から一字一句そのまま複製した。913749 を含む既定分割で流すと、2 回目の optimize_query の直前で応答切れにより停止し、913749 が未捕捉のまま終わるため、最終結果の seedDiagnoses（阻害ブロック・承認状態・根拠）の保存を確認できる。"
+  },
+  "responses": [
+    "{\n  \"target_block_id\": \"2\",\n  \"proposed_expression\": \"(Diabetic Retinopathy[Mesh] OR Retinal Neovascularization[Mesh] OR \\\"proliferative diabetic retinopath*\\\"[tiab] OR \\\"proliferative retinopath*\\\"[tiab] OR \\\"PDR\\\"[tiab])\",\n  \"added_terms\": [],\n  \"removed_terms\": [],\n  \"replaced_terms\": [],\n  \"rationale\": \"ブロック2に広範な概念である「Diabetic Retinopathy[Mesh]」が含まれているため、ブロック1とのAND結合が十分に機能せず、全体のヒット数が16409件と目標上限（10000件）を超えて高止まりしています。PDR（増殖糖尿病網膜症）に特化した適切なMeSH（例えば「Diabetic Retinopathy, Proliferative」など）が存在するか、およびそのツリー構造を確認するため、MeSHの追加取得要求を行います。今回は式を変更せず、情報を取得した上で次ステップで修正案を提示します。\",\n  \"measurement_ids\": [\n    \"r2-pdr-prognostic-2026-09-11T23-20-18-741Z-19721433:initial\"\n  ],\n  \"mesh_requests\": [\n    {\n      \"descriptor\": \"Diabetic Retinopathy\",\n      \"tree_number\": \"\"\n    },\n    {\n      \"descriptor\": \"Diabetic Retinopathy, Proliferative\",\n      \"tree_number\": \"\"\n    }\n  ]\n}"
+  ]
+}
