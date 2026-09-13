@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomUUID } from 'node:crypto';
 import { esearch, EutilsError, resolveRateLimiter, shouldRetryEutils, type EutilsDeps } from '../../src/lib/ncbi/eutils';
 import { retryWithBackoff } from '../../src/lib/ncbi/rateLimit';
 import type { SearchMeasurement } from './types';
@@ -7,6 +9,7 @@ import type { SearchMeasurement } from './types';
 export const ESEARCH_POST_THRESHOLD = 1500;
 
 async function evalSearch(query: string, deps: EutilsDeps, retmax: number) {
+  deps = { ...deps, fetch: trackAttempts(deps.fetch) };
   if (query.length <= ESEARCH_POST_THRESHOLD) return esearch(query, { ...deps, strictCounts: true }, { retmax });
   const params = new URLSearchParams({ db: 'pubmed', term: query, retmode: 'json', retmax: String(retmax), retstart: '0',
     tool: deps.tool ?? 'sr-query-builder-plugin' });
@@ -48,9 +51,53 @@ export function redact(text: string, secrets: readonly string[] = []): string {
 
 export interface ApiEvent {
   url: string;
+  startedAt: string;
+  method: string;
+  /** 初回は 1。呼び出し単位を観測できない製品内部の再送は null。 */
+  attempt: number | null;
+  requestId: string | null;
   status: number | null;
   elapsedMs: number;
   error?: string;
+}
+
+const attempts = new AsyncLocalStorage<{ attempt: number; requestId: string }>();
+
+/** 検索 1 回の fetch を数える。同一クエリの並行実行や日付ラッパの入れ子でも混同しない。 */
+function trackAttempts(fetchImpl: typeof fetch): typeof fetch {
+  let attempt = 0;
+  const requestId = randomUUID();
+  return (input, init) => attempts.run({ attempt: ++attempt, requestId }, () => fetchImpl(input, init));
+}
+
+export interface LimiterEvent {
+  at: string;
+  waitedMs: number;
+  bucket: 'withApiKey' | 'withoutApiKey';
+}
+
+/** 再送前に指定された待機時間を記録し、同じ時間だけ待つ。 */
+export function observeBackoff(onWait: (event: { ms: number }) => void,
+  sleep: NonNullable<EutilsDeps['sleep']> = (ms) => new Promise((resolve) => setTimeout(resolve, ms))): NonNullable<EutilsDeps['sleep']> {
+  return async (ms) => {
+    onWait({ ms });
+    await sleep(ms);
+  };
+}
+
+/** 既定の共有インスタンスを包む。待機と後続 fetch の対応は推測しない。 */
+export function observeRateLimiter(deps: Omit<EutilsDeps, 'rateLimiter'>,
+  onWait: (event: LimiterEvent) => void): NonNullable<EutilsDeps['rateLimiter']> {
+  if ('rateLimiter' in deps && deps.rateLimiter !== undefined) {
+    throw new Error('rateLimiter が既に設定されています。計測対象は既定の共有バケットに限ります');
+  }
+  const shared = resolveRateLimiter(deps);
+  const bucket = deps.apiKey ? 'withApiKey' : 'withoutApiKey';
+  return { acquire: async (onWaitCallback) => {
+    const start = Date.now();
+    await shared.acquire(onWaitCallback);
+    onWait({ at: new Date().toISOString(), waitedMs: Date.now() - start, bucket });
+  } };
 }
 
 export function createEvalFetch(searchDate: string, fetchImpl: typeof fetch, onCall: (event: ApiEvent) => void,
@@ -84,7 +131,10 @@ export function createEvalFetch(searchDate: string, fetchImpl: typeof fetch, onC
       error = redact(err instanceof Error ? err.message : String(err), secrets);
       throw new Error(error);
     } finally {
-      onCall({ url: redact(url.toString(), secrets), status, elapsedMs: Date.now() - start, ...(error ? { error } : {}) });
+      onCall({ url: redact(url.toString(), secrets), startedAt: new Date(start).toISOString(),
+        method: (init?.method ?? request?.method ?? 'GET').toUpperCase(),
+        attempt: attempts.getStore()?.attempt ?? null, requestId: attempts.getStore()?.requestId ?? null,
+        status, elapsedMs: Date.now() - start, ...(error ? { error } : {}) });
     }
   };
 }
@@ -120,6 +170,7 @@ export async function evaluateSearch(query: string, goldPmids: readonly string[]
 }
 
 export async function seedTitles(pmids: readonly string[], deps: EutilsDeps): Promise<{ pmid: string; title: string | null }[]> {
+  deps = { ...deps, fetch: trackAttempts(deps.fetch) };
   const params = new URLSearchParams({ db: 'pubmed', id: pmids.join(','), retmode: 'json' });
   if (deps.apiKey) params.set('api_key', deps.apiKey);
   await resolveRateLimiter(deps).acquire();

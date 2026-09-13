@@ -125,6 +125,39 @@ C0 はシード文脈を空にして適格基準だけから作り、C1 で凍�
 
 API コール数は実 fetch 回数、API 所要時間は fetch の応答までの合計です。ケースの elapsedMs は待機・処理時間込みです。サービス内の apiCalls は別の予算単位なので optimization の中へそのまま残しています。URL の api_key/key および環境変数のキー値は保存前にマスクします。
 
+### API 通信の観測と集計
+
+この観測追加は 429 の原因を測れるようにするためのもので、原因はまだ特定していません。共有バケットのレート・容量や再送方針は変更していません。原因説明には、実行 SHA・送信履歴・経路・再送・同時実行条件をそろえた再測定が必要です。
+
+`eval:optimize` の `progress.jsonl` は従来どおり `{ at, event }` の JSONL です。外側の `at` は記録時刻で、API イベントでは fetch 完了後になります。追加項目は次のとおりです。
+
+| イベント | 追加項目と意味 |
+|---|---|
+| API (`event.api`) | `startedAt`: fetch 送信直前の ISO 8601 時刻、`method`: GET / POST 等。`status` / `elapsedMs` / `url` / `error` は従来どおり |
+| API の試行 | `attempt`: 初回 1、再送 2 以降。`requestId`: 論理的な検索 1 回を識別する UUID。同じ検索式を別途発行すると別 ID・試行 1 に戻る |
+| リミッタ (`event.limiter`) | `at`: acquire 完了時刻、`waitedMs`: 呼び出しから完了まで（共有キューの待機込み）、`bucket`: `withoutApiKey` / `withApiKey`。既存の共有バケットを包んで測定し、待機ゼロも 1 行残す。後続の fetch には紐付けない |
+| バックオフ (`event.backoff`) | `ms`: 再送前に指定された待機時間。待機開始前に 1 行記録し、同じ時間だけ待つ。リミッタ待機とは別集計 |
+| 開始条件 (`event.process`) | 各ケースの実行履歴の先頭に 1 行。`pid`、`hasApiKey`（NCBI キーの有無のみ）、`caseCount`（選択対象数、スキップ予定も含む）、`caseExecution: sequential`（ケースは逐次）、`requestConcurrency: caller-dependent`（ケース内の要求並行性は呼び出し側依存）、`externalConcurrency: unknown`（他プロセスは検知しない）、`gitCommit`、`gitDirty`、`runId` |
+
+試行番号を確定できるのはハーネスの `evalSearch`（製品 ESearch に委譲する GET/POST とハーネスの POST、gold 分割取得を含む）と、再送しない `seedTitles` です。製品サービスから直接発行される ESearch / EFetch / MeSH と LLM は呼び出し単位を観測できないため `attempt` / `requestId` を `null`（不明）で残します。HTTP 結果や URL の一致から再送を推定しません。一方、製品コードを変更せず、共有の `eutils.sleep` を通るすべての再送（ハーネスの `evalSearch` と製品サービス経由の E-utilities に加え、同じ依存を受け取る MeSH RDF の SPARQL 取得 `id.nlm.nih.gov` も含む）の回数と指定待機時間を `backoff` 行として記録します。行にはホストを持たないため、E-utilities の再送だけを切り出すことはできません。個々の `requestId` / 試行とは紐付かず、LLM の再送は対象外です。トークンバケットの待機は `eutils.sleep` を経由しないため、バックオフには数えません。
+
+`run.json` の `apiCalls` は従来どおり実 fetch 回数、`apiElapsedMs` は fetch の所要時間合計で、リミッタ待機・バックオフは加算しません。全進捗行は保存前に `redact` を通し、API キー値は残しません。
+
+```powershell
+# 1 実行のログ（パスは手元の実行履歴に置き換える）
+npm run eval:api-audit -- experiments/query-optimization-bench/results/<profile>/<case>/<c0>/<split>/<runId>/progress.jsonl
+# ディレクトリ内の progress.jsonl を再帰収集し、複数実行を時刻順に統合
+npm run eval:api-audit -- experiments/query-optimization-bench/results
+```
+
+集計対象はホストが `eutils.ncbi.nlm.nih.gov` の通信のみです（別ホストの SPARQL / LLM は除外）。日本語でステータス × 経路（ESearch GET / POST、ESummary、EFetch 等）の件数、任意の 1 秒窓 `[t, t+1000ms)` の最大送信数、各 429 と直前 5 件の送信時刻・前の送信からの間隔・経路・試行番号、リミッタ待機とバックオフそれぞれの件数・合計・最大、記録されたプロセス条件を表示します。同じ時刻の別リクエストも数え、外側の完了時刻で並べ替えません。
+
+指定ファイルが無い、ディレクトリ内にログが無い、JSON 行が壊れている（途中の空行も含む）、観測項目が不正な場合はエラー・終了コード 1 にします。ただし、ファイルが改行で終わらず、その最終行の JSON パースに失敗した場合だけは書きかけとして読み飛ばし、「書きかけの末尾行を読み飛ばしました: <ファイル>:<行番号>」と警告して集計を続けます。途中の破損行や、改行で終わる破損した最終行は従来どおりエラーです。エラー・警告に壊れた行の本文は出さずファイルと行番号を示します。末尾の改行は許容し、空ファイルは 0 件と明示します。旧ログの送信時刻・方式・試行番号は逆算せず欠測として表示し、時刻欠測の要求はレートと直前履歴から除外します。その場合、最大値と履歴は不完全です。待機ログなし・バックオフ記録なしも表示し、待機ゼロと区別します。
+
+再帰集計は選択した全ファイルを統合するため、コピーしたログを重複して置くと二重計上します。別ホストの時計のずれは補正せず、ログにない別プロセスや同一 IP の通信は把握できません。外部で同時実行した条件は別途記録してください。実 API に接続する検証は、この集計コマンドでは行いません。
+
+`eval:candidates`（`candidates.ts`）と `eval:freeze-c0`（`freezeC0.ts`）は実 NCBI 通信を行いますが、`progress.jsonl` を書かず、`eval:api-audit` の集計には現れません。これらの通信も NCBI のレート枠を消費するため、429 を解釈するときは両 CLI の同時実行条件も別途記録してください。
+
 再現率の分母は全研究数または held-out 群に属する研究数、分子は捕捉研究数です。喪失・追加の一覧も研究名で出力します。既知組入研究当たりのレコード数は hits / 捕捉研究数です。指標の分母 0 は null。捕捉 0 で hits>0 の既知組入報告割合は 0、既知組入研究当たりのレコード数は null です。改善は C0 の held-out 捕捉を一つも失わず、held-out 捕捉研究が増えるか hits が減る場合に限定します。捕捉喪失と hits 減少は tradeoff として記録します。
 
 B1 は任意の `fixtures/<id>/b1.json` に `{ "query": "展開済みの PubMed 検索式" }` として与えます。変換根拠は `b1.md` に残してください。存在すれば同じ分母と日付で実行し、無ければ summary の B1 は「欠測」です。完了後に B1 を追加した場合は report に式と「未計測」が表示されます。自動で実 API を再実行しません。
