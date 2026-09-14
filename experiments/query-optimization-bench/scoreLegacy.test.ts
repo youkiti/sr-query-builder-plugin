@@ -6,7 +6,7 @@ import { config } from 'dotenv';
 import { collectLegacyRuns, main } from './scoreLegacy';
 import { computeAdoptionAudit } from './adoptionAudit';
 import { getGitCommit, isGitDirty } from './gitInfo';
-import type { RunResult } from './types';
+import type { AdoptionAudit, RunResult } from './types';
 
 jest.mock('dotenv', () => ({ config: jest.fn() }));
 jest.mock('./adoptionAudit', () => ({ computeAdoptionAudit: jest.fn() }));
@@ -65,8 +65,8 @@ test('legacy 完了だけを採点し、保存済みの分母をそのまま渡�
 
 test('同一コミットはスキップし、別コミットのエラー後も次のファイルを採点する', async () => {
   for (const name of ['a', 'b', 'c']) writeRun(name);
-  writeFileSync(join(root, 'a/scored.json'), JSON.stringify({ gitCommit: 'current' }));
-  writeFileSync(join(root, 'b/scored.json'), JSON.stringify({ gitCommit: 'old' }));
+  writeFileSync(join(root, 'a/scored.json'), JSON.stringify({ gitCommit: 'current', adoptionAudit }));
+  writeFileSync(join(root, 'b/scored.json'), JSON.stringify({ gitCommit: 'old', adoptionAudit }));
   await main([root], { fetch: jest.fn() });
   expect(computeAdoptionAudit).toHaveBeenCalledTimes(1);
   expect(process.exitCode).toBe(1);
@@ -85,6 +85,46 @@ test('dry-run は env・通信・保存をせず対象と保存先を表示し�
   expect(output.mock.calls.flat().join('')).toContain(join(root, 'a/scored.json'));
   await main(['--dry-run']);
   expect(output.mock.calls.flat().join('')).toContain('対象 0 件');
+});
+
+const failedAudits: AdoptionAudit[] = [
+  { ...adoptionAudit, trials: [{ candidateId: 'failed', accepted: false, held: false, hitsBefore: null, hitsAfter: null,
+    lostHeldOut: [], gainedHeldOut: [], error: '測定失敗' }] },
+  { ...adoptionAudit, adopted: 1, unscoredAdopted: 1, harmfulAdopted: null },
+];
+
+test.each(failedAudits)('測定失敗の監査は保存せず終了コード 1 にする: %j', async (audit) => {
+  writeRun('a');
+  jest.mocked(computeAdoptionAudit).mockResolvedValue(audit);
+  await main([root], { fetch: jest.fn() });
+  expect(process.exitCode).toBe(1);
+  expect(existsSync(join(root, 'a/scored.json'))).toBe(false);
+  expect(existsSync(join(root, 'a/scored.json.tmp'))).toBe(false);
+  expect(output.mock.calls).toHaveLength(1);
+  expect(output.mock.calls[0]![0]).toContain('failed');
+});
+
+test.each(failedAudits)('失敗の印がある保存済み採点はコミットにかかわらず再採点する: %j', async (audit) => {
+  for (const commit of ['current', 'old']) {
+    writeRun(commit);
+    writeFileSync(join(root, commit, 'scored.json'), JSON.stringify({ gitCommit: commit, adoptionAudit: audit }));
+  }
+  await main([root], { fetch: jest.fn() });
+  expect(computeAdoptionAudit).toHaveBeenCalledTimes(2);
+  expect(process.exitCode).toBe(0);
+  for (const commit of ['current', 'old']) expect(JSON.parse(readFileSync(join(root, commit, 'scored.json'), 'utf8')))
+    .toMatchObject({ gitCommit: 'current', adoptionAudit });
+});
+
+test('再採点も失敗した場合は保存済みファイルを変更しない', async () => {
+  writeRun('a');
+  const destination = join(root, 'a/scored.json');
+  const original = JSON.stringify({ gitCommit: 'old', adoptionAudit: failedAudits[0] });
+  writeFileSync(destination, original);
+  jest.mocked(computeAdoptionAudit).mockResolvedValue(failedAudits[1]!);
+  await main([root], { fetch: jest.fn() });
+  expect(process.exitCode).toBe(1);
+  expect(readFileSync(destination, 'utf8')).toBe(original);
 });
 
 test('通信に検索日制限を付け、例外に含まれるキーをマスクする', async () => {

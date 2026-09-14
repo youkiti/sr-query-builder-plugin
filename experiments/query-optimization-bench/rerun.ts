@@ -5,7 +5,8 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { c0FileName, c0FixturePath, type C0Variant } from './c0Artifact';
 import { FIXTURES, SEED, seedSplitId } from './prepare';
 import { redact } from './ncbiEval';
-import { CASES, type RunResult } from './types';
+import { getGitCommit } from './gitInfo';
+import { CASES, PROFILES, type RunResult } from './types';
 
 export const BENCH = resolve(__dirname);
 export const RESULTS = join(BENCH, 'results');
@@ -25,7 +26,7 @@ export interface Job {
   variant?: C0Variant; command: string[]; cwd: string; expected: string; blocked?: string;
 }
 export interface LedgerRow {
-  id: string; arm: Job['arm']; command: string[]; startedAt: string; finishedAt: string; exitCode: number; runStatus: string | null;
+  id: string; arm: Job['arm']; command: string[]; startedAt: string; finishedAt: string; exitCode: number; runStatus: string | null; error?: string;
 }
 export interface Options { stage: string; config: string; legacyDir?: string; filter?: string; limit: number; dryRun: boolean }
 export interface Paths { root: string; fixtures: string; results: string }
@@ -160,6 +161,16 @@ export const launch: Launch = (job, env, log) => new Promise((resolveExit) => {
 
 export async function executeRerun(config: RerunConfig, options: Options, start: Launch = launch, paths = defaultPaths) {
   if (options.legacyDir) config = { ...config, legacyWorktree: options.legacyDir };
+  const ledgerPath = join(paths.results, 'rerun/ledger.jsonl');
+  if (!options.dryRun && existsSync(ledgerPath)) {
+    const raw = readFileSync(ledgerPath, 'utf8');
+    if (raw && !raw.endsWith('\n')) {
+      const temp = `${ledgerPath}.${process.pid}.tmp`;
+      writeFileSync(temp, raw.slice(0, raw.lastIndexOf('\n') + 1));
+      renameSync(temp, ledgerPath);
+      process.stdout.write('ledger の書きかけの末尾を取り除きました\n');
+    }
+  }
   const slotsPath = join(paths.results, 'rerun/c0-slots.json');
   const slots = makeSlots(config, readJson<Slot[]>(slotsPath) ?? []);
   const summary = { completed: 0, skipped: 0, failed: [] as string[], executed: 0 };
@@ -185,7 +196,8 @@ export async function executeRerun(config: RerunConfig, options: Options, start:
     const success = exitCode === 0 && (job.arm === 'freeze' ? existsSync(job.expected)
       : ['current', 'legacy', 'legacyLive'].includes(job.arm) ? runStatus === 'completed' : true);
     const row: LedgerRow = { id: job.id, arm: job.arm, command: job.command.map(mask), startedAt, finishedAt: new Date().toISOString(), exitCode, runStatus };
-    appendFileSync(join(paths.results, 'rerun/ledger.jsonl'), mask(JSON.stringify(row)) + '\n');
+    if (!success) row.error = output.trim() || `exitCode=${exitCode}, runStatus=${runStatus}`;
+    appendFileSync(ledgerPath, mask(JSON.stringify(row)) + '\n');
     if (success) summary.completed++; else summary.failed.push(job.id);
     return { success, error: success ? null : output.trim() || `exitCode=${exitCode}, runStatus=${runStatus}` };
   };
@@ -221,9 +233,23 @@ export async function executeRerun(config: RerunConfig, options: Options, start:
         } while (attemptsThisPass < config.maxDraftAttempts && slot.attempts.length < config.maxDraftAttempts);
       }
     } else if (stage === 'run') {
+      const commits = new Map<string, string | null>();
       for (const job of buildRunJobs(config, slots, paths)) {
+        if (!selected(job)) continue;
+        if (!commits.has(job.cwd)) commits.set(job.cwd, getGitCommit(job.cwd));
+        const commit = commits.get(job.cwd);
         let completed = false;
-        try { completed = readJson<RunResult>(job.expected)?.status === 'completed'; } catch { /* 壊れた結果は再実行の対象。 */ }
+        try {
+          const result = readJson<RunResult>(job.expected);
+          if (result?.status === 'completed') {
+            const mismatches = [];
+            if (!commit || result.gitCommit !== commit) mismatches.push('gitCommit');
+            if (result.maxHits !== (job.arm === 'current' ? PROFILES.find((p) => p.id === 'default')!.maxHits : 2000)) mismatches.push('maxHits');
+            if (job.arm === 'current' && (result.oracleRounds ?? 0) !== config.oracleRounds) mismatches.push('oracleRounds');
+            completed = mismatches.length === 0;
+            if (!completed) job.blocked = `完了結果の条件が一致しません（${mismatches.join(' / ')}）。label を変えてください`;
+          }
+        } catch { /* 壊れた結果は再実行の対象。 */ }
         await perform(job, completed);
       }
     } else {

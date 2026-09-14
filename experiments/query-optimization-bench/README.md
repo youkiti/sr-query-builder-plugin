@@ -572,14 +572,21 @@ npm 同梱の `npx-cli.js` を Node で起動します。親の環境変数を�
    を指定します（実際の凍結名を使用）。`score` と `eval:rerun-report` まで通し、実費を確認します。
 5. **本実行**: `npm run eval:rerun -- run --legacy-dir <絶対パス>`。ケースごとに current → legacy → legacyLive の順です。
    current は `oracleRounds` を渡します。基本 run が failed の場合、oracle のラウンドを始めません。
-   期待する `run.json` が completed ならスキップし、失敗は次の実行へ進みます。失敗があれば終了コード 1。
+   期待する `run.json` が completed で、実行先チェックアウトの HEAD（取得不能は不可）、`maxHits`（current は default、旧版は 2,000）、
+   current の `oracleRounds`（欠落は 0）が要求と一致する場合だけスキップします。条件不一致は子を起動せず失敗にし、
+   label の変更を求める理由を ledger とログに残します。dry-run でもスキップ・条件不一致・実行を表示します。
+   失敗は次の実行へ進み、失敗があれば終了コード 1。
    `all` は prepare → freeze → run → score を順に実行します。filter / limit は全段階に共通で、limit は all 全体の上限です。
 6. **報告**: `npm run eval:rerun -- score` で旧版の有害採用を採点し、`npm run eval:rerun-report` で集計します。
    採点には追加の NCBI 計測がありえますが、rerun-report はローカルファイルだけを読みます。
+   監査の `trials[].error` または `unscoredAdopted > 0` は失敗として表示し、`scored.json` を保存せず終了コード 1 にします。
+   この印がある既存採点は再採点し、正常な既存採点は同じコミットならスキップ、別コミットなら上書きせずエラーにします。
    `--config <path>` は両 CLI に指定できます。
 
 各試行の `ledger.jsonl` は実行 ID ごとの最終行勝ちです。標準出力・標準エラーは
 `results/rerun/logs/<安全な ID>-<sha256 先頭8桁>.log` へマスクして追記します。
+dry-run 以外の起動時に一度、ledger の末尾に改行がなければ最後の改行より後ろを除き、一時ファイル + rename で修復します。
+修復したことだけを 1 行表示し、取り除いた中身は表示しません。
 終了時は実行 0 件でも「完了 / スキップ / 失敗」の件数と失敗 ID を表示します。
 途中の凍結失敗が再試行で回復した場合も、そのコマンドの失敗試行として終了集計に残ります。
 

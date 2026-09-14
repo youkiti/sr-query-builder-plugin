@@ -5,7 +5,10 @@ import type { EutilsDeps } from '../../src/lib/ncbi/eutils';
 import { computeAdoptionAudit } from './adoptionAudit';
 import { getGitCommit, isGitDirty } from './gitInfo';
 import { createEvalFetch, redact } from './ncbiEval';
-import type { RunResult } from './types';
+import type { AdoptionAudit, RunResult } from './types';
+
+const auditFailed = (audit?: AdoptionAudit): boolean =>
+  !!audit && (audit.unscoredAdopted > 0 || audit.trials.some((trial) => trial.error !== undefined));
 
 /** 試行ディレクトリの複製は、その runId と親ディレクトリ名で識別する。 */
 export function collectLegacyRuns(paths: string[]): string[] {
@@ -46,14 +49,17 @@ export async function main(args = process.argv.slice(2), eutils?: EutilsDeps): P
       if (dryRun) { log(`${path}: dry-run → ${destination}`); continue; }
       if (!gitCommit) throw new Error('採点コミットを取得できません');
       if (existsSync(destination)) {
-        const scored = JSON.parse(readFileSync(destination, 'utf8')) as { gitCommit?: string };
-        if (scored.gitCommit !== gitCommit) throw new Error('別コミットの scored.json があります');
-        log(`${path}: 同じコミットで採点済みのためスキップ`);
-        continue;
+        const scored = JSON.parse(readFileSync(destination, 'utf8')) as { gitCommit?: string; adoptionAudit?: AdoptionAudit };
+        if (!auditFailed(scored.adoptionAudit)) {
+          if (scored.gitCommit !== gitCommit) throw new Error('別コミットの scored.json があります');
+          log(`${path}: 同じコミットで採点済みのためスキップ`);
+          continue;
+        }
       }
       const network = eutils ?? { fetch: globalThis.fetch, apiKey: process.env.NCBI_API_KEY, strictCounts: true };
       const adoptionAudit = await computeAdoptionAudit(result, { ...network,
         fetch: createEvalFetch(result.searchDate, network.fetch, () => undefined, secrets) });
+      if (auditFailed(adoptionAudit)) throw new Error('監査の測定に失敗したため採点を保存しません');
       const scored = { adoptionAudit, scoredAt: new Date().toISOString(), gitCommit, gitDirty, source: result.runId };
       writeFileSync(`${destination}.tmp`, redact(JSON.stringify(scored, null, 2), secrets) + '\n');
       renameSync(`${destination}.tmp`, destination);

@@ -5,6 +5,10 @@ import { dirname, join } from 'node:path';
 import { buildRunJobs, executeRerun, logName, makeSlots, parseOptions, readConfig, readLedger, slotName,
   type Job, type Launch, type Paths, type Slot } from './rerun';
 import { c0FixturePath } from './c0Artifact';
+import { getGitCommit } from './gitInfo';
+import { PROFILES } from './types';
+
+jest.mock('./gitInfo', () => ({ getGitCommit: jest.fn() }));
 
 const config = () => ({ ...readConfig(), cases: ['r3-vascular-bleeding'], drafts: 1, liveRunsPerSplit: 1 });
 const paths = (): Paths => {
@@ -18,7 +22,10 @@ function frozen(c = config(), p = paths()) {
   write(join(p.results, 'rerun/c0-slots.json'), slots);
   return { c, p, slots };
 }
-beforeEach(() => { jest.spyOn(process.stdout, 'write').mockReturnValue(true); });
+beforeEach(() => {
+  jest.spyOn(process.stdout, 'write').mockReturnValue(true);
+  jest.mocked(getGitCommit).mockReset().mockReturnValue('current');
+});
 afterEach(() => { jest.restoreAllMocks(); });
 
 test('行列はケースごと current → legacy → legacyLive、criteria-only C0 は分割間で共有する', () => {
@@ -131,4 +138,65 @@ test('ledger は id の最終行勝ちで読み、途中の破損は拒否する
   expect([...readLedger(p).values()].map((r) => r.exitCode)).toEqual([0, 0]);
   writeFileSync(p, '{"id":"one"}\nbroken\n');
   expect(() => readLedger(p)).toThrow('2 行目');
+});
+
+test.each([
+  ['一致', {}, 'current', true],
+  ['別コミット', { gitCommit: 'old' }, 'current', false],
+  ['oracleRounds', { oracleRounds: 1 }, 'current', false],
+  ['maxHits', { maxHits: 1000 }, 'current', false],
+  ['HEAD 取得失敗', { gitCommit: null }, null, false],
+] as const)('完了結果の条件照合: %s', async (_name, changes, head, skip) => {
+  const { c, p, slots } = frozen();
+  c.oracleRounds = 0;
+  const job = buildRunJobs(c, slots, p)[0]!;
+  write(job.expected, { status: 'completed', gitCommit: 'current', maxHits: PROFILES[0].maxHits, ...changes });
+  const original = readFileSync(job.expected, 'utf8');
+  jest.mocked(getGitCommit).mockReturnValue(head);
+  const start = jest.fn();
+  const options = parseOptions(['run', '--filter', job.id]);
+  await executeRerun(c, { ...options, dryRun: true }, start, p);
+  expect(process.stdout.write).toHaveBeenCalledWith(expect.stringContaining(skip ? 'スキップ' : '完了結果の条件が一致しません'));
+  expect(existsSync(join(p.results, 'rerun/ledger.jsonl'))).toBe(false);
+  const result = await executeRerun(c, options, start, p);
+  expect(result.skipped).toBe(skip ? 1 : 0);
+  expect(result.failed).toEqual(skip ? [] : [job.id]);
+  expect(start).not.toHaveBeenCalled();
+  expect(readFileSync(job.expected, 'utf8')).toBe(original);
+  if (!skip) {
+    expect(readLedger(join(p.results, 'rerun/ledger.jsonl')).get(job.id)).toMatchObject({ exitCode: 1, error: expect.stringContaining('label を変えてください') });
+    expect(readFileSync(join(p.results, 'rerun/logs', logName(job.id)), 'utf8')).toContain('完了結果の条件が一致しません');
+  }
+});
+
+test('各チェックアウトの HEAD を一度だけ取得し、旧版は 2000 件でラウンド数に依存せずスキップする', async () => {
+  const { c, p, slots } = frozen();
+  c.legacyWorktree = join(p.root, 'old');
+  c.oracleRounds = 2;
+  jest.mocked(getGitCommit).mockImplementation((cwd) => cwd === p.root ? 'current' : 'legacy');
+  const jobs = buildRunJobs(c, slots, p);
+  for (const job of jobs) write(job.expected, { status: 'completed', gitCommit: job.arm === 'current' ? 'current' : 'legacy',
+    maxHits: job.arm === 'current' ? PROFILES[0].maxHits : 2000, oracleRounds: job.arm === 'current' ? 2 : 0 });
+  const start = jest.fn();
+  const result = await executeRerun(c, parseOptions(['run']), start, p);
+  expect(result.skipped).toBe(jobs.length);
+  expect(getGitCommit).toHaveBeenCalledTimes(2);
+  expect(getGitCommit).toHaveBeenCalledWith(p.root);
+  expect(getGitCommit).toHaveBeenCalledWith(c.legacyWorktree);
+  expect(start).not.toHaveBeenCalled();
+});
+
+test.each(['{"id":"previous"}\n{"id":', '{"id":'])('起動時に ledger の末尾を修復してから追記する: %s', async (raw) => {
+  const { c, p } = frozen();
+  const ledgerPath = join(p.results, 'rerun/ledger.jsonl');
+  writeFileSync(ledgerPath, raw);
+  const start = jest.fn(async () => 0);
+  await executeRerun(c, parseOptions(['score', '--dry-run']), start, p);
+  expect(readFileSync(ledgerPath, 'utf8')).toBe(raw);
+  expect(start).not.toHaveBeenCalled();
+  await executeRerun(c, parseOptions(['score']), start, p);
+  const lines = readFileSync(ledgerPath, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { id: string });
+  expect(lines.map((row) => row.id)).toEqual(raw.includes('\n') ? ['previous', 'score:all:legacy:all'] : ['score:all:legacy:all']);
+  expect(readLedger(ledgerPath).size).toBe(lines.length);
+  expect(process.stdout.write).toHaveBeenCalledWith('ledger の書きかけの末尾を取り除きました\n');
 });
