@@ -3,6 +3,7 @@ import type { BlockSkeleton, FilterDesignerResult } from '@/features/formula/ski
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
 import {
   AssembleFormulaError,
+  buildMeshTag,
   assembleFormulaMd,
   type AssembleInput,
   type BlockOutputs,
@@ -93,7 +94,7 @@ describe('assembleFormulaMd', () => {
     expect(formula.blocks[0]?.expression).toContain('unspecified');
   });
 
-  test('tagSyntax が空でも descriptor でフォールバック', () => {
+  test('tagSyntax が空でも descriptor を引用符付き MeSH タグにする', () => {
     const input: AssembleInput = {
       baseCombinationExpression: '#1',
       blocks: [
@@ -105,7 +106,7 @@ describe('assembleFormulaMd', () => {
       filterResult: defaultFilterResult,
     };
     const { formula } = assembleFormulaMd(input);
-    expect(formula.blocks[0]?.expression).toBe('Raw Term');
+    expect(formula.blocks[0]?.expression).toBe('"Raw Term"[Mesh]');
   });
 
   test('フィルタブロックを名前付き id で追加し、結合式に AND 追記する', () => {
@@ -220,5 +221,22 @@ describe('assembleFormulaMd', () => {
     const reparsed = parsePubmedFormulaMd(markdown);
     expect(reparsed.blocks.map((b) => b.id)).toEqual(['1', '2', '3']);
     expect(reparsed.blocks[2]?.isCombination).toBe(true);
+  });
+});
+
+
+describe('buildMeshTag', () => {
+  test.each([
+    ['Diabetes Mellitus', '"Diabetes Mellitus"[Mesh]', '"Diabetes Mellitus"[Mesh]'],
+    ['Diabetic Retinopathy, Proliferative', 'Diabetic Retinopathy, Proliferative[Mesh]', '"Diabetic Retinopathy, Proliferative"[Mesh]'],
+    ['  "Term"[mh]  ', 'Term[ mH : noExp ]', '"Term"[Mesh:NoExp]'],
+    ['Term', 'Term[Majr]', '"Term"[Majr]'],
+    ['Term', 'Term[ MeSH Major Topic ]', '"Term"[Majr]'],
+    ['', ' "Fallback"[Mesh] ', '"Fallback"[Mesh]'],
+    [' "" ', 'Fallback[Mesh]', '"Fallback"[Mesh]'],
+    ['A"B', '', '"AB"[Mesh]'],
+    ['', '', ''],
+  ])('%s と %s から安全なタグを組み立てる', (descriptor, tagSyntax, expected) => {
+    expect(buildMeshTag({ descriptor, tagSyntax })).toBe(expected);
   });
 });

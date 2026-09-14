@@ -1,3 +1,4 @@
+import { checkMeshDescriptors } from '../../src/lib/ncbi/mesh';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -24,6 +25,7 @@ export interface Trial {
   caseId: string; variant: C0Variant; trial: number; c0: { name: string; sha256: string };
   model: string; targetHits: number; startedAt: string; elapsedMs: number; gitCommit: string | null; gitDirty: boolean | null;
   complete: boolean; outcome: Outcome; error: string | null; formulaMd: string | null; formula: DraftGeneration['formula'] | null;
+  removedMeshHeadings?: DraftGeneration['removedMeshHeadings'];
   generationBlockHits: DraftGeneration['blockHits']; diagnostics: Diagnostic[]; meshLookups: MeshLookup[];
   apiCalls: { ncbi: number; llm: number }; llmUsage: LlmUsage; llmLogs: string[];
   relookup?: { at: string; gitCommit: string | null; previousMeshLookups: MeshLookup[] };
@@ -186,16 +188,17 @@ export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES,
       const start = Date.now();
       const result: Trial = { caseId: condition.caseId, variant: condition.variant, trial, c0: { name: condition.c0Name, sha256: condition.c0Sha256 },
         model: provider.model, targetHits: DEFAULT_OPTIMIZATION_MAX_HITS, startedAt: new Date(start).toISOString(), elapsedMs: 0, gitCommit, gitDirty: isGitDirty(),
-        complete: false, outcome: 'generation_failed', error: null, formulaMd: null, formula: null, generationBlockHits: [], diagnostics: [], meshLookups: [], apiCalls, llmUsage: tracker.usage, llmLogs };
+        complete: false, outcome: 'generation_failed', error: null, formulaMd: null, formula: null, removedMeshHeadings: [], generationBlockHits: [], diagnostics: [], meshLookups: [], apiCalls, llmUsage: tracker.usage, llmLogs };
       progress({ process: { pid: process.pid, hasApiKey: Boolean(eutils.apiKey), caseExecution: 'sequential', gitCommit, gitDirty: result.gitDirty } });
       let draft: DraftGeneration | undefined;
       try {
         draft = await (deps.generate ?? generateDraftFormula)({ protocol: artifact.protocol, blocks: artifact.blocks,
           seedContext: condition.variant === 'seeded' ? artifact.seedContext! : { titles: [], samples: [], meshSummary: { seedCount: 0, concepts: [], checkTags: [] } },
-          targetHits: DEFAULT_OPTIMIZATION_MAX_HITS }, { llmFactory: factory, countBlockHits: async (query) => (await esearch(query, eutils, { retmax: 0 })).count });
+          targetHits: DEFAULT_OPTIMIZATION_MAX_HITS }, { llmFactory: factory, checkMeshDescriptors: (descriptors) => checkMeshDescriptors(descriptors, eutils), countBlockHits: async (query) => (await esearch(query, eutils, { retmax: 0 })).count });
       } catch (error) { result.outcome = generationOutcome(error); result.error = errorText(error); }
       if (draft) {
         result.formula = draft.formula; result.formulaMd = draft.markdown; result.generationBlockHits = draft.blockHits;
+        result.removedMeshHeadings = draft.removedMeshHeadings;
         Object.assign(result, await diagnoseFormula(draft.formula, eutils));
         result.outcome = diagnosticOutcome(result.diagnostics);
       }
@@ -209,7 +212,7 @@ export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES,
 
 export function reportFrequency(root: string, plan: Plan | undefined, options: Pick<FrequencyArgs, 'caseId' | 'variant'> = {}): string {
   const conditions = plan?.conditions.filter((item) => (!options.caseId || item.caseId === options.caseId) && (!options.variant || item.variant === options.variant)) ?? [];
-  const headers = ['条件', '計画試行数', '完了', '未完了（再試行待ち）', '未実行', 'generation_failed/完了', 'syntax_error/完了', 'other_error/完了', 'zero/完了', 'ok/完了', '構文エラーブロック/診断ブロック', '構文エラー式/診断式', 'unresolved語', 'ambiguous語', 'resolved語', 'lookup_failed語', 'not_mesh語', 'カンマ未引用の語'];
+  const headers = ['条件', '計画試行数', '完了', '未完了（再試行待ち）', '未実行', 'generation_failed/完了', 'syntax_error/完了', 'other_error/完了', 'zero/完了', 'ok/完了', '構文エラーブロック/診断ブロック', '構文エラー式/診断式', 'unresolved語', 'ambiguous語', 'resolved語', 'lookup_failed語', 'not_mesh語', 'カンマ未引用の語', '外した見出し'];
   const all: Trial[] = [];
   const row = (name: string, records: Trial[], planned: number): (string | number)[] => {
     const complete = records.filter((item) => item.complete);
@@ -219,7 +222,8 @@ export function reportFrequency(root: string, plan: Plan | undefined, options: P
       ...(['generation_failed', 'syntax_error', 'other_error', 'zero', 'ok'] as const).map((outcome) => `${complete.filter((item) => item.outcome === outcome).length}/${complete.length}`),
       ...(['block', 'formula'] as const).map((target) => { const items = diagnostics.filter((item) => item.target === target); return `${items.filter((item) => item.status === 'syntax_error').length}/${items.length}`; }),
       ...(['unresolved', 'ambiguous', 'resolved', 'lookup_failed', 'not_mesh'] as const).map((status) => lookups.filter((item) => item.status === status).length),
-      lookups.filter((item) => item.unquotedComma === true).length];
+      lookups.filter((item) => item.unquotedComma === true).length,
+      complete.reduce((sum, item) => sum + (item.removedMeshHeadings?.length ?? 0), 0)];
   };
   const rows = conditions.map((condition) => {
     const records: Trial[] = [];

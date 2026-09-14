@@ -8,6 +8,7 @@ declare const __BUILD_DATE__: string;
  * store に反映し、protocol / blocks view の callback に services を結び付ける。
  */
 
+import { checkMeshDescriptors } from '@/lib/ncbi/mesh';
 import { adoptQueryOptimization, editQueryOptimization } from './services/queryOptimizationAdoptionService';
 import { createOptimizationProgressPublisher } from './services/queryOptimizationProgressPublisher';
 import { searchOutsideCandidates } from './services/expandService';
@@ -1249,7 +1250,8 @@ export async function runOptimizeQuery(
         targetHits: fixedSettings.maxHits,
         seedContext: { titles: seeds.flatMap((seed) => seed.title ? [seed.title] : []).slice(0, 30),
           samples: [], meshSummary: { seedCount: 0, concepts: [], checkTags: [] } },
-      }, { llmFactory: factory, onProgress: () => check() })).formula;
+      }, { llmFactory: factory, onProgress: () => check(),
+        checkMeshDescriptors: (descriptors) => checkMeshDescriptors(descriptors, eutils) })).formula;
     check();
     update({ inputSnapshot: { researchQuestion: state.protocolDraft.researchQuestion,
       inclusionCriteria: state.protocolDraft.inclusionCriteria, exclusionCriteria: state.protocolDraft.exclusionCriteria,
@@ -1436,6 +1438,7 @@ async function runGenerateAndValidate(
       startedAtMs: Date.now(),
       error: null,
       blockHits: [],
+      removedMeshHeadings: [],
     },
   }));
 
@@ -1482,6 +1485,7 @@ async function runGenerateAndValidate(
           draftRun: {
             ...s.draftRun,
             phase: 'validating',
+            removedMeshHeadings: draftResult.removedMeshHeadings,
             progressLabel: '検証を開始します…',
             progress: { phase: 'validating', step: 'line_hits' },
           },
@@ -1504,7 +1508,7 @@ async function runGenerateAndValidate(
  * 検証フェーズ（runValidation + 進捗反映 + 完了時の validationResult 保存）。
  * 「生成して検証する」の後半と「検証のみ再実行」（fix-plan 2-2）で共用する。
  * 呼び出し時点で draftRun は status='running' / phase='validating' になっている前提。
- * 成功時は summary を返して draftRun を終了（null）し、失敗時は draftRun をエラー化して
+ * 成功時は summary を返し、除外通知があれば完了状態を保持する。失敗時は draftRun をエラー化して
  * null を返す（生成済みの blockHits は保持される）。
  */
 async function runValidationPhase(
@@ -1540,7 +1544,8 @@ async function runValidationPhase(
           : { formulaVersionId: s.currentFormulaVersionId, summary },
       // 再生成・再検証したら過去の原因分析は古くなるため破棄する
       missedAnalysis: null,
-      draftRun: null,
+      draftRun: s.draftRun?.removedMeshHeadings.length
+        ? { ...s.draftRun, status: 'done', progressLabel: '', progress: null } : null,
     }));
     return summary;
   } catch (err) {
@@ -1583,6 +1588,7 @@ async function runRevalidateOnly(
       startedAtMs: Date.now(),
       error: null,
       blockHits: prevBlockHits,
+      removedMeshHeadings: initial.draftRun?.phase === 'validating' ? initial.draftRun.removedMeshHeadings : [],
     },
   }));
   const precomputed = new Map<string, number>();
@@ -1717,6 +1723,7 @@ function setDraftRunError(
       startedAtMs: s.draftRun?.startedAtMs ?? Date.now(),
       error: err instanceof Error ? err.message : String(err),
       blockHits: s.draftRun?.blockHits ?? [],
+      removedMeshHeadings: s.draftRun?.removedMeshHeadings ?? [],
     },
   }));
 }
@@ -1755,6 +1762,7 @@ async function runGenerateDraft(
     llmFactory: factory,
     onProgress,
     onBlockCounted,
+    checkMeshDescriptors: (descriptors) => checkMeshDescriptors(descriptors, eutils),
     // 概念ブロックは葉式なのでそのまま esearch count に投げられる
     countBlockHits: async (expression) =>
       (await esearch(expression, eutils, { retmax: 0 })).count,

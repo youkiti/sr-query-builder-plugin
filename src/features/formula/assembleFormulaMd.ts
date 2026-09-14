@@ -102,6 +102,22 @@ export function assembleFormulaMd(input: AssembleInput): AssembledFormula {
   return { formula, markdown };
 }
 
+/** 辞書照会とタグ組み立てで共通の見出しを使う。 */
+export function meshDescriptor(mesh: Pick<MeshSuggestion, 'descriptor' | 'tagSyntax'>): string {
+  const clean = (value: string): string => value.trim().replace(/^"|"$/g, '')
+    .replace(/\s*\[[^\]]*\]\s*$/, '').replace(/"/g, '').trim();
+  return clean(mesh.descriptor) || clean(mesh.tagSyntax);
+}
+
+/** AI のタグ文字列を信用せず、見出しを常に引用符で囲む。 */
+export function buildMeshTag(mesh: Pick<MeshSuggestion, 'descriptor' | 'tagSyntax'>): string {
+  const descriptor = meshDescriptor(mesh);
+  if (!descriptor) return '';
+  const tag = /\[\s*(?:mesh|mh)\s*:\s*noexp\s*\]/i.test(mesh.tagSyntax) ? 'Mesh:NoExp'
+    : /\[\s*(?:majr|mesh\s+major\s+topic)\s*\]/i.test(mesh.tagSyntax) ? 'Majr' : 'Mesh';
+  return `"${descriptor}"[${tag}]`;
+}
+
 /**
  * 1 つの概念ブロック（mesh + freeword）を `(A OR B OR ...)` 形式の式へ組み立てる。
  * assembleFormulaMd と、生成途中のブロック単体ヒット数計測（line_hits）で共有する。
@@ -110,7 +126,7 @@ export function assembleFormulaMd(input: AssembleInput): AssembledFormula {
 export function buildBlockExpression(block: BlockOutputs): string {
   const terms: string[] = [];
   for (const mesh of block.mesh) {
-    const token = (mesh.tagSyntax || mesh.descriptor).trim();
+    const token = buildMeshTag(mesh);
     if (token) terms.push(token);
   }
   for (const freeword of block.freewords) {

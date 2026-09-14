@@ -932,6 +932,7 @@ describe('startApp - wiring 層', () => {
           ],
         });
       }
+      if (url.includes('db=mesh')) return jsonResponse({ esearchresult: { count: '0', warninglist: { quotedphrasesnotfound: ['Desc'] } } });
       if (typeof url === 'string' && url.includes('/upload/drive/v3/files')) {
         return jsonResponse({ id: 'f', webViewLink: '' });
       }
@@ -974,6 +975,11 @@ describe('startApp - wiring 層', () => {
     const calls = fetchMock.mock.calls.map((c) => c[0] as string);
     expect(calls.some((u) => u.includes('FormulaVersions') && u.includes(':append'))).toBe(true);
     expect(handle.store.getState().currentFormulaVersionId).toBeTruthy();
+    expect(calls.some((url) => url.includes('db=mesh') && new URL(url).searchParams.get('term') === '"Desc"[mh]')).toBe(true);
+    expect(handle.store.getState().draftRun?.removedMeshHeadings).toEqual([
+      { blockIndex: 0, blockId: '1', blockLabel: 'P', descriptor: 'Desc' },
+    ]);
+    expect(handle.store.getState().currentFormulaMarkdown).not.toContain('"Desc"[Mesh]');
   });
 
   test('export view 既定 onExport が Conversions に 4 行追記する', async () => {
@@ -2554,7 +2560,7 @@ describe('startApp - wiring 層', () => {
         progressLabel: '',
         startedAtMs: Date.now(),
         error: 'NCBI 503',
-        blockHits: [],
+        removedMeshHeadings: [], blockHits: [],
       },
     }));
   }
@@ -2608,7 +2614,7 @@ describe('startApp - wiring 層', () => {
     });
   }
 
-  test('「検証のみ再実行」は LLM を呼ばずに検証を回す（fix-plan 2-2）', async () => {
+  test.each([false, true])('「検証のみ再実行」は LLM を呼ばず、除外通知の有無 %s を保持する', async (hasRemoved) => {
     const doc = buildDocument();
     const { runtime, fetchMock } = makeRuntime({
       currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
@@ -2623,6 +2629,9 @@ describe('startApp - wiring 層', () => {
     });
     await flush();
     seedValidatingError(handle);
+    const removedMeshHeadings = hasRemoved
+      ? [{ blockIndex: 0, blockId: '1', blockLabel: 'P', descriptor: 'Missing' }] : [];
+    handle.store.setState((s) => ({ ...s, draftRun: { ...s.draftRun!, removedMeshHeadings } }));
     const btn = doc.querySelector<HTMLButtonElement>('.draft__revalidate');
     expect(btn).not.toBeNull();
     btn!.click();
@@ -2634,7 +2643,11 @@ describe('startApp - wiring 層', () => {
     );
     expect(llmCalls).toHaveLength(0);
     const state = handle.store.getState();
-    expect(state.draftRun).toBeNull();
+    if (hasRemoved) {
+      expect(state.draftRun?.status).toBe('done');
+      expect(state.draftRun?.removedMeshHeadings).toEqual(removedMeshHeadings);
+      expect(doc.querySelector('.draft__mesh-notice')?.textContent).toContain('#1 P: Missing');
+    } else expect(state.draftRun).toBeNull();
     expect(state.validationResult?.formulaVersionId).toBe('fv-1');
     expect(state.validationResult?.summary.lineHits.length).toBeGreaterThan(0);
   });

@@ -255,9 +255,12 @@ test('シードなし・式なしは保存なし生成を経て実行する', as
   fixture.list.mockResolvedValue([]);
   fixture.store.setState((s) => ({ ...s, currentFormulaMarkdown: null }));
   const generate = jest.spyOn(draft, 'generateDraftFormula').mockResolvedValue({ formula, markdown: '',
-    filter: { filters: [], appendToCombination: '', excessFilterCandidates: [] }, blockSkeletons: [], meshSuggestions: [], freewordSuggestions: [], blockHits: [] });
+    filter: { filters: [], appendToCombination: '', excessFilterCandidates: [] }, blockSkeletons: [], meshSuggestions: [], freewordSuggestions: [], removedMeshHeadings: [], blockHits: [] });
   await fixture.invoke();
   expect(generate).toHaveBeenCalledTimes(1);
+  const checkMesh = jest.spyOn(mesh, 'checkMeshDescriptors').mockResolvedValue(new Map([['Term', 'exists']]));
+  expect(await generate.mock.calls[0]![1].checkMeshDescriptors!(['Term'])).toEqual(new Map([['Term', 'exists']]));
+  expect(checkMesh).toHaveBeenCalledWith(['Term'], { fetch: fixture.runtime.google.fetch });
   expect(fixture.run.mock.calls[0]![0].seedPmids).toEqual([]);
   expect(fixture.store.getState().queryOptimizationRun?.seedCount).toBe(0);
   expect(fixture.store.getState().currentFormulaMarkdown).toBeNull();

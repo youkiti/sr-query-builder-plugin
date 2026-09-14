@@ -53,7 +53,7 @@ test.describe('app-draft (#/draft)', () => {
             progressLabel: 'MeSH を提案中（ブロック 1/2）',
             startedAtMs: Date.now() - 65_000,
             error: null,
-            blockHits: [],
+            removedMeshHeadings: [], blockHits: [],
           },
         },
       })
@@ -85,7 +85,7 @@ test.describe('app-draft (#/draft)', () => {
             progressLabel: '',
             startedAtMs: Date.now() - 10_000,
             error: 'Gemini API failed: HTTP 503',
-            blockHits: [],
+            removedMeshHeadings: [], blockHits: [],
           },
         },
       })

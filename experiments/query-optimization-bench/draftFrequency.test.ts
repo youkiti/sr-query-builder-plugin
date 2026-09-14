@@ -12,8 +12,11 @@ import type { DraftGeneration } from '../../src/app/services/draftService';
 jest.mock('dotenv', () => ({ config: jest.fn() }));
 const id = 'r1-mindfulness-smoking';
 const baseArgs = ['--case', id, '--variant', 'criteria-only', '--trials', '3'];
-const draft = { formula: { blocks: [{ id: '1', expression: 'hello[tiab]', isCombination: false }], combinationExpression: '#1' },
-  markdown: '生の検索式', blockHits: [{ hitCount: 0, error: '生成時の構文エラー' }] } as DraftGeneration;
+const draft: DraftGeneration = { formula: { blocks: [{ id: '1', expression: 'hello[tiab]', isCombination: false }], combinationExpression: '#1' },
+  markdown: '生の検索式', removedMeshHeadings: [],
+  filter: { filters: [], appendToCombination: '', excessFilterCandidates: [] },
+  blockSkeletons: [], meshSuggestions: [], freewordSuggestions: [],
+  blockHits: [{ blockIndex: 0, blockId: '1', blockLabel: '対象', expression: 'hello[tiab]', hitCount: 0, error: '生成時の構文エラー' }] };
 let output: jest.SpyInstance;
 beforeEach(() => {
   output = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
@@ -56,6 +59,7 @@ test('固定入力、日付、診断だけの結論、完了スキップ、未�
   await main(baseArgs, FIXTURES, results, deps);
   expect(JSON.parse(readFileSync(path(1), 'utf8')).outcome).toBe('ok');
   expect(JSON.parse(readFileSync(path(2), 'utf8')).outcome).toBe('generation_failed');
+  expect(JSON.parse(readFileSync(path(2), 'utf8')).removedMeshHeadings).toEqual([]);
   const artifact = loadC0Artifact(FIXTURES, id, 'criteria-only-draft1');
   expect(deps.generate).toHaveBeenCalledWith(expect.objectContaining({ protocol: artifact.protocol, blocks: artifact.blocks, targetHits: 2000,
     seedContext: { titles: [], samples: [], meshSummary: { seedCount: 0, concepts: [], checkTags: [] } } }), expect.anything());
@@ -261,7 +265,7 @@ test('再照会は完了診断だけを置換し、初回値と履歴を保持�
     expect(events.filter((event) => event.terms === 0)).toHaveLength(2);
     const summary = reportFrequency(root, plan, { caseId: id, variant: 'criteria-only' });
     expect(summary).toContain('| not_mesh語 | カンマ未引用の語 |');
-    expect(summary.split('\n').find((line) => line.startsWith('| 全体 |'))).toMatch(/\| 1 \| 0 \| 0 \| 0 \| 0 \| 1 \|$/);
+    expect(summary.split('\n').find((line) => line.startsWith('| 全体 |'))).toMatch(/\| 1 \| 0 \| 0 \| 0 \| 0 \| 1 \| 0 \|$/);
     const check = (dir: string): void => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const file = join(dir, entry.name);
@@ -272,4 +276,22 @@ test('再照会は完了診断だけを置換し、初回値と履歴を保持�
   } finally {
     if (originalKey === undefined) delete process.env.NCBI_API_KEY; else process.env.NCBI_API_KEY = originalKey;
   }
+});
+
+
+test('辞書確認を注入し、除外見出しを保存して完了試行だけ集計する', async () => {
+  const { results, root, path, deps } = setup();
+  const removedMeshHeadings = [{ blockIndex: 0, blockId: '1', blockLabel: '対象', descriptor: 'Missing' }];
+  deps.generate = async (_input, context) => {
+    expect(await context.checkMeshDescriptors!(['Neoplasms'])).toEqual(new Map([['Neoplasms', 'exists']]));
+    return { ...draft, removedMeshHeadings };
+  };
+  await main(baseArgs, FIXTURES, results, deps);
+  expect(JSON.parse(readFileSync(path(1), 'utf8')).removedMeshHeadings).toEqual(removedMeshHeadings);
+  const pending = JSON.parse(readFileSync(path(3), 'utf8')) as Trial;
+  pending.complete = false;
+  writeFileSync(path(3), JSON.stringify(pending));
+  const summary = reportFrequency(root, JSON.parse(readFileSync(join(root, 'plan.json'), 'utf8')) as Plan);
+  expect(summary).toContain('| 外した見出し |');
+  expect(summary.split('\n').find((line) => line.startsWith('| 全体 |'))).toMatch(/\| 2 \|$/);
 });
