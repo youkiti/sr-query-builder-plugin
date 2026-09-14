@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import * as types from './types';
-import { buildReport, csv, distribution, layerC, report, type Entry } from './rerunReport';
+import { buildReport, csv, distribution, layerC, report, usageFromLogs, type Entry } from './rerunReport';
 import { buildRunJobs, makeSlots, readConfig, slotName, slotsFile, type Job, type RerunConfig } from './rerun';
 import type { AdoptionAudit, ConditionResult, RunResult } from './types';
 
@@ -30,7 +30,54 @@ function matrix(ids = ['r1-mindfulness-smoking']) {
   return { config, slots, entries };
 }
 const build = (m: ReturnType<typeof matrix>) => buildReport(m.config, m.slots, m.entries);
+function loggedEntry(arm: Job['arm'], logs: unknown[]) {
+  const m = matrix();
+  const entry = m.entries.find((e) => e.job.arm === arm)!;
+  const root = mkdtempSync(join(tmpdir(), 'rerun-cost-'));
+  entry.job = { ...entry.job, expected: join(root, 'run.json') };
+  entry.run!.runId = 'attempt';
+  entry.run!.llmUsage = undefined;
+  entry.run!.llmLogs = logs.map((_, i) => `llm/${i}.json`);
+  mkdirSync(join(root, 'attempt/llm'), { recursive: true });
+  logs.forEach((log, i) => writeFileSync(join(root, 'attempt', entry.run!.llmLogs[i]!), JSON.stringify(log)));
+  return { entry, costs: () => buildReport(m.config, m.slots, [entry]).tables.costs.find((row) => row.arm === arm)! };
+}
+const successLog = { model: 'gemini-3.5-flash', response: { text: 'ok' }, tokensIn: 6024, tokensOut: 618 };
 afterEach(() => jest.restoreAllMocks());
+
+test.each(['legacy', 'legacyLive'] as const)('呼び出しログを同じ単価と失敗時の規則で復元する: %s', (arm) => {
+  const { entry, costs } = loggedEntry(arm, [successLog,
+    { model: 'unknown', response: null, tokensIn: null, tokensOut: null, error: 'offline' }]);
+  expect(usageFromLogs(entry)).toEqual({ calls: 2, tokensIn: 6024, tokensOut: 618, costUsd: expect.closeTo(0.014598, 12), unpricedCalls: 0, untrackedCalls: 0 });
+  expect(costs()).toMatchObject({ costFromLogs: 1, costMissing: 0, costUsdKnownSum: expect.closeTo(0.014598, 12), llmCallsKnownSum: 2, llmCallsMissing: 0 });
+  expect(entry.run!.llmUsage).toBeUndefined();
+});
+
+test.each([
+  [{ ...successLog, model: 'unknown' }, 1, 0],
+  [{ ...successLog, tokensIn: null, tokensOut: null }, 0, 1],
+] as const)('価格表外・成功時トークン不明は費用欠測を保持する: %j', (log, unpricedCalls, untrackedCalls) => {
+  const { entry, costs } = loggedEntry('legacy', [log, successLog]);
+  expect(usageFromLogs(entry)).toMatchObject({ calls: 2, costUsd: null, unpricedCalls, untrackedCalls });
+  expect(costs()).toMatchObject({ costFromLogs: 1, costMissing: 1, costUsdKnownSum: null, llmCallsKnownSum: 2 });
+});
+
+test.each(['missing', 'broken', 'shape'])('ログが欠落・破損していれば部分和も採用しない: %s', (kind) => {
+  const { entry, costs } = loggedEntry('legacy', [successLog]);
+  entry.run!.llmLogs.push('llm/bad.json');
+  if (kind !== 'missing') writeFileSync(join(dirname(entry.job.expected), 'attempt/llm/bad.json'), kind === 'broken' ? '{' : '42');
+  expect(usageFromLogs(entry)).toBeNull();
+  expect(costs()).toMatchObject({ costFromLogs: 0, costMissing: 1, costUsdKnownSum: null, llmCallsKnownSum: null, llmCallsMissing: 1 });
+});
+
+test('既存 llmUsage はログや費用欠測に関係なく優先する', () => {
+  const { entry, costs } = loggedEntry('current', [successLog]);
+  entry.run!.llmUsage = run(entry.job).llmUsage;
+  expect(costs()).toMatchObject({ costFromLogs: 0, costMissing: 0, costUsdKnownSum: 0.1, llmCallsKnownSum: 1 });
+  entry.run!.llmLogs = ['missing.json'];
+  entry.run!.llmUsage!.costUsd = null;
+  expect(costs()).toMatchObject({ costFromLogs: 0, costMissing: 1, costUsdKnownSum: null, llmCallsKnownSum: 1 });
+});
 
 test('層 A は criteria-only の分布、層 B は同じ C0 と分割の対、層 C は取りこぼしの積集合', () => {
   const m = matrix();
@@ -137,7 +184,10 @@ test('段階の提示 PMID は重複を含め合計し、include と未提示再
 test('構文エラー率と費用の欠測を示し、0 件では安全・過半数・回収を満たした扱いにしない', () => {
   const m = matrix();
   m.slots[0]!.attempts = [{ draft: 11, success: false, error: '構文エラー' }, { draft: 12, success: true, error: null }];
-  for (const e of m.entries.filter((e) => e.job.arm === 'legacy')) e.run!.llmUsage = undefined;
+  for (const e of m.entries.filter((e) => e.job.arm === 'legacy')) {
+    e.run!.llmUsage = undefined;
+    e.run!.llmLogs = ['llm/missing.json'];
+  }
   const result = build(m);
   expect(result.tables.c0QualityRates[0]).toMatchObject({ attempts: 2, syntaxErrors: 1, syntaxErrorRate: 0.5 });
   expect(result.tables.costs[1]).toMatchObject({ costUsdKnownSum: null, costMissing: 4 });
@@ -162,6 +212,8 @@ test.each(['new', 'legacy', 'both'])('ローカル run.json と最終 ledger 行
   expect(output.tables.c0Quality.map((row) => row.name)).toEqual(m.slots.map((slot) => slot.name));
   const summary = readFileSync(join(paths.results, 'rerun/summary.md'), 'utf8');
   expect(summary).toContain('S1:'); expect(summary).toContain('候補'); expect(summary).toContain('失敗'); expect(summary).toContain('欠測');
+  expect(summary).toContain('旧版はハーネスが `llmUsage` を記録しないため');
+  expect(summary).toContain('costFromLogs');
   expect(readFileSync(join(paths.results, 'rerun/layerB.csv'), 'utf8')).toContain('criteria-only-draft11');
   expect(csv([{ study: 'name,"quoted"\nnext', missing: null }])).toContain('"name,""quoted""\nnext"');
 });
