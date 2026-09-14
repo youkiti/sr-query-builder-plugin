@@ -421,6 +421,79 @@ describe('generateDraft', () => {
 describe('generateDraftFormula', () => {
   const seedContext = { titles: [], samples: [], meshSummary: { seedCount: 0, concepts: [], checkTags: [] } };
 
+  test.each<{
+    descriptor: string;
+    heading: string;
+    resolution: import('@/lib/ncbi/mesh').MeshResolution;
+    expected: string[];
+    replaced?: boolean;
+  }>([
+    { descriptor: 'Aorta/surgery', heading: 'Aorta', resolution: { status: 'resolved', headings: ['Aorta'] }, expected: ['Aorta/surgery'] },
+    { descriptor: 'Heart Attack/therapy', heading: 'Heart Attack', resolution: { status: 'resolved', headings: ['Myocardial Infarction'] }, expected: ['Myocardial Infarction/therapy'], replaced: true },
+    { descriptor: 'Tobacco/adverse effects', heading: 'Tobacco', resolution: { status: 'resolved', headings: ['Tobacco Products', 'Nicotiana'] }, expected: ['Tobacco Products/adverse effects', 'Nicotiana/adverse effects'], replaced: true },
+    { descriptor: 'Missing/surgery', heading: 'Missing', resolution: { status: 'missing' }, expected: [] },
+    { descriptor: 'Aorta/surgery', heading: 'Aorta', resolution: { status: 'unknown' }, expected: ['Aorta/surgery'] },
+    { descriptor: 'Aorta / surgery', heading: 'Aorta', resolution: { status: 'resolved', headings: ['Aorta'] }, expected: ['Aorta/surgery'] },
+    { descriptor: 'aorta/surgery', heading: 'aorta', resolution: { status: 'resolved', headings: ['Aorta'] }, expected: ['Aorta/surgery'] },
+    { descriptor: '/surgery', heading: '/surgery', resolution: { status: 'missing' }, expected: [] },
+    { descriptor: 'Aorta/', heading: 'Aorta/', resolution: { status: 'missing' }, expected: [] },
+    { descriptor: ' / surgery', heading: '/ surgery', resolution: { status: 'missing' }, expected: [] },
+    { descriptor: 'Aorta/ ', heading: 'Aorta/', resolution: { status: 'missing' }, expected: [] },
+    { descriptor: 'Aorta/surgery/other', heading: 'Aorta', resolution: { status: 'resolved', headings: ['Aorta'] }, expected: ['Aorta/surgery/other'] },
+    { descriptor: 'Tobacco/adverse effects', heading: 'Tobacco', resolution: { status: 'resolved', headings: ['Tobacco', 'Nicotiana'] }, expected: ['Tobacco/adverse effects', 'Nicotiana/adverse effects'], replaced: true },
+  ])('サブヘッディング付き候補 $descriptor の辞書結果 $resolution.status を反映する', async ({ descriptor, heading, resolution, expected, replaced }) => {
+    const { deps, store } = setupDeps();
+    deps.llmFactory.forPurpose = (purpose) => {
+      const provider = skillProviderFor(purpose);
+      if (purpose === 'suggest_mesh') provider.chat = async () => ({ text: JSON.stringify({ suggestions: [
+        { descriptor, tag_syntax: `${descriptor}[Mesh]`, rationale: '理由' },
+      ] }), tokensIn: null, tokensOut: null, raw: {} });
+      return provider;
+    };
+    deps.resolveMeshDescriptors = jest.fn().mockResolvedValue(new Map([[heading, resolution]]));
+    const state = store.getState();
+    const result = await generateDraftFormula({ protocol: state.protocolDraft!, blocks: state.blocksDraft!, seedContext }, deps);
+    expect(deps.resolveMeshDescriptors).toHaveBeenCalledTimes(2);
+    expect(deps.resolveMeshDescriptors).toHaveBeenNthCalledWith(1, [heading]);
+    expect(deps.resolveMeshDescriptors).toHaveBeenNthCalledWith(2, [heading]);
+    expect(result.meshSuggestions).toEqual([0, 1].map(() => expected.map((value) => ({
+      descriptor: value,
+      tagSyntax: resolution.status === 'unknown' ? `${descriptor}[Mesh]` : `"${value}"[Mesh]`,
+      rationale: '理由',
+    }))));
+    for (const value of expected) expect(result.markdown).toContain(`"${value}"[Mesh]`);
+    if (resolution.status === 'missing') expect(result.markdown).not.toContain(descriptor.trim());
+    const blockRefs = ['Population', 'Intervention'].map((blockLabel, blockIndex) => ({ blockIndex, blockId: String(blockIndex + 1), blockLabel }));
+    expect(result.removedMeshHeadings).toEqual(resolution.status === 'missing'
+      ? blockRefs.map((blockRef) => ({ ...blockRef, descriptor: descriptor.trim() })) : []);
+    expect(result.replacedMeshHeadings).toEqual(replaced
+      ? blockRefs.map((blockRef) => ({ ...blockRef, from: descriptor, to: expected })) : []);
+  });
+
+  test.each(['Mesh', 'Mesh:NoExp', 'Majr'])('サブヘッディング付きのタグ %s を保ち、見出しだけの候補も残して辞書照会は重複を除く', async (tag) => {
+    const { deps, store } = setupDeps();
+    deps.llmFactory.forPurpose = (purpose) => {
+      const provider = skillProviderFor(purpose);
+      if (purpose === 'suggest_mesh') provider.chat = async () => ({ text: JSON.stringify({ suggestions:
+        ['Aorta/surgery', 'Aorta', 'Aorta/surgery'].map((descriptor) => ({ descriptor, tag_syntax: `"${descriptor}"[${tag}]`, rationale: '理由' })),
+      }), tokensIn: null, tokensOut: null, raw: {} });
+      return provider;
+    };
+    deps.resolveMeshDescriptors = jest.fn().mockResolvedValue(new Map([
+      ['Aorta', { status: 'resolved', headings: ['Aorta'] }],
+    ]));
+    const state = store.getState();
+    const result = await generateDraftFormula({ protocol: state.protocolDraft!, blocks: state.blocksDraft!, seedContext }, deps);
+    expect(deps.resolveMeshDescriptors).toHaveBeenCalledWith(['Aorta']);
+    expect(result.meshSuggestions).toEqual([0, 1].map(() => ['Aorta/surgery', 'Aorta'].map((descriptor) => ({
+      descriptor, tagSyntax: `"${descriptor}"[${tag}]`, rationale: '理由',
+    }))));
+    expect(result.markdown).toContain(`"Aorta/surgery"[${tag}]`);
+    expect(result.markdown).toContain(`"Aorta"[${tag}]`);
+    expect(result.removedMeshHeadings).toEqual([]);
+    expect(result.replacedMeshHeadings).toEqual([]);
+  });
+
   test('保存先・store を使わず生成し、版の採番も保存進捗の通知もしない', async () => {
     const progress: DraftProgress[] = [];
     const { deps, store, fetchMock } = setupDeps({ onProgress: (p) => progress.push(p) });
