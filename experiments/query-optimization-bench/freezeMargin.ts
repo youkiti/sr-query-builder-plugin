@@ -27,6 +27,7 @@ export interface MarginContent {
   name: string;
   caseId: string;
   c0: { name: string; sha256: string };
+  sources?: { name: string; sha256: string }[];
   additions: BlockRecallAdditions[];
   broadenedQuery: string;
   marginQuery: string;
