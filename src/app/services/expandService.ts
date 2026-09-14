@@ -4,9 +4,11 @@ import {
   type SeedUserDecision,
 } from '@/domain/seedPaper';
 import {
+  allocateRetmaxEqually,
   buildBroadenedFormula,
   buildMarginQuery,
   getFormulaVersionById,
+  interleaveRoundRobin,
   type BlockRecallAdditions,
 } from '@/features/formula';
 import {
@@ -239,6 +241,19 @@ export const OUTSIDE_DEFAULT_RETMAX = 200;
 export const OUTSIDE_DEFAULT_SKILL_CANDIDATE_LIMIT = 200;
 export const OUTSIDE_DEFAULT_SORT = 'relevance';
 
+/**
+ * margin の取得方法。既定は `per-term`（issue #154）。
+ * - `per-term`: 拡張語 1 語ずつの margin（`拡張語 1 語だけを足した拡張式 NOT 現式`）を件数の
+ *   小さい順に並べ、取得枠を均等配分して取得する。全語を合わせた margin をそのまま関連度順で
+ *   取得する `head` より、件数の少ない（＝的が絞られた）語が取りこぼされにくい
+ *   （評価ハーネス `experiments/query-optimization-bench/marginDesign.ts` の `per-term-equal` の
+ *   比較で、確認候補に届いた既知の取りこぼしが 4 件→9 件に増えた）。
+ * - `head`: 全語を合わせた margin をそのまま関連度順（既定）で取得する（旧既定）。
+ * - `year-stratified`: 出版年代ごとに取得枠を配る（評価ハーネス専用。製品では未使用）。
+ */
+export type OutsideRetrieval = 'head' | 'year-stratified' | 'per-term';
+export const OUTSIDE_DEFAULT_RETRIEVAL: OutsideRetrieval = 'per-term';
+
 export interface OutsideSearchInput extends Pick<ExpandServiceDeps,
   'eutils' | 'llmFactory' | 'retmax' | 'skillCandidateLimit' | 'onProgress'> {
   formula: PubmedFormula;
@@ -248,7 +263,17 @@ export interface OutsideSearchInput extends Pick<ExpandServiceDeps,
   existingPmids: ReadonlySet<string>;
   additions?: BlockRecallAdditions[];
   sort?: 'relevance' | 'none';
-  retrieval?: 'head' | 'year-stratified';
+  retrieval?: OutsideRetrieval;
+}
+
+/** per-term 取得（既定）で 1 語ぶんに対応する取得単位の記録。stages.terms の要素。 */
+export interface OutsideTermMargin {
+  blockId: string;
+  term: string;
+  marginQuery: string;
+  count: number;
+  allocation: number;
+  retrievedPmids: string[];
 }
 
 /** 外側探索の各段階で通過した PMID。配列はその段階の順序を保持する。 */
@@ -261,6 +286,18 @@ export interface OutsideSearchStages {
   fetchedPmids: string[];
   pickedPmids: string[];
   strata?: { label: string; dateRange: string; count: number; retrievedPmids: string[] }[];
+  /**
+   * per-term 取得（既定）で数えた語ごとの margin（issue #154）。件数昇順（同数は additions の
+   * 出現順）に並ぶ。件数 0 の語・割当 0 の語（取得枠が足りず esearch しなかった語）も、診断用に
+   * count / allocation を 0 のまま残す（retrievedPmids は空配列）。retrieval が per-term 以外のとき
+   * は undefined。
+   */
+  terms?: OutsideTermMargin[];
+  /**
+   * per-term 取得で語ごとの取得結果が合計 0 件だったのに全体の margin が 1 件以上あり、
+   * 従来の head 取得（全体の margin をそのまま関連度順で取得）へ切り替えたときに 'head' になる。
+   */
+  retrievalFallback?: 'head';
 }
 
 /** 出版年代ごとに取得枠を配り、余りを一度だけ再配分する。 */
@@ -317,7 +354,94 @@ async function searchYearStratified(marginQuery: string, deps: OutsideSearchInpu
   return { count: total.count, pmids: [...pmids] };
 }
 
-/** 指定された式の外側から、人が判定する境界事例を取得する。 */
+/**
+ * per-term 取得（既定。issue #154）: 拡張語 1 語ずつの margin を件数の小さい順に並べ、
+ * 取得枠を均等配分して取得する。
+ *
+ * 1. 全体の margin 件数（marginQuery, retmax 0）を数える（従来どおり画面の「外側 N 件」に使う）
+ * 2. additions の各語について、その語だけを足した拡張式から margin クエリを組み、件数（retmax 0）
+ *    を数える（空文字の語は buildBroadenedFormula と同じく除く）
+ * 3. 件数 1 以上の語を件数昇順（同数は additions の出現順）に並べ、取得枠を均等配分する
+ *    （`allocateRetmaxEqually`。余りは先頭の語から。件数が割当に満たない語の余りは再配分しない）
+ * 4. 割当 1 以上の語だけ esearch（retmax=割当・sort）し、語の並び順でラウンドロビンに重複除去して
+ *    1 列にする（`interleaveRoundRobin`）
+ * 5. 4 の結果が 0 件なのに全体の margin 件数が 1 件以上あれば、従来の head 取得（全体の margin を
+ *    そのまま retmax・sort で取得）へフォールバックする（複数の語が同時に効いて初めて外側に入る
+ *    文献だけのケース。フォールバックしないと画面が「式の外側 N 件はすべて既存 seed と重複して
+ *    いました」と誤表示する）
+ */
+async function searchPerTermMargin(
+  originalQuery: string,
+  formula: PubmedFormula,
+  additions: readonly BlockRecallAdditions[],
+  marginQuery: string,
+  deps: OutsideSearchInput,
+  stages: OutsideSearchStages
+): Promise<{ count: number; pmids: string[] }> {
+  const retmax = deps.retmax ?? OUTSIDE_DEFAULT_RETMAX;
+  const sortOpt = deps.sort === 'none' ? {} : { sort: deps.sort ?? OUTSIDE_DEFAULT_SORT };
+
+  // 1. 全体の margin 件数（画面の「外側 N 件」の由来。従来どおり）
+  const overall = await esearch(marginQuery, deps.eutils, { retmax: 0 });
+
+  // 2. 語ごとの件数（retmax 0）。空文字の語は buildBroadenedFormula と同じ扱いで除く。
+  const counted: { blockId: string; term: string; marginQuery: string; count: number }[] = [];
+  for (const block of additions) {
+    for (const item of block.additions) {
+      const term = item.term.trim();
+      if (term === '') continue;
+      const broadenedTermQuery = expandFormula(
+        buildBroadenedFormula(formula, [{ blockId: block.blockId, additions: [item] }])
+      ).trim();
+      const termMarginQuery = buildMarginQuery(broadenedTermQuery, originalQuery);
+      const result = await esearch(termMarginQuery, deps.eutils, { retmax: 0 });
+      counted.push({ blockId: block.blockId, term, marginQuery: termMarginQuery, count: result.count });
+    }
+  }
+
+  // 3. 件数 1 以上の語を件数昇順（同数は出現順）に並べ、取得枠を均等配分する。
+  const eligible = counted
+    .map((entry, index) => ({ entry, index }))
+    .filter(({ entry }) => entry.count >= 1)
+    .sort((a, b) => a.entry.count - b.entry.count || a.index - b.index)
+    .map(({ entry }) => entry);
+  const allocations = allocateRetmaxEqually(eligible.length, retmax);
+
+  // 4. 割当 1 以上の語だけ取得し、語の並び順でラウンドロビンに重複除去する。
+  const termRecords: OutsideTermMargin[] = [];
+  const retrievedLists: string[][] = [];
+  for (const [index, entry] of eligible.entries()) {
+    const allocation = allocations[index]!;
+    let retrievedPmids: string[] = [];
+    if (allocation > 0) {
+      const result = await esearch(entry.marginQuery, deps.eutils, { retmax: allocation, ...sortOpt });
+      retrievedPmids = [...result.pmids];
+      retrievedLists.push(retrievedPmids);
+    }
+    termRecords.push({ ...entry, allocation, retrievedPmids });
+  }
+  // 件数 0 の語も診断用に残す（取得枠を配らないので末尾）。
+  for (const entry of counted) {
+    if (entry.count === 0) termRecords.push({ ...entry, allocation: 0, retrievedPmids: [] });
+  }
+  stages.terms = termRecords;
+
+  const merged = interleaveRoundRobin(retrievedLists);
+
+  // 5. 語ごとの取得が合計 0 件なのに全体 margin が 1 件以上あれば、head 取得へフォールバックする。
+  if (merged.length === 0 && overall.count >= 1) {
+    const head = await esearch(marginQuery, deps.eutils, { retmax, ...sortOpt });
+    stages.retrievalFallback = 'head';
+    return { count: overall.count, pmids: [...head.pmids] };
+  }
+  return { count: overall.count, pmids: merged };
+}
+
+/**
+ * 指定された式の外側から、人が判定する境界事例を取得する。
+ * margin（拡張式 NOT 現式）の取得方法は `deps.retrieval` で選べる（既定 `per-term`。
+ * {@link OUTSIDE_DEFAULT_RETRIEVAL} / {@link OutsideRetrieval} を参照）。
+ */
 export async function searchOutsideCandidates(deps: OutsideSearchInput): Promise<BoundaryCasesResult> {
   const { formula, existingPmids } = deps;
   const protocol = deps;
@@ -360,10 +484,15 @@ export async function searchOutsideCandidates(deps: OutsideSearchInput): Promise
 
   // 式の外側（margin）を検索。現式は拡張式の部分集合なので broadenedHits = originalHits + marginHits。
   deps.onProgress?.('esearch');
-  const marginResult = deps.retrieval === 'year-stratified' ? await searchYearStratified(marginQuery, deps, stages) : await esearch(marginQuery, deps.eutils, {
-    retmax: deps.retmax ?? OUTSIDE_DEFAULT_RETMAX,
-    ...(deps.sort === 'none' ? {} : { sort: deps.sort ?? OUTSIDE_DEFAULT_SORT }),
-  });
+  const retrieval = deps.retrieval ?? OUTSIDE_DEFAULT_RETRIEVAL;
+  const marginResult = retrieval === 'year-stratified'
+    ? await searchYearStratified(marginQuery, deps, stages)
+    : retrieval === 'per-term'
+      ? await searchPerTermMargin(originalQuery, formula, additions, marginQuery, deps, stages)
+      : await esearch(marginQuery, deps.eutils, {
+          retmax: deps.retmax ?? OUTSIDE_DEFAULT_RETMAX,
+          ...(deps.sort === 'none' ? {} : { sort: deps.sort ?? OUTSIDE_DEFAULT_SORT }),
+        });
   const original = await esearch(originalQuery, deps.eutils, { retmax: 0 });
   const originalHits = original.count;
   const marginHits = marginResult.count;

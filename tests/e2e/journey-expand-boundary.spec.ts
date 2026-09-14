@@ -8,7 +8,9 @@
  * 候補が並ぶところまで確認する。
  *
  * 外部 API はすべて `tests/e2e/fixtures/apiStubs.ts` の共通スタブで止める
- * （候補取得だけなら LLM 2 回 / esearch 2 回 / efetch 1 回）。
+ * （候補取得だけなら LLM 2 回 / efetch 1 回。esearch は語ごとの取得が既定（per-term。issue #154）
+ * になったため件数は固定していないが、下の `esearch` スタブは NOT を含むクエリすべてに同じ
+ * idlist を返すので、語の件数・語の取得・全体の margin 件数のどれが何回呼ばれても収束先は同じ）。
  *
  * 候補すべてを判定してラウンドを完了させるテスト（後述）は、この取得に加えて
  * onRoundComplete 側の再検証（checkSearchLines / checkFinalQuery）が追加で

@@ -1,9 +1,11 @@
 import type { PubmedFormula } from '@/lib/search-formula-md';
 import {
+  allocateRetmaxEqually,
   buildBroadenedFormula,
   buildMarginQuery,
   buildUpdateProposals,
   flattenAdditions,
+  interleaveRoundRobin,
   matchAdditionToPaper,
   type BlockRecallAdditions,
   type IncludedPaper,
@@ -133,5 +135,36 @@ describe('buildUpdateProposals', () => {
       additions
     );
     expect(proposals).toEqual([]);
+  });
+});
+
+// issue #154: expandService の per-term 取得（既定）が使う配分・交互並べの純粋関数。
+// `experiments/query-optimization-bench/marginDesign.ts` の allocatePerBlockRetmax /
+// interleaveRoundRobin と同じ規則（この 2 関数はそれの製品版）。
+describe('allocateRetmaxEqually', () => {
+  test('余りは先頭の単位から 1 件ずつ配る', () => {
+    expect(allocateRetmaxEqually(3, 200)).toEqual([67, 67, 66]);
+    expect(allocateRetmaxEqually(2, 200)).toEqual([100, 100]);
+    expect(allocateRetmaxEqually(4, 10)).toEqual([3, 3, 2, 2]);
+    expect(allocateRetmaxEqually(1, 5)).toEqual([5]);
+  });
+
+  test('単位数が 0 なら空配列', () => {
+    expect(allocateRetmaxEqually(0, 200)).toEqual([]);
+  });
+});
+
+describe('interleaveRoundRobin', () => {
+  test('リスト順のラウンドロビンで並べ、異なる位置の重複は先着を残す', () => {
+    expect(interleaveRoundRobin([['a', 'b', 'c'], ['x', 'y']])).toEqual(['a', 'x', 'b', 'y', 'c']);
+  });
+
+  test('重複は先に出現した位置を残す', () => {
+    expect(interleaveRoundRobin([['a', 'b'], ['b', 'c']])).toEqual(['a', 'b', 'c']);
+  });
+
+  test('空リストは詰めて処理し、全体が空なら空配列', () => {
+    expect(interleaveRoundRobin([[], ['x']])).toEqual(['x']);
+    expect(interleaveRoundRobin([])).toEqual([]);
   });
 });

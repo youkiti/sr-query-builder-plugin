@@ -94,6 +94,39 @@ export function buildMarginQuery(broadenedQuery: string, originalQuery: string):
   return `(${broadenedQuery.trim()}) NOT (${originalQuery.trim()})`;
 }
 
+/**
+ * 取得枠 total を単位数 unitCount に均等配分する。余りは先頭の単位から 1 件ずつ配る。
+ * issue #154: 語ごとの margin 取得（per-term）で、件数昇順に並べた語へ retmax を配るのに使う。
+ * `experiments/query-optimization-bench/marginDesign.ts` の `allocatePerBlockRetmax` と同じ規則。
+ */
+export function allocateRetmaxEqually(unitCount: number, total: number): number[] {
+  if (unitCount <= 0) return [];
+  const base = Math.floor(total / unitCount);
+  const remainder = total % unitCount;
+  return Array.from({ length: unitCount }, (_, index) => base + (index < remainder ? 1 : 0));
+}
+
+/**
+ * 複数の取得順リストを、リストの並び順のラウンドロビンで重複を除いて 1 列にする（先着優先）。
+ * issue #154: 語ごとに取得した PMID リストを、件数昇順の語の並びで交互に並べて 1 列にするのに使う。
+ * `experiments/query-optimization-bench/marginDesign.ts` の `interleaveRoundRobin` と同じ規則。
+ */
+export function interleaveRoundRobin(lists: readonly (readonly string[])[]): string[] {
+  const merged: string[] = [];
+  const seen = new Set<string>();
+  const depth = Math.max(0, ...lists.map((list) => list.length));
+  for (let index = 0; index < depth; index++) {
+    for (const list of lists) {
+      const pmid = list[index];
+      if (pmid !== undefined && !seen.has(pmid)) {
+        seen.add(pmid);
+        merged.push(pmid);
+      }
+    }
+  }
+  return merged;
+}
+
 /** 拡張語に blockId を添えて平坦化する。 */
 export function flattenAdditions(
   additions: readonly BlockRecallAdditions[]

@@ -26,7 +26,7 @@ flowchart TD
     A2["🤖 検索式ドラフト生成 4 skill<br/>block-designer 骨格<br/>mesh-suggester MeSH 提案<br/>freeword-designer 同義語 tiab<br/>filter-designer RCT 年代のみ"]
     A2 --> V1["⚙️ 自動検証<br/>行ごとヒット数、シード捕捉率、MeSH 階層"]
     V1 --> H4["👤 ④検証結果の確認<br/>捕捉率、漏れ PMID、MeSH を眺める"]
-    H4 --> A3["🤖 境界事例を最大 5 件ピックアップ<br/>外側を関連度順で 200 件取得し、既知 PMID を除く最大 200 件の書誌から AI が選定"]
+    H4 --> A3["🤖 境界事例を最大 5 件ピックアップ<br/>外側を拡張語ごとに件数昇順で均等配分取得（計 200 件、既定）し、既知 PMID を除く最大 200 件の書誌から AI が選定"]
     A3 --> H5["👤 ⑤境界事例の判定<br/>include・exclude・maybe"]
     H5 --> V2["⚙️ シード集合を更新、捕捉率を再計算"]
     V2 --> D1{"👤 ⑥次のアクション"}
