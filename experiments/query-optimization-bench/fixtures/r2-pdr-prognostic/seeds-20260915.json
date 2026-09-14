@@ -1,0 +1,20 @@
+{
+  "seed": 20260915,
+  "selections": [
+    {
+      "groupId": "harris 2013",
+      "pmid": "23275374",
+      "year": 2013
+    },
+    {
+      "groupId": "hsieh 2018",
+      "pmid": "29167896",
+      "year": null
+    },
+    {
+      "groupId": "lee 2017",
+      "pmid": "28572062",
+      "year": 2017
+    }
+  ]
+}

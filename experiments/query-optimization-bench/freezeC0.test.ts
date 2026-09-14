@@ -4,10 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateC0Content, loadFreezeSeeds, main, parseFreezeArgs } from './freezeC0';
 import { hashC0Content } from './c0Artifact';
+import { validateC0Formula } from './c0Generation';
 import { extractProtocol } from '../../src/features/formula/skills/extractProtocol';
 import { generateDraftFormula } from '../../src/app/services/draftService';
 import { efetchArticles, type EfetchArticle } from '../../src/lib/ncbi';
-import { esearch } from '../../src/lib/ncbi/eutils';
+import { esearch, EutilsError } from '../../src/lib/ncbi/eutils';
 import type { LlmProviderFactory } from '../../src/app/services/llmProviderService';
 import type { BenchCase, FrozenSeeds } from './types';
 
@@ -71,8 +72,8 @@ test.each([false, true])('generateC0Content: 実測エラーを全件集めて�
     { id: '3', expression: '#1 AND #2', isCombination: true },
   ], combinationExpression: '#1 AND #2' } });
   jest.mocked(esearch).mockImplementation(async (query) => {
-    if (query === 'invalid[Mesh]') throw new Error('構文エラー: phrase not found invalid');
-    if (wholeFails && query === '(invalid[Mesh]) AND (smoking[tiab])') throw new Error('式の実測エラー');
+    if (query === 'invalid[Mesh]') throw new EutilsError('構文エラー: phrase not found invalid', 200, true);
+    if (wholeFails && query === '(invalid[Mesh]) AND (smoking[tiab])') throw new EutilsError('式の実測エラー', 200, true);
     return { count: 10, pmids: [] };
   });
   const eutils = { fetch: jest.fn(), strictCounts: true };
@@ -86,6 +87,18 @@ test.each([false, true])('generateC0Content: 実測エラーを全件集めて�
     ['smoking[tiab]', eutils, { retmax: 0 }],
     ['(invalid[Mesh]) AND (smoking[tiab])', eutils, { retmax: 0 }],
   ]);
+});
+
+test.each([
+  new EutilsError('HTTP 503', 503),
+  new Error('fetch failed'),
+  '通信失敗',
+])('validateC0Formula: 一時障害が混ざれば同じ番号で再試行できる: %s', async (transient) => {
+  jest.mocked(esearch).mockRejectedValueOnce(new EutilsError('構文エラー', 200, true)).mockRejectedValueOnce(transient);
+  const result = validateC0Formula(formula, { fetch: jest.fn() });
+  await expect(result).rejects.toThrow('実測中に一時的な通信障害があったため凍結しない。同じ番号で再試行できる');
+  await expect(result).rejects.not.toThrow('実測できない C0 は凍結しない');
+  expect(esearch).toHaveBeenCalledTimes(2);
 });
 
 test.each([[10, 0], [0, 0]])('generateC0Content: 実測がすべて成功すれば 0 件でも内容を返す（ブロック %i 件、式全体 %i 件）', async (blockCount, wholeCount) => {

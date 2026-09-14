@@ -69,7 +69,7 @@ export function compareHuman(markdown: string, lines: readonly PubmedLine[]) {
 
 export function generateB1(fixtureDir = FIXTURES, sourceDir = join(__dirname, 'b1')): boolean {
   let complete = true;
-  CASES.forEach((definition, i) => {
+  CASES.filter((definition) => definition.role === 'development').forEach((definition, i) => {
     const dir = join(fixtureDir, definition.id);
     const jsonPath = join(dir, 'b1.json');
     // Keep the query and its derivation together when a baseline has been frozen.

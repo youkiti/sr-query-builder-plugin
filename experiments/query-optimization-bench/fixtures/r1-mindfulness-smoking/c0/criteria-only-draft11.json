@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "caseId": "r1-mindfulness-smoking",
+  "variant": "criteria-only",
+  "draftIndex": 11,
+  "seedSplit": null,
+  "targetHits": 2000,
+  "model": "gemini-3.5-flash",
+  "createdAt": "2026-09-14T13:28:59.489Z",
+  "gitCommit": "76f6b600063a86b9d4ca96098f0760ba224d06fe",
+  "gitDirty": true,
+  "protocol": {
+    "frameworkType": "pico",
+    "researchQuestion": "喫煙者を対象に、マインドフルネスに基づく介入が禁煙およびメンタルヘルスのアウトカムに及ぼす効果を評価する。",
+    "inclusionCriteria": "ランダム化比較試験（RCT）およびクラスターRCT\nベースラインから少なくとも6ヶ月以上の禁煙を測定している研究\n年齢を問わず、禁煙研究への参加に同意した現在のタバコ喫煙者\nマインドフルネスに基づく禁煙介入（ACTやヨガ、MBSR、MBCTなどを含む）\n比較対照：禁煙治療なし、他の禁煙介入（通常ケア含む）、または他のマインドフルネス介入",
+    "exclusionCriteria": "妊婦のみを対象とした研究\n追跡期間が6ヶ月未満の禁煙のみを測定した研究",
+    "studyDesign": "RCT",
+    "blocks": [
+      {
+        "blockLabel": "Smoking",
+        "description": "タバコ喫煙者や禁煙に関する概念。喫煙、タバコ、禁煙などのキーワードやシソーラス用語を含みます。"
+      },
+      {
+        "blockLabel": "Mindfulness",
+        "description": "マインドフルネスやそれに関連するアプローチ（MBSR、MBCT、ACT、ヨガなど）に関する概念を含みます。"
+      }
+    ],
+    "combinationExpression": "#1 AND #2",
+    "sourceType": "markdown",
+    "sourceFilename": "protocol.md",
+    "rawTextRef": null,
+    "rawTextPreview": "# Mindfulness for smoking cessation\n\n## Objectives\nTo assess the efficacy of mindfulness‐based interventions for smoking cessation among people who smoke, and whether these interventions have an effect on mental health outcomes.\n\n## types_of_studies\nRandomised controlled trials (RCTs) and cluster‐RCTs that measured smoking cessation at least six months from baseline were eligible for this review. We included studies reported as full text, those published as abstract only, and unpublished data, w",
+    "rawTextInline": "# Mindfulness for smoking cessation\n\n## Objectives\nTo assess the efficacy of mindfulness‐based interventions for smoking cessation among people who smoke, and whether these interventions have an effect on mental health outcomes.\n\n## types_of_studies\nRandomised controlled trials (RCTs) and cluster‐RCTs that measured smoking cessation at least six months from baseline were eligible for this review. We included studies reported as full text, those published as abstract only, and unpublished data, where available. There were no language or date restrictions.\n\n## types_of_participants\nWe included current tobacco smokers of any age who were willing to enrol in a smoking cessation study. We excluded studies that only recruited pregnant women, as their particular needs and circumstances warrant their treatment as a separate population, and these are covered in a separate Cochrane Review (Chamberlain 2017).\n\n## types_of_interventions\nWe included interventions targeted at tobacco smoking cessation that were either labelled as mindfulness, or involved a mindfulness‐based approach that could be isolated to investigate effectiveness. There were no restrictions on the minimum duration of the intervention. Where a potentially relevant study intervention was not specifically described as being mindfulness‐based, we discussed as a team (of EN, JLB, NL, SJ) whether it was eligible for inclusion. We intentionally adopted an inclusive approach, including interventions that incorporated mindfulness (e.g. ACT or yoga) in addition to those specifically focused on mindfulness meditation (e.g. MBSR or MBCT) to capture the broadest evidence. Eligible studies had to include at least one of the following comparison (control) interventions: no smoking cessation treatment;another smoking cessation intervention, of any length or intensity (including usual care);another type of mindfulness intervention (e.g. mindfulness of a lower intensity).\n\n## types_of_outcomes\nTo be eligible for inclusion, studies must have measured abstinence at least six months from the start of the intervention. Following the Cochrane Tobacco Addiction Group's standard methods, we excluded studies that only measured abstinence at less than six‐months' follow‐up. In studies with more than one measure of abstinence, we preferred the measure with the strictest criteria, in line with the Russell Standard (West 2005). We used prolonged or continuous abstinence in preference to point prevalence abstinence, and preferred biochemically validated abstinence (e.g. using exhaled carbon monoxide or cotinine measures) over self‐report. We favoured biochemically validated point prevalence abstinence over self‐reported continuous or prolonged abstinence. This could provide us with information on potential benefits or harms of the mindfulness‐based interventions. Even if comparisons of mindfulness‐based interventions with other smoking cessation interventions do not find a benefit of mindfulness for smoking cessation, improved mental well‐being could be a reason for choosing this treatment over another. We assessed validated measures of the following relevant constructs: depression;anxiety;quality of life;positive affect;negative affect;stress. We extracted data on these mental health and well‐being outcomes, measured at the longest follow‐up at which abstinence was reported, or as close to this as possible.\n"
+  },
+  "blocks": {
+    "blocks": [
+      {
+        "blockLabel": "Smoking",
+        "description": "タバコ喫煙者や禁煙に関する概念。喫煙、タバコ、禁煙などのキーワードやシソーラス用語を含みます。",
+        "aiGenerated": true,
+        "note": ""
+      },
+      {
+        "blockLabel": "Mindfulness",
+        "description": "マインドフルネスやそれに関連するアプローチ（MBSR、MBCT、ACT、ヨガなど）に関する概念を含みます。",
+        "aiGenerated": true,
+        "note": ""
+      }
+    ],
+    "combinationExpression": "#1 AND #2"
+  },
+  "formula": {
+    "blocks": [
+      {
+        "id": "1",
+        "expression": "(\"Smoking\"[Mesh] OR \"Tobacco Use Disorder\"[Mesh] OR \"Smoking Cessation\"[Mesh] OR \"Tobacco Products\"[Mesh] OR \"Smokers\"[Mesh] OR \"smoking\"[tiab] OR smoker*[tiab] OR \"tobacco\"[tiab] OR cigarette*[tiab] OR \"nicotine\"[tiab] OR \"smoking cessation\"[tiab] OR quit* smoking[tiab] OR stop* smoking[tiab])",
+        "isCombination": false
+      },
+      {
+        "id": "2",
+        "expression": "(\"Mindfulness\"[Mesh] OR \"Meditation\"[Mesh] OR \"Acceptance and Commitment Therapy\"[Mesh] OR \"Yoga\"[Mesh] OR mindful*[tiab] OR \"mindfulness-based\"[tiab] OR MBSR[tiab] OR MBCT[tiab] OR \"acceptance and commitment\"[tiab] OR meditat*[tiab] OR yoga[tiab])",
+        "isCombination": false
+      },
+      {
+        "id": "RCTfilter",
+        "expression": "(randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh]))",
+        "isCombination": false
+      },
+      {
+        "id": "3",
+        "expression": "#1 AND #2 AND #RCTfilter",
+        "isCombination": true
+      }
+    ],
+    "combinationExpression": "#1 AND #2 AND #RCTfilter"
+  },
+  "formulaMd": "## PubMed/MEDLINE\n\n```\n#1 (\"Smoking\"[Mesh] OR \"Tobacco Use Disorder\"[Mesh] OR \"Smoking Cessation\"[Mesh] OR \"Tobacco Products\"[Mesh] OR \"Smokers\"[Mesh] OR \"smoking\"[tiab] OR smoker*[tiab] OR \"tobacco\"[tiab] OR cigarette*[tiab] OR \"nicotine\"[tiab] OR \"smoking cessation\"[tiab] OR quit* smoking[tiab] OR stop* smoking[tiab])\n#2 (\"Mindfulness\"[Mesh] OR \"Meditation\"[Mesh] OR \"Acceptance and Commitment Therapy\"[Mesh] OR \"Yoga\"[Mesh] OR mindful*[tiab] OR \"mindfulness-based\"[tiab] OR MBSR[tiab] OR MBCT[tiab] OR \"acceptance and commitment\"[tiab] OR meditat*[tiab] OR yoga[tiab])\n#RCTfilter (randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh]))\n#3 #1 AND #2 AND #RCTfilter\n```\n",
+  "seedContext": null,
+  "blockApproval": "auto",
+  "sha256": "91745e9aabec5dc8c36f6a22eecb9c31d078d3b214143e0c990a2496533ec18d"
+}

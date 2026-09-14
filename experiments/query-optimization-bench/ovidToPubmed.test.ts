@@ -5,16 +5,24 @@ import { join } from 'node:path';
 import { canonicalQuery, compareHuman, generateB1 } from './b1';
 import { parseOvid, transpile, type ManualOverride } from './ovidToPubmed';
 import { CASES } from './types';
+import * as types from './types';
 
 const source = (name: string) => readFileSync(join(__dirname, 'b1', name), 'utf8');
 const convert = (body: string) => transpile([{ n: 1, body }])[0]!;
 const allowlist = JSON.parse(source('mesh-allowlist.json')) as Record<string, string[]>;
+const developmentCases = CASES.filter((c) => c.role === 'development');
+const sourceNumbers: Record<string, number> = {
+  'r1-mindfulness-smoking': 1,
+  'r2-pdr-prognostic': 2,
+  'r3-vascular-bleeding': 3,
+};
 
 test.each([
   [1, [3, 8, 11, 12, 14, 17, 18]],
   [2, [35, 37, 41, 45, 46, 47, 50, 60, 61, 66, 71, 73, 74]],
 ])('human reference R%i matches except explicitly reported rule disagreements', (n, disagreements) => {
-  const lines = transpile(parseOvid(source(`r${n}_ovid.txt`)), { meshHeadings: allowlist[CASES[n - 1]!.id] });
+  const id = developmentCases.find((c) => sourceNumbers[c.id] === n)!.id;
+  const lines = transpile(parseOvid(source(`r${n}_ovid.txt`)), { meshHeadings: allowlist[id] });
   const differences = compareHuman(source(`r${n}.md`), lines);
   // Keep disagreements visible without teaching the converter case-specific expectations.
   // The generated b1.md records both values for every disagreement, including dependent rows.
@@ -100,8 +108,8 @@ test('mp requires a complete allowlisted heading and never assigns Mesh to trunc
   expect(line.query).toContain('"risk factors"[tiab]');
   expect(line.approximations.filter((a) => a.kind === 'mesh_dropped')).toHaveLength(4);
   expect(line.approximations.some((a) => a.kind === 'field_widened')).toBe(false);
-  CASES.forEach((definition, i) => {
-    const lines = transpile(parseOvid(source(`r${i + 1}_ovid.txt`)), { meshHeadings: allowlist[definition.id] });
+  developmentCases.forEach((definition) => {
+    const lines = transpile(parseOvid(source(`r${sourceNumbers[definition.id]}_ovid.txt`)), { meshHeadings: allowlist[definition.id] });
     for (const row of lines) expect(row.query).not.toMatch(/(?:"[^"\n]*\*[^"\n]*"|[^\s()"]*\*[^\s()"]*)\[Mesh\]/i);
   });
 });
@@ -117,17 +125,19 @@ test('overrides replace references and reject missing rationale or nonexistent l
 test('offline generation blocks unresolved cases, then uses override files and preserves frozen outputs', () => {
   const network = jest.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Real network forbidden'));
   const output = jest.spyOn(process.stdout, 'write').mockReturnValue(true);
+  const confirmation = { id: 'confirmation-without-b1', pmcid: 'PMC123', searchDate: '2020-01-01', role: 'confirmation' };
+  const cases = jest.replaceProperty(types, 'CASES', developmentCases.flatMap((c) => [confirmation, c]) as unknown as typeof CASES);
   try {
     const dir = mkdtempSync(join(tmpdir(), 'b1-test-'));
     const sources = join(dir, 'source');
     cpSync(join(__dirname, 'b1'), sources, { recursive: true });
     expect(generateB1(dir, sources)).toBe(false);
-    CASES.forEach((c, i) => {
+    developmentCases.forEach((c) => {
       expect(existsSync(join(dir, c.id, 'b1.json'))).toBe(false);
       expect(existsSync(join(dir, c.id, 'b1.md'))).toBe(false);
       const review = readFileSync(join(sources, `review-${c.id}.md`), 'utf8');
       expect(review).toContain('人手判断が必要な行');
-      const unresolved = transpile(parseOvid(source(`r${i + 1}_ovid.txt`))).filter((line) =>
+      const unresolved = transpile(parseOvid(source(`r${sourceNumbers[c.id]}_ovid.txt`))).filter((line) =>
         line.approximations.some((a) => a.kind === 'unsupported' && !a.detail.includes('reference')));
       const overrides: Record<string, ManualOverride> = Object.fromEntries(unresolved.map((line) =>
         [String(line.n), { query: `manual${line.n}[tiab]`, note: `Test rationale for ${line.n}` }]));
@@ -136,12 +146,14 @@ test('offline generation blocks unresolved cases, then uses override files and p
       for (const line of unresolved) { expect(review).toContain(`元の式: ${line.source}`); }
     });
     expect(generateB1(dir, sources)).toBe(true);
-    const files = CASES.flatMap((c) => ['b1.json', 'b1.md'].map((name) => join(dir, c.id, name)));
+    expect(existsSync(join(dir, confirmation.id))).toBe(false);
+    expect(existsSync(join(sources, `review-${confirmation.id}.md`))).toBe(false);
+    const files = developmentCases.flatMap((c) => ['b1.json', 'b1.md'].map((name) => join(dir, c.id, name)));
     const before = files.map((file) => readFileSync(file, 'utf8'));
-    CASES.forEach((c, i) => {
+    developmentCases.forEach((c) => {
       const query = JSON.parse(readFileSync(join(dir, c.id, 'b1.json'), 'utf8')).query;
       const overrides = JSON.parse(readFileSync(join(sources, 'overrides', `${c.id}.json`), 'utf8')) as Record<string, ManualOverride>;
-      const converted = transpile(parseOvid(source(`r${i + 1}_ovid.txt`)), { meshHeadings: allowlist[c.id], overrides });
+      const converted = transpile(parseOvid(source(`r${sourceNumbers[c.id]}_ovid.txt`)), { meshHeadings: allowlist[c.id], overrides });
       expect(query).toBe(converted[converted.length - 1]!.query);
       const report = readFileSync(join(dir, c.id, 'b1.md'), 'utf8');
       for (const override of Object.values(overrides)) {
@@ -152,5 +164,5 @@ test('offline generation blocks unresolved cases, then uses override files and p
     generateB1(dir, join(dir, 'missing-source'));
     expect(files.map((file) => readFileSync(file, 'utf8'))).toEqual(before);
     expect(network).not.toHaveBeenCalled();
-  } finally { network.mockRestore(); output.mockRestore(); }
+  } finally { cases.restore(); network.mockRestore(); output.mockRestore(); }
 });

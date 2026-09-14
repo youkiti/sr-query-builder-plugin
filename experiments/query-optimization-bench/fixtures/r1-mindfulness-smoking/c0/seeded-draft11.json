@@ -1,0 +1,298 @@
+{
+  "schemaVersion": 1,
+  "caseId": "r1-mindfulness-smoking",
+  "variant": "seeded",
+  "draftIndex": 11,
+  "seedSplit": "s20260912",
+  "targetHits": 2000,
+  "model": "gemini-3.5-flash",
+  "createdAt": "2026-09-14T13:31:57.484Z",
+  "gitCommit": "76f6b600063a86b9d4ca96098f0760ba224d06fe",
+  "gitDirty": true,
+  "protocol": {
+    "frameworkType": "pico",
+    "researchQuestion": "喫煙者を対象に、禁煙に対するマインドフルネスに基づく介入の有効性、およびメンタルヘルスへの影響を評価する。",
+    "inclusionCriteria": "現在のタバコ喫煙者（年齢不問）\nマインドフルネスに基づく禁煙介入（ACTやヨガ、MBSR、MBCTなどを含む）\n比較対照：禁煙治療なし、他の禁煙介入（通常ケア含む）、または他のマインドフルネス介入\n介入開始から少なくとも6ヶ月以上の時点での禁煙（禁欲）の測定\nランダム化比較試験（RCT）およびクラスターRCT",
+    "exclusionCriteria": "妊婦のみを募集した研究\n追跡期間が6ヶ月未満の禁煙測定のみの研究",
+    "studyDesign": "RCT / cluster-RCT",
+    "blocks": [
+      {
+        "blockLabel": "Smoking",
+        "description": "タバコ喫煙、禁煙、ニコチン依存など、対象者（喫煙者）および目的とする行動（禁煙）に関する概念。"
+      },
+      {
+        "blockLabel": "Mindfulness",
+        "description": "マインドフルネス、瞑想、マインドフルネスストレス低減法（MBSR）、マインドフルネス認知療法（MBCT）、アクセプタンス＆コミットメントセラピー（ACT）、ヨガなど、マインドフルネスに基づく介入に関する概念。"
+      }
+    ],
+    "combinationExpression": "#1 AND #2",
+    "sourceType": "markdown",
+    "sourceFilename": "protocol.md",
+    "rawTextRef": null,
+    "rawTextPreview": "# Mindfulness for smoking cessation\n\n## Objectives\nTo assess the efficacy of mindfulness‐based interventions for smoking cessation among people who smoke, and whether these interventions have an effect on mental health outcomes.\n\n## types_of_studies\nRandomised controlled trials (RCTs) and cluster‐RCTs that measured smoking cessation at least six months from baseline were eligible for this review. We included studies reported as full text, those published as abstract only, and unpublished data, w",
+    "rawTextInline": "# Mindfulness for smoking cessation\n\n## Objectives\nTo assess the efficacy of mindfulness‐based interventions for smoking cessation among people who smoke, and whether these interventions have an effect on mental health outcomes.\n\n## types_of_studies\nRandomised controlled trials (RCTs) and cluster‐RCTs that measured smoking cessation at least six months from baseline were eligible for this review. We included studies reported as full text, those published as abstract only, and unpublished data, where available. There were no language or date restrictions.\n\n## types_of_participants\nWe included current tobacco smokers of any age who were willing to enrol in a smoking cessation study. We excluded studies that only recruited pregnant women, as their particular needs and circumstances warrant their treatment as a separate population, and these are covered in a separate Cochrane Review (Chamberlain 2017).\n\n## types_of_interventions\nWe included interventions targeted at tobacco smoking cessation that were either labelled as mindfulness, or involved a mindfulness‐based approach that could be isolated to investigate effectiveness. There were no restrictions on the minimum duration of the intervention. Where a potentially relevant study intervention was not specifically described as being mindfulness‐based, we discussed as a team (of EN, JLB, NL, SJ) whether it was eligible for inclusion. We intentionally adopted an inclusive approach, including interventions that incorporated mindfulness (e.g. ACT or yoga) in addition to those specifically focused on mindfulness meditation (e.g. MBSR or MBCT) to capture the broadest evidence. Eligible studies had to include at least one of the following comparison (control) interventions: no smoking cessation treatment;another smoking cessation intervention, of any length or intensity (including usual care);another type of mindfulness intervention (e.g. mindfulness of a lower intensity).\n\n## types_of_outcomes\nTo be eligible for inclusion, studies must have measured abstinence at least six months from the start of the intervention. Following the Cochrane Tobacco Addiction Group's standard methods, we excluded studies that only measured abstinence at less than six‐months' follow‐up. In studies with more than one measure of abstinence, we preferred the measure with the strictest criteria, in line with the Russell Standard (West 2005). We used prolonged or continuous abstinence in preference to point prevalence abstinence, and preferred biochemically validated abstinence (e.g. using exhaled carbon monoxide or cotinine measures) over self‐report. We favoured biochemically validated point prevalence abstinence over self‐reported continuous or prolonged abstinence. This could provide us with information on potential benefits or harms of the mindfulness‐based interventions. Even if comparisons of mindfulness‐based interventions with other smoking cessation interventions do not find a benefit of mindfulness for smoking cessation, improved mental well‐being could be a reason for choosing this treatment over another. We assessed validated measures of the following relevant constructs: depression;anxiety;quality of life;positive affect;negative affect;stress. We extracted data on these mental health and well‐being outcomes, measured at the longest follow‐up at which abstinence was reported, or as close to this as possible.\n"
+  },
+  "blocks": {
+    "blocks": [
+      {
+        "blockLabel": "Smoking",
+        "description": "タバコ喫煙、禁煙、ニコチン依存など、対象者（喫煙者）および目的とする行動（禁煙）に関する概念。",
+        "aiGenerated": true,
+        "note": ""
+      },
+      {
+        "blockLabel": "Mindfulness",
+        "description": "マインドフルネス、瞑想、マインドフルネスストレス低減法（MBSR）、マインドフルネス認知療法（MBCT）、アクセプタンス＆コミットメントセラピー（ACT）、ヨガなど、マインドフルネスに基づく介入に関する概念。",
+        "aiGenerated": true,
+        "note": ""
+      }
+    ],
+    "combinationExpression": "#1 AND #2"
+  },
+  "formula": {
+    "blocks": [
+      {
+        "id": "1",
+        "expression": "(\"Smoking Cessation\"[Mesh] OR \"Smoking\"[Mesh] OR \"Tobacco Use Disorder\"[Mesh] OR \"Tobacco Use\"[Mesh] OR \"Tobacco Use Cessation Devices\"[Mesh] OR \"smoking\"[tiab] OR smoker*[tiab] OR \"smoking cessation\"[tiab] OR \"quit smoking\"[tiab] OR \"quitting smoking\"[tiab] OR \"stop smoking\"[tiab] OR \"cessation\"[tiab] OR \"tobacco\"[tiab] OR \"nicotine\"[tiab] OR cigarette*[tiab])",
+        "isCombination": false
+      },
+      {
+        "id": "2",
+        "expression": "(\"Mindfulness\"[Mesh] OR \"Meditation\"[Mesh] OR \"Yoga\"[Mesh] OR \"Acceptance and Commitment Therapy\"[Mesh] OR \"Cognitive Behavioral Therapy\"[Mesh] OR \"mindfulness\"[tiab] OR \"mindfulness-based\"[tiab] OR \"mindfulness training\"[tiab] OR \"mindfulness-based addiction treatment\"[tiab] OR \"MBAT\"[tiab] OR \"MBSR\"[tiab] OR \"MBCT\"[tiab] OR \"meditation\"[tiab] OR \"meditative\"[tiab] OR \"yoga\"[tiab] OR \"Iyengar yoga\"[tiab] OR \"acceptance and commitment\"[tiab])",
+        "isCombination": false
+      },
+      {
+        "id": "RCTfilter",
+        "expression": "(randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh]))",
+        "isCombination": false
+      },
+      {
+        "id": "3",
+        "expression": "#1 AND #2 AND #RCTfilter",
+        "isCombination": true
+      }
+    ],
+    "combinationExpression": "#1 AND #2 AND #RCTfilter"
+  },
+  "formulaMd": "## PubMed/MEDLINE\n\n```\n#1 (\"Smoking Cessation\"[Mesh] OR \"Smoking\"[Mesh] OR \"Tobacco Use Disorder\"[Mesh] OR \"Tobacco Use\"[Mesh] OR \"Tobacco Use Cessation Devices\"[Mesh] OR \"smoking\"[tiab] OR smoker*[tiab] OR \"smoking cessation\"[tiab] OR \"quit smoking\"[tiab] OR \"quitting smoking\"[tiab] OR \"stop smoking\"[tiab] OR \"cessation\"[tiab] OR \"tobacco\"[tiab] OR \"nicotine\"[tiab] OR cigarette*[tiab])\n#2 (\"Mindfulness\"[Mesh] OR \"Meditation\"[Mesh] OR \"Yoga\"[Mesh] OR \"Acceptance and Commitment Therapy\"[Mesh] OR \"Cognitive Behavioral Therapy\"[Mesh] OR \"mindfulness\"[tiab] OR \"mindfulness-based\"[tiab] OR \"mindfulness training\"[tiab] OR \"mindfulness-based addiction treatment\"[tiab] OR \"MBAT\"[tiab] OR \"MBSR\"[tiab] OR \"MBCT\"[tiab] OR \"meditation\"[tiab] OR \"meditative\"[tiab] OR \"yoga\"[tiab] OR \"Iyengar yoga\"[tiab] OR \"acceptance and commitment\"[tiab])\n#RCTfilter (randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh]))\n#3 #1 AND #2 AND #RCTfilter\n```\n",
+  "seedContext": {
+    "titles": [
+      "Efficacy of mindfulness-based addiction treatment (MBAT) for smoking cessation and lapse recovery: A randomized clinical trial.",
+      "Brief mindfulness training for smoking cessation in Chinese women in workplaces: A pilot randomized controlled trial.",
+      "Testing the efficacy of yoga as a complementary therapy for smoking cessation: design and methods of the BreathEasy trial."
+    ],
+    "samples": [
+      {
+        "title": "Efficacy of mindfulness-based addiction treatment (MBAT) for smoking cessation and lapse recovery: A randomized clinical trial.",
+        "abstract": "OBJECTIVE: To compare the efficacy of Mindfulness-Based Addiction Treatment (MBAT) to a Cognitive Behavioral Treatment (CBT) that matched MBAT on treatment contact time, and a Usual Care (UC) condition that comprised brief individual counseling.\n\nMETHOD: Participants (N = 412) were 48.2% African American, 41.5% non-Latino White, 5.4% Latino, and 4.9% other, and 57.6% reported a total annual household income < $30,000. The majority of participants were female (54.9%). Mean cigarettes per day was 19.9 (SD = 10.1). Following the baseline visit, participants were randomized to UC (n = 103), CBT (n = 155), or MBAT (n = 154). All participants were given self-help materials and nicotine patch therapy. CBT and MBAT groups received 8 2-hr in-person group counseling sessions. UC participants received 4 brief individual counseling sessions. Biochemically verified smoking abstinence was assessed 4 and 26 weeks after the quit date.\n\nRESULTS: Logistic random effects model analyses over time indicated no overall significant treatment effects (completers only: F(2, 236) = 0.29, p = .749; intent-to-treat: F(2, 401) = 0.9, p = .407). Among participants classified as smoking at the last treatment session, analyses examining the recovery of abstinence revealed a significant overall treatment effect, F(2, 103) = 4.41, p = .015 (MBAT vs. CBT: OR = 4.94, 95% CI: 1.47 to 16.59, p = .010, Effect Size = .88; MBAT vs. UC: OR = 4.18, 95% CI: 1.04 to 16.75, p = .043, Effect Size = .79).\n\nCONCLUSION: Although there were no overall significant effects of treatment on abstinence, MBAT may be more effective than CBT or UC in promoting recovery from lapses. (PsycINFO Database Record"
+      },
+      {
+        "title": "Brief mindfulness training for smoking cessation in Chinese women in workplaces: A pilot randomized controlled trial.",
+        "abstract": "INTRODUCTION: Mindfulness training (MT) has shown preliminary efficacy as a behavioral treatment for smoking cessation. We examined the effect of a brief-MT intervention on smoking cessation for Chinese women in workplaces in Hong Kong, China.\n\nMETHODS: In this pilot randomized controlled trial, 213 daily smokers were recruited from workplaces and computer-randomized into the intervention (n = 114) or control (n = 99) groups. Participants in both groups received a self-help booklet. Participants in the intervention group additionally attended 2 sessions of a brief-MT workshop. The primary outcome was self-reported 7-day point-prevalence abstinence (PPA) at 6 months. Secondary outcomes were biochemically validated abstinence (exhaled CO < 4 ppm and salivary cotinine < 10 ng/mL) and smoking reduction at 6 months. Analyses were done by intention to treat. We conducted a post-trial qualitative evaluation on participants in the intervention group (n = 14). Data were analyzed thematically.\n\nRESULTS: At 6-month follow-up, self-reported 7-day PPA were similar between the intervention and control groups (18.4% vs. 21.2%; P = 0.61). Very few participated in biochemical validation (n = 17), and validated abstinence and smoking reduction rates showed no significant difference (5.3% vs. 11.1%, P = 0.12 and 20.2% vs. 20.2%, P = 1.00, respectively). A posteriori analysis showed that brief-MT participants who were psychologically engaged with the intervention had greater 6-month PPA. Qualitative evaluation showed brief-MT reduced stress but its effectiveness was restrained by the insufficient home practice.\n\nCONCLUSIONS: This pilot trial on a brief-MT intervention for smoking cessation on Chinese women in workplaces showed feasibility, but improving compliance is needed to maximize the efficacy in future fully powered trials."
+      },
+      {
+        "title": "Testing the efficacy of yoga as a complementary therapy for smoking cessation: design and methods of the BreathEasy trial.",
+        "abstract": "INTRODUCTION: Smokers trying to quit encounter many challenges including nicotine withdrawal symptoms, cigarette craving, increased stress and negative mood and concern regarding weight gain. These phenomena make it difficult to successfully quit smoking. Studies in non-smoking populations show that yoga reduces stress and negative mood and improves weight control. By increasing mindfulness we anticipate that yoga may also improve smokers' ability to cope with the negative symptoms associated with quitting. Yoga may also improve cognitive deliberation which is needed to make effective choices and avoid smoking in tempting situations.\n\nMETHODS/DESIGN: The BreathEasy study is a rigorous, randomized controlled clinical trial examining the efficacy of Iyengar yoga as a complementary therapy to cognitive-behavioral therapy for smoking cessation. All participants are given an 8-week program of smoking cessation classes, and are randomized to either twice weekly yoga (Yoga) or twice-weekly health and wellness classes which serve as a control for contact and participant burden (CTL). Assessments are conducted at baseline, 8 weeks, 3, 6, and 12 months of follow-up. The primary outcome is prolonged abstinence using an intention-to-treat approach. Multiple internal and external audits using blind data collection are employed to ensure treatment fidelity and reliability of study results. To understand why yoga may be more effective than CTL, we will examine the mechanisms of action (i.e., mediators) underlying intervention efficacy. We will examine the maintenance of yoga practice and smoking status at each follow-up. Focus groups and interviews will be used to enrich our understanding of the relationship of yoga practice and smoking abstinence.\n\nCONCLUSIONS: This study will provide a stringent test of the relative efficacy of yoga compared to a condition that controls for contact time and attention. The use of mixed methodology also provides the opportunity to validate existing knowledge about yoga and helps to explore new themes for future mindfulness and yoga research."
+      }
+    ],
+    "meshSummary": {
+      "seedCount": 3,
+      "concepts": [
+        {
+          "descriptor": "Smoking Cessation",
+          "count": 3,
+          "majorCount": 1,
+          "qualifiers": [
+            {
+              "name": "methods",
+              "count": 1
+            },
+            {
+              "name": "psychology",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Mindfulness",
+          "count": 2,
+          "majorCount": 1,
+          "qualifiers": [
+            {
+              "name": "methods",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Age Factors",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "China",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Cognitive Behavioral Therapy",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "methods",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Combined Modality Therapy",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Counseling",
+          "count": 1,
+          "majorCount": 1,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Health Behavior",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Health Status",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Hong Kong",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Motivation",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Pilot Projects",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Reproducibility of Results",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Research Design",
+          "count": 1,
+          "majorCount": 1,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Sex Factors",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Smoking",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "psychology",
+              "count": 1
+            },
+            {
+              "name": "therapy",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Substance Withdrawal Syndrome",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "epidemiology",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Tobacco Use Cessation Devices",
+          "count": 1,
+          "majorCount": 1,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Tobacco Use Disorder",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "therapy",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Treatment Outcome",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Workplace",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Yoga",
+          "count": 1,
+          "majorCount": 1,
+          "qualifiers": []
+        }
+      ],
+      "checkTags": [
+        {
+          "descriptor": "Female",
+          "count": 3
+        },
+        {
+          "descriptor": "Humans",
+          "count": 3
+        },
+        {
+          "descriptor": "Male",
+          "count": 2
+        },
+        {
+          "descriptor": "Adult",
+          "count": 1
+        },
+        {
+          "descriptor": "Middle Aged",
+          "count": 1
+        }
+      ]
+    }
+  },
+  "blockApproval": "auto",
+  "sha256": "055d06ef0ad3aad39b3dd0bf437f75fe88a89ebda43847b404f1c324be6ffe8c"
+}

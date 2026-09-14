@@ -1,0 +1,299 @@
+{
+  "schemaVersion": 1,
+  "caseId": "r2-pdr-prognostic",
+  "variant": "seeded",
+  "draftIndex": 11,
+  "seedSplit": "s20260912",
+  "targetHits": 2000,
+  "model": "gemini-3.5-flash",
+  "createdAt": "2026-09-14T13:43:18.206Z",
+  "gitCommit": "76f6b600063a86b9d4ca96098f0760ba224d06fe",
+  "gitDirty": true,
+  "protocol": {
+    "frameworkType": "peco",
+    "researchQuestion": "糖尿病網膜症患者において、増殖糖尿病網膜症（PDR）への発症および進行を予測する予後因子は何か。",
+    "inclusionCriteria": "18歳以上の糖尿病網膜症（NPDRまたは高リスク未満のPDR）患者\n人口統計学的情報、臨床データ、網膜バイオマーカーなどの予後因子\nPDRの発症（NVD/NVEの存在、レーザー治療の実施）または高リスクPDR（HRC-PDR）への進行\n前向き・後ろ向きコホート研究、縦断的症例対照研究、縦断的レジストリ研究",
+    "exclusionCriteria": "糖尿病網膜症に対する治療歴がある患者\n介入効果を評価するランダム化比較試験（RCT）\n横断研究、症例報告、意見書、レター\n房水・硝子体採取などの侵襲的な手順を伴う予後因子の評価",
+    "studyDesign": "observational",
+    "blocks": [
+      {
+        "blockLabel": "Diabetic Retinopathy",
+        "description": "対象集団である糖尿病網膜症（非増殖糖尿病網膜症などを含む）の患者を特定するための概念。"
+      },
+      {
+        "blockLabel": "Proliferative Diabetic Retinopathy",
+        "description": "アウトカムまたは進行先である増殖糖尿病網膜症（PDR）や高リスクPDR（HRC-PDR）を特定するための概念。"
+      },
+      {
+        "blockLabel": "Prognostic Factors",
+        "description": "予後因子、予測因子、リスク因子、または縦断的な経過や進行を特定するための概念。"
+      }
+    ],
+    "combinationExpression": "#1 AND #2 AND #3",
+    "sourceType": "markdown",
+    "sourceFilename": "protocol.md",
+    "rawTextRef": null,
+    "rawTextPreview": "# Prognostic factors for the development and progression of proliferative diabetic retinopathy in people with diabetic retinopathy\n\n## Objectives\nTo assess prognostic factors for predicting the occurrence of PDR in individuals with diabetic retinopathy. To assess prognostic risk factors for predicting the progression of PDR from less than HRC‐PDR to HRC‐PDR.\n\n## types_of_studies\nEligible study designs included prospective or retrospective cohort and case‐control longitudinal studies including pa",
+    "rawTextInline": "# Prognostic factors for the development and progression of proliferative diabetic retinopathy in people with diabetic retinopathy\n\n## Objectives\nTo assess prognostic factors for predicting the occurrence of PDR in individuals with diabetic retinopathy. To assess prognostic risk factors for predicting the progression of PDR from less than HRC‐PDR to HRC‐PDR.\n\n## types_of_studies\nEligible study designs included prospective or retrospective cohort and case‐control longitudinal studies including participants who have not had previous treatment for DR. Although we initially planned to include randomised controlled trials (RCTs) evaluating therapeutic interventions to prevent progression of DR where there was a control, untreated arm, ultimately we decided not to include these (see Differences between protocol and review). We also included studies based on longitudinal registry data. It was a mandatory requirement for inclusion in the review that studies had to evaluate prognostic factors specifically for the development and progression of PDR, as opposed to generalised progression of DR. Studies investigating general microvascular complications of diabetes but including a subset of data related to factors involved in the development of PDR were eligible for inclusion if specific information on this group (PDR) was given. We excluded case reports, as they would have introduced selection bias, and editorials and letters to editors not containing primary data. We did not include cross‐sectional studies, as this type of study design is less appropriate for the evaluation of prognostic factors for the development or progression of disease.\n\n## types_of_participants\nThe target population consisted of adults (≥ 18 years of age) of any gender with NPDR or PDR with less than HRC‐PDR, diagnosed as per standard clinical practice. Studies including participants of all ethnicities, geographical locations, and socioeconomic status were eligible for inclusion. Any appropriate studies including a subset of relevant participants were considered as potentially eligible if data from this subset were given separately.\n\n## types_of_interventions\nThis review considered and included prognostic factor studies only. Specific prognostic factors of interest included, but were not restricted to: routinely collected patient demographics and information, such as age, gender, ethnicity, socioeconomic status, and smoking habits;frequently obtained standard clinical data, such as comorbidities (presence/absence of cardiovascular disease, cerebrovascular disease, nephropathy and specifically chronic kidney failure (defined as estimated GFR of < 60 mL/min/1.73 m2), peripheral neuropathy and specifically foot ulcers, amputation), BMI, neck/waist circumference, glycated haemoglobin, blood pressure, low‐density lipoprotein, high‐density lipoprotein, triglycerides; andfunctional and structural retinal biomarkers in the prognostic context of the development and progression of PDR. We excluded studies evaluating prognostic factors involving invasive procedures that cannot be practically undertaken in a clinical setting (such as aqueous/vitreous sampling) and are thus unlikely to be translatable to routine clinical practice. We expected that prognostic factors would generally have been measured at the time participants entered the studies, and indeed after diagnosis of DR or PDR. If measures of prognostic factors were available at other time points, and these coincided in more than one study, we planned to consider investigating them at these other time points.\n\n## types_of_outcomes\nThe development of PDR was determined by the presence of NVD or NVE, as diagnosed based on fundus examination, fundus photography, or fundus fluorescein angiography. We considered participants requiring laser treatment for PDR specifically to have progressed to the outcome of PDR. Progression from less than HRC‐PDR to HRC‐PDR. HRC‐PDR was defined according to the ETDRS as: i) NVD 0.5 disc area plus vitreous haemorrhage or pre‐retinal haemorrhage; ii) vitreous haemorrhage or pre‐retinal haemorrhage obscuring more than one disc area (Diabetic Retinopathy Study Research Group 1991). These features could have been determined by clinical examination or by the grading of ophthalmic images, both fundus photography and fundus fluorescein angiograms. Participants requiring laser treatment for HRC‐PDR specifically were considered as having progressed to the outcome of HRC‐PDR. The time horizon for the evaluation of health outcomes in this review was three years (± two years), eight years (± two years), or lifelong, if available. If not, we accepted and presented other time points.\n"
+  },
+  "blocks": {
+    "blocks": [
+      {
+        "blockLabel": "Diabetic Retinopathy",
+        "description": "対象集団である糖尿病網膜症（非増殖糖尿病網膜症などを含む）の患者を特定するための概念。",
+        "aiGenerated": true,
+        "note": ""
+      },
+      {
+        "blockLabel": "Proliferative Diabetic Retinopathy",
+        "description": "アウトカムまたは進行先である増殖糖尿病網膜症（PDR）や高リスクPDR（HRC-PDR）を特定するための概念。",
+        "aiGenerated": true,
+        "note": ""
+      },
+      {
+        "blockLabel": "Prognostic Factors",
+        "description": "予後因子、予測因子、リスク因子、または縦断的な経過や進行を特定するための概念。",
+        "aiGenerated": true,
+        "note": ""
+      }
+    ],
+    "combinationExpression": "#1 AND #2 AND #3"
+  },
+  "formula": {
+    "blocks": [
+      {
+        "id": "1",
+        "expression": "(\"Diabetic Retinopathy\"[Mesh] OR \"diabetic retinopathy\"[tiab] OR \"diabetic retinopathies\"[tiab] OR \"diabetic eye disease*\"[tiab] OR \"diabetic macular edema\"[tiab] OR \"diabetic macular oedema\"[tiab] OR \"retinopathy in diabetes\"[tiab] OR \"diabetic microangiopathy\"[tiab] OR \"NPDR\"[tiab] OR \"PDR\"[tiab] OR \"DME\"[tiab])",
+        "isCombination": false
+      },
+      {
+        "id": "2",
+        "expression": "(\"Diabetic Retinopathy\"[Mesh] OR \"Disease Progression\"[Mesh] OR \"Retinal Neovascularization\"[Mesh] OR \"proliferative diabetic retinopath*\"[tiab] OR \"proliferative retinopath*\"[tiab] OR \"PDR\"[tiab] OR \"high risk proliferative diabetic retinopath*\"[tiab] OR \"HR-PDR\"[tiab] OR \"HRC-PDR\"[tiab] OR \"advanced diabetic retinopath*\"[tiab])",
+        "isCombination": false
+      },
+      {
+        "id": "3",
+        "expression": "(\"Prognosis\"[Mesh] OR \"Risk Factors\"[Mesh] OR \"Disease Progression\"[Mesh] OR \"Cohort Studies\"[Mesh] OR \"Prospective Studies\"[Mesh] OR \"Follow-Up Studies\"[Mesh] OR prognos*[tiab] OR predict*[tiab] OR risk factor*[tiab] OR progress*[tiab] OR course*[tiab] OR longitudinal*[tiab] OR prospective*[tiab] OR cohort*[tiab] OR follow-up*[tiab] OR deteriorat*[tiab] OR worsen*[tiab] OR retrospective*[tiab] OR hazard ratio*[tiab])",
+        "isCombination": false
+      },
+      {
+        "id": "4",
+        "expression": "#1 AND #2 AND #3",
+        "isCombination": true
+      }
+    ],
+    "combinationExpression": "#1 AND #2 AND #3"
+  },
+  "formulaMd": "## PubMed/MEDLINE\n\n```\n#1 (\"Diabetic Retinopathy\"[Mesh] OR \"diabetic retinopathy\"[tiab] OR \"diabetic retinopathies\"[tiab] OR \"diabetic eye disease*\"[tiab] OR \"diabetic macular edema\"[tiab] OR \"diabetic macular oedema\"[tiab] OR \"retinopathy in diabetes\"[tiab] OR \"diabetic microangiopathy\"[tiab] OR \"NPDR\"[tiab] OR \"PDR\"[tiab] OR \"DME\"[tiab])\n#2 (\"Diabetic Retinopathy\"[Mesh] OR \"Disease Progression\"[Mesh] OR \"Retinal Neovascularization\"[Mesh] OR \"proliferative diabetic retinopath*\"[tiab] OR \"proliferative retinopath*\"[tiab] OR \"PDR\"[tiab] OR \"high risk proliferative diabetic retinopath*\"[tiab] OR \"HR-PDR\"[tiab] OR \"HRC-PDR\"[tiab] OR \"advanced diabetic retinopath*\"[tiab])\n#3 (\"Prognosis\"[Mesh] OR \"Risk Factors\"[Mesh] OR \"Disease Progression\"[Mesh] OR \"Cohort Studies\"[Mesh] OR \"Prospective Studies\"[Mesh] OR \"Follow-Up Studies\"[Mesh] OR prognos*[tiab] OR predict*[tiab] OR risk factor*[tiab] OR progress*[tiab] OR course*[tiab] OR longitudinal*[tiab] OR prospective*[tiab] OR cohort*[tiab] OR follow-up*[tiab] OR deteriorat*[tiab] OR worsen*[tiab] OR retrospective*[tiab] OR hazard ratio*[tiab])\n#4 #1 AND #2 AND #3\n```\n",
+  "seedContext": {
+    "titles": [
+      "The Importance of Close Follow-Up in Patients with Early-Grade Diabetic Retinopathy: A Taiwan Population-Based Study Grading via Deep Learning Model.",
+      "Prevalence and Progression Rate of Diabetic Retinopathy in Type 2 Diabetes Patients in Correlation with the Duration of Diabetes.",
+      "[Diabetes mellitus and its degenerative complications: a prospective study of 4,400 patients observed between 1947 and 1973 (2nd part) (author's transl)]."
+    ],
+    "samples": [
+      {
+        "title": "The Importance of Close Follow-Up in Patients with Early-Grade Diabetic Retinopathy: A Taiwan Population-Based Study Grading via Deep Learning Model.",
+        "abstract": "(1) Background: Diabetic retinopathy (DR) can cause blindness. Current guidelines on diabetic eye care recommend more frequent eye examinations for more severe DR to prevent deterioration. However, close follow-up and early intervention at earlier stages are important for the prevention of disease progression of other diabetes mellitus (DM) complications. The study was designed to investigate the association between different stages of DR in type 2 DM patients and the progression of DR; (2) Methods: A total of 2623 type 2 DM patients were included in this study. In these patients, a total of 14,409 fundus color photographs was obtained. The primary outcome was the progression of DR; (3) Results: The progression of DR was highly associated with the initial grade of DR (p < 0.001). Severe nonproliferative diabetic retinopathy (NPDR) was the most likely to progress to proliferative diabetic retinopathy (PDR), followed by moderate NPDR, mild NPDR, and no retinopathy. However, progression to the next stage of DR showed a different trend. We used no retinopathy as a reference. Mild NPDR showed the highest risk for progression to the next stage [hazard ratio (HR): 2.00 (95% conference interval (CI): 1.72-2.32)] relative to higher initial grades [HR (moderate NPDR): 1.82 (95% CI: 1.58-2.09) and HR (severe NPDR): 0.87 (95% CI: 0.69-1.09)]. The same trend was observed in the multivariate analysis, in which mild NPDR presented the highest risk for progression to the next stage (adjusted HR (mild NPDR): 1.95 (95% CI: 1.68-2.27), adjusted HR (moderate NPDR): 1.73 (95% CI: 1.50-1.99), and adjusted HR (severe NPDR): 0.82 (95% CI: 0.65-1.03)); (4) Conclusions: Type 2 diabetic patients with earlier-grade DR appeared to exhibit more rapid development to the next grade in our study. As these findings show, more frequent fundus color photography follow-up in earlier-grade DR patients is important to slow DR progression and awaken self-perception."
+      },
+      {
+        "title": "Prevalence and Progression Rate of Diabetic Retinopathy in Type 2 Diabetes Patients in Correlation with the Duration of Diabetes.",
+        "abstract": "AIMS: We examined prevalence and progression of retinopathy in dependence on diabetes duration in order to estimate the probability of progression.\n\nPATIENTS/METHODS: In a retrospective cohort-analysis from an academic outpatient department of endocrinology and metabolic diseases we analyzed 17461 consultations of 4513 patients with DM2 from 1987 to 2014. 50.3% of the patients (n=2272) had at least one documented result of funduscopy.\n\nRESULTS: 25.8% of the patients had retinopathy (20.2% non-proliferative, 4.7% proliferative, 0.7% were not classified, 0.1% blindness). The prevalence of retinopathy in dependence on diabetes duration was 1.1% at diagnosis, 6.6% after 0<5 years, 12% after 5<10 years, 24% after 10<15 years, 39.9% after 15<20 years, 52.7% after 20<25 years, 58.7% after 25<30 years and 63% after ≥30 years. In a subset of 586 (25.7%) patients with retinal photography of 3 consecutive years 7.0% showed deterioration after one and 12.2% after two years; 2.6% improved after one and 2.8% after two years. 201 (34.3%) of this group had<10 years diabetes and lower deterioration (4.5% worsened after one and 9.5% after two years). Their retinopathy mainly transformed from no retinopathy to non-proliferative. Four patients (2.0%) developed proliferative retinopathy.\n\nCONCLUSIONS/INTERPRETATIONS: Within the first 10 years of diabetes duration, the prevalence of retinopathy is low and the progression infrequent. Most patients have a non-proliferative form which can be reversible and rarely requires interventions. Patients with DM2 without retinopathy and good glycaemic control do not run into additional risk from expanding funduscopy intervals to biennial."
+      },
+      {
+        "title": "[Diabetes mellitus and its degenerative complications: a prospective study of 4,400 patients observed between 1947 and 1973 (2nd part) (author's transl)].",
+        "abstract": null
+      }
+    ],
+    "meshSummary": {
+      "seedCount": 3,
+      "concepts": [
+        {
+          "descriptor": "Diabetic Retinopathy",
+          "count": 3,
+          "majorCount": 1,
+          "qualifiers": [
+            {
+              "name": "epidemiology",
+              "count": 3
+            },
+            {
+              "name": "diagnostic imaging",
+              "count": 1
+            },
+            {
+              "name": "etiology",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Diabetes Mellitus, Type 2",
+          "count": 2,
+          "majorCount": 1,
+          "qualifiers": [
+            {
+              "name": "complications",
+              "count": 2
+            },
+            {
+              "name": "epidemiology",
+              "count": 2
+            }
+          ]
+        },
+        {
+          "descriptor": "Age Factors",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Deep Learning",
+          "count": 1,
+          "majorCount": 1,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Diabetes Complications",
+          "count": 1,
+          "majorCount": 1,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Diabetes Mellitus",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "genetics",
+              "count": 1
+            },
+            {
+              "name": "therapy",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Diabetic Nephropathies",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "epidemiology",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Diabetic Neuropathies",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "epidemiology",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Disease Progression",
+          "count": 1,
+          "majorCount": 1,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Follow-Up Studies",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Prevalence",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Prospective Studies",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Retinoscopy",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "statistics & numerical data",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Retrospective Studies",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Risk Factors",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Taiwan",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "epidemiology",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Time Factors",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        }
+      ],
+      "checkTags": [
+        {
+          "descriptor": "Humans",
+          "count": 3
+        },
+        {
+          "descriptor": "Aged",
+          "count": 2
+        },
+        {
+          "descriptor": "Middle Aged",
+          "count": 2
+        },
+        {
+          "descriptor": "Adolescent",
+          "count": 1
+        },
+        {
+          "descriptor": "Adult",
+          "count": 1
+        },
+        {
+          "descriptor": "Female",
+          "count": 1
+        },
+        {
+          "descriptor": "Male",
+          "count": 1
+        }
+      ]
+    }
+  },
+  "blockApproval": "auto",
+  "sha256": "1fb2d3d06fc23f33051d00fa8f26e88cf002c33fb27a74596ae5a3195d68c904"
+}

@@ -1,0 +1,304 @@
+{
+  "schemaVersion": 1,
+  "caseId": "r3-vascular-bleeding",
+  "variant": "seeded",
+  "draftIndex": 11,
+  "seedSplit": "s20260912",
+  "targetHits": 2000,
+  "model": "gemini-3.5-flash",
+  "createdAt": "2026-09-14T13:57:00.117Z",
+  "gitCommit": "76f6b600063a86b9d4ca96098f0760ba224d06fe",
+  "gitDirty": true,
+  "protocol": {
+    "frameworkType": "pico",
+    "researchQuestion": "主要な開創血管手術または血管内治療を受ける患者において、抗線溶薬および止血薬が出血および輸血の必要性を減少させる効果と安全性について評価する。",
+    "inclusionCriteria": "18歳以上の成人\n主要な血管外科手術（大動脈瘤・解離の開創修復術、末梢動脈疾患の開創バイパス術、主要な下肢切断術、緊急・準緊急の血管内大動脈修復術（EVAR）、末梢動脈疾患の血管内ステント留置術など）を受ける患者\n抗線溶薬（トラネキサム酸、ε-アミノカプロン酸、アプロチニン）、デスモプレシン、プロトロンビン複合体製剤（PCC）、遺伝子組み換え第VII因子（rFVII）、第XIII因子（FXIII）、フィブリノゲン製剤、局所止血剤の投与\nランダム化比較試験（RCT）およびクラスターRCT",
+    "exclusionCriteria": "実験室的アウトカムのみを測定する研究\n心臓外科医が通常行う手術（上行大動脈・大動脈基部手術、冠動脈バイパス術など）\n待機的血管内治療\n出血や輸血が極めて少ない手術（頸動脈手術、透析用動静脈瘻造設術、静脈瘤手術、上肢・指切断術）\n脳神経外科医が通常行う手術（頭頸部の大動脈瘤・解離修復術）\n既知の遺伝性凝固障害（フォン・ヴィレブランド病、血友病、低フィブリノゲン血症など）を持つ患者",
+    "studyDesign": "RCT",
+    "blocks": [
+      {
+        "blockLabel": "Vascular Surgery",
+        "description": "大動脈瘤修復術、末梢動脈バイパス術、下肢切断術、緊急血管内治療などの主要な血管外科手術および血管内治療を受ける患者群を特定する概念。"
+      },
+      {
+        "blockLabel": "Haemostatic Agents",
+        "description": "抗線溶薬（トラネキサム酸、アプロチニン等）、デスモプレシン、凝固因子製剤（PCC、rFVII等）、局所止血剤などの止血・抗線溶作用を持つ薬剤を特定する概念。"
+      }
+    ],
+    "combinationExpression": "#1 AND #2",
+    "sourceType": "markdown",
+    "sourceFilename": "protocol.md",
+    "rawTextRef": null,
+    "rawTextPreview": "# Drugs to reduce bleeding and transfusion in major open vascular or endovascular surgery: a systematic review and network meta‐analysis\n\n## Objectives\nTo assess the effectiveness and safety of anti‐fibrinolytic and haemostatic drugs and agents in reducing bleeding and the need for blood transfusion in people undergoing major vascular surgery or vascular procedures with a risk of moderate or severe (> 500 mL) blood loss.\n\n## types_of_studies\nWe prespecified our methods for conducting this review",
+    "rawTextInline": "# Drugs to reduce bleeding and transfusion in major open vascular or endovascular surgery: a systematic review and network meta‐analysis\n\n## Objectives\nTo assess the effectiveness and safety of anti‐fibrinolytic and haemostatic drugs and agents in reducing bleeding and the need for blood transfusion in people undergoing major vascular surgery or vascular procedures with a risk of moderate or severe (> 500 mL) blood loss.\n\n## types_of_studies\nWe prespecified our methods for conducting this review in the review protocol (Beverly 2020). We included randomised controlled trials (RCTs) and cluster‐RCTs if the analyses accounted for clustering, or if we were able to adequately adjust for clustering (McKenzie 2016). We included all studies regardless of their language or publication status. We excluded studies with purely experimental laboratory outcomes (for example blood tests for inflammatory markers).\n\n## types_of_participants\nWe included adults (18 years or over) undergoing the following emergency, urgent and elective procedures. Open surgical repair (OSR) of aneurysm of the:abdominal aorta (AAA);thoracic aorta (TAA);thoraco‐abdominal aorta (TAAA);iliac artery;femoral artery; orpopliteal artery.OSR or endovascular repair of dissection of the:abdominal aorta;thoracic aorta; orthoraco‐abdominal aorta.Open bypass surgery for peripheral arterial disease of the:aortic artery;iliac artery;femoral artery; orpopliteal artery.Major lower limb amputation for vascular disease:below knee;above knee; orhindquarter. We included adults (18 years or over) undergoing the following emergency or urgent procedures. Endovascular aneurysm repair (EVAR) of the:abdominal aorta (AAA);thoracic aorta (TAA);thoraco‐abdominal aorta (TAAA);iliac artery;femoral artery; orpopliteal artery.Endovascular stenting for peripheral arterial disease of the:aortic artery;iliac artery;femoral artery; orpopliteal artery We included participants undergoing surgery with or without aortic cross clamping and with or without use of hypothermia. We included participants undergoing open, modifications of open, and minimally invasive, e.g. laparoscopic, surgical approaches. We excluded procedures typically performed by or in conjunction with cardiac surgeons, such as those on the ascending aorta and aortic root, or those using coronary artery bypass grafting. These are the topic of a separate ongoing Cochrane Review entitled Drugs to reduce bleeding and transfusion in adults undergoing cardiac surgery; a systematic review and network meta‐analysis (Beverly 2019). We excluded studies involving elective endovascular procedures. We excluded procedures associated with minimal bleeding and transfusion, such as carotid procedures, arterio‐venous fistulae formation for dialysis, varicose vein surgery and upper limb or digit amputations. We also excluded procedures typically performed by neurosurgeons, such as repair of aneurysms or dissection of arteries in the head or neck. We excluded people with known inherited coagulation disorders, such as von Willebrand factor deficiency, haemophilia or hypofibrinogenaemia. This is because the clotting mechanisms that the drugs promote or interact with may be genetically absent, making response atypical. For trials consisting of mixed populations of participants (e.g. including children, or including procedures other than those specified), we only used data from participants 18 years or over undergoing the specified procedures, without clotting disorders. If the subgroup data required were not provided, we excluded the trial if less than 80% of participants were eligible to be included.\n\n## types_of_interventions\nWe included RCTs of the following interventions, compared to usual care, placebo, or each other. Tranexamic acid (TXA)ε‐aminocaproic acid (EACA)AprotininDesmopressinProthrombin complex concentrate (PCC)Recombinant factor VII (rFVII)Factor XIII (FXIII)Fibrinogen concentrateOther topical agents, categorised as:fibrin‐based agents;thrombin‐based agents;synthetic sealants;passive biomaterials; andcombination agents. We included RCTs that compared one or more of the interventions listed above. We included studies using a combination of the above drugs. We did not exclude trials on the basis of the route, dose, timing, or frequency of drug administration. The comparison groups were as defined by the study, which could be a control group using placebo, standard care, or one of the included drugs, if a second additional drug was being investigated.\n\n## types_of_outcomes\nWe were primarily interested in postsurgical outcomes, and especially the need for blood transfusion. We did not include intraoperative outcomes, such as time to haemostasis, because these outcomes are prone to measurement bias and are of limited clinical relevance or interest to health services. Our primary outcomes were: Red cell transfusions (units per participant*) at up to 30 days post surgeryAll‐cause mortality at up to 30 days; and between 31 and 90 days *If the red cell transfusion outcome was reported in mL, we converted that into units, according to any local mean unit volume data given in the study, or as per the Guidelines for the Blood Transfusion Services in the UK mean stated volume per unit of red cells of 280 ± 60 mLs (JPAC 2013). Our secondary outcomes were as follows. Risk of receiving any allogeneic blood product at up to 30 days post surgeryComposite: packed red cells (PRC), fresh frozen plasma (FFP), platelets (PLTs)Components: PRC, FFP, PLTsRisk of reoperation or repeat procedure for bleeding within 7 daysRisk of a thrombotic/thromboembolic eventComposite: myocardial Infarction (MI), cerebrovascular attack (CVA), deep vein thrombosis (DVT), pulmonary embolus (PE) at up to 30 days and between 31 and 90 daysComponents: MI at up to 30 days, CVA at up to 30 days, DVT at up to 90 days, PE at up to 90 daysRisk of a serious adverse event (SAE) at up to 30 days postsurgeryLength of hospital stay (days) We commented on any cost data, if presented, in a narrative form (Ryan 2016). Cost information was provided as useful additional information, but was not intended to be a formal economic evaluation.\n"
+  },
+  "blocks": {
+    "blocks": [
+      {
+        "blockLabel": "Vascular Surgery",
+        "description": "大動脈瘤修復術、末梢動脈バイパス術、下肢切断術、緊急血管内治療などの主要な血管外科手術および血管内治療を受ける患者群を特定する概念。",
+        "aiGenerated": true,
+        "note": ""
+      },
+      {
+        "blockLabel": "Haemostatic Agents",
+        "description": "抗線溶薬（トラネキサム酸、アプロチニン等）、デスモプレシン、凝固因子製剤（PCC、rFVII等）、局所止血剤などの止血・抗線溶作用を持つ薬剤を特定する概念。",
+        "aiGenerated": true,
+        "note": ""
+      }
+    ],
+    "combinationExpression": "#1 AND #2"
+  },
+  "formula": {
+    "blocks": [
+      {
+        "id": "1",
+        "expression": "(\"Vascular Surgical Procedures\"[Mesh] OR \"Endovascular Procedures\"[Mesh] OR \"Blood Vessel Prosthesis Implantation\"[Mesh] OR \"Aortic Aneurysm\"[Mesh] OR \"Vascular Grafting\"[Mesh] OR \"vascular surgery\"[tiab] OR \"vascular surgical\"[tiab] OR vascular procedure*[tiab] OR endovascular[tiab] OR EVAR[tiab] OR TEVAR[tiab] OR \"aortic repair\"[tiab] OR \"aortic reconstruction\"[tiab] OR \"aortic aneurysm repair\"[tiab] OR \"arterial bypass\"[tiab] OR \"peripheral bypass\"[tiab] OR \"vascular reconstruction\"[tiab] OR \"vascular anastomosis\"[tiab] OR \"AAA repair\"[tiab])",
+        "isCombination": false
+      },
+      {
+        "id": "2",
+        "expression": "(\"Hemostatics\"[Mesh] OR \"Antifibrinolytic Agents\"[Mesh] OR \"Aprotinin\"[Mesh] OR \"Tranexamic Acid\"[Mesh] OR \"Thrombin\"[Mesh] OR \"Fibrin Tissue Adhesive\"[Mesh] OR \"Deamino Arginine Vasopressin\"[Mesh] OR \"antifibrinolytic*\"[tiab] OR \"anti-fibrinolytic*\"[tiab] OR \"tranexamic acid\"[tiab] OR \"TXA\"[tiab] OR \"aprotinin\"[tiab] OR \"aminocaproic acid\"[tiab] OR \"desmopressin\"[tiab] OR \"DDAVP\"[tiab] OR \"prothrombin complex concentrate*\"[tiab] OR \"PCC\"[tiab] OR \"factor VIIa\"[tiab] OR \"rFVIIa\"[tiab] OR \"hemostatic*\"[tiab] OR \"haemostatic*\"[tiab] OR \"hemostasis\"[tiab] OR \"haemostasis\"[tiab] OR \"thrombin\"[tiab] OR \"fibrin sealant*\"[tiab] OR \"fibrin glue*\"[tiab] OR \"gelatin-thrombin\"[tiab] OR \"FloSeal\"[tiab] OR \"Gelfoam\"[tiab])",
+        "isCombination": false
+      },
+      {
+        "id": "RCTfilter",
+        "expression": "(randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh]))",
+        "isCombination": false
+      },
+      {
+        "id": "3",
+        "expression": "#1 AND #2 AND #RCTfilter",
+        "isCombination": true
+      }
+    ],
+    "combinationExpression": "#1 AND #2 AND #RCTfilter"
+  },
+  "formulaMd": "## PubMed/MEDLINE\n\n```\n#1 (\"Vascular Surgical Procedures\"[Mesh] OR \"Endovascular Procedures\"[Mesh] OR \"Blood Vessel Prosthesis Implantation\"[Mesh] OR \"Aortic Aneurysm\"[Mesh] OR \"Vascular Grafting\"[Mesh] OR \"vascular surgery\"[tiab] OR \"vascular surgical\"[tiab] OR vascular procedure*[tiab] OR endovascular[tiab] OR EVAR[tiab] OR TEVAR[tiab] OR \"aortic repair\"[tiab] OR \"aortic reconstruction\"[tiab] OR \"aortic aneurysm repair\"[tiab] OR \"arterial bypass\"[tiab] OR \"peripheral bypass\"[tiab] OR \"vascular reconstruction\"[tiab] OR \"vascular anastomosis\"[tiab] OR \"AAA repair\"[tiab])\n#2 (\"Hemostatics\"[Mesh] OR \"Antifibrinolytic Agents\"[Mesh] OR \"Aprotinin\"[Mesh] OR \"Tranexamic Acid\"[Mesh] OR \"Thrombin\"[Mesh] OR \"Fibrin Tissue Adhesive\"[Mesh] OR \"Deamino Arginine Vasopressin\"[Mesh] OR \"antifibrinolytic*\"[tiab] OR \"anti-fibrinolytic*\"[tiab] OR \"tranexamic acid\"[tiab] OR \"TXA\"[tiab] OR \"aprotinin\"[tiab] OR \"aminocaproic acid\"[tiab] OR \"desmopressin\"[tiab] OR \"DDAVP\"[tiab] OR \"prothrombin complex concentrate*\"[tiab] OR \"PCC\"[tiab] OR \"factor VIIa\"[tiab] OR \"rFVIIa\"[tiab] OR \"hemostatic*\"[tiab] OR \"haemostatic*\"[tiab] OR \"hemostasis\"[tiab] OR \"haemostasis\"[tiab] OR \"thrombin\"[tiab] OR \"fibrin sealant*\"[tiab] OR \"fibrin glue*\"[tiab] OR \"gelatin-thrombin\"[tiab] OR \"FloSeal\"[tiab] OR \"Gelfoam\"[tiab])\n#RCTfilter (randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh]))\n#3 #1 AND #2 AND #RCTfilter\n```\n",
+  "seedContext": {
+    "titles": [
+      "Gelatin-thrombin-based hemostatic sealant for intraoperative bleeding in vascular surgery.",
+      "Prospective, Randomized, Phase II, Non-Inferiority Study to Evaluate the Safety and Efficacy of Topical Thrombin (Human) Grifols as Adjunct to Hemostasis During Vascular, Hepatic, Soft Tissue, and Spinal Open Surgery.",
+      "Randomized, multicentre, double-blind, placebo-controlled trial of the use of aprotinin in the repair of ruptured abdominal aortic aneurysm. On behalf of the Joint Vascular Research Group."
+    ],
+    "samples": [
+      {
+        "title": "Gelatin-thrombin-based hemostatic sealant for intraoperative bleeding in vascular surgery.",
+        "abstract": "Vascular surgical procedures may be prolonged because of intraoperative bleeding that is not easily controlled by cautery or suture ligation. This trial compared the ability of a new hemostat, FloSealTM Matrix (FM), with a known hemostat, Gelfoam(R) plus thrombin (GT), to control intraoperative bleeding. Patients undergoing vascular surgery procedures at four institutions were entered in the trial. After a bleeding site was identified, patients were randomized to one of the study agents: (1) FM, a cross-linked gelatin of bovine origin combined with thrombin, or (2) GT. The assigned agent was applied and the site observed for bleeding at 1, 2, 3, 6, and 10 min. The primary end point was cessation of bleeding within 10 min for the first identified site treated. Secondary end points were cessation of bleeding within 10 min for all sites and time to cessation of bleeding. Patients were assessed for morbidity at 30 days and 6-8 weeks after the operation. Analysis was performed on an intent-to-treat basis for analysis of hemostasis at 10 min and on protocol-valid patients for analysis of time to hemostasis. From our results we concluded that for patients undergoing vascular surgery procedures, the new topical hemostat, FloSeal Matrix, provides more rapid and effective hemostasis than Gelfoam plus thrombin."
+      },
+      {
+        "title": "Prospective, Randomized, Phase II, Non-Inferiority Study to Evaluate the Safety and Efficacy of Topical Thrombin (Human) Grifols as Adjunct to Hemostasis During Vascular, Hepatic, Soft Tissue, and Spinal Open Surgery.",
+        "abstract": "BACKGROUND: Thrombin-based formulations have been used for topical hemostasis in surgery for decades. However, the number of randomized clinical trials comparing bovine vs human thrombin is limited.\n\nSTUDY DESIGN: A randomized, double-blind, non-inferiority phase II study evaluated the hemostatic efficacy and safety of plasma-derived topical thrombin (human) Grifols (TTH-Grifols; Instituto Grifols SA) vs bovine THROMBIN JMI (BT-JMI; GenTrac Inc) (2:1 ratio) in vascular, hepatic, soft tissue, and spinal operations. The primary efficacy end point was the percentage of patients achieving hemostasis at target bleeding sites with mild to moderate bleeding (response) within 5 minutes (T5) of treatment application. Non-inferiority was met if the lower limit of the 95% CI of the response ratio of TTH-Grifols relative to BT-JMI by T5 exceeded 0.8. Secondary efficacy variables were the cumulative response by 3 and 4 minutes (T3 and T4), and the number of treatment failures. Safety parameters were assessed.\n\nRESULTS: Randomized patients in TTH-Grifols and BT-JMI groups were n = 137 and n = 68, respectively. In modified intention-to-treat population, rates of hemostasis by T5 were 78.3% (94 of 120) in TTH-Grifols and 80.3% (49 of 61) in BT-JMI (response ratio: 0.973; 95% CI 0.833 to 1.135). Rates of hemostasis in vascular, hepatic, soft tissue, and spinal operations ranged from 75.0% to 82.5% for TTH-Grifols and from 54.5% to 91.7% for BT-JMI. No significant differences in adverse events were observed between treatment groups. Antibodies to bovine factor V antigen were detected in 2 patients exposed to BT-JMI and in none exposed to TTH-Grifols.\n\nCONCLUSIONS: The TTH-Grifols was safe and well tolerated as a local hemostatic agent and was non-inferior to BT-JMI. No antibodies to thrombin developed in TTH-Grifols-treated patients."
+      },
+      {
+        "title": "Randomized, multicentre, double-blind, placebo-controlled trial of the use of aprotinin in the repair of ruptured abdominal aortic aneurysm. On behalf of the Joint Vascular Research Group.",
+        "abstract": "BACKGROUND: The use of aprotinin in cardiac surgery reduces blood transfusion requirements. The aim of this trial was to see whether the same benefit applies in the repair of ruptured abdominal aortic aneurysm (AAA).\n\nMETHODS: In this prospective, randomized trial, nine centres with local ethics committee approval recruited 77 patients with a ruptured AAA. A bolus of aprotinin 2 x 106 units, followed by an infusion of 0.5 x 106 units every 30 min, was administered to 38 patients, and 39 received a placebo infusion. The quantity of blood products transfused during surgery and in the first 12 h after operation was noted, along with the incidence of complications, mortality rates and length of hospital stay.\n\nRESULTS: Seventeen of the 38 patients who received aprotinin and 17 of the 39 given placebo died within 30 days (overall mortality rate 44 per cent). The median amount of blood given to the aprotinin group after operation was 1 (range 0-14) unit, while for the placebo group it was 3 (range 0-13) units (P = 0.02). However, the difference in the total number of units of blood transfused did not reach significance (10 (range 2-29) versus 14 (range 4-38) units respectively).\n\nCONCLUSION: The use of high-dose aprotinin during the repair of a ruptured AAA reduced blood transfusion requirements in the first 12 h after operation, but had no significant effect on the overall blood transfusion requirement."
+      }
+    ],
+    "meshSummary": {
+      "seedCount": 3,
+      "concepts": [
+        {
+          "descriptor": "Hemostatics",
+          "count": 3,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "therapeutic use",
+              "count": 2
+            },
+            {
+              "name": "administration & dosage",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Prospective Studies",
+          "count": 3,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Double-Blind Method",
+          "count": 2,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Thrombin",
+          "count": 2,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "administration & dosage",
+              "count": 1
+            },
+            {
+              "name": "therapeutic use",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Vascular Surgical Procedures",
+          "count": 2,
+          "majorCount": 1,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Administration, Topical",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Aortic Aneurysm, Abdominal",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "surgery",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Aortic Rupture",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "surgery",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Aprotinin",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "therapeutic use",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Blood Loss, Surgical",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "prevention & control",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Blood Transfusion",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Equivalence Trials as Topic",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Gelatin Sponge, Absorbable",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "therapeutic use",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Hemostasis, Surgical",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Hepatectomy",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Intraoperative Care",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "methods",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Serine Proteinase Inhibitors",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "therapeutic use",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Spinal Diseases",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "surgery",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Treatment Outcome",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        }
+      ],
+      "checkTags": [
+        {
+          "descriptor": "Female",
+          "count": 3
+        },
+        {
+          "descriptor": "Humans",
+          "count": 3
+        },
+        {
+          "descriptor": "Male",
+          "count": 3
+        },
+        {
+          "descriptor": "Middle Aged",
+          "count": 3
+        },
+        {
+          "descriptor": "Aged",
+          "count": 2
+        },
+        {
+          "descriptor": "Aged, 80 and over",
+          "count": 1
+        }
+      ]
+    }
+  },
+  "blockApproval": "auto",
+  "sha256": "3d62a6ac9a4e2e278ee8e3cb31119bf4859352f7fc2cf2f77439d854d58ce6b8"
+}

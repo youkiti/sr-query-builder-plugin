@@ -20,6 +20,7 @@ export type Arm = 'current' | 'legacy' | 'legacyLive';
 export interface Slot {
   id: string; caseId: string; variant: C0Variant; split: number | null; slot: number; name: string | null;
   attempts: { draft: number; success: boolean; error: string | null }[];
+  pendingDraft?: number;
 }
 export interface Job {
   id: string; arm: Arm | 'prepare' | 'freeze' | 'score'; caseId: string; c0: string; split: number;
@@ -32,6 +33,11 @@ export interface Options { stage: string; config: string; legacyDir?: string; fi
 export interface Paths { root: string; fixtures: string; results: string }
 export const defaultPaths: Paths = { root: resolve(BENCH, '../..'), fixtures: FIXTURES, results: RESULTS };
 export const readJson = <T>(path: string): T | null => existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) as T : null;
+export const slotsFile = (paths: Paths): string => join(paths.root, 'experiments/query-optimization-bench/rerun/c0-slots.json');
+export function readSlots(paths: Paths): Slot[] {
+  // 旧記録は読み取りだけに使い、次の保存から版管理対象へ移行する。
+  return readJson<Slot[]>(slotsFile(paths)) ?? readJson<Slot[]>(join(paths.results, 'rerun/c0-slots.json')) ?? [];
+}
 const secrets = () => Object.entries(process.env).filter(([key]) => /KEY|TOKEN|SECRET|PASSWORD/i.test(key)).map(([, value]) => value ?? '');
 export const mask = (value: string): string => redact(value, secrets());
 export function atomicJson(path: string, value: unknown): void {
@@ -39,6 +45,13 @@ export function atomicJson(path: string, value: unknown): void {
   const temp = `${path}.${process.pid}.tmp`;
   writeFileSync(temp, mask(JSON.stringify(value, null, 2)) + '\n');
   renameSync(temp, path);
+}
+function saveSlots(path: string, slots: Slot[]): void {
+  // 版管理する失敗理由から、子プロセスのログに含まれる絶対パスも除く。
+  const withoutPaths = (error: string | null) => error?.replace(/(?:[A-Za-z]:[\\/]|\\\\|(?<![\w:/])\/)[^\s"'<>]+/g, '[PATH]') ?? null;
+  atomicJson(path, slots.map((slot) => ({ ...slot,
+    attempts: slot.attempts.map((attempt) => ({ ...attempt, error: withoutPaths(attempt.error) })),
+  })));
 }
 export function readConfig(path = CONFIG): RerunConfig {
   const config = readJson<RerunConfig>(path);
@@ -160,6 +173,10 @@ export const launch: Launch = (job, env, log) => new Promise((resolveExit) => {
 });
 
 export async function executeRerun(config: RerunConfig, options: Options, start: Launch = launch, paths = defaultPaths) {
+  const stages = options.stage === 'all' ? ['prepare', 'freeze', 'run', 'score'] : [options.stage];
+  if (!options.dryRun && stages.some((stage) => stage === 'freeze' || stage === 'run') && !process.env.GEMINI_API_KEY?.trim()) {
+    throw new Error('GEMINI_API_KEY が未設定です。環境変数に設定するか、worktree ルートの .env（別の場所なら DOTENV_CONFIG_PATH）を dotenv/config で親プロセスに事前読み込みしてください');
+  }
   if (options.legacyDir) config = { ...config, legacyWorktree: options.legacyDir };
   const ledgerPath = join(paths.results, 'rerun/ledger.jsonl');
   if (!options.dryRun && existsSync(ledgerPath)) {
@@ -171,11 +188,11 @@ export async function executeRerun(config: RerunConfig, options: Options, start:
       process.stdout.write('ledger の書きかけの末尾を取り除きました\n');
     }
   }
-  const slotsPath = join(paths.results, 'rerun/c0-slots.json');
-  const slots = makeSlots(config, readJson<Slot[]>(slotsPath) ?? []);
+  const slotsPath = slotsFile(paths);
+  const slots = makeSlots(config, readSlots(paths));
   const summary = { completed: 0, skipped: 0, failed: [] as string[], executed: 0 };
   const selected = (job: Job) => !options.filter || job.id.includes(options.filter);
-  const perform = async (job: Job, skip: boolean): Promise<{ success: boolean; error: string | null } | null> => {
+  const perform = async (job: Job, skip: boolean): Promise<{ success: boolean; error: string | null; artifactFailure: boolean } | null> => {
     if (!selected(job)) return null;
     if (!skip && summary.executed >= options.limit) return null;
     process.stdout.write(mask(`${job.id} | ${JSON.stringify(job.command)} | ${job.expected} | ${skip ? 'スキップ' : job.blocked ?? '実行'}\n`));
@@ -186,7 +203,19 @@ export async function executeRerun(config: RerunConfig, options: Options, start:
     const logPath = join(paths.results, 'rerun/logs', logName(job.id));
     mkdirSync(dirname(logPath), { recursive: true });
     let output = '';
-    const log = (text: string) => { const safe = mask(text); output = (output + safe).slice(-4000); appendFileSync(logPath, safe); };
+    // c0Generation.ts の validateC0Formula が投げ、freezeC0.ts の末尾の catch が出力する凍結前実測の拒否文言。
+    const rejection = '実測できない C0 は凍結しない。再生成するには --draft で別番号を指定する';
+    let rejectionTail = '';
+    let artifactFailure = false;
+    const log = (text: string) => {
+      if (job.arm === 'freeze') {
+        const combined = rejectionTail + text;
+        artifactFailure ||= combined.includes(rejection);
+        // チャンク境界や末尾ログの切り詰めによって判定を失わない。
+        rejectionTail = combined.slice(-(rejection.length - 1));
+      }
+      const safe = mask(text); output = (output + safe).slice(-4000); appendFileSync(logPath, safe);
+    };
     let exitCode = 1;
     try { if (job.blocked) throw new Error(job.blocked); exitCode = await start(job, process.env, log); }
     catch (error) { log(`${String(error)}\n`); }
@@ -199,9 +228,8 @@ export async function executeRerun(config: RerunConfig, options: Options, start:
     if (!success) row.error = output.trim() || `exitCode=${exitCode}, runStatus=${runStatus}`;
     appendFileSync(ledgerPath, mask(JSON.stringify(row)) + '\n');
     if (success) summary.completed++; else summary.failed.push(job.id);
-    return { success, error: success ? null : output.trim() || `exitCode=${exitCode}, runStatus=${runStatus}` };
+    return { success, error: success ? null : output.trim() || `exitCode=${exitCode}, runStatus=${runStatus}`, artifactFailure };
   };
-  const stages = options.stage === 'all' ? ['prepare', 'freeze', 'run', 'score'] : [options.stage];
   for (const stage of stages) {
     if (stage === 'prepare') {
       for (const split of config.splits.slice(1)) await perform({ id: `prepare:all:seeds:${seedSplitId(split)}`, arm: 'prepare', caseId: 'all', c0: 'seeds', split,
@@ -213,9 +241,11 @@ export async function executeRerun(config: RerunConfig, options: Options, start:
         do {
           let draft = config.draftStart + slot.slot - 1;
           const sameScope = slots.filter((s) => s.caseId === slot.caseId && s.variant === slot.variant && s.split === slot.split);
-          const used = new Set(sameScope.flatMap((s) => s.attempts.map((a) => a.draft)));
+          // 再試行待ちの番号を他の枠が消費しないよう、過去の試行番号と共に予約する。
+          const used = new Set(sameScope.flatMap((s) => [...s.attempts.map((a) => a.draft), ...(s.pendingDraft === undefined ? [] : [s.pendingDraft])]));
           if (slot.attempts.length) draft = config.draftStart + config.drafts;
-          while (used.has(draft) || (!complete && existsSync(c0FixturePath(paths.fixtures, slot.caseId, slotName(slot, draft))))) draft++;
+          if (slot.pendingDraft !== undefined) draft = slot.pendingDraft;
+          else while (used.has(draft) || (!complete && existsSync(c0FixturePath(paths.fixtures, slot.caseId, slotName(slot, draft))))) draft++;
           const name = complete ? slot.name! : slotName(slot, draft);
           const args = ['--case', slot.caseId, '--variant', slot.variant, '--draft', String(draft)];
           if (slot.split !== null) args.push('--seeds', String(slot.split));
@@ -225,9 +255,16 @@ export async function executeRerun(config: RerunConfig, options: Options, start:
             expected: c0FixturePath(paths.fixtures, slot.caseId, name), blocked: exhausted ? 'C0 枠の最大試行数に到達しました' : undefined };
           const result = await perform(job, !!complete);
           if (!result || exhausted) break;
+          // 設定・通信・判定不能の失敗は枠を消費せず、次回の実行で同じ番号を再試行する。
+          if (!result.success && !result.artifactFailure) {
+            slot.pendingDraft = draft;
+            saveSlots(slotsPath, slots);
+            break;
+          }
+          delete slot.pendingDraft;
           slot.attempts.push({ draft, success: result.success, error: result.error });
           if (result.success) slot.name = name;
-          atomicJson(slotsPath, slots);
+          saveSlots(slotsPath, slots);
           attemptsThisPass++;
           if (result.success) break;
         } while (attemptsThisPass < config.maxDraftAttempts && slot.attempts.length < config.maxDraftAttempts);

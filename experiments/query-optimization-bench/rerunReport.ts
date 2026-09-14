@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { CASES, type AdoptionAudit, type CaseRole, type Metrics, type RunResult } from './types';
-import { buildRunJobs, CONFIG, defaultPaths, makeSlots, mask, readConfig, readJson, readLedger,
+import { buildRunJobs, CONFIG, defaultPaths, makeSlots, mask, readConfig, readJson, readLedger, readSlots,
   type Job, type LedgerRow, type Paths, type RerunConfig, type Slot } from './rerun';
 
 type Cell = string | number | null;
@@ -189,7 +189,7 @@ export function csv(rows: Row[]): string {
   return [keys.map(cell).join(','), ...rows.map((row) => keys.map((key) => cell(row[key])).join(','))].join('\r\n') + '\r\n';
 }
 export function report(config: RerunConfig, paths: Paths = defaultPaths) {
-  const slots = makeSlots(config, readJson<Slot[]>(join(paths.results, 'rerun/c0-slots.json')) ?? []);
+  const slots = makeSlots(config, readSlots(paths));
   const ledger = readLedger(join(paths.results, 'rerun/ledger.jsonl'));
   const entries: Entry[] = buildRunJobs(config, slots, paths).map((job) => ({ job, run: readJson<RunResult>(job.expected),
     scored: readJson<Entry['scored']>(join(dirname(job.expected), 'scored.json')), ledger: ledger.get(job.id) }));

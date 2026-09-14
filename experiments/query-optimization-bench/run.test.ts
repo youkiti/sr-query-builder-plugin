@@ -1,8 +1,8 @@
 /** @jest-environment node */
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { FIXTURES, loadSeedsFile, SEED, seedSplitId } from './prepare';
-import { hashC0Content, loadC0Artifact } from './c0Artifact';
+import { c0Dir, hashC0Content, loadC0Artifact } from './c0Artifact';
 import { CASES } from './types';
 import { join } from 'node:path';
 import { decideExisting, resultDir, loggedFactory, main, memoryCheckpoint, parseArgs, reportError, RESULTS } from './run';
@@ -190,13 +190,20 @@ test('既存の全凍結 C0 は optimize の --c0 検証経路を通信無しで
   const network = jest.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('実 API 禁止'));
   const stdout = jest.spyOn(process.stdout, 'write').mockReturnValue(true);
   try {
+    let verified = 0;
     for (const { id } of CASES) {
-      for (const name of ['criteria-only-draft1', 'seeded-draft1']) {
-        await main(['--case', id, '--c0', name, '--dry-run']);
+      if (!existsSync(c0Dir(FIXTURES, id))) continue;
+      for (const file of readdirSync(c0Dir(FIXTURES, id)).filter((name) => name.endsWith('.json'))) {
+        const name = file.slice(0, -5);
+        const { seedSplit } = loadC0Artifact(FIXTURES, id, name);
+        const seeds = seedSplit === null ? [] : ['--seeds', /^s\d+$/.test(seedSplit) ? seedSplit.slice(1) : seedSplit];
+        await main(['--case', id, '--c0', name, ...seeds, '--dry-run']);
         expect(stdout).toHaveBeenLastCalledWith(expect.stringContaining(`c0=${name}`));
         expect(stdout).toHaveBeenLastCalledWith(expect.stringContaining('dry-run OK'));
+        verified++;
       }
     }
+    expect(verified).toBeGreaterThan(0);
     expect(network).not.toHaveBeenCalled();
   } finally { network.mockRestore(); stdout.mockRestore(); }
 });
@@ -276,7 +283,7 @@ test('replay の識別情報は最初の保存より前に入り、実行が例�
 });
 
 test('名前付き集合と取り込み C0 を optimize が照合し、名前を結果キーに使用する', async () => {
-  const id = CASES[0].id;
+  const id = 'r1-mindfulness-smoking';
   const root = mkdtempSync(join(tmpdir(), 'run-named-'));
   const fixturesDir = join(root, 'fixtures');
   const resultsDir = join(root, 'results');

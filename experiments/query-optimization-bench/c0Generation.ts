@@ -3,7 +3,7 @@ import { extractProtocol } from '../../src/features/formula/skills/extractProtoc
 import { expandFormula } from '../../src/features/validation/expandFormula';
 import { DEFAULT_OPTIMIZATION_MAX_HITS } from '../../src/app/services/queryOptimizationSettingsService';
 import { efetchArticles } from '../../src/lib/ncbi';
-import { esearch, type EutilsDeps } from '../../src/lib/ncbi/eutils';
+import { esearch, EutilsError, type EutilsDeps } from '../../src/lib/ncbi/eutils';
 import type { LlmProviderFactory } from '../../src/app/services/llmProviderService';
 import type { PubmedFormula } from '../../src/lib/search-formula-md';
 import type { FrozenSeeds } from './types';
@@ -55,15 +55,20 @@ export async function validateC0Formula(formula: PubmedFormula, eutils: EutilsDe
     .map((block) => ({ label: `#${block.id}`, query: block.expression }));
   checks.push({ label: '式全体', query: expandFormula(formula) });
   const errors: string[] = [];
+  let permanentOnly = true;
   for (const { label, query } of checks) {
     try {
       await esearch(query, eutils, { retmax: 0 });
     } catch (err) {
+      permanentOnly &&= err instanceof EutilsError && err.permanent;
       errors.push(`${label}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
   if (errors.length > 0) {
-    throw new Error(`${errors.join('\n')}\n実測できない C0 は凍結しない。再生成するには --draft で別番号を指定する`);
+    const rejection = permanentOnly
+      ? '実測できない C0 は凍結しない。再生成するには --draft で別番号を指定する'
+      : '実測中に一時的な通信障害があったため凍結しない。同じ番号で再試行できる';
+    throw new Error(`${errors.join('\n')}\n${rejection}`);
   }
 }
 

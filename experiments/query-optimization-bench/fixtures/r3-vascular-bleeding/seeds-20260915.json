@@ -1,0 +1,20 @@
+{
+  "seed": 20260915,
+  "selections": [
+    {
+      "groupId": "qerimi 2013",
+      "pmid": "23332688",
+      "year": 2013
+    },
+    {
+      "groupId": "robinson 2000",
+      "pmid": "10848853",
+      "year": 2000
+    },
+    {
+      "groupId": "clagett 1995",
+      "pmid": "7674464",
+      "year": 1995
+    }
+  ]
+}

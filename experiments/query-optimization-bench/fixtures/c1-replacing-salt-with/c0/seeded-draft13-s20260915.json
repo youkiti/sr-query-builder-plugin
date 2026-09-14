@@ -1,0 +1,359 @@
+{
+  "schemaVersion": 1,
+  "caseId": "c1-replacing-salt-with",
+  "variant": "seeded",
+  "draftIndex": 13,
+  "seedSplit": "s20260915",
+  "targetHits": 2000,
+  "model": "gemini-3.5-flash",
+  "createdAt": "2026-09-14T14:16:26.866Z",
+  "gitCommit": "76f6b600063a86b9d4ca96098f0760ba224d06fe",
+  "gitDirty": true,
+  "protocol": {
+    "frameworkType": "pico",
+    "researchQuestion": "To assess the effects and safety of replacing salt with low-sodium salt substitutes (LSSS) on cardiovascular health in adults, pregnant women, and children.",
+    "inclusionCriteria": "Individually randomised controlled trials (RCTs) and cluster-randomised controlled trials (cluster-RCTs) with true randomisation\nProspective analytical cohort studies\nGeneral population (adults, children aged 2 to <18 years, and pregnant women) including those with hypertension, cardiovascular disease, diabetes, renal impairment, or taking medications impairing potassium excretion\nInterventions using low-sodium salt substitutes (LSSS) at individual, household, or community levels\nComparison with regular salt (NaCl) or no active intervention",
+    "exclusionCriteria": "Cross-over RCTs where data for the first phase are unavailable\nCluster-RCTs with fewer than two intervention and two control clusters\nMulti-component interventions where the effects of LSSS cannot be isolated\nStudies measuring only sensory or organoleptic outcomes (e.g., taste or preference)",
+    "studyDesign": "RCT / observational",
+    "blocks": [
+      {
+        "blockLabel": "Salt Substitutes",
+        "description": "低ナトリウム塩代替物（LSSS）、カリウム塩、減塩塩など、通常の食塩（塩化ナトリウム）の代替として用いられる調味料や化合物に関する概念。"
+      },
+      {
+        "blockLabel": "Cardiovascular and Safety Outcomes",
+        "description": "血圧、心血管疾患、血中カリウム濃度、高カリウム血症、腎機能など、本研究で評価対象となる有効性および安全性に関するアウトカムの概念。"
+      }
+    ],
+    "combinationExpression": "#1 AND #2",
+    "sourceType": "markdown",
+    "sourceFilename": "protocol.md",
+    "rawTextRef": null,
+    "rawTextPreview": "# Replacing salt with low‐sodium salt substitutes (LSSS) for cardiovascular health in adults, children and pregnant women\n\n## Objectives\nTo assess the effects and safety of replacing salt with LSSS to reduce sodium intake on cardiovascular health in adults, pregnant women and children.\n\n## types_of_studies\nThe Populations, Intervention, Comparison, and Outcomes (PICO) were agreed by the WHO NUGAG Subgroup on Diet and Health, who ranked the outcomes and also agreed on subgroups and study designs ",
+    "rawTextInline": "# Replacing salt with low‐sodium salt substitutes (LSSS) for cardiovascular health in adults, children and pregnant women\n\n## Objectives\nTo assess the effects and safety of replacing salt with LSSS to reduce sodium intake on cardiovascular health in adults, pregnant women and children.\n\n## types_of_studies\nThe Populations, Intervention, Comparison, and Outcomes (PICO) were agreed by the WHO NUGAG Subgroup on Diet and Health, who ranked the outcomes and also agreed on subgroups and study designs to be included. As per these agreements and our prospective registration on the international prospective register of systematic reviews (PROSPERO 2020 CRD42020180162; available at https://www.crd.york.ac.uk/prospero/display_record.php?RecordID=180162), we included individually randomised controlled trials (RCTs) and cluster‐randomised controlled trials (cluster‐RCTs) with true randomisation methods, regardless of the unit of allocation. We also planned to include prospective analytical cohort studies, where LSSS intake/exposure was assessed at baseline and related to any of the prespecified outcomes at a later time point using empirical data. We excluded RCTs with a cross‐over trial design if data for the first phase per group were unavailable, due to the possible period and carry‐over effects that would arise with the eligible dietary interventions/exposures and outcomes not being easily reversible, as required for a valid cross‐over design (Younge 2015). We additionally excluded cluster‐RCTs with fewer than two intervention and two control clusters.\n\n## types_of_participants\nWe included studies in the general population, from any setting in any country, including participants with the following condition(s) and/or risk factors: hypertension, cardiovascular disease (CVD), diabetes mellitus, renal impairment and those taking medications that impair potassium excretion. In accordance with the WHO NUGAG PICO conceptualisations and agreements, the following three comparisons were planned if data allowed: LSSS versus regular salt or no active intervention in adults (aged 18 years and older)LSSS versus regular salt or no active intervention in children aged 2 to < 18 yearsLSSS versus regular salt or no active intervention in pregnant women\n\n## types_of_interventions\nWe included studies that assessed the health effects associated with the use of LSSS at an individual, household or community level. LSSS interventions/exposures of any type or duration were included, provided they aimed to replace the dietary intake of any amount of sodium with another mineral or compound. Studies investigating either discretionary (i.e. salt on table or added during cooking) or non‐discretionary use of LSSS (i.e. included during food manufacturing), or both, were included. Eligible comparators/controls included the use of regular salt (NaCl) or no active intervention to reduce salt intake. Studies where the control group received only basic information on sodium reduction at baseline, were included. Studies with multi‐component interventions were included if effects of LSSS could be isolated from the multifactorial design. We excluded studies with multi‐component interventions if the additional intervention components were not aimed primarily at promoting LSSS use by participants or communities, but were instead focussed more broadly on reducing sodium intake (e.g. changing lifestyle and dietary behaviour of which LSSS use is only one component) or aimed at improving health in general (e.g. counselling for exercise or smoking cessation), such that LSSS effects could not be isolated.\n\n## types_of_outcomes\nWe did not exclude studies on the basis of outcomes measured. However, we did exclude studies measuring only sensory or organoleptic outcomes (e.g. taste of or preference for LSSS). Table 3, Table 4 and Table 5 detail the prespecified primary outcomes for each comparison, with outcome ranking by the WHO NUGAG Subgroup on Diet and Health indicated as follows: criticalc, importanti and not important ni. The following primary outcomes were regarded as safety outcomes related to the intake of LSSS with potassium: change in blood potassium, hyperkalaemia and hypokalaemia. Outcome ranking by WHO NUGAG ‐ Subgroup on Diet and Health: criticalc, importanti and not importantni * Outcomes measured at longest follow‐up ** Additional outcomes added by WHO NUGAG during the guideline development process; measured using 24‐h urine samples only (spot samples excluded) Abbreviations: BMI: body mass index DBP: diastolic blood pressure GFR: glomerular filtration rate NUGAG: Nutrition Guidance Expert Advisory Group SBP: systolic blood pressure uACR: urine albumin‐to‐creatinine ratio Outcome ranking by WHO NUGAG ‐ Subgroup on Diet and Health: criticalc, importanti and not importantni * Outcomes measured at longest follow‐up ** Additional outcomes added by WHO NUGAG during the guideline development process; measured using 24‐h urine samples only (spot samples excluded) Abbreviations: DBP: diastolic blood pressure GFR: glomerular filtration rate IUGR: intra‐uterine growth restriction NUGAG: Nutrition Guidance Expert Advisory Group SBP: systolic blood pressure SD: standard deviation SGA: small‐for‐gestational age uACR: urine albumin‐to‐creatinine ratio Outcome ranking by WHO NUGAG ‐ Subgroup on Diet and Health: criticalc, importanti and not importantni * Outcomes measured at longest follow‐up ** Additional outcomes added by WHO NUGAG during the guideline development process; measured using 24‐h urine samples only (spot samples excluded) Abbreviations: ALP: alkaline phosphatase BMI: body mass index BP: blood pressure DBP: diastolic blood pressure GFR: glomerular filtration rate HAZ: height‐for‐age z‐score LAZ: length‐for‐age z‐score NUGAG: Nutrition Guidance Expert Advisory Group SBP: systolic blood pressure uACR: urine albumin‐to‐creatinine ratio WAZ: weight‐for‐age z‐score WHZ: weight‐for‐height z‐score Table 3, Table 4 and Table 5 detail the prespecified secondary outcomes for each comparison, with outcome ranking by the WHO NUGAG Subgroup on Diet and Health indicated as follows: criticalc, importanti and not important ni. The following secondary outcomes were regarded as safety outcomes related to the intake of LSSS with potassium: adverse events, renal function and hyponatraemia.\n"
+  },
+  "blocks": {
+    "blocks": [
+      {
+        "blockLabel": "Salt Substitutes",
+        "description": "低ナトリウム塩代替物（LSSS）、カリウム塩、減塩塩など、通常の食塩（塩化ナトリウム）の代替として用いられる調味料や化合物に関する概念。",
+        "aiGenerated": true,
+        "note": ""
+      },
+      {
+        "blockLabel": "Cardiovascular and Safety Outcomes",
+        "description": "血圧、心血管疾患、血中カリウム濃度、高カリウム血症、腎機能など、本研究で評価対象となる有効性および安全性に関するアウトカムの概念。",
+        "aiGenerated": true,
+        "note": ""
+      }
+    ],
+    "combinationExpression": "#1 AND #2"
+  },
+  "formula": {
+    "blocks": [
+      {
+        "id": "1",
+        "expression": "(\"Sodium Chloride, Dietary\"[Mesh] OR \"Diet, Sodium-Restricted\"[Mesh] OR \"Potassium, Dietary\"[Mesh] OR \"salt substitute*\"[tiab] OR \"salt substitution*\"[tiab] OR \"salt replacer*\"[tiab] OR \"salt replacement*\"[tiab] OR \"low sodium salt*\"[tiab] OR \"reduced sodium salt*\"[tiab] OR \"potassium-enriched salt*\"[tiab] OR \"potassium salt*\"[tiab] OR \"sodium substitution*\"[tiab] OR \"sodium replacement*\"[tiab] OR \"mineral salt*\"[tiab])",
+        "isCombination": false
+      },
+      {
+        "id": "2",
+        "expression": "(\"Blood Pressure\"[Mesh] OR \"Hypertension\"[Mesh] OR \"Cardiovascular Diseases\"[Mesh] OR \"Potassium\"[Mesh] OR \"Hyperkalemia\"[Mesh] OR \"Kidney Function Tests\"[Mesh] OR \"Renal Insufficiency\"[Mesh] OR \"blood pressure\"[tiab] OR \"hypertension\"[tiab] OR \"hypertensive\"[tiab] OR \"systolic\"[tiab] OR \"diastolic\"[tiab] OR \"SBP\"[tiab] OR \"DBP\"[tiab] OR \"BP\"[tiab] OR \"cardiovascular\"[tiab] OR \"stroke\"[tiab] OR \"cerebrovascular\"[tiab] OR \"myocardial infarction\"[tiab] OR \"coronary heart disease\"[tiab] OR \"heart failure\"[tiab] OR \"mortality\"[tiab] OR \"potassium\"[tiab] OR \"hyperkalemia\"[tiab] OR \"hyperkalaemia\"[tiab] OR \"renal\"[tiab] OR \"kidney\"[tiab] OR \"eGFR\"[tiab] OR \"glomerular filtration\"[tiab] OR \"creatinine\"[tiab])",
+        "isCombination": false
+      },
+      {
+        "id": "RCTfilter",
+        "expression": "(randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh]))",
+        "isCombination": false
+      },
+      {
+        "id": "3",
+        "expression": "#1 AND #2 AND #RCTfilter",
+        "isCombination": true
+      }
+    ],
+    "combinationExpression": "#1 AND #2 AND #RCTfilter"
+  },
+  "formulaMd": "## PubMed/MEDLINE\n\n```\n#1 (\"Sodium Chloride, Dietary\"[Mesh] OR \"Diet, Sodium-Restricted\"[Mesh] OR \"Potassium, Dietary\"[Mesh] OR \"salt substitute*\"[tiab] OR \"salt substitution*\"[tiab] OR \"salt replacer*\"[tiab] OR \"salt replacement*\"[tiab] OR \"low sodium salt*\"[tiab] OR \"reduced sodium salt*\"[tiab] OR \"potassium-enriched salt*\"[tiab] OR \"potassium salt*\"[tiab] OR \"sodium substitution*\"[tiab] OR \"sodium replacement*\"[tiab] OR \"mineral salt*\"[tiab])\n#2 (\"Blood Pressure\"[Mesh] OR \"Hypertension\"[Mesh] OR \"Cardiovascular Diseases\"[Mesh] OR \"Potassium\"[Mesh] OR \"Hyperkalemia\"[Mesh] OR \"Kidney Function Tests\"[Mesh] OR \"Renal Insufficiency\"[Mesh] OR \"blood pressure\"[tiab] OR \"hypertension\"[tiab] OR \"hypertensive\"[tiab] OR \"systolic\"[tiab] OR \"diastolic\"[tiab] OR \"SBP\"[tiab] OR \"DBP\"[tiab] OR \"BP\"[tiab] OR \"cardiovascular\"[tiab] OR \"stroke\"[tiab] OR \"cerebrovascular\"[tiab] OR \"myocardial infarction\"[tiab] OR \"coronary heart disease\"[tiab] OR \"heart failure\"[tiab] OR \"mortality\"[tiab] OR \"potassium\"[tiab] OR \"hyperkalemia\"[tiab] OR \"hyperkalaemia\"[tiab] OR \"renal\"[tiab] OR \"kidney\"[tiab] OR \"eGFR\"[tiab] OR \"glomerular filtration\"[tiab] OR \"creatinine\"[tiab])\n#RCTfilter (randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh]))\n#3 #1 AND #2 AND #RCTfilter\n```\n",
+  "seedContext": {
+    "titles": [
+      "Effects of dietary sodium substitution with potassium and magnesium in hypertensive type II diabetics: a randomised blind controlled parallel study.",
+      "Reduction in blood pressure with a low sodium, high potassium, high magnesium salt in older subjects with mild to moderate hypertension.",
+      "Salt substitution: a low-cost strategy for blood pressure control among rural Chinese. A randomized, controlled trial."
+    ],
+    "samples": [
+      {
+        "title": "Effects of dietary sodium substitution with potassium and magnesium in hypertensive type II diabetics: a randomised blind controlled parallel study.",
+        "abstract": "We have previously demonstrated that modest sodium restriction has a hypotensive effect in hypertensive diabetic subjects. A randomised blind controlled study has therefore been performed to study the effect of replacement of added salt intake using a salt substitute (50% NaCl, 40% KCL, 10% Mg2+, supplied by Cederroth, Sweden), compared to added whole salt intake over a 9 month period of 40 hypertensive Type II diabetic subjects (mean age 62.5 +/- 7.8 years; 24 males and 16 females). After 3 months, there was a significant reduction in systolic blood pressure (SBP) in the salt substitution group (163.2 +/- 24.2 to 153.6 +/- 20.8 mm Hg; P < 0.03) which was maintained at 9 months, when compared to the whole salt group (151.5 +/- 20.6 vs 173 +/- 18.9 mm Hg; P < 0.05). No significant changes were observed in mean weight, fasting lipid or insulin levels or diabetic control (measured by glycosylated haemoglobin). A greater number of patients were withdrawn during the study period owing to consistent BP > 160/95 in the whole salt group (n = 10) compared to salt substitute (n = 4). No significant changes were observed in diastolic pressure, 24-h urine sodium or magnesium excretion, but urine potassium was significantly increased in the salt substitute group (58.8 to 77.3: P < 0.05). The results of this study suggest that substitution of sodium, by potassium and magnesium, produces a clinically significant reduction in SBP in hypertensive Type II diabetic patients, and should be a useful antihypertensive therapy in this patient group."
+      },
+      {
+        "title": "Reduction in blood pressure with a low sodium, high potassium, high magnesium salt in older subjects with mild to moderate hypertension.",
+        "abstract": "OBJECTIVE: To examine the effect of a reduced sodium and increased potassium and magnesium intake on blood pressure.\n\nDESIGN: Randomised double blind placebo controlled trial.\n\nSETTING: General population of a suburb of Rotterdam.\n\nSUBJECTS: 100 men and women between 55 and 75 years of age with untreated mild to moderate hypertension.\n\nINTERVENTIONS: During 24 weeks the intervention group received a mineral salt (sodium: potassium: magnesium 8:6:1) and foods prepared with the mineral salt. Controls received common salt and foods.\n\nMAIN OUTCOME MEASURE: Change in blood pressure.\n\nRESULTS: Complete follow up was achieved for 97 of the 100 randomised subjects. Systolic blood pressure (mean of measurements at weeks 8, 16, and 24) fell by 7.6 mm Hg (95% confidence interval 4.0 to 11.2) and diastolic blood pressure by 3.3 mm Hg (0.8 to 5.8) in the mineral salt group compared with the controls, with a 28% decrease in urinary sodium excretion and a 22% increase in urinary potassium excretion. Twenty five weeks after the study the difference in blood pressure between the groups was no longer detectable.\n\nCONCLUSION: Replacing common sodium salt by a low sodium, high potassium, high magnesium mineral salt could offer a valuable non-pharmacological approach to lowering blood pressure in older people with mild to moderate hypertension."
+      },
+      {
+        "title": "Salt substitution: a low-cost strategy for blood pressure control among rural Chinese. A randomized, controlled trial.",
+        "abstract": "OBJECTIVE: Dietary sodium and potassium consumption is associated with blood pressure levels. The objective of this study was to define a practical and low-cost method for the control of blood pressure by modification of these dietary cations in rural Chinese.\n\nMETHODS: This study was a double-blind, randomized, controlled trial designed to establish the long-term effects of a reduced-sodium, high-potassium salt substitute (65% sodium chloride, 25% potassium chloride, 10% magnesium sulphate) compared to normal salt (100% sodium chloride) on blood pressure among high-risk individuals. Following a 4-week run-in period on salt substitute, participants were randomly assigned to replace their household salt with either the study salt substitute or normal salt for a 12-month period.\n\nRESULTS: The mean age of the 608 randomized participants was 60 years and 56% of them were female. Sixty-four percent had a history of vascular disease and 61% were taking one or more blood pressure-lowering drugs at entry. Mean baseline blood pressure was 159/93 mmHg (SD 26/14). The mean overall difference in systolic blood pressure between randomized groups was 3.7 mmHg (95% confidence interval 1.6-5.9, P < 0.001). There was strong evidence that the magnitude of this reduction increased over time (P = 0.001) with the maximum net reduction of 5.4 mmHg (2.3-8.5) achieved at 12 months. There were no detectable effects on diastolic blood pressure.\n\nCONCLUSION: Salt substitution produced a substantial and sustained systolic blood pressure reduction in this population, and should be actively promoted as a low-cost alternate or adjunct to drug therapy for people consuming significant quantities of salt."
+      }
+    ],
+    "meshSummary": {
+      "seedCount": 3,
+      "concepts": [
+        {
+          "descriptor": "Double-Blind Method",
+          "count": 3,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Hypertension",
+          "count": 3,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "diet therapy",
+              "count": 2
+            },
+            {
+              "name": "physiopathology",
+              "count": 2
+            },
+            {
+              "name": "prevention & control",
+              "count": 1
+            },
+            {
+              "name": "therapy",
+              "count": 1
+            },
+            {
+              "name": "urine",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Blood Pressure",
+          "count": 2,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "drug effects",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Magnesium",
+          "count": 2,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "administration & dosage",
+              "count": 1
+            },
+            {
+              "name": "therapeutic use",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Potassium, Dietary",
+          "count": 2,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "administration & dosage",
+              "count": 1
+            },
+            {
+              "name": "therapeutic use",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Sodium, Dietary",
+          "count": 2,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "administration & dosage",
+              "count": 1
+            },
+            {
+              "name": "adverse effects",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Body Weight",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "China",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Diabetes Mellitus, Type 2",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "therapy",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Diet, Sodium-Restricted",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "methods",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Feeding Behavior",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "physiology",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Follow-Up Studies",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Life Style",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Magnesium Sulfate",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "administration & dosage",
+              "count": 1
+            },
+            {
+              "name": "adverse effects",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Potassium",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "urine",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Potassium Chloride",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "administration & dosage",
+              "count": 1
+            },
+            {
+              "name": "adverse effects",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Risk Factors",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Rural Population",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Sodium",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "urine",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Sodium Chloride, Dietary",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "administration & dosage",
+              "count": 1
+            },
+            {
+              "name": "adverse effects",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Taste",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        }
+      ],
+      "checkTags": [
+        {
+          "descriptor": "Aged",
+          "count": 3
+        },
+        {
+          "descriptor": "Female",
+          "count": 3
+        },
+        {
+          "descriptor": "Humans",
+          "count": 3
+        },
+        {
+          "descriptor": "Male",
+          "count": 3
+        },
+        {
+          "descriptor": "Middle Aged",
+          "count": 2
+        }
+      ]
+    }
+  },
+  "blockApproval": "auto",
+  "sha256": "f981e3517150e3f276306cfe3d8128d0a6eff489e2d78f58adc76c85f6988459"
+}

@@ -1,5 +1,5 @@
 /** @jest-environment node */
-import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FIXTURES } from './prepare';
@@ -62,11 +62,15 @@ test('従来の凍結 C0 は由来フィールド無しのままハッシュ検�
 });
 
 test('追加分を含む全凍結 C0 はハッシュ検証を通る', () => {
+  let verified = 0;
   for (const { id } of CASES) {
+    if (!existsSync(c0Dir(FIXTURES, id))) continue;
     for (const name of readdirSync(c0Dir(FIXTURES, id)).filter((name) => name.endsWith('.json'))) {
       expect(() => loadC0Artifact(FIXTURES, id, name.slice(0, -5))).not.toThrow();
+      verified++;
     }
   }
+  expect(verified).toBeGreaterThan(0);
 });
 
 test('取り込みの由来もハッシュに含まれ、元ファイル名の改変を検出する', () => {
