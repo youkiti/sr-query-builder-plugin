@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { config } from 'dotenv';
 import { searchOutsideCandidates, type OutsideSearchStages } from '../../src/app/services/expandService';
 import type { LlmProviderFactory } from '../../src/app/services/llmProviderService';
+import { expandFormula } from '../../src/features/validation/expandFormula';
 import { GeminiProvider } from '../../src/lib/llm/GeminiProvider';
 import { esearch, type EutilsDeps } from '../../src/lib/ncbi/eutils';
 import { loadC0Artifact, type C0Artifact } from './c0Artifact';
@@ -61,7 +62,7 @@ export function parseOutsideStagesArgs(args: string[]): OutsideStagesArgs {
     sort, rankDepth: integer('--rank-depth', 10000, 0, 10000), label, dryRun };
 }
 
-export const STAGE_NAMES = ['not_in_margin', 'beyond_retmax', 'excluded_as_known', 'beyond_candidate_limit',
+export const STAGE_NAMES = ['captured_by_current', 'not_in_margin', 'beyond_retmax', 'excluded_as_known', 'beyond_candidate_limit',
   'efetch_missing', 'not_picked', 'presented'] as const;
 export type OutsideStage = typeof STAGE_NAMES[number];
 export interface StudyStage {
@@ -73,7 +74,7 @@ export interface StudyStage {
 }
 
 /** 複数報告のいずれかが通過すれば、その研究が到達した段階として数える。 */
-export function classifyStudy(study: { studyId: string; pmids: string[] }, inMargin: readonly string[],
+export function classifyStudy(study: { studyId: string; pmids: string[] }, inCurrent: readonly string[], inMargin: readonly string[],
   stages: OutsideSearchStages, deepPmids: readonly string[] | null): StudyStage {
   const has = (pmids: readonly string[]) => study.pmids.some((pmid) => pmids.includes(pmid));
   const rank = (pmids: readonly string[] | null): number | null => {
@@ -82,7 +83,7 @@ export function classifyStudy(study: { studyId: string; pmids: string[] }, inMar
   };
   const passed = [inMargin, stages.retrievedPmids, stages.novelPmids, stages.requestedPmids, stages.fetchedPmids, stages.pickedPmids];
   const firstMissing = passed.findIndex((pmids) => !has(pmids));
-  return { ...study, stage: STAGE_NAMES[firstMissing < 0 ? 6 : firstMissing]!,
+  return { ...study, stage: has(inCurrent) ? 'captured_by_current' : STAGE_NAMES[firstMissing < 0 ? 7 : firstMissing + 1]!,
     retrievedRank: rank(stages.retrievedPmids), deepRank: rank(deepPmids) };
 }
 
@@ -116,6 +117,7 @@ export interface OutsideRun {
   stages: OutsideSearchStages | null;
   candidates: { pmid: string; reason: string }[];
   heldOutStages: StudyStage[];
+  missedHeldOutCount: number | null;
   stageCounts: Record<OutsideStage, number>;
   /** 順位の追加取得は候補選定終了後の事後集計専用。選定には戻さない。 */
   deepRankPurpose: string;
@@ -152,14 +154,18 @@ export async function executeOutsideStages(fixture: BenchCase, seeds: FrozenSeed
       .filter((study) => study.pmids.length > 0) })).filter((group) => group.pmids.length > 0);
   if (seeds.selections.some((seed) => !inDate.includes(seed.pmid))) throw new Error('凍結済みシードが検索日範囲外です。自動で差し替えません');
   const heldOut = new Set(computeHeldOut(groups, seeds));
+  const studies = groups.filter((group) => heldOut.has(group.id)).flatMap((group) => group.members);
+  const heldOutPmids = [...new Set(studies.flatMap((study) => study.pmids))];
+  const inCurrent = await capturedGold(expandFormula(c0.formula).trim(), heldOutPmids, deps.eutils);
+  const inMargin = await capturedGold(margin.marginQuery, heldOutPmids, deps.eutils);
   const deepPmids = options.rankDepth === 0 ? null : (await esearch(margin.marginQuery, deps.eutils,
     { retmax: options.rankDepth, ...(options.sort ? { sort: options.sort } : {}) })).pmids;
-  for (const study of groups.filter((group) => heldOut.has(group.id)).flatMap((group) => group.members)) {
-    const inMargin = await capturedGold(margin.marginQuery, study.pmids, deps.eutils);
-    const classified = classifyStudy(study, inMargin, outside.stages, deepPmids);
+  for (const study of studies) {
+    const classified = classifyStudy(study, inCurrent, inMargin, outside.stages, deepPmids);
     result.heldOutStages.push(classified);
     result.stageCounts[classified.stage]++;
   }
+  result.missedHeldOutCount = studies.length - result.stageCounts.captured_by_current;
   result.status = 'completed';
 }
 
@@ -170,6 +176,7 @@ export function printOutsideStages(result: OutsideRun): void {
     process.stdout.write(`${study.studyId} / ${study.stage} / ${study.retrievedRank ?? '-'} / ${study.deepRank ?? '-'}\n`);
   }
   process.stdout.write(`判定別研究数: ${JSON.stringify(result.stageCounts)}\n`);
+  process.stdout.write(`取りこぼし（現式で未捕捉）: ${result.missedHeldOutCount ?? '未集計'} 研究\n`);
 }
 
 export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES, resultsDir = RESULTS): Promise<void> {
@@ -210,7 +217,8 @@ export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES,
     c0: margin.c0, seedSplit: splitId, config: { retmax: options.retmax, candidateLimit: options.candidateLimit,
       sort: options.sort ?? null, rankDepth: options.rankDepth }, label: options.label ?? null,
     searchDate: fixture.searchDate, model: '', gitCommit, gitDirty: isGitDirty(), originalHits: null, marginHits: null,
-    stages: null, candidates: [], heldOutStages: [], stageCounts: Object.fromEntries(STAGE_NAMES.map((stage) => [stage, 0])) as Record<OutsideStage, number>,
+    stages: null, candidates: [], heldOutStages: [], missedHeldOutCount: null,
+    stageCounts: Object.fromEntries(STAGE_NAMES.map((stage) => [stage, 0])) as Record<OutsideStage, number>,
     deepRankPurpose: '候補選定終了後の事後集計専用。候補選定には使用しない。rankDepth=0 は取得省略。',
     apiCalls: { ncbi: 0, llm: 0 }, apiElapsedMs: { ncbi: 0, llm: 0 }, llmUsage: usage.usage, elapsedMs: 0, llmLogs: [] };
   const start = Date.now();
