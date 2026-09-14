@@ -83,7 +83,23 @@ export function hasSheetsStub(page: Page): boolean {
   return pagesWithSheetsStub.has(page);
 }
 
-/** 戻り値の SheetsFake.tabs は append で追記された行を含めて可変（テスト側から検査できる） */
+/**
+ * append する値を、本物の Sheets API が values:get で返す形へ変換する。
+ * 本物の Sheets はセルを常に文字列で返す（`true`→`"TRUE"`、`false`→`"FALSE"`、
+ * `null`/`undefined`→`""`、数値→`"2024"`）。ここで文字列化せず boolean/number のまま
+ * `fake.tabs` に積むと、`seedRepository.ts` の `fromRow` のような「文字列前提」の読み取り
+ * （`cell('is_valid').toLowerCase()` 等）がスタブ上でだけ `TypeError` になる（issue #156）。
+ */
+function toSheetCellString(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
+  return String(value);
+}
+
+/**
+ * 戻り値の SheetsFake.tabs は append で追記された行を含めて可変（テスト側から検査できる）。
+ * append した値は本物の Sheets と同じく `toSheetCellString` で文字列化してから保持する。
+ */
 export async function registerSheetsStub(
   page: Page,
   options: SheetsStubOptions = {}
@@ -115,9 +131,9 @@ export async function registerSheetsStub(
       if (appendDelayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, appendDelayMs));
       }
-      const body = route.request().postDataJSON() as { values?: string[][] };
+      const body = route.request().postDataJSON() as { values?: unknown[][] };
       const rows = (fake.tabs[tab] ??= []);
-      rows.push(...(body.values ?? []));
+      rows.push(...(body.values ?? []).map((row) => row.map(toSheetCellString)));
       await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
       return;
     }
