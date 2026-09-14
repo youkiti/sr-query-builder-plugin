@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "name": "seeded-draft1-margin2",
+  "caseId": "r1-mindfulness-smoking",
+  "c0": {
+    "name": "seeded-draft1",
+    "sha256": "f1395e6744a5970442d00c66e67381e88f44ec18b9afa921b97fe23ce804a3bf"
+  },
+  "additions": [
+    {
+      "blockId": "1",
+      "additions": [
+        {
+          "term": "\"Substance-Related Disorders\"[Mesh]",
+          "axis": "mesh",
+          "rationale": "タバコ使用障害の上位概念である物質関連障害を含めることで、薬物依存全般の文脈で報告されている喫煙者データを捕捉します。"
+        },
+        {
+          "term": "\"Behavior, Addictive\"[Mesh]",
+          "axis": "mesh",
+          "rationale": "喫煙行動の背景にある嗜癖行動全般をカバーし、行動変容の文脈から喫煙関連研究を広く拾い上げます。"
+        },
+        {
+          "term": "\"vaping\"[tiab]",
+          "axis": "freeword",
+          "rationale": "近年増加している電子タバコ（VAPE）を用いた喫煙やその禁煙に関する研究を取りこぼさないようにします。"
+        },
+        {
+          "term": "\"e-cigarette*\"[tiab]",
+          "axis": "freeword",
+          "rationale": "新型タバコや電子タバコ使用者に対する禁煙介入研究を網羅するために追加します。"
+        },
+        {
+          "term": "\"tobacco dependence\"[tiab]",
+          "axis": "freeword",
+          "rationale": "「Tobacco Use Disorder」のMeSHにマッピングされない、フリーワードとしてのタバコ依存症の表記を補正します。"
+        },
+        {
+          "term": "\"waterpipe*\"[tiab]",
+          "axis": "freeword",
+          "rationale": "水タバコ（シーシャ）など、一般的なシガレット以外の喫煙形態に対する禁煙介入をカバーします。"
+        }
+      ]
+    },
+    {
+      "blockId": "2",
+      "additions": [
+        {
+          "term": "\"Mind-Body Therapies\"[Mesh]",
+          "axis": "mesh",
+          "rationale": "マインドフルネス、瞑想、ヨガなどを包括する上位概念である心身療法を含めることで、境界領域の介入研究を広く捕捉します。"
+        },
+        {
+          "term": "\"Cognitive Behavioral Therapy\"[Mesh]",
+          "axis": "mesh",
+          "rationale": "ACTやマインドフルネス認知療法（MBCT）の親概念である認知行動療法を含め、マインドフルネス要素を含むハイブリッドな介入を拾い上げます。"
+        },
+        {
+          "term": "\"mind-body\"[tiab]",
+          "axis": "freeword",
+          "rationale": "マインドフルネスやヨガを「心身療法（mind-body therapy/intervention）」と表現している論文を回収します。"
+        },
+        {
+          "term": "\"vipassana\"[tiab]",
+          "axis": "freeword",
+          "rationale": "マインドフルネスの源流であるヴィパッサナー瞑想を用いた介入研究を取りこぼさないようにします。"
+        },
+        {
+          "term": "\"breathwork\"[tiab]",
+          "axis": "freeword",
+          "rationale": "マインドフルネスや瞑想の要素として頻用される呼吸法に焦点を当てた介入をカバーします。"
+        },
+        {
+          "term": "\"compassion\"[tiab]",
+          "axis": "freeword",
+          "rationale": "マインドフルネスと親和性の高いセルフ・コンパッションやコンパッション・フォーカスト・セラピーを用いた介入を捕捉します。"
+        }
+      ]
+    }
+  ],
+  "broadenedQuery": "(((Smoking Cessation[Mesh] OR Smoking[Mesh] OR Tobacco Use[Mesh] OR Tobacco Use Disorder[Mesh] OR Tobacco Use Cessation Devices[Mesh] OR smok*[tiab] OR tobacco[tiab] OR cigarette*[tiab] OR cigar*[tiab] OR nicotine[tiab] OR cessation[tiab] OR quit*[tiab] OR \"lapse recovery\"[tiab] OR \"smoking abstinence\"[tiab] OR \"smoking reduction\"[tiab])) OR \"Substance-Related Disorders\"[Mesh] OR \"Behavior, Addictive\"[Mesh] OR \"vaping\"[tiab] OR \"e-cigarette*\"[tiab] OR \"tobacco dependence\"[tiab] OR \"waterpipe*\"[tiab]) AND (((Mindfulness[Mesh] OR Meditation[Mesh] OR Acceptance and Commitment Therapy[Mesh] OR Yoga[Mesh] OR \"mindful*\"[tiab] OR \"meditat*\"[tiab] OR \"yoga\"[tiab] OR \"MBSR\"[tiab] OR \"MBCT\"[tiab] OR \"MBAT\"[tiab] OR \"acceptance and commitment\"[tiab])) OR \"Mind-Body Therapies\"[Mesh] OR \"Cognitive Behavioral Therapy\"[Mesh] OR \"mind-body\"[tiab] OR \"vipassana\"[tiab] OR \"breathwork\"[tiab] OR \"compassion\"[tiab]) AND ((randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh])))",
+  "marginQuery": "((((Smoking Cessation[Mesh] OR Smoking[Mesh] OR Tobacco Use[Mesh] OR Tobacco Use Disorder[Mesh] OR Tobacco Use Cessation Devices[Mesh] OR smok*[tiab] OR tobacco[tiab] OR cigarette*[tiab] OR cigar*[tiab] OR nicotine[tiab] OR cessation[tiab] OR quit*[tiab] OR \"lapse recovery\"[tiab] OR \"smoking abstinence\"[tiab] OR \"smoking reduction\"[tiab])) OR \"Substance-Related Disorders\"[Mesh] OR \"Behavior, Addictive\"[Mesh] OR \"vaping\"[tiab] OR \"e-cigarette*\"[tiab] OR \"tobacco dependence\"[tiab] OR \"waterpipe*\"[tiab]) AND (((Mindfulness[Mesh] OR Meditation[Mesh] OR Acceptance and Commitment Therapy[Mesh] OR Yoga[Mesh] OR \"mindful*\"[tiab] OR \"meditat*\"[tiab] OR \"yoga\"[tiab] OR \"MBSR\"[tiab] OR \"MBCT\"[tiab] OR \"MBAT\"[tiab] OR \"acceptance and commitment\"[tiab])) OR \"Mind-Body Therapies\"[Mesh] OR \"Cognitive Behavioral Therapy\"[Mesh] OR \"mind-body\"[tiab] OR \"vipassana\"[tiab] OR \"breathwork\"[tiab] OR \"compassion\"[tiab]) AND ((randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh])))) NOT (((Smoking Cessation[Mesh] OR Smoking[Mesh] OR Tobacco Use[Mesh] OR Tobacco Use Disorder[Mesh] OR Tobacco Use Cessation Devices[Mesh] OR smok*[tiab] OR tobacco[tiab] OR cigarette*[tiab] OR cigar*[tiab] OR nicotine[tiab] OR cessation[tiab] OR quit*[tiab] OR \"lapse recovery\"[tiab] OR \"smoking abstinence\"[tiab] OR \"smoking reduction\"[tiab])) AND ((Mindfulness[Mesh] OR Meditation[Mesh] OR Acceptance and Commitment Therapy[Mesh] OR Yoga[Mesh] OR \"mindful*\"[tiab] OR \"meditat*\"[tiab] OR \"yoga\"[tiab] OR \"MBSR\"[tiab] OR \"MBCT\"[tiab] OR \"MBAT\"[tiab] OR \"acceptance and commitment\"[tiab])) AND ((randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh]))))",
+  "originalHits": 246,
+  "marginHits": 2176,
+  "searchDate": "2021-04-15",
+  "model": "gemini-3.5-flash",
+  "createdAt": "2026-09-14T04:15:20.296Z",
+  "gitCommit": "b9bff8751baa7de7015112c4d977bcef5c1ec4b9",
+  "gitDirty": true,
+  "sha256": "e451c57ae30688c177c4a8aa7576487fd5b8e7970d090d7e8f30fa1b93d6bf87"
+}

@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "name": "seeded-draft1-margin3",
+  "caseId": "r1-mindfulness-smoking",
+  "c0": {
+    "name": "seeded-draft1",
+    "sha256": "f1395e6744a5970442d00c66e67381e88f44ec18b9afa921b97fe23ce804a3bf"
+  },
+  "additions": [
+    {
+      "blockId": "1",
+      "additions": [
+        {
+          "term": "\"Substance-Related Disorders\"[Mesh]",
+          "axis": "mesh",
+          "rationale": "ニコチン依存症の上位概念である物質関連障害を包括して、より広い依存症治療の文脈から喫煙対策を拾い上げるため。"
+        },
+        {
+          "term": "\"Behavior, Addictive\"[Mesh]",
+          "axis": "mesh",
+          "rationale": "喫煙行動の背景にある嗜癖行動・アディクション全般に関する研究を包括するため。"
+        },
+        {
+          "term": "\"vaping\"[tiab]",
+          "axis": "freeword",
+          "rationale": "従来の紙巻タバコだけでなく、電子タバコ（Vape）を用いた喫煙や禁煙に関する研究をカバーするため。"
+        },
+        {
+          "term": "\"e-cigarette*\"[tiab]",
+          "axis": "freeword",
+          "rationale": "新型タバコ（電子タバコ）の禁煙・使用削減に関する境界事例を拾い上げるため。"
+        },
+        {
+          "term": "\"abstinence\"[tiab]",
+          "axis": "freeword",
+          "rationale": "smoking等の単語を伴わずに「禁欲（abstinence）」単独で禁煙を表現している論文を回収するため。"
+        }
+      ]
+    },
+    {
+      "blockId": "2",
+      "additions": [
+        {
+          "term": "\"Complementary Therapies\"[Mesh]",
+          "axis": "mesh",
+          "rationale": "瞑想やヨガを包含する相補・代替療法（補完代替医療）の広範な上位概念からアプローチを網羅するため。"
+        },
+        {
+          "term": "\"Cognitive Behavioral Therapy\"[Mesh]",
+          "axis": "mesh",
+          "rationale": "ACTやマインドフルネス認知療法（MBCT）の親概念である認知行動療法（CBT）の文脈で語られる介入を拾うため。"
+        },
+        {
+          "term": "\"contemplative\"[tiab]",
+          "axis": "freeword",
+          "rationale": "マインドフルネスや瞑想を指す「静観的（contemplative）」な実践や訓練をカバーするため。"
+        },
+        {
+          "term": "\"breathing exercise*\"[tiab]",
+          "axis": "freeword",
+          "rationale": "ヨガやマインドフルネスの主要な要素である呼吸法を用いた介入研究を拾い上げるため。"
+        },
+        {
+          "term": "\"third-wave\"[tiab]",
+          "axis": "freeword",
+          "rationale": "ACTやマインドフルネスが分類される「第三の波」の認知行動療法としての言及をカバーするため。"
+        },
+        {
+          "term": "\"vipassana\"[tiab]",
+          "axis": "freeword",
+          "rationale": "マインドフルネス瞑想の直接のルーツであるヴィパッサナー瞑想に関する言及を拾うため。"
+        }
+      ]
+    }
+  ],
+  "broadenedQuery": "(((Smoking Cessation[Mesh] OR Smoking[Mesh] OR Tobacco Use[Mesh] OR Tobacco Use Disorder[Mesh] OR Tobacco Use Cessation Devices[Mesh] OR smok*[tiab] OR tobacco[tiab] OR cigarette*[tiab] OR cigar*[tiab] OR nicotine[tiab] OR cessation[tiab] OR quit*[tiab] OR \"lapse recovery\"[tiab] OR \"smoking abstinence\"[tiab] OR \"smoking reduction\"[tiab])) OR \"Substance-Related Disorders\"[Mesh] OR \"Behavior, Addictive\"[Mesh] OR \"vaping\"[tiab] OR \"e-cigarette*\"[tiab] OR \"abstinence\"[tiab]) AND (((Mindfulness[Mesh] OR Meditation[Mesh] OR Acceptance and Commitment Therapy[Mesh] OR Yoga[Mesh] OR \"mindful*\"[tiab] OR \"meditat*\"[tiab] OR \"yoga\"[tiab] OR \"MBSR\"[tiab] OR \"MBCT\"[tiab] OR \"MBAT\"[tiab] OR \"acceptance and commitment\"[tiab])) OR \"Complementary Therapies\"[Mesh] OR \"Cognitive Behavioral Therapy\"[Mesh] OR \"contemplative\"[tiab] OR \"breathing exercise*\"[tiab] OR \"third-wave\"[tiab] OR \"vipassana\"[tiab]) AND ((randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh])))",
+  "marginQuery": "((((Smoking Cessation[Mesh] OR Smoking[Mesh] OR Tobacco Use[Mesh] OR Tobacco Use Disorder[Mesh] OR Tobacco Use Cessation Devices[Mesh] OR smok*[tiab] OR tobacco[tiab] OR cigarette*[tiab] OR cigar*[tiab] OR nicotine[tiab] OR cessation[tiab] OR quit*[tiab] OR \"lapse recovery\"[tiab] OR \"smoking abstinence\"[tiab] OR \"smoking reduction\"[tiab])) OR \"Substance-Related Disorders\"[Mesh] OR \"Behavior, Addictive\"[Mesh] OR \"vaping\"[tiab] OR \"e-cigarette*\"[tiab] OR \"abstinence\"[tiab]) AND (((Mindfulness[Mesh] OR Meditation[Mesh] OR Acceptance and Commitment Therapy[Mesh] OR Yoga[Mesh] OR \"mindful*\"[tiab] OR \"meditat*\"[tiab] OR \"yoga\"[tiab] OR \"MBSR\"[tiab] OR \"MBCT\"[tiab] OR \"MBAT\"[tiab] OR \"acceptance and commitment\"[tiab])) OR \"Complementary Therapies\"[Mesh] OR \"Cognitive Behavioral Therapy\"[Mesh] OR \"contemplative\"[tiab] OR \"breathing exercise*\"[tiab] OR \"third-wave\"[tiab] OR \"vipassana\"[tiab]) AND ((randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh])))) NOT (((Smoking Cessation[Mesh] OR Smoking[Mesh] OR Tobacco Use[Mesh] OR Tobacco Use Disorder[Mesh] OR Tobacco Use Cessation Devices[Mesh] OR smok*[tiab] OR tobacco[tiab] OR cigarette*[tiab] OR cigar*[tiab] OR nicotine[tiab] OR cessation[tiab] OR quit*[tiab] OR \"lapse recovery\"[tiab] OR \"smoking abstinence\"[tiab] OR \"smoking reduction\"[tiab])) AND ((Mindfulness[Mesh] OR Meditation[Mesh] OR Acceptance and Commitment Therapy[Mesh] OR Yoga[Mesh] OR \"mindful*\"[tiab] OR \"meditat*\"[tiab] OR \"yoga\"[tiab] OR \"MBSR\"[tiab] OR \"MBCT\"[tiab] OR \"MBAT\"[tiab] OR \"acceptance and commitment\"[tiab])) AND ((randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh]))))",
+  "originalHits": 246,
+  "marginHits": 3367,
+  "searchDate": "2021-04-15",
+  "model": "gemini-3.5-flash",
+  "createdAt": "2026-09-14T04:15:43.389Z",
+  "gitCommit": "b9bff8751baa7de7015112c4d977bcef5c1ec4b9",
+  "gitDirty": true,
+  "sha256": "133d3a1aabb8e0c5c9cf2c3db92f96e90f811f279777fb785024bcd217f4bbab"
+}

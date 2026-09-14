@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "name": "seeded-draft1-margin4",
+  "caseId": "r1-mindfulness-smoking",
+  "c0": {
+    "name": "seeded-draft1",
+    "sha256": "f1395e6744a5970442d00c66e67381e88f44ec18b9afa921b97fe23ce804a3bf"
+  },
+  "additions": [
+    {
+      "blockId": "1",
+      "additions": [
+        {
+          "term": "\"Substance-Related Disorders\"[Mesh]",
+          "axis": "mesh",
+          "rationale": "ニコチン依存症や喫煙行動の上位概念である物質関連障害を含めることで、薬物依存全般を扱う研究の中の喫煙セグメントを拾う。"
+        },
+        {
+          "term": "\"Tobacco\"[Mesh]",
+          "axis": "mesh",
+          "rationale": "タバコそのものを指すMeSHを追加し、タバコ使用や禁煙に直接分類されていないタバコ関連文献を網羅する。"
+        },
+        {
+          "term": "\"Behavior, Addictive\"[Mesh]",
+          "axis": "mesh",
+          "rationale": "喫煙行動の背景にある嗜癖行動全般をカバーし、行動変容アプローチの文脈から喫煙研究を拾い上げる。"
+        },
+        {
+          "term": "\"vaping\"[tiab]",
+          "axis": "freeword",
+          "rationale": "近年増加している電子タバコ（VAPE）を用いた喫煙やその禁煙に関する文献をカバーする。"
+        },
+        {
+          "term": "\"e-cigarette*\"[tiab]",
+          "axis": "freeword",
+          "rationale": "電子タバコユーザー（新型タバコ喫煙者）を対象とした禁煙介入研究を漏れなく拾う。"
+        },
+        {
+          "term": "\"abstinence\"[tiab]",
+          "axis": "freeword",
+          "rationale": "\"smoking abstinence\"だけでなく単なる「禁欲・禁煙」として表現されている文献を回収する。"
+        },
+        {
+          "term": "\"nicotine dependence\"[tiab]",
+          "axis": "freeword",
+          "rationale": "ニコチン依存症という臨床的表現で記載された喫煙者対象の研究を網羅する。"
+        }
+      ]
+    },
+    {
+      "blockId": "2",
+      "additions": [
+        {
+          "term": "\"Mind-Body Therapies\"[Mesh]",
+          "axis": "mesh",
+          "rationale": "マインドフルネスや瞑想、ヨガの直接の親概念である心身療法を含めることで、境界領域の介入法を網羅する。"
+        },
+        {
+          "term": "\"Cognitive Behavioral Therapy\"[Mesh]",
+          "axis": "mesh",
+          "rationale": "第三世代の認知行動療法（ACTやMBCT）の基盤である認知行動療法全体に網羅性を広げる。"
+        },
+        {
+          "term": "\"ACT\"[tiab]",
+          "axis": "freeword",
+          "rationale": "Acceptance and Commitment Therapy の一般的な略称である「ACT」を用いた文献を取りこぼさないようにする。"
+        },
+        {
+          "term": "\"mind-body\"[tiab]",
+          "axis": "freeword",
+          "rationale": "マインドフルネスやヨガを包括する「心身相関」的アプローチをフリーワードで広く拾い上げる。"
+        },
+        {
+          "term": "\"vipassana\"[tiab]",
+          "axis": "freeword",
+          "rationale": "マインドフルネスの起源であるヴィパッサナー瞑想を用いた介入研究を回収する。"
+        },
+        {
+          "term": "\"contemplative\"[tiab]",
+          "axis": "freeword",
+          "rationale": "瞑想やマインドフルネスを指す表現として使われる「観想的（contemplative）」なアプローチを拾う。"
+        },
+        {
+          "term": "\"breathwork\"[tiab]",
+          "axis": "freeword",
+          "rationale": "マインドフルネスやヨガの主要な構成要素である呼吸法に焦点を当てた介入を網羅する。"
+        }
+      ]
+    }
+  ],
+  "broadenedQuery": "(((Smoking Cessation[Mesh] OR Smoking[Mesh] OR Tobacco Use[Mesh] OR Tobacco Use Disorder[Mesh] OR Tobacco Use Cessation Devices[Mesh] OR smok*[tiab] OR tobacco[tiab] OR cigarette*[tiab] OR cigar*[tiab] OR nicotine[tiab] OR cessation[tiab] OR quit*[tiab] OR \"lapse recovery\"[tiab] OR \"smoking abstinence\"[tiab] OR \"smoking reduction\"[tiab])) OR \"Substance-Related Disorders\"[Mesh] OR \"Tobacco\"[Mesh] OR \"Behavior, Addictive\"[Mesh] OR \"vaping\"[tiab] OR \"e-cigarette*\"[tiab] OR \"abstinence\"[tiab] OR \"nicotine dependence\"[tiab]) AND (((Mindfulness[Mesh] OR Meditation[Mesh] OR Acceptance and Commitment Therapy[Mesh] OR Yoga[Mesh] OR \"mindful*\"[tiab] OR \"meditat*\"[tiab] OR \"yoga\"[tiab] OR \"MBSR\"[tiab] OR \"MBCT\"[tiab] OR \"MBAT\"[tiab] OR \"acceptance and commitment\"[tiab])) OR \"Mind-Body Therapies\"[Mesh] OR \"Cognitive Behavioral Therapy\"[Mesh] OR \"ACT\"[tiab] OR \"mind-body\"[tiab] OR \"vipassana\"[tiab] OR \"contemplative\"[tiab] OR \"breathwork\"[tiab]) AND ((randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh])))",
+  "marginQuery": "((((Smoking Cessation[Mesh] OR Smoking[Mesh] OR Tobacco Use[Mesh] OR Tobacco Use Disorder[Mesh] OR Tobacco Use Cessation Devices[Mesh] OR smok*[tiab] OR tobacco[tiab] OR cigarette*[tiab] OR cigar*[tiab] OR nicotine[tiab] OR cessation[tiab] OR quit*[tiab] OR \"lapse recovery\"[tiab] OR \"smoking abstinence\"[tiab] OR \"smoking reduction\"[tiab])) OR \"Substance-Related Disorders\"[Mesh] OR \"Tobacco\"[Mesh] OR \"Behavior, Addictive\"[Mesh] OR \"vaping\"[tiab] OR \"e-cigarette*\"[tiab] OR \"abstinence\"[tiab] OR \"nicotine dependence\"[tiab]) AND (((Mindfulness[Mesh] OR Meditation[Mesh] OR Acceptance and Commitment Therapy[Mesh] OR Yoga[Mesh] OR \"mindful*\"[tiab] OR \"meditat*\"[tiab] OR \"yoga\"[tiab] OR \"MBSR\"[tiab] OR \"MBCT\"[tiab] OR \"MBAT\"[tiab] OR \"acceptance and commitment\"[tiab])) OR \"Mind-Body Therapies\"[Mesh] OR \"Cognitive Behavioral Therapy\"[Mesh] OR \"ACT\"[tiab] OR \"mind-body\"[tiab] OR \"vipassana\"[tiab] OR \"contemplative\"[tiab] OR \"breathwork\"[tiab]) AND ((randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh])))) NOT (((Smoking Cessation[Mesh] OR Smoking[Mesh] OR Tobacco Use[Mesh] OR Tobacco Use Disorder[Mesh] OR Tobacco Use Cessation Devices[Mesh] OR smok*[tiab] OR tobacco[tiab] OR cigarette*[tiab] OR cigar*[tiab] OR nicotine[tiab] OR cessation[tiab] OR quit*[tiab] OR \"lapse recovery\"[tiab] OR \"smoking abstinence\"[tiab] OR \"smoking reduction\"[tiab])) AND ((Mindfulness[Mesh] OR Meditation[Mesh] OR Acceptance and Commitment Therapy[Mesh] OR Yoga[Mesh] OR \"mindful*\"[tiab] OR \"meditat*\"[tiab] OR \"yoga\"[tiab] OR \"MBSR\"[tiab] OR \"MBCT\"[tiab] OR \"MBAT\"[tiab] OR \"acceptance and commitment\"[tiab])) AND ((randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh]))))",
+  "originalHits": 246,
+  "marginHits": 3749,
+  "searchDate": "2021-04-15",
+  "model": "gemini-3.5-flash",
+  "createdAt": "2026-09-14T04:16:07.212Z",
+  "gitCommit": "b9bff8751baa7de7015112c4d977bcef5c1ec4b9",
+  "gitDirty": true,
+  "sha256": "96dd475226bdcc6257d34bf01f147ebb6b3d023d24af67d96a9929cda629a8b9"
+}

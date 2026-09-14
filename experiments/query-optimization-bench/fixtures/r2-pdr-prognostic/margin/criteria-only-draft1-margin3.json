@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "name": "criteria-only-draft1-margin3",
+  "caseId": "r2-pdr-prognostic",
+  "c0": {
+    "name": "criteria-only-draft1",
+    "sha256": "544bfb28ed3fd9c8ec1492a603c2228c9fd9e2d7049b9be84552a42bcac274bb"
+  },
+  "additions": [
+    {
+      "blockId": "1",
+      "additions": [
+        {
+          "term": "Diabetic Angiopathies[Mesh]",
+          "axis": "mesh",
+          "rationale": "糖尿病網膜症の上位概念である糖尿病性血管障害を含めることで、網膜症に特化してインデックスされていない初期の血管合併症論文を拾います。"
+        },
+        {
+          "term": "Retinal Diseases[Mesh]",
+          "axis": "mesh",
+          "rationale": "網膜疾患全般に広げることで、糖尿病網膜症として明示的にMeSH付与されていない網膜合併症の文献をカバーします。"
+        },
+        {
+          "term": "\"diabetic eye disease*\"[tiab]",
+          "axis": "freeword",
+          "rationale": "糖尿病網膜症を包含する一般的な表現である「糖尿病眼疾患」をテキスト検索に追加します。"
+        },
+        {
+          "term": "\"diabetic microangiopath*\"[tiab]",
+          "axis": "freeword",
+          "rationale": "網膜症の背景病態である糖尿病微小血管障害の表現を拾います。"
+        },
+        {
+          "term": "\"diabetic macular edema\"[tiab]",
+          "axis": "freeword",
+          "rationale": "糖尿病網膜症と併発・関連性の高い糖尿病黄斑浮腫のテキスト表現を追加します。"
+        }
+      ]
+    },
+    {
+      "blockId": "2",
+      "additions": [
+        {
+          "term": "Neovascularization, Pathologic[Mesh]",
+          "axis": "mesh",
+          "rationale": "網膜新生血管の上位概念である病的新生血管を含めることで、増殖変化を伴う病態の取りこぼしを防ぎます。"
+        },
+        {
+          "term": "\"neovascular diabetic retinopath*\"[tiab]",
+          "axis": "freeword",
+          "rationale": "増殖糖尿病網膜症（PDR）と同義で使われる「新生血管を伴う糖尿病網膜症」のテキスト表現をカバーします。"
+        },
+        {
+          "term": "\"advanced diabetic retinopathy\"[tiab]",
+          "axis": "freeword",
+          "rationale": "増殖期に達した状態を指す「進行した糖尿病網膜症」という表現を拾い上げます。"
+        }
+      ]
+    }
+  ],
+  "broadenedQuery": "(((Diabetic Retinopathy[Mesh] OR \"diabetic retinopath*\"[tiab] OR \"nonproliferative diabetic retinopath*\"[tiab] OR \"non-proliferative diabetic retinopath*\"[tiab] OR \"NPDR\"[tiab] OR \"preproliferative diabetic retinopath*\"[tiab] OR \"pre-proliferative diabetic retinopath*\"[tiab])) OR Diabetic Angiopathies[Mesh] OR Retinal Diseases[Mesh] OR \"diabetic eye disease*\"[tiab] OR \"diabetic microangiopath*\"[tiab] OR \"diabetic macular edema\"[tiab]) AND (((Diabetic Retinopathy[Mesh] OR Retinal Neovascularization[Mesh] OR \"proliferative diabetic retinopath*\"[tiab] OR \"PDR\"[tiab] OR \"high-risk proliferative diabetic retinopathy\"[tiab] OR \"HR-PDR\"[tiab] OR \"HRC-PDR\"[tiab] OR \"proliferative retinopath*\"[tiab])) OR Neovascularization, Pathologic[Mesh] OR \"neovascular diabetic retinopath*\"[tiab] OR \"advanced diabetic retinopathy\"[tiab]) AND ((Prognosis[Mesh] OR Disease Progression[Mesh] OR Risk Factors[Mesh] OR Cohort Studies[Mesh] OR Incidence[Mesh] OR Longitudinal Studies[Mesh] OR prognos*[tiab] OR predict*[tiab] OR course[tiab] OR history[tiab] OR progress*[tiab] OR develop*[tiab] OR worsen*[tiab] OR deteriorat*[tiab] OR onset[tiab] OR incidence[tiab] OR risk*[tiab] OR hazard*[tiab] OR cohort*[tiab] OR longitudinal*[tiab] OR follow-up*[tiab] OR followup*[tiab] OR prospective*[tiab]))",
+  "marginQuery": "((((Diabetic Retinopathy[Mesh] OR \"diabetic retinopath*\"[tiab] OR \"nonproliferative diabetic retinopath*\"[tiab] OR \"non-proliferative diabetic retinopath*\"[tiab] OR \"NPDR\"[tiab] OR \"preproliferative diabetic retinopath*\"[tiab] OR \"pre-proliferative diabetic retinopath*\"[tiab])) OR Diabetic Angiopathies[Mesh] OR Retinal Diseases[Mesh] OR \"diabetic eye disease*\"[tiab] OR \"diabetic microangiopath*\"[tiab] OR \"diabetic macular edema\"[tiab]) AND (((Diabetic Retinopathy[Mesh] OR Retinal Neovascularization[Mesh] OR \"proliferative diabetic retinopath*\"[tiab] OR \"PDR\"[tiab] OR \"high-risk proliferative diabetic retinopathy\"[tiab] OR \"HR-PDR\"[tiab] OR \"HRC-PDR\"[tiab] OR \"proliferative retinopath*\"[tiab])) OR Neovascularization, Pathologic[Mesh] OR \"neovascular diabetic retinopath*\"[tiab] OR \"advanced diabetic retinopathy\"[tiab]) AND ((Prognosis[Mesh] OR Disease Progression[Mesh] OR Risk Factors[Mesh] OR Cohort Studies[Mesh] OR Incidence[Mesh] OR Longitudinal Studies[Mesh] OR prognos*[tiab] OR predict*[tiab] OR course[tiab] OR history[tiab] OR progress*[tiab] OR develop*[tiab] OR worsen*[tiab] OR deteriorat*[tiab] OR onset[tiab] OR incidence[tiab] OR risk*[tiab] OR hazard*[tiab] OR cohort*[tiab] OR longitudinal*[tiab] OR follow-up*[tiab] OR followup*[tiab] OR prospective*[tiab]))) NOT (((Diabetic Retinopathy[Mesh] OR \"diabetic retinopath*\"[tiab] OR \"nonproliferative diabetic retinopath*\"[tiab] OR \"non-proliferative diabetic retinopath*\"[tiab] OR \"NPDR\"[tiab] OR \"preproliferative diabetic retinopath*\"[tiab] OR \"pre-proliferative diabetic retinopath*\"[tiab])) AND ((Diabetic Retinopathy[Mesh] OR Retinal Neovascularization[Mesh] OR \"proliferative diabetic retinopath*\"[tiab] OR \"PDR\"[tiab] OR \"high-risk proliferative diabetic retinopathy\"[tiab] OR \"HR-PDR\"[tiab] OR \"HRC-PDR\"[tiab] OR \"proliferative retinopath*\"[tiab])) AND ((Prognosis[Mesh] OR Disease Progression[Mesh] OR Risk Factors[Mesh] OR Cohort Studies[Mesh] OR Incidence[Mesh] OR Longitudinal Studies[Mesh] OR prognos*[tiab] OR predict*[tiab] OR course[tiab] OR history[tiab] OR progress*[tiab] OR develop*[tiab] OR worsen*[tiab] OR deteriorat*[tiab] OR onset[tiab] OR incidence[tiab] OR risk*[tiab] OR hazard*[tiab] OR cohort*[tiab] OR longitudinal*[tiab] OR follow-up*[tiab] OR followup*[tiab] OR prospective*[tiab])))",
+  "originalHits": 17694,
+  "marginHits": 5785,
+  "searchDate": "2022-05-27",
+  "model": "gemini-3.5-flash",
+  "createdAt": "2026-09-14T04:17:48.214Z",
+  "gitCommit": "b9bff8751baa7de7015112c4d977bcef5c1ec4b9",
+  "gitDirty": true,
+  "sha256": "26f13b525480b6aa709359a6308e2a520fdf3325dbc11cdf6dfd56f5d0cad6b0"
+}
