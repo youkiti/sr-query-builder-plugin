@@ -1,0 +1,13 @@
+{
+  "cases": ["r1-mindfulness-smoking", "r2-pdr-prognostic", "r3-vascular-bleeding"],
+  "splits": [20260912, 20260915],
+  "drafts": 3,
+  "draftStart": 11,
+  "maxDraftAttempts": 3,
+  "legacyWorktree": null,
+  "labels": { "current": "rerun-current", "legacy": "rerun-legacy", "legacyLive": "rerun-legacy-live" },
+  "legacyProfile": "rerun-2000",
+  "legacyResultsSubdir": "legacy-f84762e",
+  "oracleRounds": 2,
+  "liveRunsPerSplit": 3
+}

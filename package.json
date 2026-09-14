@@ -9,6 +9,10 @@
   },
   "scripts": {
     "eval:optimize": "tsx experiments/query-optimization-bench/run.ts",
+    "eval:score-legacy": "tsx experiments/query-optimization-bench/scoreLegacy.ts",
+    "eval:select-cases": "tsx experiments/query-optimization-bench/selectCases.ts",
+    "eval:rerun": "tsx experiments/query-optimization-bench/rerun.ts",
+    "eval:rerun-report": "tsx experiments/query-optimization-bench/rerunReport.ts",
     "eval:freeze-c0": "tsx experiments/query-optimization-bench/freezeC0.ts",
     "eval:draft-frequency": "tsx experiments/query-optimization-bench/draftFrequency.ts",
     "eval:import-c0": "tsx experiments/query-optimization-bench/importC0.ts",

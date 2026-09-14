@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { CASES, type BenchCase, type FrozenSeeds, type GoldAudit, type StudyGroup } from './types';
+import { seededShuffle } from './shuffle';
 
 export const FIXTURES = resolve(__dirname, 'fixtures');
 /** 既定のシード分割の乱数。`fixtures/<id>/seeds.json` はこの値で凍結されている。 */
@@ -132,13 +133,7 @@ export function auditGold(gold: GoldRecord, parsed: ParsedReview): { groups: Stu
 
 export function selectSeeds(groups: readonly StudyGroup[], years: Record<string, number | null>, seed = SEED): FrozenSeeds {
   if (groups.length < 3) throw new Error('シード用に 3 群以上必要です');
-  let state = seed;
-  const random = () => { state = (Math.imul(1664525, state) + 1013904223) >>> 0; return state / 4294967296; };
-  const shuffled = [...groups].sort((a, b) => a.id.localeCompare(b.id, 'en'));
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j]!, shuffled[i]!];
-  }
+  const shuffled = seededShuffle([...groups].sort((a, b) => a.id.localeCompare(b.id, 'en')), seed);
   return { seed, selections: shuffled.slice(0, 3).map((group) => {
     const allKnown = group.pmids.every((pmid) => years[pmid] != null);
     const pmid = [...group.pmids].sort((a, b) => (allKnown ? years[a]! - years[b]! : 0) || pmidOrder(a, b))[0]!;

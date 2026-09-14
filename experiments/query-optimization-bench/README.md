@@ -443,10 +443,165 @@ B1 は任意の `fixtures/<id>/b1.json` に `{ "query": "展開済みの PubMed 
 ### 有害採用・確認負荷・LLM コストの計測
 
 - **有害採用（`adoptionAudit`）**: C0→C1 の間に採用されたすべての候補（`optimization.trials` の `kind: 'proposal'` かつ `accepted: true`）について、**採用直前の基準式**（その候補より前で最後に採用された候補、無ければ C0）と比べて held-out 捕捉を失っていないかを監査する。1 件でも held-out を失った採用を「有害な採用」（`harmfulAdopted`）と数える。C0 の測定・却下候補の既存計測（`rejectedCandidates`）・C1 の測定は再利用し、同じ gold クエリを重複して投げない。`manualReviewPending` のときは採点そのものを保留する（`harmfulAdopted: null`）。比較元または候補自身の metrics が無く比較できなかった採用件数を `unscoredAdopted` に記録し、1 件以上あれば `harmfulAdopted: null`（未採点）とする。候補自身の測定失敗や比較元の欠測は原因を `error` に記録し（手動監査待ちだけの場合を除く）、`lostHeldOut: []` を「0 件確定」とは読まない
-- **確認負荷（`confirmation`）**: 最良式（`best`）があり、自動調整の `status !== 'error'` のとき（`stopped` も含む）、`searchOutsideCandidates`（`#/expand` の margin 探索と同じ処理）で「人が確認すべき候補」の件数だけを数える。`confirmationAudit.ts` は `retrieval` を渡さず製品の既定で測定するため、**issue #154 で既定が per-term（拡張語ごとの margin を件数昇順で均等配分して取得。書誌 200 件）に変わって以降の run は per-term で測定している**（#154 より前の run は関連度順・一括取得 200 件）。頑健性集計や過去 run との比較で `confirmationTotal` を読むときはこの既定変更を考慮すること。**候補は自動調整へ一切フィードバックしない**（採否も readjustment もしない）。`existingPmids` には常にシード PMID だけを渡し、gold（held-out を含む）は渡さない。gold への対応付け（`heldOutStudiesAmongCandidates` / `nonGoldCandidates`）は、検索・LLM 呼び出しがすべて終わったあと、この集計のためだけに事後に行う。`total` は outside 候補と、held（レビュー保留）だった候補の `impact.inspected`（シード PMID を除く）を合わせて重複除去した件数。outside check 自体の失敗は `status: 'error'` を記録するだけで run を failed にはしない
+- **確認負荷（`confirmation`）**: 最良式（`best`）があり、自動調整の `status !== 'error'` のとき（`stopped` も含む）、`searchOutsideCandidates`（`#/expand` の margin 探索と同じ処理）で「人が確認すべき候補」の件数だけを数える。`confirmationAudit.ts` は `retrieval` を渡さず製品の既定で測定するため、**issue #154 で既定が per-term（拡張語ごとの margin を件数昇順で均等配分して取得。書誌 200 件）に変わって以降の run は per-term で測定している**（#154 より前の run は関連度順・一括取得 200 件）。頑健性集計や過去 run との比較で `confirmationTotal` を読むときはこの既定変更を考慮すること。**既定（`--oracle-rounds 0`）では候補を自動調整へフィードバックしない**。模擬レビュアーを有効にした場合は、下記の規則で include をシードに加えて再調整する。`existingPmids` には常にシード PMID だけを渡し、gold（held-out を含む）は渡さない。gold への対応付け（`heldOutStudiesAmongCandidates` / `nonGoldCandidates`）は、検索・LLM 呼び出しがすべて終わったあと、この集計のためだけに事後に行う。`total` は outside 候補と、held（レビュー保留）だった候補の `impact.inspected`（シード PMID を除く）を合わせて重複除去した件数。outside check 自体の失敗は `status: 'error'` を記録するだけで run を failed にはしない
 - **LLM 使用量とコスト（`llmUsage`）**: `loggedFactory` の呼び出し 1 回（リトライの各試行を含む）ごとに tokensIn/tokensOut を積算し、`src/lib/llm/pricing.ts` の単価表でコストを概算する。失敗した呼び出しも `calls` に数える（トークンは加算しない）。価格表に無いモデルの呼び出しが 1 回でもあれば `costUsd` は恒久的に `null`（`unpricedCalls` で件数を確認できる）。失敗呼び出し（トークン無し）は 0 円加算として扱い、それだけでは `costUsd` を null にしない。成功しても tokensIn/tokensOut が両方 null なら `untrackedCalls` を増やし、`costUsd` は恒久的に null とする。cost 列は「欠測（価格表外 N 件）」「欠測（トークン不明 N 件）」で原因を区別し、両方あれば併記する。llmUsage の無い古い記録は従来どおり「欠測」
 - summary.md の後半に **頑健性の集計**（`role` / `profile` / `case` / C0（`live` または `variant`） / シード分割 / `label` / `gitCommit` ごとにグループ化した run 数・C0 hits / C1 hits / C1 heldOutRecall の min・median・max・outcome 件数・`harmfulAdopted` 合計・`confirmationTotal` の中央値）を出す（`results/summary-aggregate.csv` にも同じ内容）。`c0` が `live` の行は run ごとに C0 が再生成されるため、行内の散らばりを自動調整ポリシーの効果と解釈しない注記を付ける。`seedSplit` の後ろに `label`（無ければ `-`）・`gitCommit`（先頭 12 文字、無ければ「欠測」）列を置き、この値でコード版を分ける。同じ凍結 C0 の variant 内で `c0.id` が複数なら「複数ドラフト（N 種）を含む。散らばりには C0 の違いが混ざる」と注記する
 
 ## 解釈の限界
 
 これは現在の PubMed に作成日上限を適用した後ろ向き評価で、当時の検索の再現ではありません。完成後の Methods、現在の索引、LLM の学習混入、PMID のある既知研究への限定が残ります。ブロック自動承認の影響の向きは不明です。3 ケース・固定分割 1 回から新規レビューの性能、専門家検索への非劣性、選考時間を主張できません。既知組入報告割合と既知組入研究当たりのレコード数だけで検索効率の優劣を結論しないでください。
+
+
+## 模擬レビュアーによる再調整（`--oracle-rounds`）
+
+```powershell
+npm run eval:optimize -- --case r1-mindfulness-smoking --oracle-rounds 2 --label oracle --dry-run
+# 実 API を呼ぶ場合は --dry-run を外す
+```
+
+`--oracle-rounds` は 0〜2 の整数で、既定 0 は従来の C0 → C1 → 却下候補 → 有害採用 → 確認負荷のままです。
+0 も `oracleRounds` に保存し、`oracle` は未設定にします。`--replay` とは 0 の明示指定も含め併用できません。
+完了結果の要求ラウンド数（古い記録の欠落は 0）が異なる場合はエラーとなるため、`--label` を変えてください。
+`--dry-run` は `oracleRounds=` を表示します。
+
+有効時は基本 run の確認負荷集計後、直前の `outsidePmids` と `lostInspectedPmids` の和集合を提示集合とし、
+検索日内の gold に属する、現在のシード以外の PMID だけを include と答えます。それ以外は exclude と数え、maybe は使いません。
+**gold の境界**: gold は模擬判定の返答と事後採点にだけ使います。探索の既知集合と最適化の入力に渡すのは
+初期シードと、それまでに提示され include された PMID だけです。未提示の held-out を渡しません。
+**この模擬は保守的に偏ります**。gold に無い適格研究も exclude と答えるため、実際の人より include が少なくなりえます。
+人の include の見落としは模擬しません。
+
+更新シード全体の書誌を `seedTitles` で取得し、直前の最良式を初期式に、同じ `maxHits` / `maxIterations` /
+`approvedBlocks` / `criteria` で新たに最適化します。runId は `<基本 runId>-oracle<k>`、チェックポイントも毎回新規です。
+各ラウンドでは最終式、前段との比較、却下候補、有害採用、更新シードでの確認負荷を測定します。
+停止理由は `confirmation_unavailable`（前段の確認負荷が ready でない）、`no_new_includes`（追加 include なし）、
+`no_best_formula`（追加 include はあるが前段の最良式なし）、`round_limit`（要求回数完了）です。
+
+`oracle.rounds` に提示・include PMID、include の研究 ID、exclude 件数、更新シード、runId、最適化・測定・監査を保存します。
+`oracle.final` は最後の段階の最終式（再調整 0 回なら C1）、`exposedHeldOutStudies` は基本 run と全ラウンドの確認候補に
+提示された held-out 研究 ID の和集合です。`unexposedHeldOut` は一度も提示されなかった held-out 研究についての
+`total` / `captured` / `recall` です。分母 0、最終測定失敗、手動監査待ちでは recall は null です。
+既存の held-out 分母は include 後も固定し、未提示研究の指標を別に残します。
+
+ラウンドごとに run を保存し、試行ディレクトリにマスク済みの `oracle-round-<k>.json` を書きます。
+途中の例外、最適化の error、最終式・却下候補・有害採用監査の測定失敗は run 全体を failed にします。
+途中ラウンドから再開せず、既存方式どおり基本 run からやり直します。確認負荷の error は次ラウンドの停止条件です。
+
+## 旧版 run の採点（`eval:score-legacy`）
+
+```powershell
+npm run eval:score-legacy -- experiments/query-optimization-bench/results --dry-run
+# run.json のパスやディレクトリを複数指定できる
+npm run eval:score-legacy -- path/to/run.json path/to/results
+```
+
+ディレクトリは再帰的に `run.json` を集め、親ディレクトリ名がその runId である試行コピーを除外します。
+`legacy === true` かつ `status === 'completed'` の記録だけが対象です。対象外は理由付きでスキップし、対象が無ければ「対象 0 件」を表示します。
+既存の `computeAdoptionAudit` に保存済みの分母、C0 / C1、試行履歴・却下候補計測を渡し、有害採用だけを採点します。
+C0 / C1 の再採点や分母の作り直しは行いません。
+
+原本の `run.json` は変更せず、同じディレクトリの `scored.json` に
+`{ adoptionAudit, scoredAt, gitCommit, gitDirty, source }`（source は元の runId）を一時ファイル + rename で保存します。
+同じコミットでの採点済み記録はスキップし、別コミットの記録は上書きせずエラーとして次のファイルへ進みます。
+採点コミットを取得できない場合も保存しません。
+
+通常実行は dotenv で `.env` を読み、必要な追加計測に `NCBI_API_KEY` と検索日制限付き `createEvalFetch` を使います。
+LLM は使いません。ログ・保存内容は `redact` でキーをマスクします。`--dry-run` は `.env` を読まず、通信・保存をせず対象と保存先だけを表示します。
+
+## 確認用ケースの選定（`eval:select-cases`）
+
+`screen` は Cochrane-bench の cc-by gold 全件、parsed JSON、検索日監査
+`data/audit/medline_search_dates/session_2026-09-14/final_cc-by.jsonl` を読み取り専用で使います。
+入力ルートは `eval:prepare` と同じ `COCHRANE_BENCH_DIR` または既定のローカルパスです。通信しません。
+
+```powershell
+npm run eval:select-cases -- screen
+```
+
+`fixtures/_selection/screening.json` と `screening.md` に、全レビューの基準の真偽、研究数、重複・共有・未対応 PMID、
+PMID 無し研究名、最終番号付き検索ステップ、検索日、更新検索の根拠抜粋、不適格理由を残します。
+研究群と研究数は `prepare.ts` の `auditGold` をそのまま使います。
+更新検索の語と日付制限は機械検出し、収録範囲の `1946 to ...` は除きます。
+他の基準を通過し更新検索の疑いがあるレビューは、判断がなければ「判断待ち」です。
+
+根拠を読んだ人が `fixtures/_selection/update-search-decisions.json` を次の形で用意し、`screen` を再実行します。
+`updateSearch: true` は不適格、`false` は適格です。判断ファイルを CLI が自動作成することはありません。
+
+```json
+{ "<pmcid>": { "updateSearch": false, "note": "更新検索ではないと判断した根拠" } }
+```
+
+```powershell
+npm run eval:select-cases -- screen
+npm run eval:select-cases -- pick --seed 20260915 --count 3
+```
+
+`pick` は判断待ちが 1 件でもあると拒否します。適格を PMCID 順に並べ、`selectSeeds` と共通の
+LCG / Fisher–Yates（`seededShuffle`）で選びます。3 件未満なら基準を緩めず全件を選びます。
+`confirmation-cases.json` に選定乱数・要求数・全適格 PMCID・選定内容・元 screening の SHA-256 を保存します。
+`screening.*` は再生成で上書きしますが、選定結果は `wx` で上書きを禁止します。作り直す場合は手動で削除します。
+選定後は `suggestedId`・PMCID・検索日を `types.ts` の `CASES` に `role: 'confirmation'` として転記し、
+gold の監査とシード凍結を済ませます。検索日は従来どおり `CASES.searchDate` に手で記入します。
+
+## 再評価の行列実行（`eval:rerun` / `eval:rerun-report`）
+
+設定は `rerun/config.json`。雛形は開発用 3 件、2 分割、条件ごと 3 枠、draft11 開始です。
+確認用ケースを登録した後、この設定の `cases` にも ID を追加します。
+`legacyWorktree` は旧版の絶対パスを記入するか、`--legacy-dir <絶対パス>` で上書きします。
+旧版段階は指定がなければ失敗として記録します。dry-run は未設定・未凍結も表示できます。
+
+旧版は評価用パッチ済み CLI が `--fixtures` / `--results` / `--profile rerun-2000` /
+`--c0` / `--seeds` / `--label` を受け付ける前提です。旧版の cwd で子プロセスを起動し、
+fixtures と results はこの worktree の絶対パスを渡します。版の切り替えは行いません。
+各 CLI を `npx tsx <script> ...` 相当の子プロセスで直列実行します。Windows はシェル経由の文字列展開を避け、
+npm 同梱の `npx-cli.js` を Node で起動します。親の環境変数をそのまま渡し、`.env` は子 CLI が読みます。
+
+[再評価計画 §9](../../docs/query-optimization-rerun-plan.md) の順で進めます。
+
+1. **準備**: 設定と旧版パッチを用意し、`npm run eval:rerun -- all --dry-run --legacy-dir <絶対パス>` で行列を確認します。
+   `--dry-run` は子を起動せず、実行 ID・引数配列・保存先・スキップまたは未準備の理由を表示します。
+2. **ケースの凍結**: 上の選定手順、CASES 登録、`npm run eval:prepare`、gold の監査を行い、
+   `npm run eval:rerun -- prepare` で 2 つ目以降のシード分割を準備します。選定記録と fixture を版管理します。
+3. **C0 の凍結**: `npm run eval:rerun -- freeze`。criteria-only はケースごとに枠を持ち、両分割で共有します。
+   seeded はケース・分割ごとに枠を持ちます。凍結失敗は別の空き番号で再試行し、各試行直後に
+   `results/rerun/c0-slots.json` を一時ファイル + rename で保存します。各枠の上限は `maxDraftAttempts`。
+   上限到達時は停止理由を確認して対処します。割当済み C0 が存在する枠は再凍結しません。
+4. **パイロット**: `--filter` は実行 ID の部分文字列、`--limit` は実際に実行する試行数の上限です。
+   例えば `npm run eval:rerun -- run --filter current:r3-vascular-bleeding:criteria-only-draft11 --limit 1`。
+   旧対比較は `legacy:r3-vascular-bleeding:criteria-only-draft11`、旧通しは `legacyLive:r3-vascular-bleeding:live-1`
+   を指定します（実際の凍結名を使用）。`score` と `eval:rerun-report` まで通し、実費を確認します。
+5. **本実行**: `npm run eval:rerun -- run --legacy-dir <絶対パス>`。ケースごとに current → legacy → legacyLive の順です。
+   current は `oracleRounds` を渡します。基本 run が failed の場合、oracle のラウンドを始めません。
+   期待する `run.json` が completed で、実行先チェックアウトの HEAD（取得不能は不可）、`maxHits`（current は default、旧版は 2,000）、
+   current の `oracleRounds`（欠落は 0）が要求と一致する場合だけスキップします。条件不一致は子を起動せず失敗にし、
+   label の変更を求める理由を ledger とログに残します。dry-run でもスキップ・条件不一致・実行を表示します。
+   失敗は次の実行へ進み、失敗があれば終了コード 1。
+   `all` は prepare → freeze → run → score を順に実行します。filter / limit は全段階に共通で、limit は all 全体の上限です。
+6. **報告**: `npm run eval:rerun -- score` で旧版の有害採用を採点し、`npm run eval:rerun-report` で集計します。
+   採点には追加の NCBI 計測がありえますが、rerun-report はローカルファイルだけを読みます。
+   監査の `trials[].error` または `unscoredAdopted > 0` は失敗として表示し、`scored.json` を保存せず終了コード 1 にします。
+   この印がある既存採点は再採点し、正常な既存採点は同じコミットならスキップ、別コミットなら上書きせずエラーにします。
+   `--config <path>` は両 CLI に指定できます。
+
+各試行の `ledger.jsonl` は実行 ID ごとの最終行勝ちです。標準出力・標準エラーは
+`results/rerun/logs/<安全な ID>-<sha256 先頭8桁>.log` へマスクして追記します。
+dry-run 以外の起動時に一度、ledger の末尾に改行がなければ最後の改行より後ろを除き、一時ファイル + rename で修復します。
+修復したことだけを 1 行表示し、取り除いた中身は表示しません。
+終了時は実行 0 件でも「完了 / スキップ / 失敗」の件数と失敗 ID を表示します。
+途中の凍結失敗が再試行で回復した場合も、そのコマンドの失敗試行として終了集計に残ります。
+
+集計は `results/rerun/summary.md` と表ごとの CSV に出します。設定・C0 枠から期待する全 run を列挙し、
+未実行は「欠測」、失敗は「失敗」として保持します。旧版の `scored.json` は source が runId と一致する場合だけ使います。
+層 A は criteria-only の版ごとの C0 / C1 分布（role 小計付き）、層 B は凍結 C0 の対比較と実名の喪失・獲得、
+層 C は取りこぼし・提示・回収・確認負担・未提示再現率（role 小計付き）です。C0 枠の品質と費用も別表にします。
+
+S1 は新有害採用 0 を機械判定し、旧有害採用のあった C0 の同種候補の保留・却下は手動照合表に出します。
+S2 は喪失した組の `原因` を空欄にして「要手動分類」とし、調整ロジック起因 0 の確認を人に残します。
+S3 は中央値が旧以上のケースが**過半数**、S4 は development / confirmation の各 1 ケース以上の回収です。
+S5 は achieved かつ C1 再現率 1 未満の run における「確認済み」の割合を報告し、合否の数値閾値を追加しません。
+画面の区分を作らないハーネスのため、確認負荷が ready かつ total=0 を「確認済み」の近似として注記します。
+欠測が判定を妨げる場合は「欠測で判定不能」とします。
+
+`.gitignore` は `experiments/query-optimization-bench/results/` を無視しています。
+`fixtures/_selection/` と `rerun/config.json` は**コミット対象**です（判断ファイルと凍結した選定結果も含む）。
+C0 枠と ledger は results にあるので、再開・報告のため実行環境で保持してください。

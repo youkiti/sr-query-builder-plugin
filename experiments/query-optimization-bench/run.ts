@@ -28,7 +28,7 @@ import { computeAdoptionAudit } from './adoptionAudit';
 import { computeConfirmation } from './confirmationAudit';
 import { createLlmUsageTracker } from './llmUsage';
 import { createReplayLlmFactory, hashReplayFixture, loadReplayFixture, type ReplayFixtureContent, type ReplayLlmFactory } from './replay';
-import { CASES, PROFILES, type BenchCase, type FrozenSeeds, type GoldAudit, type RunResult, type ConditionResult } from './types';
+import { CASES, PROFILES, type BenchCase, type FrozenSeeds, type GoldAudit, type RunResult, type ConditionResult, type OracleRound, type OracleSummary } from './types';
 
 export const RESULTS = resolve(__dirname, 'results');
 
@@ -83,6 +83,7 @@ export function loggedFactory(provider: LLMProvider, write: (path: string, value
 export interface ParsedArgs {
   ids: string[];
   dryRun: boolean;
+  oracleRounds: number;
   profile: { id: string; maxHits: number; maxIterations: number };
   /** tight-1000 または --max-hits による事後探索条件かどうか（default は false）。 */
   postHoc: boolean;
@@ -98,6 +99,7 @@ export interface ParsedArgs {
 export function parseArgs(args: string[]): ParsedArgs {
   let selected: string | undefined;
   let dryRun = false;
+  let oracleArg: string | undefined;
   let profileId: string | undefined;
   let maxHitsArg: string | undefined;
   let seedArg: string | undefined;
@@ -106,6 +108,7 @@ export function parseArgs(args: string[]): ParsedArgs {
   let replayName: string | undefined;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--dry-run') dryRun = true;
+    else if (args[i] === '--oracle-rounds' && oracleArg === undefined && args[i + 1] !== undefined) oracleArg = args[++i];
     else if (args[i] === '--case' && selected === undefined && args[i + 1]) selected = args[++i];
     else if (args[i] === '--profile' && profileId === undefined && args[i + 1]) profileId = args[++i];
     else if (args[i] === '--max-hits' && maxHitsArg === undefined && args[i + 1]) maxHitsArg = args[++i];
@@ -115,6 +118,9 @@ export function parseArgs(args: string[]): ParsedArgs {
     else if (args[i] === '--replay' && replayName === undefined && args[i + 1]) replayName = args[++i];
     else throw new Error(`未対応の引数: ${args[i]}`);
   }
+  if (oracleArg !== undefined && !/^[0-2]$/.test(oracleArg)) throw new Error('--oracle-rounds は 0〜2 の整数で指定してください');
+  if (oracleArg !== undefined && replayName !== undefined) throw new Error('--oracle-rounds と --replay は併用できません');
+  const oracleRounds = Number(oracleArg ?? 0);
   if (label !== undefined && (!/^[A-Za-z0-9._-]{1,40}$/.test(label) || label.trim() !== label)) throw new Error('--label は英数字・.・_・- の 1〜40 文字で指定してください');
   // resultDir は label と --replay の接尾辞をどちらも `+` 連結だけで区別するため、label が
   // `replay-` で始まると自由生成の保存先が --replay の保存先と衝突する（大文字小文字を区別しない）。
@@ -137,7 +143,7 @@ export function parseArgs(args: string[]): ParsedArgs {
     postHoc = found.postHoc;
   }
   const seed = seedArg === undefined ? SEED : parseSeedSplit(seedArg);
-  return { profile, ids: selected ? [selected] : CASES.map((item) => item.id), dryRun, postHoc, seed, c0Name, label, replayName };
+  return { oracleRounds, profile, ids: selected ? [selected] : CASES.map((item) => item.id), dryRun, postHoc, seed, c0Name, label, replayName };
 }
 
 /** --c0 で読み込み・検証済みの凍結 C0（run.ts のみで組み立て、executeCase はそのまま信用する）。 */
@@ -156,6 +162,7 @@ export interface ExecutionDeps {
   llmFactory: LlmProviderFactory;
   progress: (event: unknown) => void;
   save: () => void;
+  writeOracleRound?: (round: OracleRound) => void;
   /** 選択したシード分割。未指定なら fixture 埋め込みの既定分割（SEED）を使う。 */
   seeds?: FrozenSeeds;
   /** --c0 検証済みの凍結 C0。未指定なら従来どおり extractProtocol/generateDraftFormula でその場生成する。 */
@@ -195,6 +202,7 @@ export async function measureRejectedCandidates(result: RunResult, eutils: Eutil
 export async function executeCase(fixture: BenchCase, audit: GoldAudit, protocolText: string, result: RunResult,
   deps: ExecutionDeps, b1?: { query: string }): Promise<void> {
   const { eutils, llmFactory, progress, save } = deps;
+  result.oracleRounds ??= 0;
   if (DEFAULT_OPTIMIZATION_MAX_HITS !== PROFILES.find((profile) => profile.id === 'default')!.maxHits) throw new Error('アプリの既定上限と固定評価条件が一致しません');
   const seeds = deps.seeds ?? fixture.seeds;
   validateSeeds(seeds, fixture.gold);
@@ -243,10 +251,11 @@ export async function executeCase(fixture: BenchCase, audit: GoldAudit, protocol
   };
   result.conditions.C0 = { ...await measure(expandFormula(formula)), formula };
   save();
-  result.optimization = await runQueryOptimization({ projectId: fixture.id, runId: result.runId,
+  const optimizationInput = { projectId: fixture.id, runId: result.runId,
     initialFormula: formula, seedPmids, seedPapers: papers, maxHits: result.maxHits, maxIterations: result.maxIterations,
     approvedBlocks: blocks.blocks.map((block, index) => ({ id: String(index + 1), approvedBlockId: String(index + 1), label: block.blockLabel })),
-    criteria: { researchQuestion: protocol.researchQuestion, inclusionCriteria: protocol.inclusionCriteria, exclusionCriteria: protocol.exclusionCriteria } },
+    criteria: { researchQuestion: protocol.researchQuestion, inclusionCriteria: protocol.inclusionCriteria, exclusionCriteria: protocol.exclusionCriteria } };
+  result.optimization = await runQueryOptimization(optimizationInput,
   { eutils, llmFactory, checkpoint: memoryCheckpoint(), fetchMeshContext: (request, observed) => fetchMeshContext(request, observed ?? eutils),
     onProgress: progress, measureTermDetails: true, ...(deps.replay ? { shouldStop: deps.replay.factory.shouldStop } : {}) });
   if (deps.replay) {
@@ -270,17 +279,91 @@ export async function executeCase(fixture: BenchCase, audit: GoldAudit, protocol
   save();
   result.status = result.optimization.status === 'error' || candidates.some((candidate) => candidate.error)
     || Object.values(result.conditions).some((condition) => condition.measurement.status === 'failure') ? 'failed' : 'completed';
+  if (result.status === 'completed' && result.oracleRounds > 0) {
+    const baseStatus = result.status;
+    result.status = 'running';
+    try {
+      let previous = result;
+      let currentSeeds = [...seedPmids];
+      const oracle: OracleSummary = result.oracle = {
+        requestedRounds: result.oracleRounds, stopReason: 'round_limit', rounds: [], final: result.conditions.C1,
+        exposedHeldOutStudies: [], unexposedHeldOut: { total: 0, captured: 0, recall: null },
+      };
+      const updateExposure = (confirmation: RunResult['confirmation']) => {
+        oracle.exposedHeldOutStudies = [...new Set([...oracle.exposedHeldOutStudies,
+          ...(confirmation?.heldOutStudiesAmongCandidates ?? [])])];
+        const unseen = groups.filter((group) => heldOut.includes(group.id)).flatMap((group) => group.members)
+          .filter((study) => !oracle.exposedHeldOutStudies.includes(study.studyId));
+        const capturedPmids = oracle.final.measurement.status === 'success' ? oracle.final.measurement.capturedPmids : [];
+        const captured = unseen.filter((study) => study.pmids.some((pmid) => capturedPmids.includes(pmid))).length;
+        oracle.unexposedHeldOut = { total: unseen.length, captured,
+          recall: unseen.length && oracle.final.measurement.status === 'success' && !audit.manual_review ? captured / unseen.length : null };
+      };
+      updateExposure(result.confirmation);
+      const goldPmids = new Set(groups.flatMap((group) => group.pmids));
+      for (let round = 1; round <= result.oracleRounds; round++) {
+        const confirmation = previous.confirmation;
+        if (confirmation?.status !== 'ready') { oracle.stopReason = 'confirmation_unavailable'; break; }
+        const presentedPmids = [...new Set([...confirmation.outsidePmids, ...confirmation.lostInspectedPmids])];
+        // gold は模擬レビュアーの返答と事後採点にだけ使う。探索・最適化へ渡す既知集合はシードと include のみ。
+        const includedPmids = presentedPmids.filter((pmid) => goldPmids.has(pmid) && !currentSeeds.includes(pmid));
+        if (!includedPmids.length) { oracle.stopReason = 'no_new_includes'; break; }
+        const previousBest = previous.optimization?.best;
+        if (!previousBest) { oracle.stopReason = 'no_best_formula'; break; }
+        currentSeeds = [...currentSeeds, ...includedPmids];
+        const seedPapers = await seedTitles(currentSeeds, eutils);
+        const runId = `${result.runId}-oracle${round}`;
+        const optimization = await runQueryOptimization({ ...optimizationInput, initialFormula: previousBest.formula,
+          seedPmids: currentSeeds, seedPapers, runId },
+        { eutils, llmFactory, checkpoint: memoryCheckpoint(), fetchMeshContext: (request, observed) => fetchMeshContext(request, observed ?? eutils),
+          onProgress: progress, measureTermDetails: true });
+        const final: ConditionResult = optimization.best
+          ? { ...await measure(expandFormula(optimization.best.formula)), formula: optimization.best.formula }
+          : { query: '', measurement: { status: 'failure', error: '自動調整の有効な最良式がありません' }, metrics: null };
+        const stage: RunResult = { ...result, runId, optimization, conditions: { C0: oracle.final, C1: final },
+          rejectedCandidates: undefined, adoptionAudit: undefined, confirmation: undefined, oracle: undefined };
+        stage.rejectedCandidates = await measureRejectedCandidates(stage, eutils);
+        stage.adoptionAudit = await computeAdoptionAudit(stage, eutils);
+        stage.confirmation = await computeConfirmation(stage, protocol, currentSeeds, { eutils, llmFactory });
+        const entry: OracleRound = { round, presentedPmids, includedPmids,
+          includedStudyIds: [...new Set(groups.flatMap((group) => group.members)
+            .filter((study) => study.pmids.some((pmid) => includedPmids.includes(pmid))).map((study) => study.studyId))],
+          excludedCount: presentedPmids.length - includedPmids.length, seedPmids: [...currentSeeds], runId, optimization, final,
+          comparisonToPrevious: oracle.final.metrics && final.metrics ? compareMetrics(oracle.final.metrics, final.metrics) : null,
+          rejectedCandidates: stage.rejectedCandidates, adoptionAudit: stage.adoptionAudit, confirmation: stage.confirmation };
+        oracle.rounds.push(entry);
+        oracle.final = final;
+        updateExposure(stage.confirmation);
+        const failed = optimization.status === 'error' || final.measurement.status === 'failure'
+          || stage.rejectedCandidates.some((candidate) => candidate.error) || stage.adoptionAudit.trials.some((trial) => trial.error);
+        if (failed) result.status = 'failed';
+        deps.writeOracleRound?.(entry);
+        save();
+        if (failed) throw new Error(`oracle ラウンド ${round} の最適化または測定に失敗しました`);
+        previous = stage;
+      }
+      result.status = baseStatus;
+      save();
+    } catch (err) {
+      result.status = 'failed';
+      throw err;
+    }
+  }
+
 }
 
 /** 完了結果を別コミットで上書きしないため、保存処理より前に判定する。 */
-export function decideExisting(existing: RunResult, profile: Pick<ParsedArgs['profile'], 'maxHits'>, gitCommit: string | null): 'run' | 'skip' {
+export function decideExisting(existing: RunResult, profile: Pick<ParsedArgs['profile'], 'maxHits'>, gitCommit: string | null, oracleRounds = 0): 'run' | 'skip' {
+  if (existing.status === 'completed' && (existing.oracleRounds ?? 0) !== oracleRounds) {
+    throw new Error('完了結果の oracleRounds が異なります。--label を変えて実行してください');
+  }
   if (existing.status !== 'completed' || existing.maxHits !== profile.maxHits) return 'run';
   if (existing.gitCommit === gitCommit) return 'skip';
   throw new Error(`別コミット（既存=${existing.gitCommit?.slice(0, 12) ?? '欠測'}, 現在=${gitCommit?.slice(0, 12) ?? '欠測'}）の完了結果があります。比較用に残すなら --label を付けて実行してください`);
 }
 
 export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES, resultsDir = RESULTS): Promise<void> {
-  const { ids, dryRun, profile, postHoc, seed, c0Name, label, replayName } = parseArgs(args);
+  const { ids, dryRun, profile, postHoc, seed, c0Name, label, replayName, oracleRounds } = parseArgs(args);
   if (!dryRun) {
     config();
     // searchOutsideCandidates（confirmation の集計）が efetchArticles を使うため、非 dry-run では必ず補う。
@@ -296,7 +379,7 @@ export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES,
     if (!dryRun && existsSync(resultPath)) {
       try {
         const existing = JSON.parse(readFileSync(resultPath, 'utf8')) as RunResult;
-        if (decideExisting(existing, profile, gitCommit) === 'skip') {
+        if (decideExisting(existing, profile, gitCommit, oracleRounds) === 'skip') {
           process.stdout.write(`${id}: 完了済みのためスキップ\n`); continue;
         }
       } catch (err) {
@@ -312,7 +395,7 @@ export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES,
     const result: RunResult = { id, runId, profileId: profile.id, status: dryRun ? 'dry-run' : 'running', startedAt: new Date().toISOString(),
       model: '', searchDate: '', maxHits: profile.maxHits, maxIterations: profile.maxIterations, conditions: {}, apiCalls: { ncbi: 0, llm: 0 },
       apiElapsedMs: { ncbi: 0, llm: 0 }, elapsedMs: 0, llmLogs: [], gitCommit, gitDirty: isGitDirty(),
-      seedSplit: splitId, role, postHoc, label };
+      seedSplit: splitId, role, postHoc, label, oracleRounds };
     const serialize = (value: unknown) => redact(JSON.stringify(value, null, 2), secrets) + '\n';
     const save = () => {
       if (dryRun) return;
@@ -395,7 +478,7 @@ export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES,
           || DEFAULT_OPTIMIZATION_MAX_HITS !== PROFILES.find((profile) => profile.id === 'default')!.maxHits) throw new Error('配線確認に失敗しました');
         llmFactory.forPurpose('extract_protocol');
         process.stdout.write(`${id}: dry-run OK (profile=${profile.id}, maxHits=${profile.maxHits}, maxIterations=${profile.maxIterations}, `
-          + `seedSplit=${splitId}, c0=${c0Key}, label=${label ?? '-'}, replay=${replayName ?? '-'}, API calls=0, groups=${fixture.gold.length}, heldOut=${computeHeldOut(fixture.gold, seeds).length})\n`);
+          + `oracleRounds=${oracleRounds}, seedSplit=${splitId}, c0=${c0Key}, label=${label ?? '-'}, replay=${replayName ?? '-'}, API calls=0, groups=${fixture.gold.length}, heldOut=${computeHeldOut(fixture.gold, seeds).length})\n`);
         continue;
       }
       save();
@@ -405,7 +488,8 @@ export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES,
       if (b1 && (typeof b1.query !== 'string' || !b1.query.trim())) throw new Error('b1.json には query が必要です');
       const replay = replayFactory ? { name: replayName!, sha256: replaySha256!,
         responseCount: replayFixture!.responses.length, factory: replayFactory } : undefined;
-      await executeCase(fixture, audit, protocolText, result, { eutils, llmFactory, save, progress, seeds, frozenC0, replay }, b1);
+      await executeCase(fixture, audit, protocolText, result, { eutils, llmFactory, save, progress, seeds, frozenC0, replay,
+        writeOracleRound: (round) => write(`oracle-round-${round.round}.json`, round) }, b1);
     } catch (err) {
       result.status = 'failed';
       result.error = redact(err instanceof Error ? err.message : String(err), secrets);
