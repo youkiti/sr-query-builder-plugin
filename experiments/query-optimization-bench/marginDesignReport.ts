@@ -22,6 +22,11 @@ function findRunFiles(dir: string): string[] {
 
 function formatMarginHits(run: MarginDesignVariantRun): string {
   if (run.marginHitsByBlock) return run.marginHitsByBlock.map((block) => String(block.count)).join('+');
+  // per-term は語数が多くなりうるため、件数を `+` 連結すると長すぎる。「<語数>語/合計<件数>」に要約する
+  // （語ごとの件数はそもそも重複を含む単純合計で、和集合の件数ではない点は per-block の `+` 表示と同じ）。
+  if (run.termMargins && run.termMargins.length > 0) {
+    return `${run.termMargins.length}語/合計${run.termMargins.reduce((sum, term) => sum + term.count, 0)}`;
+  }
   return run.marginHits === null ? '-' : String(run.marginHits);
 }
 
@@ -42,12 +47,15 @@ function formatCost(usage: MarginDesignVariantRun['llmUsage']): string {
   return reasons.length ? `欠測（${reasons.join('・')}）` : '欠測';
 }
 
-/** full → cutoff-<N>（N の数値昇順）→ per-block。文字列比較だと cutoff-500 と cutoff-1000 が逆転する。 */
+/** full → cutoff-<N>（N の数値昇順）→ per-block → per-term-equal → per-term-smallest-first。
+ * 文字列比較だと cutoff-500 と cutoff-1000 が逆転する。 */
 function variantOrder(variant: string): readonly [number, number] {
   if (variant === 'full') return [0, 0];
   if (variant === 'per-block') return [2, 0];
+  if (variant === 'per-term-equal') return [3, 0];
+  if (variant === 'per-term-smallest-first') return [4, 0];
   const match = /^cutoff-(\d+)$/.exec(variant);
-  return match ? [1, Number(match[1])] : [3, 0];
+  return match ? [1, Number(match[1])] : [5, 0];
 }
 
 function compareRuns(a: MarginDesignVariantRun, b: MarginDesignVariantRun): number {

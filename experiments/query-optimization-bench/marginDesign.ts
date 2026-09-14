@@ -45,6 +45,8 @@ export interface MarginDesignArgs {
   thresholds: number[];
   rankDepth: number;
   label?: string;
+  /** --variants で絞った案名。未指定（全案）なら undefined。 */
+  variants?: string[];
   dryRun: boolean;
 }
 
@@ -60,13 +62,18 @@ function parseThresholds(raw: string | undefined): number[] {
   return [...values].sort((a, b) => a - b);
 }
 
+/** full → cutoff-<N>（昇順）→ per-block → per-term-equal → per-term-smallest-first の既定の全案名。 */
+export function allMarginDesignVariantNames(thresholds: readonly number[]): string[] {
+  return ['full', ...thresholds.map((threshold) => `cutoff-${threshold}`), 'per-block', 'per-term-equal', 'per-term-smallest-first'];
+}
+
 export function parseMarginDesignArgs(args: string[]): MarginDesignArgs {
   const values: Record<string, string> = {};
   let dryRun = false;
   for (let i = 0; i < args.length; i++) {
     const key = args[i]!;
     if (key === '--dry-run' && !dryRun) dryRun = true;
-    else if (['--case', '--margin', '--seeds', '--thresholds', '--rank-depth', '--label'].includes(key)
+    else if (['--case', '--margin', '--seeds', '--thresholds', '--rank-depth', '--label', '--variants'].includes(key)
       && values[key] === undefined && args[i + 1] !== undefined && !args[i + 1]!.startsWith('--')) values[key] = args[++i]!;
     else throw new Error(`未対応・重複または値のない引数: ${key}`);
   }
@@ -84,8 +91,18 @@ export function parseMarginDesignArgs(args: string[]): MarginDesignArgs {
   if (label !== undefined && (!/^[A-Za-z0-9._-]{1,40}$/.test(label) || /^replay-/i.test(label))) {
     throw new Error('--label は英数字・.・_・- の 1〜40 文字で指定してください（replay- で始まる名前は使用できません）');
   }
+  const variantsRaw = values['--variants'];
+  let variants: string[] | undefined;
+  if (variantsRaw !== undefined) {
+    const parts = variantsRaw.split(',').map((part) => part.trim());
+    if (parts.some((part) => part === '')) throw new Error('--variants には既知の案名をカンマ区切りで指定してください');
+    if (new Set(parts).size !== parts.length) throw new Error('--variants に重複した値があります');
+    const known = new Set(allMarginDesignVariantNames(thresholds));
+    for (const part of parts) if (!known.has(part)) throw new Error(`--variants に未知の案名があります: ${part}`);
+    variants = parts;
+  }
   return { caseId, marginName, seed: values['--seeds'] === undefined ? SEED : parseSeedSplit(values['--seeds']),
-    thresholds, rankDepth, label, dryRun };
+    thresholds, rankDepth, label, variants, dryRun };
 }
 
 // ---------------------------------------------------------------------------
@@ -149,6 +166,13 @@ function termCountLookup(counts: Map<string, TermCountRecord>): Map<string, numb
   return lookup;
 }
 
+/** キーは `${blockId} ${term}`（termCountLookup と同じキー形式）。marginQuery まで保持する版。 */
+function termRecordLookup(counts: Map<string, TermCountRecord>): Map<string, TermCountRecord> {
+  const lookup = new Map<string, TermCountRecord>();
+  for (const record of counts.values()) lookup.set(`${record.blockId} ${record.term}`, record);
+  return lookup;
+}
+
 function lookupCount(lookup: Map<string, number>, blockId: string, term: string): number {
   const count = lookup.get(`${blockId} ${term}`);
   if (count === undefined) throw new Error(`語の件数が見つかりません（先に段階 1 を実行してください）: ${blockId}/${term}`);
@@ -159,9 +183,12 @@ function lookupCount(lookup: Map<string, number>, blockId: string, term: string)
 // 段階 2: 案ごとの候補選定（gold を使わない）
 // ---------------------------------------------------------------------------
 
-export type MarginDesignVariantKind = 'full' | 'cutoff' | 'per-block';
+export type MarginDesignVariantKind = 'full' | 'cutoff' | 'per-block' | 'per-term';
 
 export interface KeptTerm { blockId: string; term: string; count: number }
+
+/** per-term 専用の取得単位（実際に esearch する語だけを持つ）。 */
+export interface TermUnitPlan { blockId: string; term: string; marginQuery: string; count: number; allocation: number }
 
 export interface VariantPlan {
   name: string;
@@ -171,6 +198,8 @@ export interface VariantPlan {
   additions: BlockRecallAdditions[] | null;
   /** per-block 専用: 語が 1 つ以上残ったブロックだけの一覧。 */
   blocksWithTerms?: BlockRecallAdditions[];
+  /** per-term 専用: 実際に esearch する語（allocation >= 1）だけの一覧。sameAs のときは undefined。 */
+  termUnits?: TermUnitPlan[];
   sameAs: string | null;
   emptyMargin: boolean;
   keptTerms: KeptTerm[];
@@ -225,8 +254,59 @@ export function planMarginDesignVariants(additions: readonly BlockRecallAddition
   return plans;
 }
 
+/**
+ * per-term-equal・per-term-smallest-first の 2 案を組み立てる（純粋関数。通信しない）。
+ * 対象は凍結 margin の全語（段階 1 で数え済みであることが前提）。件数 0 の語は取得単位から除く。
+ * 件数の昇順（同数は凍結 margin での出現順 = additions のブロック順・語順）に並べる。
+ * - per-term-equal: allocatePerBlockRetmax と同じ配り方で取得枠を均等配分する。ある語の件数が割当より
+ *   少なくてもその語の割当はそのまま（実際の取得はその語の件数までしか返らない）で、余りは他の語へ
+ *   再配分しない（単純さを優先）。語数が枠を超える極端なケースでは、末尾の語の割当が 0 になりうる
+ *   （allocatePerBlockRetmax の余り配りは先頭から 1 件ずつのため）。
+ * - per-term-smallest-first: 件数の少ない語から「その語の件数ぶん（残り枠まで）」を順に割り当てる。
+ *   枠が尽きたら以降の語の割当は 0。
+ * 割当 0 の語は取得単位に含めない（esearch しない）。取得単位が 1 つ（件数 1 以上の語が 1 語）なら
+ * 両案は同じ結果になるため、per-term-smallest-first を sameAs: 'per-term-equal' として選定を再実行しない。
+ * full・cutoff・per-block とは組み方が異なるため、それらとの sameAs 判定は行わない。
+ */
+export function planPerTermVariants(additions: readonly BlockRecallAdditions[], records: Map<string, TermCountRecord>,
+  retmax: number): { equal: VariantPlan; smallestFirst: VariantPlan } {
+  const allTerms = additions.flatMap((block) => block.additions.map((item) => {
+    const record = records.get(`${block.blockId} ${item.term}`);
+    if (!record) throw new Error(`語の件数が見つかりません（先に段階 1 を実行してください）: ${block.blockId}/${item.term}`);
+    return { blockId: block.blockId, term: item.term, count: record.count, marginQuery: record.marginQuery };
+  }));
+  const zeroCount = allTerms.filter((term) => term.count === 0);
+  const sorted = allTerms.filter((term) => term.count >= 1)
+    .map((term, index) => ({ term, index })).sort((a, b) => a.term.count - b.term.count || a.index - b.index)
+    .map((entry) => entry.term);
+  const toKeptTerm = (list: readonly { blockId: string; term: string; count: number }[]): KeptTerm[] =>
+    list.map(({ blockId, term, count }) => ({ blockId, term, count }));
+
+  const equalAllocations = sorted.length === 0 ? [] : allocatePerBlockRetmax(sorted.length, retmax);
+  const equalAll = sorted.map((term, index) => ({ ...term, allocation: equalAllocations[index]! }));
+  const equalUnits = equalAll.filter((unit) => unit.allocation > 0);
+  const equalDropped = [...zeroCount, ...equalAll.filter((unit) => unit.allocation <= 0)];
+  const equal: VariantPlan = { name: 'per-term-equal', kind: 'per-term', threshold: null, additions: null,
+    sameAs: null, emptyMargin: sorted.length === 0, keptTerms: toKeptTerm(equalUnits), droppedTerms: toKeptTerm(equalDropped),
+    termUnits: equalUnits };
+
+  let remaining = retmax;
+  const smallestUnits: TermUnitPlan[] = [];
+  const smallestDropped: typeof allTerms = [...zeroCount];
+  for (const term of sorted) {
+    const allocation = Math.min(term.count, remaining);
+    if (allocation > 0) { smallestUnits.push({ ...term, allocation }); remaining -= allocation; }
+    else smallestDropped.push(term);
+  }
+  const sameAs = sorted.length === 1 ? 'per-term-equal' : null;
+  const smallestFirst: VariantPlan = { name: 'per-term-smallest-first', kind: 'per-term', threshold: null, additions: null,
+    sameAs, emptyMargin: sorted.length === 0, keptTerms: toKeptTerm(sameAs ? equalUnits : smallestUnits),
+    droppedTerms: toKeptTerm(sameAs ? equalDropped : smallestDropped), termUnits: sameAs ? undefined : smallestUnits };
+  return { equal, smallestFirst };
+}
+
 // ---------------------------------------------------------------------------
-// per-block 専用の取得（製品に経路が無いため、ここだけハーネス内で組み立てる）
+// per-block・per-term 共通の取得（製品に経路が無いため、ここだけハーネス内で組み立てる）
 // ---------------------------------------------------------------------------
 
 export interface SubMarginInfo { blockId: string; marginQuery: string; count: number; retrievedPmids: string[] }
@@ -264,24 +344,34 @@ export function interleaveRoundRobin(lists: readonly (readonly string[])[]): str
   return merged;
 }
 
+/** 取得単位。per-block はブロック、per-term は語 1 つに対応する。meta は各呼び出し元が結果を復元するための付加情報。 */
+export interface RetrievalUnit<Meta> { unitId: string; marginQuery: string; allocation: number; meta: Meta }
+export interface RetrievedUnit<Meta> extends RetrievalUnit<Meta> { count: number; retrievedPmids: string[] }
+export interface RetrievalResult<Meta> {
+  stages: OutsideSearchStages;
+  candidates: { pmid: string; reason: string }[];
+  /** allocation <= 0 だった単位は esearch していないため含まれない。 */
+  units: RetrievedUnit<Meta>[];
+}
+
 /**
- * per-block 取得（製品の searchOutsideCandidates とは経路が別。違いは取得段階だけ）:
- * ブロックごとに取得枠を均等配分（余りは先頭のブロックから 1 件ずつ）→ ブロック順のラウンドロビンで
- * 重複を除いて並べる → 既知除外・書誌上限・efetch・pickBoundaryCases（1 回だけ）。
+ * per-block・per-term 共通の取得（製品の searchOutsideCandidates とは経路が別。違いは取得段階だけ）:
+ * 単位ごとに esearch（allocation <= 0 の単位は esearch しない）→ 単位の並び順のラウンドロビンで
+ * 重複を除いて並べる → 既知除外・書誌上限・efetch・pickBoundaryCases（1 回だけ。書誌 0 件なら呼ばない）。
  */
-export async function runPerBlockVariant(c0: C0Artifact, blocksWithTerms: BlockRecallAdditions[], existingPmids: ReadonlySet<string>,
-  protocol: { researchQuestion: string; inclusionCriteria: string; exclusionCriteria: string }, originalQuery: string,
-  cfg: PerBlockConfig, deps: { eutils: EutilsDeps; llmFactory: LlmProviderFactory; progress: (event: unknown) => void }): Promise<PerBlockResult> {
-  const allocations = allocatePerBlockRetmax(blocksWithTerms.length, cfg.retmax);
-  const subMargins: SubMarginInfo[] = [];
-  for (const [index, block] of blocksWithTerms.entries()) {
-    const allocation = allocations[index]!;
-    const marginQuery = buildBlockMarginQuery(c0, block, originalQuery);
-    deps.progress({ perBlockEsearch: { blockId: block.blockId, allocation } });
-    const result = await esearch(marginQuery, deps.eutils, { retmax: allocation, sort: cfg.sort });
-    subMargins.push({ blockId: block.blockId, marginQuery, count: result.count, retrievedPmids: [...result.pmids] });
+export async function runRetrievalUnits<Meta>(units: readonly RetrievalUnit<Meta>[], existingPmids: ReadonlySet<string>,
+  protocol: { researchQuestion: string; inclusionCriteria: string; exclusionCriteria: string },
+  cfg: { skillCandidateLimit: number; sort: 'relevance' },
+  deps: { eutils: EutilsDeps; llmFactory: LlmProviderFactory; progress: (event: unknown) => void;
+    describeEsearch: (unit: RetrievalUnit<Meta>) => unknown }): Promise<RetrievalResult<Meta>> {
+  const retrieved: RetrievedUnit<Meta>[] = [];
+  for (const unit of units) {
+    if (unit.allocation <= 0) continue;
+    deps.progress(deps.describeEsearch(unit));
+    const result = await esearch(unit.marginQuery, deps.eutils, { retmax: unit.allocation, sort: cfg.sort });
+    retrieved.push({ ...unit, count: result.count, retrievedPmids: [...result.pmids] });
   }
-  const retrievedPmids = interleaveRoundRobin(subMargins.map((sub) => sub.retrievedPmids));
+  const retrievedPmids = interleaveRoundRobin(retrieved.map((unit) => unit.retrievedPmids));
   const novelPmids = retrievedPmids.filter((pmid) => !existingPmids.has(pmid));
   const requestedPmids = novelPmids.slice(0, cfg.skillCandidateLimit);
   let fetchedPmids: string[] = [];
@@ -301,9 +391,51 @@ export async function runPerBlockVariant(c0: C0Artifact, blocksWithTerms: BlockR
         exclusionCriteria: protocol.exclusionCriteria, candidates }, deps.llmFactory.forPurpose('pick_boundary'));
     }
   }
-  const stages: OutsideSearchStages & { subMargins: SubMarginInfo[] } = { broadenedQuery: null, marginQuery: null,
-    retrievedPmids, novelPmids, requestedPmids, fetchedPmids, pickedPmids: picks.map((pick) => pick.pmid), subMargins };
-  return { stages, candidates: picks, subMargins };
+  const stages: OutsideSearchStages = { broadenedQuery: null, marginQuery: null,
+    retrievedPmids, novelPmids, requestedPmids, fetchedPmids, pickedPmids: picks.map((pick) => pick.pmid) };
+  return { stages, candidates: picks, units: retrieved };
+}
+
+/** per-block: ブロックごとに取得枠を均等配分（余りは先頭のブロックから 1 件ずつ）。 */
+export async function runPerBlockVariant(c0: C0Artifact, blocksWithTerms: BlockRecallAdditions[], existingPmids: ReadonlySet<string>,
+  protocol: { researchQuestion: string; inclusionCriteria: string; exclusionCriteria: string }, originalQuery: string,
+  cfg: PerBlockConfig, deps: { eutils: EutilsDeps; llmFactory: LlmProviderFactory; progress: (event: unknown) => void }): Promise<PerBlockResult> {
+  const allocations = allocatePerBlockRetmax(blocksWithTerms.length, cfg.retmax);
+  const units: RetrievalUnit<undefined>[] = blocksWithTerms.map((block, index) => ({ unitId: block.blockId,
+    marginQuery: buildBlockMarginQuery(c0, block, originalQuery), allocation: allocations[index]!, meta: undefined }));
+  const retrieval = await runRetrievalUnits(units, existingPmids, protocol, { skillCandidateLimit: cfg.skillCandidateLimit, sort: cfg.sort },
+    { ...deps, describeEsearch: (unit) => ({ perBlockEsearch: { blockId: unit.unitId, allocation: unit.allocation } }) });
+  const subMargins: SubMarginInfo[] = retrieval.units.map((unit) => ({ blockId: unit.unitId, marginQuery: unit.marginQuery,
+    count: unit.count, retrievedPmids: unit.retrievedPmids }));
+  const stages: OutsideSearchStages & { subMargins: SubMarginInfo[] } = { ...retrieval.stages, subMargins };
+  return { stages, candidates: retrieval.candidates, subMargins };
+}
+
+// ---------------------------------------------------------------------------
+// per-term 専用の取得
+// ---------------------------------------------------------------------------
+
+export interface TermMarginInfo { blockId: string; term: string; marginQuery: string; count: number; allocation: number; retrievedPmids: string[] }
+export interface PerTermConfig { skillCandidateLimit: number; sort: 'relevance' }
+export interface PerTermResult {
+  stages: OutsideSearchStages & { termMargins: TermMarginInfo[] };
+  candidates: { pmid: string; reason: string }[];
+  termMargins: TermMarginInfo[];
+}
+
+/** per-term-equal・per-term-smallest-first 共通の取得。unitPlan は `planPerTermVariants` が組んだ取得単位。 */
+export async function runPerTermVariant(unitPlan: readonly TermUnitPlan[], existingPmids: ReadonlySet<string>,
+  protocol: { researchQuestion: string; inclusionCriteria: string; exclusionCriteria: string },
+  cfg: PerTermConfig, deps: { eutils: EutilsDeps; llmFactory: LlmProviderFactory; progress: (event: unknown) => void }): Promise<PerTermResult> {
+  const units: RetrievalUnit<{ blockId: string; term: string }>[] = unitPlan.map((unit) => ({
+    unitId: `${unit.blockId} ${unit.term}`, marginQuery: unit.marginQuery, allocation: unit.allocation,
+    meta: { blockId: unit.blockId, term: unit.term } }));
+  const retrieval = await runRetrievalUnits(units, existingPmids, protocol, cfg,
+    { ...deps, describeEsearch: (unit) => ({ termEsearch: { blockId: unit.meta.blockId, term: unit.meta.term, allocation: unit.allocation } }) });
+  const termMargins: TermMarginInfo[] = retrieval.units.map((unit) => ({ blockId: unit.meta.blockId, term: unit.meta.term,
+    marginQuery: unit.marginQuery, count: unit.count, allocation: unit.allocation, retrievedPmids: unit.retrievedPmids }));
+  const stages: OutsideSearchStages & { termMargins: TermMarginInfo[] } = { ...retrieval.stages, termMargins };
+  return { stages, candidates: retrieval.candidates, termMargins };
 }
 
 // ---------------------------------------------------------------------------
@@ -365,35 +497,51 @@ async function postHocSingleMargin(marginQuery: string, ctx: PostHocContext, ran
   return { heldOutStages, stageCounts, missedHeldOutCount: ctx.heldOutStudies.length - stageCounts.captured_by_current };
 }
 
-function bestBlockRank(study: { pmids: string[] }, deepByBlock: readonly { blockId: string; pmids: string[] }[]): { rank: number | null; blockId: string | null } {
-  let best: { rank: number; blockId: string } | null = null;
-  for (const block of deepByBlock) {
-    const index = block.pmids.findIndex((pmid) => study.pmids.includes(pmid));
+function bestUnitRank(study: { pmids: string[] }, deepByUnit: readonly { identifier: string; pmids: string[] }[]): { rank: number | null; identifier: string | null } {
+  let best: { rank: number; identifier: string } | null = null;
+  for (const unit of deepByUnit) {
+    const index = unit.pmids.findIndex((pmid) => study.pmids.includes(pmid));
     if (index < 0) continue;
-    if (best === null || index + 1 < best.rank) best = { rank: index + 1, blockId: block.blockId };
+    if (best === null || index + 1 < best.rank) best = { rank: index + 1, identifier: unit.identifier };
   }
-  return best ? { rank: best.rank, blockId: best.blockId } : { rank: null, blockId: null };
+  return best ? { rank: best.rank, identifier: best.identifier } : { rank: null, identifier: null };
 }
 
-/** inMargin はブロック別 margin クエリそれぞれの capturedGold の和集合。deepRank は研究ごとの最良（最小）順位。 */
-async function postHocPerBlock(subMargins: readonly SubMarginInfo[], ctx: PostHocContext, rankDepth: number, sort: 'relevance',
-  eutils: EutilsDeps, stages: OutsideSearchStages): Promise<PostHocOutcome> {
+/**
+ * per-block・per-term 共通の事後集計。inMargin は「実際に esearch した取得単位」それぞれの marginQuery の
+ * capturedGold の和集合（esearch しなかった単位の margin は含めない）。deepRank は研究ごとの最良（最小）順位、
+ * identifier は deepRankBlockId へそのまま入れる（per-block はブロック ID、per-term は語を識別できる値）。
+ */
+async function postHocPerUnit(units: readonly { identifier: string; marginQuery: string }[], ctx: PostHocContext, rankDepth: number,
+  sort: 'relevance', eutils: EutilsDeps, stages: OutsideSearchStages): Promise<PostHocOutcome> {
   const heldOutPmids = [...new Set(ctx.heldOutStudies.flatMap((study) => study.pmids))];
   const inMargin = new Set<string>();
-  for (const sub of subMargins) for (const pmid of await capturedGold(sub.marginQuery, heldOutPmids, eutils)) inMargin.add(pmid);
-  const deepByBlock: { blockId: string; pmids: string[] }[] = [];
+  for (const unit of units) for (const pmid of await capturedGold(unit.marginQuery, heldOutPmids, eutils)) inMargin.add(pmid);
+  const deepByUnit: { identifier: string; pmids: string[] }[] = [];
   if (rankDepth > 0) {
-    for (const sub of subMargins) deepByBlock.push({ blockId: sub.blockId, pmids: (await esearch(sub.marginQuery, eutils, { retmax: rankDepth, sort })).pmids });
+    for (const unit of units) deepByUnit.push({ identifier: unit.identifier, pmids: (await esearch(unit.marginQuery, eutils, { retmax: rankDepth, sort })).pmids });
   }
   const stageCounts = emptyStageCounts();
   const heldOutStages: MarginDesignStudyStage[] = [];
   for (const study of ctx.heldOutStudies) {
     const classified = classifyStudy(study, ctx.inCurrent, [...inMargin], stages, null);
-    const best = rankDepth > 0 ? bestBlockRank(study, deepByBlock) : { rank: null, blockId: null };
-    heldOutStages.push({ ...classified, deepRank: best.rank, deepRankBlockId: best.blockId });
+    const best = rankDepth > 0 ? bestUnitRank(study, deepByUnit) : { rank: null, identifier: null };
+    heldOutStages.push({ ...classified, deepRank: best.rank, deepRankBlockId: best.identifier });
     stageCounts[classified.stage]++;
   }
   return { heldOutStages, stageCounts, missedHeldOutCount: ctx.heldOutStudies.length - stageCounts.captured_by_current };
+}
+
+function postHocPerBlock(subMargins: readonly SubMarginInfo[], ctx: PostHocContext, rankDepth: number, sort: 'relevance',
+  eutils: EutilsDeps, stages: OutsideSearchStages): Promise<PostHocOutcome> {
+  return postHocPerUnit(subMargins.map((sub) => ({ identifier: sub.blockId, marginQuery: sub.marginQuery })), ctx, rankDepth, sort, eutils, stages);
+}
+
+/** identifier は `${blockId}:${term}`（deepRankBlockId に blockId と語の両方を残すため）。 */
+function postHocPerTerm(termMargins: readonly TermMarginInfo[], ctx: PostHocContext, rankDepth: number, sort: 'relevance',
+  eutils: EutilsDeps, stages: OutsideSearchStages): Promise<PostHocOutcome> {
+  return postHocPerUnit(termMargins.map((term) => ({ identifier: `${term.blockId}:${term.term}`, marginQuery: term.marginQuery })),
+    ctx, rankDepth, sort, eutils, stages);
 }
 
 export function termCaptureTablePath(resultsDir: string, caseId: string, marginName: string, seed: SeedSplit): string {
@@ -452,7 +600,9 @@ export interface MarginDesignVariantRun {
   marginHitsByBlock: { blockId: string; marginQuery: string; count: number }[] | null;
   /** ブロック別件数の単純合計（重複を含む）。和集合の件数ではない。per-block 以外は null。 */
   marginHitsSumAllowingOverlap: number | null;
-  stages: (OutsideSearchStages & { subMargins?: SubMarginInfo[] }) | null;
+  /** per-term 専用: 実際に esearch した語ごとの margin。per-term 以外は null。 */
+  termMargins: TermMarginInfo[] | null;
+  stages: (OutsideSearchStages & { subMargins?: SubMarginInfo[]; termMargins?: TermMarginInfo[] }) | null;
   candidates: { pmid: string; reason: string }[];
   heldOutStages: MarginDesignStudyStage[];
   missedHeldOutCount: number | null;
@@ -495,7 +645,9 @@ export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES,
   const seeds = loadSeedsFile(fixtureDir, seed);
   validateSeeds(seeds, fixture.gold);
 
-  const variantNames = ['full', ...thresholds.map((threshold) => `cutoff-${threshold}`), 'per-block'];
+  // --variants を指定すると、指定した案だけを実行・スキップ判定の対象にする（既定は全案）。
+  // 未指定の案は既存の run.json を一切参照・上書きしない。
+  const variantNames = options.variants ?? allMarginDesignVariantNames(thresholds);
   const dirFor = (variant: string) => marginDesignResultDir(resultsDir, caseId, marginName, seed, variant, options.label);
   const gitCommit = getGitCommit();
   const skipped: string[] = [];
@@ -555,10 +707,39 @@ export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES,
     const originalQuery = expandFormula(c0.formula).trim();
     const lookup = termCountLookup(termCounts);
     const plans = planMarginDesignVariants(margin.additions, lookup, thresholds);
+    const termRecords = termRecordLookup(termCounts);
+    const perTermPlans = planPerTermVariants(margin.additions, termRecords, OUTSIDE_DEFAULT_RETMAX);
+    plans.set('per-term-equal', perTermPlans.equal);
+    plans.set('per-term-smallest-first', perTermPlans.smallestFirst);
     const originalHitsShared = (await esearch(originalQuery, eutils, { retmax: 0 })).count;
     const existingPmids = new Set(seeds.selections.map((selection) => selection.pmid));
     const protocol = { researchQuestion: c0.protocol.researchQuestion, inclusionCriteria: c0.protocol.inclusionCriteria,
       exclusionCriteria: c0.protocol.exclusionCriteria };
+
+    // sameAs の参照先が今回の --variants に含まれない案なら、その案の run.json が既に「完了」していることを
+    // 確認する（無ければ選定を再実行せず参照するだけの run.json ができ、参照先を永遠に解決できない。
+    // status: 'failed' のまま見逃すと、参照先は今回再試行されず、次回また --variants を絞って再実行しても
+    // sameAs 側は完了扱いのまま measured value の無い失敗した案を参照し続けてしまう）。
+    // 参照先の gitCommit は照合しない: 別コミットの完了結果を参照するのは、既存の完了済み run に新しい案
+    // （per-term-equal / per-term-smallest-first）だけを --variants で足す正当な使い方であり、
+    // ここで別コミットを弾くと、その正当な使い方自体ができなくなる。
+    for (const variant of pending) {
+      const sameAsTarget = plans.get(variant)!.sameAs;
+      if (sameAsTarget !== null && !variantNames.includes(sameAsTarget)) {
+        const targetPath = join(dirFor(sameAsTarget), 'run.json');
+        let targetStatus: string | null = null;
+        if (existsSync(targetPath)) {
+          try {
+            targetStatus = (JSON.parse(readFileSync(targetPath, 'utf8')) as { status?: unknown }).status as string | undefined ?? null;
+          } catch {
+            targetStatus = null; // 壊れた JSON も「完了していない」として扱う
+          }
+        }
+        if (targetStatus !== 'completed') {
+          throw new Error(`sameAs の参照先 (${sameAsTarget}) が完了していません。--variants に ${sameAsTarget} を含めて再実行してください: ${targetPath}`);
+        }
+      }
+    }
 
     for (const variant of pending) {
       const plan = plans.get(variant)!;
@@ -576,7 +757,7 @@ export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES,
         label: options.label ?? null, searchDate: fixture.searchDate, model: provider.model, gitCommit, gitDirty: isGitDirty(),
         sameAs: plan.sameAs, emptyMargin: plan.emptyMargin, keptTerms: plan.keptTerms, droppedTerms: plan.droppedTerms,
         config: { retmax: OUTSIDE_DEFAULT_RETMAX, candidateLimit: OUTSIDE_DEFAULT_SKILL_CANDIDATE_LIMIT, sort: OUTSIDE_DEFAULT_SORT, rankDepth },
-        originalHits: null, marginHits: null, marginHitsByBlock: null, marginHitsSumAllowingOverlap: null,
+        originalHits: null, marginHits: null, marginHitsByBlock: null, marginHitsSumAllowingOverlap: null, termMargins: null,
         stages: null, candidates: [], heldOutStages: [], missedHeldOutCount: null, stageCounts: emptyStageCounts(),
         apiCalls: { ncbi: 0, llm: 0 }, apiElapsedMs: { ncbi: 0, llm: 0 }, llmUsage: usage.usage, elapsedMs: 0, llmLogs: [] };
       const sink: Sink = { apiCalls: result.apiCalls, apiElapsedMs: result.apiElapsedMs, progress };
@@ -609,6 +790,22 @@ export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES,
           result.marginHitsByBlock = perBlock.subMargins.map(({ blockId, marginQuery, count }) => ({ blockId, marginQuery, count }));
           result.marginHitsSumAllowingOverlap = perBlock.subMargins.reduce((sum, sub) => sum + sub.count, 0);
           const post = await postHocPerBlock(perBlock.subMargins, ctx, rankDepth, OUTSIDE_DEFAULT_SORT, eutils, perBlock.stages);
+          result.heldOutStages = post.heldOutStages;
+          result.stageCounts = post.stageCounts;
+          result.missedHeldOutCount = post.missedHeldOutCount;
+          result.status = 'completed';
+        } else if (plan.kind === 'per-term') {
+          activeSink = sink;
+          const write = (path: string, value: unknown) => writeFileSync(join(attemptDir, path), serialize(value));
+          const llmFactory = loggedFactory(provider, write, result.llmLogs, usage.record);
+          result.originalHits = originalHitsShared;
+          const perTerm = await runPerTermVariant(plan.termUnits!, existingPmids, protocol,
+            { skillCandidateLimit: OUTSIDE_DEFAULT_SKILL_CANDIDATE_LIMIT, sort: OUTSIDE_DEFAULT_SORT },
+            { eutils, llmFactory, progress });
+          result.stages = perTerm.stages;
+          result.candidates = perTerm.candidates;
+          result.termMargins = perTerm.termMargins;
+          const post = await postHocPerTerm(perTerm.termMargins, ctx, rankDepth, OUTSIDE_DEFAULT_SORT, eutils, perTerm.stages);
           result.heldOutStages = post.heldOutStages;
           result.stageCounts = post.stageCounts;
           result.missedHeldOutCount = post.missedHeldOutCount;
