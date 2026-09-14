@@ -1,4 +1,4 @@
-import { checkMeshDescriptors, fetchMeshTreeNumbers, parseMeshSummaryJson } from './mesh';
+import { resolveMeshDescriptors, fetchMeshTreeNumbers, parseMeshSummaryJson } from './mesh';
 import { sharedEutilsRateLimiters } from './eutils';
 import type { RateLimiter } from './rateLimit';
 
@@ -330,51 +330,119 @@ describe('レートリミッタ（issue #58 chunk 3a フォローアップ）', 
 });
 
 
-describe('checkMeshDescriptors', () => {
-  test.each([
-    [{ count: '1' }, 'exists'],
-    [{ count: '2' }, 'exists'],
-    [{ count: '0', warninglist: { quotedphrasesnotfound: ['Diabetic Retinopathy, Proliferative'] } }, 'missing'],
-    [{ count: '0' }, 'missing'],
-    [{ errorlist: { phrasesnotfound: ['Term'] } }, 'missing'],
-    [{ count: '1', errorlist: { fieldsnotfound: ['mh'], phrasesnotfound: ['Term'] } }, 'unknown'],
-    [{ count: '1', ERROR: '失敗' }, 'unknown'],
-    [{}, 'unknown'],
-    [{ count: '' }, 'unknown'],
-    [{ count: '-1' }, 'unknown'],
-    [{ count: 'NaN' }, 'unknown'],
-    [{ count: '1.5' }, 'unknown'],
-    [{ count: 1 }, 'unknown'],
-  ])('応答 %j を %s と判定する', async (esearchresult, expected) => {
-    const fetchMock = jest.fn().mockResolvedValue(jsonResponse({ esearchresult }));
-    const result = await checkMeshDescriptors(['Diabetic Retinopathy, Proliferative'], { fetch: fetchMock });
-    expect(result.get('Diabetic Retinopathy, Proliferative')).toBe(expected);
+describe('resolveMeshDescriptors', () => {
+  test('空の見出しだけなら通信しない', async () => {
+    const fetchMock = jest.fn();
+    expect(await resolveMeshDescriptors(['', '  '], { fetch: fetchMock })).toEqual(new Map());
+    expect(fetchMock).not.toHaveBeenCalled();
   });
-
-  test('空白と重複を除き、引用符・共通パラメータ・レート制限を適用する', async () => {
-    const fetchMock = jest.fn().mockResolvedValue(jsonResponse({ esearchresult: { count: '1' } }));
+  const records = {
+    '68009203': { ds_recordtype: 'descriptor', ds_meshui: 'D009203', ds_meshterms: ['Myocardial Infarction', 'Infarction, Myocardial', 'Heart Attack'] },
+    '68062789': { ds_recordtype: 'descriptor', ds_meshui: 'D062789', ds_meshterms: ['Tobacco Products', 'Products, Tobacco'] },
+    '68014026': { ds_recordtype: 'descriptor', ds_meshui: 'D014026', ds_meshterms: ['Nicotiana', 'Tobacco Plant'] },
+    '68009369': { ds_recordtype: 'descriptor', ds_meshterms: ['Neoplasms'] },
+  };
+  test.each([
+    ['Heart Attack', ['68009203'], ['Myocardial Infarction'], false],
+    ['Infarction, Myocardial', ['68009203'], ['Myocardial Infarction'], false],
+    ['Tobacco', ['68062789', '68014026'], ['Tobacco Products', 'Nicotiana'], true],
+    ['Neoplasms', ['68009369'], ['Neoplasms'], false],
+  ] as const)('%s を正式名に解決し、URL・共通パラメータ・レート制限を適用する', async (term, ids, headings, fallback) => {
+    const fetchMock = jest.fn();
+    if (fallback) fetchMock.mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '0', warninglist: { quotedphrasesnotfound: [term] } } }));
+    fetchMock.mockResolvedValueOnce(jsonResponse({ esearchresult: { count: String(ids.length), idlist: ids } }))
+      .mockResolvedValueOnce(jsonResponse({ result: { uids: ids, ...records } }));
     const rateLimiter = { acquire: jest.fn().mockResolvedValue(undefined) } as unknown as RateLimiter;
-    const result = await checkMeshDescriptors([' Neoplasms ', 'Neoplasms', '', '  '], {
+    const result = await resolveMeshDescriptors([` ${term} `, term, '', '  '], {
       fetch: fetchMock, rateLimiter, tool: 'test', apiKey: 'fake-key', email: 'test@example.com',
     });
-    expect([...result]).toEqual([['Neoplasms', 'exists']]);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(rateLimiter.acquire).toHaveBeenCalledTimes(1);
-    const params = new URL(fetchMock.mock.calls[0]![0] as string).searchParams;
-    expect(Object.fromEntries(params)).toEqual({ db: 'mesh', term: '"Neoplasms"[mh]', retmode: 'json', retmax: '0', tool: 'test', api_key: 'fake-key', email: 'test@example.com' });
+    expect([...result]).toEqual([[term, { status: 'resolved', headings }]]);
+    expect(fetchMock).toHaveBeenCalledTimes(fallback ? 3 : 2);
+    expect(rateLimiter.acquire).toHaveBeenCalledTimes(fetchMock.mock.calls.length);
+    const urls = fetchMock.mock.calls.map((call) => new URL(call[0] as string));
+    for (const url of urls) {
+      expect(url.searchParams.get('db')).toBe('mesh');
+      expect(url.searchParams.get('retmode')).toBe('json');
+      expect(url.searchParams.get('tool')).toBe('test');
+      expect(url.searchParams.get('api_key')).toBe('fake-key');
+      expect(url.searchParams.get('email')).toBe('test@example.com');
+    }
+    expect(urls[0]!.searchParams.get('term')).toBe(`"${term}"[mh]`);
+    for (const url of urls.slice(0, -1)) expect(url.searchParams.get('retmax')).toBe('20');
+    if (fallback) expect(urls[1]!.searchParams.get('term')).toBe(`${term}[mh]`);
+    expect(urls[urls.length - 1]!.pathname).toContain('esummary.fcgi');
+    expect(urls[urls.length - 1]!.searchParams.get('id')).toBe(ids.join(','));
   });
 
-  test.each([jsonResponse({ ERROR: '失敗' }), jsonResponse({}), errorResponse(400)])('エラー応答は unknown にする', async (response) => {
-    const fetchMock = jest.fn().mockResolvedValue(response);
-    expect((await checkMeshDescriptors(['Term'], { fetch: fetchMock, maxRetries: 0 })).get('Term')).toBe('unknown');
+  test.each([
+    { count: '0', errorlist: { phrasesnotfound: ['Diabetic Retinopathy, Proliferative[mh]'] } },
+    { count: '1', idlist: ['68009203'], errorlist: { phrasesnotfound: ['Diabetic Retinopathy, Proliferative[mh]'] } },
+    { count: '0' },
+  ])('引用符なしの未解決応答 %j は missing にする', async (esearchresult) => {
+    const fetchMock = jest.fn().mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '0' } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult }));
+    expect((await resolveMeshDescriptors(['Diabetic Retinopathy, Proliferative'], { fetch: fetchMock })).get('Diabetic Retinopathy, Proliferative')).toEqual({ status: 'missing' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  test.each(['network', 'http'])('%s のリトライ後も失敗したら unknown にする', async (kind) => {
-    const fetchMock = kind === 'network' ? jest.fn().mockRejectedValue(new TypeError('通信失敗'))
-      : jest.fn().mockResolvedValue(errorResponse(503));
+  test.each([
+    { ERROR: '失敗' }, {},
+    { esearchresult: { ERROR: '失敗', count: '1' } },
+    { esearchresult: { count: '1', errorlist: { fieldsnotfound: ['mh'] } } },
+    ...[undefined, '', '-1', 'NaN', '1.5', 1, '9007199254740992'].map((count) => ({ esearchresult: { count } })),
+    { esearchresult: { count: '1', idlist: [] } },
+  ])('検索エラー %j は初回・再検索とも unknown にする', async (json) => {
+    for (const fallback of [false, true]) {
+      const fetchMock = jest.fn();
+      if (fallback) fetchMock.mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '0' } }));
+      fetchMock.mockResolvedValueOnce(jsonResponse(json));
+      expect((await resolveMeshDescriptors(['Term'], { fetch: fetchMock })).get('Term')).toEqual({ status: 'unknown' });
+    }
+  });
+
+  test.each([
+    {}, { ERROR: '失敗' }, { result: { ERROR: '失敗' } }, { result: { uids: [] } },
+    { result: { uids: ['1'], '1': { ds_recordtype: 'supplemental', ds_meshterms: ['Term'] } } },
+    ...[[], [' '], [42], 'Term'].map((ds_meshterms) => ({ result: { uids: ['1'], '1': { ds_recordtype: 'descriptor', ds_meshterms } } })),
+    { result: { uids: ['1'], '1': { error: '失敗' } } },
+    { result: { uids: ['1'], '1': { ERROR: '失敗', ds_recordtype: 'descriptor', ds_meshterms: ['Term'] } } },
+    { result: { uids: '1', '1': { ds_recordtype: 'descriptor', ds_meshterms: ['Term'] } } },
+  ])('要約に正式名が無い・失敗した場合 %j は unknown にする', async (summary) => {
+    const fetchMock = jest.fn().mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '1', idlist: ['1'] } }))
+      .mockResolvedValueOnce(jsonResponse(summary));
+    expect((await resolveMeshDescriptors(['Term'], { fetch: fetchMock })).get('Term')).toEqual({ status: 'unknown' });
+  });
+
+  test('要約の uids 順で空白と正式名の重複を除く', async () => {
+    const fetchMock = jest.fn().mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '3', idlist: ['1', '2', '3'] } }))
+      .mockResolvedValueOnce(jsonResponse({ result: { uids: ['3', '2', '1'],
+        '1': { ds_recordtype: 'descriptor', ds_meshterms: [' A '] },
+        '2': { ds_recordtype: 'descriptor', ds_meshterms: ['B'] },
+        '3': { ds_recordtype: 'descriptor', ds_meshterms: ['A'] } } }));
+    expect((await resolveMeshDescriptors(['Term'], { fetch: fetchMock })).get('Term')).toEqual({ status: 'resolved', headings: ['A', 'B'] });
+  });
+
+  test.each(['search', 'fallback', 'summary'])('%s の HTTP・通信失敗をリトライし、失敗後は unknown にする', async (stage) => {
+    for (const kind of ['network', 'http', '400']) {
+      const fetchMock = jest.fn();
+      if (stage === 'fallback') fetchMock.mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '0' } }));
+      if (stage === 'summary') fetchMock.mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '1', idlist: ['1'] } }));
+      if (kind === 'network') fetchMock.mockRejectedValue(new TypeError('通信失敗'));
+      else fetchMock.mockResolvedValue(errorResponse(kind === '400' ? 400 : 503));
+      const rateLimiter = { acquire: jest.fn().mockResolvedValue(undefined) } as unknown as RateLimiter;
+      expect((await resolveMeshDescriptors(['Term'], { fetch: fetchMock, rateLimiter, maxRetries: 2, sleep: async () => {} })).get('Term')).toEqual({ status: 'unknown' });
+      expect(fetchMock).toHaveBeenCalledTimes((stage === 'search' ? 0 : 1) + 3);
+      expect(rateLimiter.acquire).toHaveBeenCalledTimes(fetchMock.mock.calls.length);
+    }
+  });
+
+  test('検索と要約がリトライで成功すれば正式名を返す', async () => {
+    const fetchMock = jest.fn().mockResolvedValueOnce(errorResponse(429))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '1', idlist: ['68009203'] } }))
+      .mockResolvedValueOnce(errorResponse(503))
+      .mockResolvedValueOnce(jsonResponse({ result: { uids: ['68009203'], ...records } }));
     const rateLimiter = { acquire: jest.fn().mockResolvedValue(undefined) } as unknown as RateLimiter;
-    expect((await checkMeshDescriptors(['Term'], { fetch: fetchMock, rateLimiter, maxRetries: 2, sleep: async () => {} })).get('Term')).toBe('unknown');
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(rateLimiter.acquire).toHaveBeenCalledTimes(3);
+    expect((await resolveMeshDescriptors(['Heart Attack'], { fetch: fetchMock, rateLimiter, sleep: async () => {} })).get('Heart Attack')).toEqual({ status: 'resolved', headings: ['Myocardial Infarction'] });
+    expect(rateLimiter.acquire).toHaveBeenCalledTimes(4);
   });
 });

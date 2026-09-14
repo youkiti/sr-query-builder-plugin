@@ -8,7 +8,7 @@ declare const __BUILD_DATE__: string;
  * store に反映し、protocol / blocks view の callback に services を結び付ける。
  */
 
-import { checkMeshDescriptors } from '@/lib/ncbi/mesh';
+import { resolveMeshDescriptors } from '@/lib/ncbi/mesh';
 import { adoptQueryOptimization, editQueryOptimization } from './services/queryOptimizationAdoptionService';
 import { createOptimizationProgressPublisher } from './services/queryOptimizationProgressPublisher';
 import { searchOutsideCandidates } from './services/expandService';
@@ -1251,7 +1251,7 @@ export async function runOptimizeQuery(
         seedContext: { titles: seeds.flatMap((seed) => seed.title ? [seed.title] : []).slice(0, 30),
           samples: [], meshSummary: { seedCount: 0, concepts: [], checkTags: [] } },
       }, { llmFactory: factory, onProgress: () => check(),
-        checkMeshDescriptors: (descriptors) => checkMeshDescriptors(descriptors, eutils) })).formula;
+        resolveMeshDescriptors: (descriptors) => resolveMeshDescriptors(descriptors, eutils) })).formula;
     check();
     update({ inputSnapshot: { researchQuestion: state.protocolDraft.researchQuestion,
       inclusionCriteria: state.protocolDraft.inclusionCriteria, exclusionCriteria: state.protocolDraft.exclusionCriteria,
@@ -1438,7 +1438,7 @@ async function runGenerateAndValidate(
       startedAtMs: Date.now(),
       error: null,
       blockHits: [],
-      removedMeshHeadings: [],
+      removedMeshHeadings: [], replacedMeshHeadings: [],
     },
   }));
 
@@ -1486,6 +1486,7 @@ async function runGenerateAndValidate(
             ...s.draftRun,
             phase: 'validating',
             removedMeshHeadings: draftResult.removedMeshHeadings,
+            replacedMeshHeadings: draftResult.replacedMeshHeadings,
             progressLabel: '検証を開始します…',
             progress: { phase: 'validating', step: 'line_hits' },
           },
@@ -1544,7 +1545,7 @@ async function runValidationPhase(
           : { formulaVersionId: s.currentFormulaVersionId, summary },
       // 再生成・再検証したら過去の原因分析は古くなるため破棄する
       missedAnalysis: null,
-      draftRun: s.draftRun?.removedMeshHeadings.length
+      draftRun: s.draftRun && (s.draftRun.removedMeshHeadings.length || s.draftRun.replacedMeshHeadings.length)
         ? { ...s.draftRun, status: 'done', progressLabel: '', progress: null, blockHits: [] } : null,
     }));
     return summary;
@@ -1589,6 +1590,7 @@ async function runRevalidateOnly(
       error: null,
       blockHits: prevBlockHits,
       removedMeshHeadings: initial.draftRun?.phase === 'validating' ? initial.draftRun.removedMeshHeadings : [],
+      replacedMeshHeadings: initial.draftRun?.phase === 'validating' ? initial.draftRun.replacedMeshHeadings : [],
     },
   }));
   const precomputed = new Map<string, number>();
@@ -1731,6 +1733,7 @@ function setDraftRunError(
       error: err instanceof Error ? err.message : String(err),
       blockHits: s.draftRun?.blockHits ?? [],
       removedMeshHeadings: s.draftRun?.removedMeshHeadings ?? [],
+      replacedMeshHeadings: s.draftRun?.replacedMeshHeadings ?? [],
     },
   }));
 }
@@ -1769,7 +1772,7 @@ async function runGenerateDraft(
     llmFactory: factory,
     onProgress,
     onBlockCounted,
-    checkMeshDescriptors: (descriptors) => checkMeshDescriptors(descriptors, eutils),
+    resolveMeshDescriptors: (descriptors) => resolveMeshDescriptors(descriptors, eutils),
     // 概念ブロックは葉式なのでそのまま esearch count に投げられる
     countBlockHits: async (expression) =>
       (await esearch(expression, eutils, { retmax: 0 })).count,

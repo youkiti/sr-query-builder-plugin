@@ -258,20 +258,29 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
     if (blockHits.length > 0 || running) {
       container.appendChild(renderLiveBlockHits(doc, ctx.state, blockHits, running));
     }
-    if (!running && run?.removedMeshHeadings.length) {
+    if (!running && run && (run.removedMeshHeadings.length || run.replacedMeshHeadings.length)) {
       const notice = doc.createElement('div');
       notice.className = 'draft__mesh-notice';
       notice.setAttribute('role', 'status');
-      const message = doc.createElement('p');
-      message.textContent = '⚠ MeSH 辞書に無い見出しを式から外しました（AI が提案した見出しが MeSH に存在しないため）';
-      notice.appendChild(message);
-      const list = doc.createElement('ul');
-      for (const item of run.removedMeshHeadings) {
-        const li = doc.createElement('li');
-        li.textContent = `#${item.blockId} ${item.blockLabel}: ${item.descriptor}`;
-        list.appendChild(li);
+      const groups = [
+        { message: 'MeSH の同義語を正式な見出しに置き換えました',
+          items: run.replacedMeshHeadings.map((item) => `#${item.blockId} ${item.blockLabel}: ${item.from} → ${item.to.join('、')}`) },
+        { message: '⚠ MeSH 辞書に無い見出しを式から外しました（AI が提案した見出しが MeSH に存在しないため）',
+          items: run.removedMeshHeadings.map((item) => `#${item.blockId} ${item.blockLabel}: ${item.descriptor}`) },
+      ];
+      for (const group of groups) {
+        if (!group.items.length) continue;
+        const message = doc.createElement('p');
+        message.textContent = group.message;
+        notice.appendChild(message);
+        const list = doc.createElement('ul');
+        for (const item of group.items) {
+          const li = doc.createElement('li');
+          li.textContent = item;
+          list.appendChild(li);
+        }
+        notice.appendChild(list);
       }
-      notice.appendChild(list);
       container.appendChild(notice);
     }
 

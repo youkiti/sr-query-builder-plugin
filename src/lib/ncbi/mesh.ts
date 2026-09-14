@@ -28,33 +28,60 @@ import { retryWithBackoff } from './rateLimit';
 const BASE_URL = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils';
 const DEFAULT_TOOL = 'sr-query-builder-plugin';
 
-/** 辞書に無い見出しだけを除外できるよう、照会失敗は unknown として返す。 */
-export async function checkMeshDescriptors(
+export type MeshResolution = { status: 'resolved'; headings: string[] } | { status: 'missing' } | { status: 'unknown' };
+
+/** 同義語を正式な見出しへ解決し、照会失敗は unknown として候補を残す。 */
+export async function resolveMeshDescriptors(
   descriptors: readonly string[], deps: EutilsDeps
-): Promise<Map<string, 'exists' | 'missing' | 'unknown'>> {
-  const result = new Map<string, 'exists' | 'missing' | 'unknown'>();
+): Promise<Map<string, MeshResolution>> {
+  const result = new Map<string, MeshResolution>();
+  const request = async (endpoint: string, params: URLSearchParams): Promise<unknown> => {
+    appendCommonParams(params, deps);
+    return retryWithBackoff(async () => {
+      await resolveRateLimiter(deps).acquire();
+      const res = await deps.fetch(`${BASE_URL}/${endpoint}.fcgi?${params.toString()}`);
+      if (!res.ok) throw new EutilsError(`MeSH 辞書の照会に失敗しました: HTTP ${res.status}`, res.status);
+      return res.json();
+    }, { sleep: deps.sleep, maxRetries: deps.maxRetries ?? 5, shouldRetry: shouldRetryEutils });
+  };
   for (const descriptor of new Set(descriptors.map((value) => value.trim()).filter(Boolean))) {
-    result.set(descriptor, 'unknown');
+    result.set(descriptor, { status: 'unknown' });
     try {
-      const params = new URLSearchParams({ db: 'mesh', term: `"${descriptor}"[mh]`, retmode: 'json', retmax: '0' });
-      appendCommonParams(params, deps);
-      const rateLimiter = resolveRateLimiter(deps);
-      const json = await retryWithBackoff(async () => {
-        await rateLimiter.acquire();
-        const res = await deps.fetch(`${BASE_URL}/esearch.fcgi?${params.toString()}`);
-        if (!res.ok) throw new EutilsError(`MeSH 辞書の照会に失敗しました: HTTP ${res.status}`, res.status);
-        return await res.json() as {
+      for (const quoted of [true, false]) {
+        const json = await request('esearch', new URLSearchParams({ db: 'mesh',
+          term: quoted ? `"${descriptor}"[mh]` : `${descriptor}[mh]`, retmode: 'json', retmax: '20' })) as {
           ERROR?: unknown;
-          esearchresult?: { ERROR?: unknown; count?: unknown;
+          esearchresult?: { ERROR?: unknown; count?: unknown; idlist?: string[];
             errorlist?: { phrasesnotfound?: string[]; fieldsnotfound?: string[] } };
         };
-      }, { sleep: deps.sleep, maxRetries: deps.maxRetries ?? 5, shouldRetry: shouldRetryEutils });
-      const search = json.esearchresult;
-      if (json.ERROR !== undefined || !search || search.ERROR !== undefined || search.errorlist?.fieldsnotfound?.length) continue;
-      if (typeof search.count === 'string' && /^\d+$/.test(search.count) && Number.isSafeInteger(Number(search.count))) {
-        result.set(descriptor, Number(search.count) > 0 ? 'exists' : 'missing');
-      } else if (search.errorlist?.phrasesnotfound?.length) {
-        result.set(descriptor, 'missing');
+        const search = json.esearchresult;
+        if (json.ERROR !== undefined || !search || search.ERROR !== undefined || search.errorlist?.fieldsnotfound?.length) break;
+        if (!quoted && search.errorlist?.phrasesnotfound?.length) {
+          result.set(descriptor, { status: 'missing' });
+          break;
+        }
+        if (typeof search.count !== 'string' || !/^\d+$/.test(search.count) || !Number.isSafeInteger(Number(search.count))) break;
+        if (Number(search.count) === 0) {
+          if (quoted) continue;
+          result.set(descriptor, { status: 'missing' });
+          break;
+        }
+        if (!Array.isArray(search.idlist) || !search.idlist.length) break;
+        const summary = await request('esummary', new URLSearchParams({ db: 'mesh',
+          id: search.idlist.join(','), retmode: 'json' })) as {
+          ERROR?: unknown;
+          result?: { ERROR?: unknown; uids?: string[]; [uid: string]: unknown };
+        };
+        if (summary.ERROR !== undefined || !summary.result || summary.result.ERROR !== undefined || !Array.isArray(summary.result.uids)) break;
+        const headings = new Set<string>();
+        for (const uid of summary.result.uids ?? []) {
+          const record = summary.result[uid] as { ds_recordtype?: string; ds_meshterms?: unknown[]; error?: unknown; ERROR?: unknown } | undefined;
+          if (record?.error !== undefined || record?.ERROR !== undefined) throw new Error('MeSH の要約取得に失敗しました');
+          const heading = record?.ds_recordtype === 'descriptor' && Array.isArray(record.ds_meshterms) ? record.ds_meshterms[0] : undefined;
+          if (typeof heading === 'string' && heading.trim()) headings.add(heading.trim());
+        }
+        if (headings.size) result.set(descriptor, { status: 'resolved', headings: [...headings] });
+        break;
       }
     } catch {
       // 通信失敗や不正な応答でも生成を止めず、候補を残す。

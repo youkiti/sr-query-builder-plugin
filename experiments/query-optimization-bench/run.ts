@@ -1,4 +1,4 @@
-import { checkMeshDescriptors } from '../../src/lib/ncbi/mesh';
+import { resolveMeshDescriptors } from '../../src/lib/ncbi/mesh';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -232,7 +232,7 @@ export async function executeCase(fixture: BenchCase, audit: GoldAudit, protocol
     // C0 は適格基準だけから生成し、既知 3 群を与える追加工程の効果を C1 で測る。
     const draft = await generateDraftFormula({ protocol, blocks, targetHits: result.maxHits,
       seedContext: { titles: [], samples: [], meshSummary: { seedCount: 0, concepts: [], checkTags: [] } } },
-    { llmFactory, onProgress: progress, checkMeshDescriptors: (descriptors) => checkMeshDescriptors(descriptors, eutils), countBlockHits: async (query) => (await esearch(query, eutils, { retmax: 0 })).count });
+    { llmFactory, onProgress: progress, resolveMeshDescriptors: (descriptors) => resolveMeshDescriptors(descriptors, eutils), countBlockHits: async (query) => (await esearch(query, eutils, { retmax: 0 })).count });
     formula = draft.formula;
     result.c0 = { source: 'live' };
   }

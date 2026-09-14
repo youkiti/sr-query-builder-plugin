@@ -338,7 +338,7 @@ export function draftRunningShotState(): Partial<AppState> {
       progress: { phase: 'validating', step: 'final_query' },
       startedAtMs: Date.now() - 42_000,
       error: null,
-      removedMeshHeadings: [], blockHits: SHOTS_BLOCK_HITS,
+      removedMeshHeadings: [], replacedMeshHeadings: [], blockHits: SHOTS_BLOCK_HITS,
     },
   };
 }

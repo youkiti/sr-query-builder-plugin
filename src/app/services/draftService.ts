@@ -1,5 +1,6 @@
 import type { AppStore, ProtocolDraft, BlocksDraft } from '../store';
-import { meshDescriptor } from '@/features/formula/assembleFormulaMd';
+import type { MeshResolution } from '@/lib/ncbi/mesh';
+import { buildMeshTag, meshDescriptor } from '@/features/formula/assembleFormulaMd';
 import {
   assembleFormulaMd,
   buildBlockExpression,
@@ -91,7 +92,7 @@ export interface DraftServiceDeps {
    * draftService 自身は NCBI を直接叩かず、配線側（bootstrap）が esearch を渡す。
    */
   countBlockHits?: (expression: string) => Promise<number>;
-  checkMeshDescriptors?: (descriptors: string[]) => Promise<Map<string, 'exists' | 'missing' | 'unknown'>>;
+  resolveMeshDescriptors?: (descriptors: string[]) => Promise<Map<string, MeshResolution>>;
   /** 1 ブロックの計測が確定するたびに呼ぶ（view のライブ表示更新用） */
   onBlockCounted?: (hit: DraftBlockHit) => void;
   /** テスト時に差し替え可能な UUID / 時刻 */
@@ -106,6 +107,7 @@ export interface DraftGeneration {
   blockSkeletons: BlockSkeleton[];
   meshSuggestions: MeshSuggestion[][];
   removedMeshHeadings: { blockIndex: number; blockId: string; blockLabel: string; descriptor: string }[];
+  replacedMeshHeadings: { blockIndex: number; blockId: string; blockLabel: string; from: string; to: string[] }[];
   freewordSuggestions: FreewordSuggestion[][];
   /** 生成途中に計測した概念ブロックごとのヒット数。countBlockHits 未注入なら空配列 */
   blockHits: DraftBlockHit[];
@@ -126,7 +128,7 @@ export interface DraftGenerationInput {
 
 /** LLM と計測・進捗の副作用は注入元が管理する。保存なし用途ではロガーなしの LLM を渡す。 */
 export type DraftGenerationDeps = Pick<
-  DraftServiceDeps, 'llmFactory' | 'onProgress' | 'countBlockHits' | 'onBlockCounted' | 'checkMeshDescriptors'
+  DraftServiceDeps, 'llmFactory' | 'onProgress' | 'countBlockHits' | 'onBlockCounted' | 'resolveMeshDescriptors'
 >;
 
 export interface DraftGenerationOptions {
@@ -174,9 +176,12 @@ export async function generateDraft(deps: DraftServiceDeps, options: DraftGenera
       formulaMd: generated.markdown,
       createdBy: 'ai_draft',
       createdAt,
-      note: generated.removedMeshHeadings.length > 0
-        ? `MeSH 辞書に無い見出しを外しました: ${generated.removedMeshHeadings.map((item) => `#${item.blockId} ${item.descriptor}`).join('、')}`
-        : null,
+      note: [
+        generated.removedMeshHeadings.length > 0
+          ? `MeSH 辞書に無い見出しを外しました: ${generated.removedMeshHeadings.map((item) => `#${item.blockId} ${item.descriptor}`).join('、')}` : '',
+        generated.replacedMeshHeadings.length > 0
+          ? `MeSH の同義語を正式な見出しに置き換えました: ${generated.replacedMeshHeadings.map((item) => `#${item.blockId} ${item.from} → ${item.to.join('、')}`).join('、')}` : '',
+      ].filter(Boolean).join('／') || null,
       model,
     },
     deps.google
@@ -210,6 +215,7 @@ export async function generateDraftFormula(
   const freewords: FreewordSuggestion[][] = [];
   const blockHits: DraftBlockHit[] = [];
   const removedMeshHeadings: DraftGeneration['removedMeshHeadings'] = [];
+  const replacedMeshHeadings: DraftGeneration['replacedMeshHeadings'] = [];
 
   for (let i = 0; i < blockCount; i += 1) {
     const block = blocks.blocks[i];
@@ -239,13 +245,31 @@ export async function generateDraftFormula(
       },
       deps.llmFactory.forPurpose('suggest_mesh')
     );
-    if (deps.checkMeshDescriptors) {
-      const checked = await deps.checkMeshDescriptors(mesh.map(meshDescriptor).filter(Boolean));
-      mesh = mesh.filter((candidate) => {
+    if (deps.resolveMeshDescriptors) {
+      const resolutions = await deps.resolveMeshDescriptors(mesh.map(meshDescriptor).filter(Boolean));
+      const seen = new Set<string>();
+      mesh = mesh.flatMap((candidate) => {
         const descriptor = meshDescriptor(candidate);
-        if (checked.get(descriptor) !== 'missing') return true;
-        removedMeshHeadings.push({ blockIndex: i, blockId: String(i + 1), blockLabel: block.blockLabel, descriptor });
-        return false;
+        const resolution = resolutions.get(descriptor);
+        const blockRef = { blockIndex: i, blockId: String(i + 1), blockLabel: block.blockLabel };
+        if (resolution?.status === 'missing') {
+          removedMeshHeadings.push({ ...blockRef, descriptor });
+          return [];
+        }
+        let candidates = [candidate];
+        if (resolution?.status === 'resolved') {
+          if (resolution.headings.some((heading) => heading.toLowerCase() !== descriptor.toLowerCase())) {
+            replacedMeshHeadings.push({ ...blockRef, from: descriptor, to: resolution.headings });
+          }
+          candidates = resolution.headings.map((heading) => ({ ...candidate, descriptor: heading,
+            tagSyntax: buildMeshTag({ descriptor: heading, tagSyntax: candidate.tagSyntax }) }));
+        }
+        return candidates.filter((item) => {
+          const key = meshDescriptor(item).toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
       });
     }
     meshes.push(mesh);
@@ -317,6 +341,7 @@ export async function generateDraftFormula(
     freewordSuggestions: freewords,
     blockHits,
     removedMeshHeadings,
+    replacedMeshHeadings,
   };
 }
 
