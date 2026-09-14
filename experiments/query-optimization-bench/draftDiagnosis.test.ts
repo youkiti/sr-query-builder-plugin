@@ -125,6 +125,17 @@ test.each([
   expect(result.diagnostics.map((item) => item.target)).toEqual(['block', 'formula']);
 });
 
+test('実測の検索バックエンド障害が再送上限まで続くと network_error になる', async () => {
+  const input = deps({ esearchresult: { ERROR: 'Search Backend failed: Status: 500' } });
+  input.maxRetries = 2;
+  input.sleep = jest.fn(async () => undefined);
+  const result = await diagnoseFormula(formula, input);
+  expect(result.diagnostics.map((item) => item.status)).toEqual(['network_error', 'network_error']);
+  expect(diagnosticOutcome(result.diagnostics)).toBe('network_error');
+  expect(input.fetch).toHaveBeenCalledTimes(2 * (input.maxRetries + 1));
+  expect(input.sleep).toHaveBeenCalledTimes(2 * input.maxRetries);
+});
+
 test('ネットワーク、構文、ゼロの優先順とその他のエラーを保存する', async () => {
   const input = deps({});
   input.fetch = jest.fn().mockRejectedValueOnce(new EutilsError('構文エラー: 不明なフィールドタグ [x]', 200, true))
