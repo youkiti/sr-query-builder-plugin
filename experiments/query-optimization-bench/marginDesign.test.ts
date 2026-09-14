@@ -22,10 +22,14 @@ import {
   marginDesignResultDir,
   parseMarginDesignArgs,
   planMarginDesignVariants,
+  planPerTermVariants,
   runPerBlockVariant,
+  runPerTermVariant,
   termCaptureTablePath,
   termCountsPath,
   type MarginDesignVariantRun,
+  type TermCountRecord,
+  type TermUnitPlan,
 } from './marginDesign';
 import { marginDesignRows } from './marginDesignReport';
 import type { BenchCase, FrozenSeeds } from './types';
@@ -196,6 +200,84 @@ describe('planMarginDesignVariants', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 段階 2': per-term-equal・per-term-smallest-first の案の組み立て（純粋関数。issue #154 続き）
+// ---------------------------------------------------------------------------
+
+describe('planPerTermVariants', () => {
+  const item = (t: string) => ({ term: t, axis: 'freeword' as const, rationale: 'r' });
+  // big1(idx0)・big2(idx1) はブロック 1、small1(idx2)・zero1(idx3) はブロック 2。
+  // idx は additions.flatMap の出現順（同数のときの並び替えの tie-break に使う）。
+  const fixtureAdditions: BlockRecallAdditions[] = [
+    { blockId: '1', additions: [item('big1[tiab]'), item('big2[tiab]')] },
+    { blockId: '2', additions: [item('small1[tiab]'), item('zero1[tiab]')] },
+  ];
+  const records = (counts: Record<string, number>): Map<string, TermCountRecord> => {
+    const map = new Map<string, TermCountRecord>();
+    for (const block of fixtureAdditions) {
+      for (const it of block.additions) {
+        const key = `${block.blockId} ${it.term}`;
+        map.set(key, { blockId: block.blockId, term: it.term, marginQuery: `mq:${key}`, count: counts[it.term] ?? 0, countedAt: '2026-01-01T00:00:00Z' });
+      }
+    }
+    return map;
+  };
+
+  test('件数 0 の語は取得単位から除く。件数昇順（同数は凍結 margin での出現順）に並べる', () => {
+    const { equal } = planPerTermVariants(fixtureAdditions,
+      records({ 'big1[tiab]': 250, 'big2[tiab]': 250, 'small1[tiab]': 5, 'zero1[tiab]': 0 }), 200);
+    expect(equal.droppedTerms.map((t) => t.term)).toEqual(['zero1[tiab]']);
+    // 昇順: small1(5) -> big1(250,idx0) -> big2(250,idx1)（同数は出現順で idx0 が先）
+    expect(equal.termUnits?.map((u) => u.term)).toEqual(['small1[tiab]', 'big1[tiab]', 'big2[tiab]']);
+  });
+
+  test('per-term-equal: allocatePerBlockRetmax と同じ配り方で均等配分し、件数が割当より少なくても余りを再配分しない', () => {
+    const { equal } = planPerTermVariants(fixtureAdditions,
+      records({ 'big1[tiab]': 250, 'big2[tiab]': 250, 'small1[tiab]': 3, 'zero1[tiab]': 0 }), 10);
+    // 3 語（small1・big1・big2）に 10 を均等配分 -> allocatePerBlockRetmax(3,10) = [4,3,3]。
+    // small1 の件数(3)は割当(4)より少ないが、割当はそのまま 4（他の語へ再配分しない）。
+    expect(equal.termUnits).toEqual([
+      { blockId: '2', term: 'small1[tiab]', marginQuery: 'mq:2 small1[tiab]', count: 3, allocation: 4 },
+      { blockId: '1', term: 'big1[tiab]', marginQuery: 'mq:1 big1[tiab]', count: 250, allocation: 3 },
+      { blockId: '1', term: 'big2[tiab]', marginQuery: 'mq:1 big2[tiab]', count: 250, allocation: 3 },
+    ]);
+    expect(equal.keptTerms).toEqual([
+      { blockId: '2', term: 'small1[tiab]', count: 3 }, { blockId: '1', term: 'big1[tiab]', count: 250 }, { blockId: '1', term: 'big2[tiab]', count: 250 },
+    ]);
+  });
+
+  test('per-term-smallest-first: 件数の少ない語から件数ぶん（残り枠まで）を割り当て、枠が尽きたら以降の語は割当 0 で除く', () => {
+    // 昇順: small1(5) -> big1(250,idx0) -> big2(250,idx1)。retmax=200。
+    // small1: alloc=min(5,200)=5, 残195。big1: alloc=min(250,195)=195, 残0。big2: alloc=min(250,0)=0 -> 除外（esearch しない）。
+    const { smallestFirst } = planPerTermVariants(fixtureAdditions,
+      records({ 'big1[tiab]': 250, 'big2[tiab]': 250, 'small1[tiab]': 5, 'zero1[tiab]': 0 }), 200);
+    expect(smallestFirst.sameAs).toBeNull();
+    expect(smallestFirst.termUnits).toEqual([
+      { blockId: '2', term: 'small1[tiab]', marginQuery: 'mq:2 small1[tiab]', count: 5, allocation: 5 },
+      { blockId: '1', term: 'big1[tiab]', marginQuery: 'mq:1 big1[tiab]', count: 250, allocation: 195 },
+    ]);
+    expect(smallestFirst.droppedTerms.map((t) => t.term).sort()).toEqual(['big2[tiab]', 'zero1[tiab]']);
+  });
+
+  test('取得単位が 1 つ（件数 1 以上の語が 1 語）なら per-term-smallest-first は per-term-equal に sameAs する', () => {
+    const { equal, smallestFirst } = planPerTermVariants(fixtureAdditions,
+      records({ 'big1[tiab]': 50, 'big2[tiab]': 0, 'small1[tiab]': 0, 'zero1[tiab]': 0 }), 200);
+    expect(equal.sameAs).toBeNull();
+    expect(equal.termUnits).toEqual([{ blockId: '1', term: 'big1[tiab]', marginQuery: 'mq:1 big1[tiab]', count: 50, allocation: 200 }]);
+    expect(smallestFirst.sameAs).toBe('per-term-equal');
+    expect(smallestFirst.termUnits).toBeUndefined();
+    expect(smallestFirst.keptTerms).toEqual(equal.keptTerms);
+    expect(smallestFirst.droppedTerms).toEqual(equal.droppedTerms);
+  });
+
+  test('全語の件数が 0 なら両案とも emptyMargin（full・cutoff・per-block との sameAs は行わない）', () => {
+    const { equal, smallestFirst } = planPerTermVariants(fixtureAdditions,
+      records({ 'big1[tiab]': 0, 'big2[tiab]': 0, 'small1[tiab]': 0, 'zero1[tiab]': 0 }), 200);
+    expect(equal).toMatchObject({ emptyMargin: true, sameAs: null, termUnits: [] });
+    expect(smallestFirst).toMatchObject({ emptyMargin: true, sameAs: null });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // per-block 専用の純粋関数
 // ---------------------------------------------------------------------------
 
@@ -299,6 +381,25 @@ test('runPerBlockVariant: 書誌が 0 件（efetch が何も返さない）な�
   expect(result.stages.requestedPmids).toEqual(['999999']);
   expect(result.stages.fetchedPmids).toEqual([]);
   expect(result.candidates).toEqual([]);
+});
+
+test('runPerTermVariant: allocation <= 0 の取得単位は esearch せず、termMargins にも反映されない', async () => {
+  const q1 = marginQueryFor([{ blockId: '1', additions: [termA1] }]);
+  const q2 = marginQueryFor([{ blockId: '2', additions: [termB1] }]);
+  const units: TermUnitPlan[] = [
+    { blockId: '1', term: termA1.term, marginQuery: q1, count: 5, allocation: 5 },
+    // allocation 0（枠が尽きた語を模す）。fakePerBlockEutils の marginInfo に q2 を用意していないため、
+    // 呼ばれれば「想定外のクエリ」で例外になる。
+    { blockId: '2', term: termB1.term, marginQuery: q2, count: 30, allocation: 0 },
+  ];
+  const marginInfo = { [q1]: { count: 5, pmids: ['101', '102'] } };
+  const llmFactory = fakePerBlockLlmFactory(async () => ({ text: JSON.stringify({ picks: [] }), tokensIn: 1, tokensOut: 1, raw: null }));
+  const result = await runPerTermVariant(units, new Set(), protocolForPerBlock, { skillCandidateLimit: 20, sort: 'relevance' },
+    { eutils: fakePerBlockEutils(marginInfo), llmFactory, progress: () => undefined });
+  expect(result.termMargins).toEqual([
+    { blockId: '1', term: termA1.term, marginQuery: q1, count: 5, allocation: 5, retrievedPmids: ['101', '102'] },
+  ]);
+  expect(result.stages.retrievedPmids).toEqual(['101', '102']);
 });
 
 // ---------------------------------------------------------------------------
@@ -457,6 +558,32 @@ test('main(): 段階 1〜3・保存・スキップ・失敗の再実行を一気
   expect(perBlock.heldOutStages.find((s) => s.studyId === 'H-current')).toMatchObject({ stage: 'captured_by_current', deepRankBlockId: null });
   expect(perBlock.heldOutStages.find((s) => s.studyId === 'H-hidden')).toMatchObject({ stage: 'not_in_margin' });
 
+  // per-term-equal・per-term-smallest-first: このケースの語数(3)・件数(5/30/50)の合計は
+  // OUTSIDE_DEFAULT_RETMAX(200) を大きく下回るため、smallest-first も予算を使い切らず全語を実行する
+  // （sameAs も null）。語の実行順は件数昇順（termA1=5 -> termB1=30 -> termA2=50）。
+  const perTermEqual = readRun('per-term-equal');
+  expect(perTermEqual.status).toBe('completed');
+  expect(perTermEqual.sameAs).toBeNull();
+  expect(perTermEqual.marginHits).toBeNull();
+  expect(perTermEqual.termMargins).toEqual([
+    { blockId: '1', term: 'termA1[tiab]', marginQuery: termA1MarginQuery, count: 5, allocation: 67, retrievedPmids: ['201', '202'] },
+    { blockId: '2', term: 'termB1[tiab]', marginQuery: termB1MarginQuery, count: 30, allocation: 67, retrievedPmids: ['301'] },
+    { blockId: '1', term: 'termA2[tiab]', marginQuery: termA2MarginQuery, count: 50, allocation: 66, retrievedPmids: [] },
+  ]);
+  expect(perTermEqual.candidates).toEqual([{ pmid: '201', reason: 'boundary' }]);
+  expect(perTermEqual.heldOutStages.find((s) => s.studyId === 'H-presented')).toMatchObject({ stage: 'presented', deepRankBlockId: '1:termA1[tiab]' });
+  expect(perTermEqual.heldOutStages.find((s) => s.studyId === 'H-hidden')).toMatchObject({ stage: 'not_in_margin' });
+
+  const perTermSmallest = readRun('per-term-smallest-first');
+  expect(perTermSmallest.status).toBe('completed');
+  expect(perTermSmallest.sameAs).toBeNull();
+  expect(perTermSmallest.termMargins).toEqual([
+    { blockId: '1', term: 'termA1[tiab]', marginQuery: termA1MarginQuery, count: 5, allocation: 5, retrievedPmids: ['201', '202'] },
+    { blockId: '2', term: 'termB1[tiab]', marginQuery: termB1MarginQuery, count: 30, allocation: 30, retrievedPmids: ['301'] },
+    { blockId: '1', term: 'termA2[tiab]', marginQuery: termA2MarginQuery, count: 50, allocation: 50, retrievedPmids: [] },
+  ]);
+  expect(perTermSmallest.heldOutStages.find((s) => s.studyId === 'H-presented')).toMatchObject({ stage: 'presented', deepRankBlockId: '1:termA1[tiab]' });
+
   // gold（シード 900/901/902、held-out 501/777）が選定の実際の通信（efetch の id・LLM への入力）に
   // 一切現れないこと。`!term.includes('501')` のような非 uid クエリの文字列検査は、PMID がクエリ文字列に
   // 直接書かれることがそもそも無いため必ず通ってしまう（tautology）。efetch の id・LLM のリクエスト本文は
@@ -521,6 +648,146 @@ test('main(): 段階 1〜3・保存・スキップ・失敗の再実行を一気
   expect(rerunNetwork).not.toHaveBeenCalled();
   expect(config).not.toHaveBeenCalled();
 }, 20000);
+
+test('main(): per-term-smallest-first が枠(200)を使い切ると、esearch しなかった語の margin にだけ入る研究は not_in_margin になる', async () => {
+  const fixture = setup();
+  // held-out 研究を 1 件追加する: pmid 850 は termB1 の margin だけに入り、他のどの語の margin にも
+  // 現式にも入らない。smallest-first が termB1 を esearch しない（枠を使い切る）ことを確かめるための仕込み。
+  const caseJsonPath = join(fixture.dir, 'case.json');
+  const caseJson = JSON.parse(readFileSync(caseJsonPath, 'utf8')) as BenchCase;
+  caseJson.gold.push({ id: 'G-term-excluded', pmids: ['850'], members: [{ studyId: 'H-term-excluded', pmids: ['850'] }] });
+  writeFileSync(caseJsonPath, JSON.stringify(caseJson));
+
+  const events: FakeEvent[] = [];
+  // 件数を大きくして枠(200)を使い切らせる: 昇順で termA1(5,idx0) -> termA2(250,idx1) -> termB1(250,idx2)
+  // の順に smallest-first で配分すると termB1 は割当 0 になり esearch されない。
+  const marginInfo: Record<string, { count: number; pmids: string[] }> = {
+    [termA1MarginQuery]: { count: 5, pmids: ['601'] },
+    [termA2MarginQuery]: { count: 250, pmids: ['602'] },
+    [termB1MarginQuery]: { count: 250, pmids: ['850'] },
+  };
+  const goldBases: { key: string; allowed: string[] }[] = [
+    { key: originalQuery, allowed: [] }, { key: termA1MarginQuery, allowed: [] },
+    { key: termA2MarginQuery, allowed: [] }, { key: termB1MarginQuery, allowed: ['850'] },
+  ];
+  jest.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const url = new URL(String(input));
+    const body = String(init?.body ?? '');
+    const params = init?.method === 'POST' ? new URLSearchParams(body) : url.searchParams;
+    if (url.hostname === 'generativelanguage.googleapis.com') {
+      events.push({ kind: 'llm', body });
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({ picks: [] }) }] } }],
+        usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 } }));
+    }
+    if (url.pathname.endsWith('/efetch.fcgi')) {
+      const ids = (params.get('id') ?? '').split(',').filter(Boolean);
+      events.push({ kind: 'efetch', ids });
+      const xml = ids.map((pmid) => `<PubmedArticle><MedlineCitation><PMID>${pmid}</PMID><Article><ArticleTitle>Title ${pmid}</ArticleTitle></Article></MedlineCitation></PubmedArticle>`).join('');
+      return new Response(`<PubmedArticleSet>${xml}</PubmedArticleSet>`);
+    }
+    if (url.pathname.endsWith('/esearch.fcgi')) {
+      const term = params.get('term') ?? '';
+      const retmax = params.get('retmax');
+      events.push({ kind: 'esearch', term, retmax });
+      if (term.includes('[uid]')) {
+        const matched = goldBases.find((base) => term.startsWith(`(${base.key}) AND (`));
+        const uidSection = matched ? term.slice(`(${matched.key}) AND (`.length, -1) : term.slice(1, -1);
+        const requested = [...uidSection.matchAll(/([\w-]+)\[uid\]/g)].map((m) => m[1]!);
+        const allowed = matched ? matched.allowed : requested; // 日付範囲の検証（base 無し）は全件 in-date とする
+        const pmids = requested.filter((pmid) => allowed.includes(pmid));
+        return new Response(JSON.stringify({ esearchresult: { count: String(pmids.length), idlist: pmids } }));
+      }
+      if (term === originalQuery) return new Response(JSON.stringify({ esearchresult: { count: '9', idlist: [] } }));
+      const info = marginInfo[term];
+      if (!info) throw new Error(`想定外のクエリ: ${term}`);
+      return new Response(JSON.stringify({ esearchresult: { count: String(info.count), idlist: info.pmids.slice(0, Number(retmax ?? '20')) } }));
+    }
+    throw new Error('想定外の通信');
+  });
+
+  // --variants で per-term の 2 案だけに絞る（full・cutoff・per-block はこのテストの対象外）。
+  // rank-depth は 0 にして事後集計の深い順位取得を省略し、モックを単純にする。
+  const runArgs = [...args, '--variants', 'per-term-equal,per-term-smallest-first', '--rank-depth', '0'];
+  await main(runArgs, fixture.root, fixture.results);
+
+  const dirFor = (variant: string) => marginDesignResultDir(fixture.results, caseId, marginName, 20260912, variant);
+  const readRun = (variant: string) => JSON.parse(readFileSync(join(dirFor(variant), 'run.json'), 'utf8')) as MarginDesignVariantRun;
+  const equalRun = readRun('per-term-equal');
+  const smallestRun = readRun('per-term-smallest-first');
+  expect(equalRun.status).toBe('completed');
+  expect(smallestRun.status).toBe('completed');
+  expect(equalRun.sameAs).toBeNull();
+  expect(smallestRun.sameAs).toBeNull();
+
+  // equal は 3 語すべて（allocatePerBlockRetmax は 3 語なら常に正の配分になる）を実行するが、
+  // smallest-first は termB1 の割当が 0 になり実行しない。
+  expect(equalRun.termMargins?.map((t) => t.term)).toEqual([termA1.term, termA2.term, termB1.term]);
+  expect(smallestRun.termMargins?.map((t) => t.term)).toEqual([termA1.term, termA2.term]);
+  expect(smallestRun.droppedTerms.map((t) => t.term)).toEqual([termB1.term]);
+
+  const excludedEqual = equalRun.heldOutStages.find((s) => s.studyId === 'H-term-excluded')!;
+  const excludedSmallest = smallestRun.heldOutStages.find((s) => s.studyId === 'H-term-excluded')!;
+  // equal は termB1 を esearch しているので inMargin に届き、not_in_margin より先の段階まで進む。
+  expect(excludedEqual.stage).not.toBe('not_in_margin');
+  // smallest-first は termB1 を esearch していないので、事後集計の inMargin にも入らない。
+  expect(excludedSmallest.stage).toBe('not_in_margin');
+
+  // termB1 の margin は smallest-first では実際に esearch していない（直接の取得は equal の分だけ）。
+  const termB1Retrievals = events.filter((e): e is EsearchEvent => e.kind === 'esearch' && e.term === termB1MarginQuery && e.retmax !== '0');
+  expect(termB1Retrievals).toHaveLength(1);
+  // gold 照合（[uid]）は 2 回: equal の事後集計 1 回 + 案に依存しない語ごとの捕捉表（term-capture.json、
+  // 段階 1 の全語を対象に一度だけ行う診断）1 回。smallest-first の事後集計からは 0 回（追加されない）。
+  const termB1GoldQueries = events.filter((e): e is EsearchEvent => e.kind === 'esearch' && e.term.startsWith(`(${termB1MarginQuery}) AND (`));
+  expect(termB1GoldQueries).toHaveLength(2);
+}, 20000);
+
+test('--variants: 指定外の案は実行もスキップ判定もしない。別コミットの既存完了 run があっても指定した新しい案だけ実行できる', async () => {
+  const fixture = setup();
+  fakeNetwork();
+  // まず full だけ実行して完了させておく（cutoff・per-block・per-term は未実行のまま）。
+  await main([...args, '--variants', 'full'], fixture.root, fixture.results);
+  const dirFor = (variant: string) => marginDesignResultDir(fixture.results, caseId, marginName, 20260912, variant);
+  expect(existsSync(join(dirFor('cutoff-1000'), 'run.json'))).toBe(false);
+  expect(existsSync(join(dirFor('per-block'), 'run.json'))).toBe(false);
+
+  // full の run.json を「別コミットの完了」に書き換える。
+  const fullPath = join(dirFor('full'), 'run.json');
+  const fullRun = JSON.parse(readFileSync(fullPath, 'utf8')) as MarginDesignVariantRun;
+  fullRun.gitCommit = 'other-commit';
+  writeFileSync(fullPath, JSON.stringify(fullRun));
+
+  // --variants で per-block だけを指定すれば、full（別コミットの完了）に触れず新しい案だけ実行できる。
+  const { events } = fakeNetwork();
+  await main([...args, '--variants', 'per-block'], fixture.root, fixture.results);
+  expect(events.some((e) => e.kind === 'esearch' && e.term === fullMarginQuery)).toBe(false);
+  const perBlockRun = JSON.parse(readFileSync(join(dirFor('per-block'), 'run.json'), 'utf8')) as MarginDesignVariantRun;
+  expect(perBlockRun.status).toBe('completed');
+  // full の run.json（別コミットの完了）はそのまま残っている（上書きされていない）。
+  expect(JSON.parse(readFileSync(fullPath, 'utf8'))).toEqual(fullRun);
+
+  // --variants を付けずに実行すると、full が別コミットの完了のため decideOutsideExisting が拒否する。
+  await expect(main(args, fixture.root, fixture.results)).rejects.toThrow('別コミットの完了結果があります');
+});
+
+test('--variants: sameAs の参照先が指定外の案で、その run.json が無ければエラーにする', async () => {
+  const fixture = setup();
+  fakeNetwork();
+  // per-term-smallest-first だけを指定する。additions は語 3 つ（termA1/termA2/termB1）なので取得単位も
+  // 3 つになり sameAs は null のはずだが、cutoff-50（全語を残す = full と同一集合で sameAs: 'full'）を
+  // 使って「sameAs 参照先が --variants に含まれず、run.json も無い」状況を再現する。
+  await expect(main([...args, '--thresholds', '50', '--variants', 'cutoff-50'], fixture.root, fixture.results))
+    .rejects.toThrow('sameAs の参照先 (full) の run.json がありません');
+
+  // full を先に完了させておけば、cutoff-50 だけの実行でも通る。
+  const { events } = fakeNetwork();
+  await main([...args, '--thresholds', '50', '--variants', 'full'], fixture.root, fixture.results);
+  await main([...args, '--thresholds', '50', '--variants', 'cutoff-50'], fixture.root, fixture.results);
+  const dirFor = (variant: string) => marginDesignResultDir(fixture.results, caseId, marginName, 20260912, variant);
+  const cutoff50 = JSON.parse(readFileSync(join(dirFor('cutoff-50'), 'run.json'), 'utf8')) as MarginDesignVariantRun;
+  expect(cutoff50.status).toBe('completed');
+  expect(cutoff50.sameAs).toBe('full');
+  void events;
+});
 
 test('段階 1 で esearch が恒久失敗した語は jsonl に残らず main が失敗する。再実行はその語だけ数え直す', async () => {
   const fixture = setup();
@@ -609,7 +876,7 @@ function fakeRun(overrides: Partial<MarginDesignVariantRun> & Pick<MarginDesignV
     threshold: null, label: null, searchDate: '2022-03-31', model: 'fake', gitCommit: null, gitDirty: null,
     sameAs: null, emptyMargin: false, keptTerms: [], droppedTerms: [],
     config: { retmax: 200, candidateLimit: 200, sort: 'relevance', rankDepth: 0 },
-    originalHits: 10, marginHits: 5, marginHitsByBlock: null, marginHitsSumAllowingOverlap: null,
+    originalHits: 10, marginHits: 5, marginHitsByBlock: null, marginHitsSumAllowingOverlap: null, termMargins: null,
     stages: { broadenedQuery: null, marginQuery: null, retrievedPmids: [], novelPmids: [], requestedPmids: [], fetchedPmids: [], pickedPmids: [] },
     candidates: [], heldOutStages: [], missedHeldOutCount: 0,
     stageCounts: Object.fromEntries(STAGE_NAMES.map((stage) => [stage, 0])) as Record<OutsideStage, number>,
@@ -628,6 +895,27 @@ test('marginDesignRows: 同じ case・margin で seedSplit だけ違う run は�
   expect(rows).toHaveLength(3); // header + 2 行（同じ case・margin・variant でも別 run として混ざらない）
   expect(rows[1]![2]).toBe('confirmed'); // 'c' < 's' なので seedSplit 順で先に来る
   expect(rows[2]![2]).toBe('s20260912');
+});
+
+test('marginDesignRows: 案の並びは full -> cutoff-<N>（数値昇順）-> per-block -> per-term-equal -> per-term-smallest-first。marginHits は per-term を「<語数>語/合計<件数>」に要約する', () => {
+  const termMargins = [
+    { blockId: '1', term: 'a[tiab]', marginQuery: 'qa', count: 5, allocation: 100, retrievedPmids: [] },
+    { blockId: '2', term: 'b[tiab]', marginQuery: 'qb', count: 30, allocation: 100, retrievedPmids: [] },
+  ];
+  const runs = [
+    fakeRun({ caseId, seedSplit: 's20260912', variant: 'per-term-smallest-first', termMargins, marginHits: null }),
+    fakeRun({ caseId, seedSplit: 's20260912', variant: 'cutoff-1000' }),
+    fakeRun({ caseId, seedSplit: 's20260912', variant: 'per-term-equal', termMargins, marginHits: null }),
+    fakeRun({ caseId, seedSplit: 's20260912', variant: 'per-block' }),
+    fakeRun({ caseId, seedSplit: 's20260912', variant: 'full' }),
+    fakeRun({ caseId, seedSplit: 's20260912', variant: 'cutoff-500' }),
+  ];
+  const rows = marginDesignRows(runs);
+  expect(rows.slice(1).map((row) => row[3])).toEqual(['full', 'cutoff-500', 'cutoff-1000', 'per-block', 'per-term-equal', 'per-term-smallest-first']);
+  const perTermEqualRow = rows.find((row) => row[3] === 'per-term-equal')!;
+  const perTermSmallestRow = rows.find((row) => row[3] === 'per-term-smallest-first')!;
+  expect(perTermEqualRow[7]).toBe('2語/合計35');
+  expect(perTermSmallestRow[7]).toBe('2語/合計35');
 });
 
 test('dry-run は margin・C0 ハッシュを照合するだけで .env・通信・書き込みなし', async () => {
