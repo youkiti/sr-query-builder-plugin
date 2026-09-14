@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "name": "criteria-only-draft1-margin4",
+  "caseId": "r1-mindfulness-smoking",
+  "c0": {
+    "name": "criteria-only-draft1",
+    "sha256": "30e591ca3dc5dba8935dc94e6a863a9648a44514f19e10295ea6d04fb95fa2a8"
+  },
+  "additions": [
+    {
+      "blockId": "1",
+      "additions": [
+        {
+          "term": "\"Substance-Related Disorders\"[Mesh]",
+          "axis": "mesh",
+          "rationale": "喫煙やニコチン依存症の親概念である物質関連障害を含めることで、物質依存全般を対象とした研究から喫煙セグメントを拾い上げます。"
+        },
+        {
+          "term": "\"Behavior, Addictive\"[Mesh]",
+          "axis": "mesh",
+          "rationale": "タバコ使用の背景にある嗜癖行動の親概念をカバーし、依存症治療の文脈から喫煙に関する研究を網羅します。"
+        },
+        {
+          "term": "\"vaping\"[tiab]",
+          "axis": "freeword",
+          "rationale": "近年増加している電子タバコ（VAPE）を用いた喫煙行動やその禁煙に関する研究を取りこぼさないようにします。"
+        },
+        {
+          "term": "\"e-cigarette\"[tiab]",
+          "axis": "freeword",
+          "rationale": "新型タバコ・電子タバコユーザーにおける禁煙介入研究を包括するために追加します。"
+        },
+        {
+          "term": "\"tobacco cessation\"[tiab]",
+          "axis": "freeword",
+          "rationale": "smoking cessation 以外の表現である「タバコ使用の中止」に関する論文を網羅します。"
+        },
+        {
+          "term": "\"nicotine cessation\"[tiab]",
+          "axis": "freeword",
+          "rationale": "ニコチンそのものの摂取中止に焦点を当てた研究をカバーします。"
+        }
+      ]
+    },
+    {
+      "blockId": "2",
+      "additions": [
+        {
+          "term": "\"Mind-Body Therapies\"[Mesh]",
+          "axis": "mesh",
+          "rationale": "マインドフルネスや瞑想、ヨガの親概念である心身療法全体に広げることで、境界領域の介入研究を網羅します。"
+        },
+        {
+          "term": "\"Cognitive Behavioral Therapy\"[Mesh]",
+          "axis": "mesh",
+          "rationale": "ACT（アクセプタンス＆コミットメント・セラピー）の親概念である認知行動療法を含め、マインドフルネス要素を内包する第3世代CBT研究を広く捉えます。"
+        },
+        {
+          "term": "\"ACT\"[tiab]",
+          "axis": "freeword",
+          "rationale": "Acceptance and Commitment Therapy の一般的な略称である「ACT」を用いた論文を網羅します。"
+        },
+        {
+          "term": "\"mind-body\"[tiab]",
+          "axis": "freeword",
+          "rationale": "マインドフルネスを内包する「心身相関」アプローチを用いた介入研究を幅広く拾い上げます。"
+        },
+        {
+          "term": "\"vipassana\"[tiab]",
+          "axis": "freeword",
+          "rationale": "マインドフルネスのルーツであり、同様の瞑想手法であるヴィパッサナー瞑想に関する研究をカバーします。"
+        },
+        {
+          "term": "\"dialectical behavior\"[tiab]",
+          "axis": "freeword",
+          "rationale": "マインドフルネススキルを重要な構成要素として含む弁証法的行動療法（DBT）の介入研究をカバーします。"
+        }
+      ]
+    }
+  ],
+  "broadenedQuery": "(((Smoking[Mesh] OR Tobacco Use[Mesh] OR Smoking Cessation[Mesh] OR Tobacco Use Disorder[Mesh] OR \"smoking\"[tiab] OR \"smoker\"[tiab] OR \"smokers\"[tiab] OR \"tobacco\"[tiab] OR \"cigarette\"[tiab] OR \"cigarettes\"[tiab] OR \"nicotine\"[tiab] OR \"smoking cessation\"[tiab] OR \"quit smoking\"[tiab] OR \"quitting smoking\"[tiab] OR \"tobacco dependence\"[tiab] OR \"nicotine dependence\"[tiab])) OR \"Substance-Related Disorders\"[Mesh] OR \"Behavior, Addictive\"[Mesh] OR \"vaping\"[tiab] OR \"e-cigarette\"[tiab] OR \"tobacco cessation\"[tiab] OR \"nicotine cessation\"[tiab]) AND (((Mindfulness[Mesh] OR Meditation[Mesh] OR Acceptance and Commitment Therapy[Mesh] OR Yoga[Mesh] OR \"mindful*\"[tiab] OR \"MBSR\"[tiab] OR \"MBCT\"[tiab] OR \"acceptance and commitment\"[tiab] OR \"yoga\"[tiab] OR \"meditation\"[tiab] OR \"meditative\"[tiab])) OR \"Mind-Body Therapies\"[Mesh] OR \"Cognitive Behavioral Therapy\"[Mesh] OR \"ACT\"[tiab] OR \"mind-body\"[tiab] OR \"vipassana\"[tiab] OR \"dialectical behavior\"[tiab]) AND ((randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh])))",
+  "marginQuery": "((((Smoking[Mesh] OR Tobacco Use[Mesh] OR Smoking Cessation[Mesh] OR Tobacco Use Disorder[Mesh] OR \"smoking\"[tiab] OR \"smoker\"[tiab] OR \"smokers\"[tiab] OR \"tobacco\"[tiab] OR \"cigarette\"[tiab] OR \"cigarettes\"[tiab] OR \"nicotine\"[tiab] OR \"smoking cessation\"[tiab] OR \"quit smoking\"[tiab] OR \"quitting smoking\"[tiab] OR \"tobacco dependence\"[tiab] OR \"nicotine dependence\"[tiab])) OR \"Substance-Related Disorders\"[Mesh] OR \"Behavior, Addictive\"[Mesh] OR \"vaping\"[tiab] OR \"e-cigarette\"[tiab] OR \"tobacco cessation\"[tiab] OR \"nicotine cessation\"[tiab]) AND (((Mindfulness[Mesh] OR Meditation[Mesh] OR Acceptance and Commitment Therapy[Mesh] OR Yoga[Mesh] OR \"mindful*\"[tiab] OR \"MBSR\"[tiab] OR \"MBCT\"[tiab] OR \"acceptance and commitment\"[tiab] OR \"yoga\"[tiab] OR \"meditation\"[tiab] OR \"meditative\"[tiab])) OR \"Mind-Body Therapies\"[Mesh] OR \"Cognitive Behavioral Therapy\"[Mesh] OR \"ACT\"[tiab] OR \"mind-body\"[tiab] OR \"vipassana\"[tiab] OR \"dialectical behavior\"[tiab]) AND ((randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh])))) NOT (((Smoking[Mesh] OR Tobacco Use[Mesh] OR Smoking Cessation[Mesh] OR Tobacco Use Disorder[Mesh] OR \"smoking\"[tiab] OR \"smoker\"[tiab] OR \"smokers\"[tiab] OR \"tobacco\"[tiab] OR \"cigarette\"[tiab] OR \"cigarettes\"[tiab] OR \"nicotine\"[tiab] OR \"smoking cessation\"[tiab] OR \"quit smoking\"[tiab] OR \"quitting smoking\"[tiab] OR \"tobacco dependence\"[tiab] OR \"nicotine dependence\"[tiab])) AND ((Mindfulness[Mesh] OR Meditation[Mesh] OR Acceptance and Commitment Therapy[Mesh] OR Yoga[Mesh] OR \"mindful*\"[tiab] OR \"MBSR\"[tiab] OR \"MBCT\"[tiab] OR \"acceptance and commitment\"[tiab] OR \"yoga\"[tiab] OR \"meditation\"[tiab] OR \"meditative\"[tiab])) AND ((randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh]))))",
+  "originalHits": 204,
+  "marginHits": 3286,
+  "searchDate": "2021-04-15",
+  "model": "gemini-3.5-flash",
+  "createdAt": "2026-09-14T04:14:17.199Z",
+  "gitCommit": "b9bff8751baa7de7015112c4d977bcef5c1ec4b9",
+  "gitDirty": true,
+  "sha256": "adf964f0f46872f60d77dc4e128d18c61907823f23d163faf5253cd19f94afd5"
+}

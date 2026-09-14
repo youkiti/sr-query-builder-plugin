@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "name": "criteria-only-draft1-margin2",
+  "caseId": "r1-mindfulness-smoking",
+  "c0": {
+    "name": "criteria-only-draft1",
+    "sha256": "30e591ca3dc5dba8935dc94e6a863a9648a44514f19e10295ea6d04fb95fa2a8"
+  },
+  "additions": [
+    {
+      "blockId": "1",
+      "additions": [
+        {
+          "term": "\"Behavior, Addictive\"[Mesh]",
+          "axis": "mesh",
+          "rationale": "タバコ依存症の上位概念である嗜癖行動（アディクション）を含めることで、より広い依存症治療の文脈から喫煙対策を拾い上げます。"
+        },
+        {
+          "term": "\"Substance-Related Disorders\"[Mesh]",
+          "axis": "mesh",
+          "rationale": "物質関連障害というさらに広い親概念を含めることで、薬物依存全般の介入研究に紛れている喫煙関連データを取りこぼさないようにします。"
+        },
+        {
+          "term": "\"vaping\"[tiab]",
+          "axis": "freeword",
+          "rationale": "近年増加している電子タバコ（ベイピング）の使用者に対する禁煙・減煙介入を網羅するために追加します。"
+        },
+        {
+          "term": "\"e-cigarette*\"[tiab]",
+          "axis": "freeword",
+          "rationale": "新型タバコや電子タバコを対象とした禁煙研究を広くカバーするために追加します。"
+        },
+        {
+          "term": "\"cigar*\"[tiab]",
+          "axis": "freeword",
+          "rationale": "紙巻きタバコ（cigarette）以外の葉巻などの喫煙者も含めるために追加します。"
+        }
+      ]
+    },
+    {
+      "blockId": "2",
+      "additions": [
+        {
+          "term": "\"Mind-Body Therapies\"[Mesh]",
+          "axis": "mesh",
+          "rationale": "マインドフルネスや瞑想、ヨガを包含する上位の概念である心身療法を含めることで、境界領域の介入研究を網羅します。"
+        },
+        {
+          "term": "\"Cognitive Behavioral Therapy\"[Mesh]",
+          "axis": "mesh",
+          "rationale": "ACTなどの第三世代認知行動療法の上位概念である認知行動療法全体を指定し、マインドフルネス要素を含む広範な心理療法を拾い上げます。"
+        },
+        {
+          "term": "\"mind-body\"[tiab]",
+          "axis": "freeword",
+          "rationale": "マインドフルネスやヨガを「心身療法（mind-body therapy/intervention）」と表現している論文を回収します。"
+        },
+        {
+          "term": "\"vipassana\"[tiab]",
+          "axis": "freeword",
+          "rationale": "マインドフルネスの起源であるヴィパッサナー瞑想を用いた介入を拾い上げるために追加します。"
+        },
+        {
+          "term": "\"zen\"[tiab]",
+          "axis": "freeword",
+          "rationale": "禅瞑想など、マインドフルネスと親和性の高い東洋的瞑想法を用いたアプローチをカバーします。"
+        },
+        {
+          "term": "\"compassion\"[tiab]",
+          "axis": "freeword",
+          "rationale": "マインドフルネスと密接に関連するセルフ・コンパッションやコンパッション・フォーカスト・セラピーを用いた介入を拾い上げます。"
+        }
+      ]
+    }
+  ],
+  "broadenedQuery": "(((Smoking[Mesh] OR Tobacco Use[Mesh] OR Smoking Cessation[Mesh] OR Tobacco Use Disorder[Mesh] OR \"smoking\"[tiab] OR \"smoker\"[tiab] OR \"smokers\"[tiab] OR \"tobacco\"[tiab] OR \"cigarette\"[tiab] OR \"cigarettes\"[tiab] OR \"nicotine\"[tiab] OR \"smoking cessation\"[tiab] OR \"quit smoking\"[tiab] OR \"quitting smoking\"[tiab] OR \"tobacco dependence\"[tiab] OR \"nicotine dependence\"[tiab])) OR \"Behavior, Addictive\"[Mesh] OR \"Substance-Related Disorders\"[Mesh] OR \"vaping\"[tiab] OR \"e-cigarette*\"[tiab] OR \"cigar*\"[tiab]) AND (((Mindfulness[Mesh] OR Meditation[Mesh] OR Acceptance and Commitment Therapy[Mesh] OR Yoga[Mesh] OR \"mindful*\"[tiab] OR \"MBSR\"[tiab] OR \"MBCT\"[tiab] OR \"acceptance and commitment\"[tiab] OR \"yoga\"[tiab] OR \"meditation\"[tiab] OR \"meditative\"[tiab])) OR \"Mind-Body Therapies\"[Mesh] OR \"Cognitive Behavioral Therapy\"[Mesh] OR \"mind-body\"[tiab] OR \"vipassana\"[tiab] OR \"zen\"[tiab] OR \"compassion\"[tiab]) AND ((randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh])))",
+  "marginQuery": "((((Smoking[Mesh] OR Tobacco Use[Mesh] OR Smoking Cessation[Mesh] OR Tobacco Use Disorder[Mesh] OR \"smoking\"[tiab] OR \"smoker\"[tiab] OR \"smokers\"[tiab] OR \"tobacco\"[tiab] OR \"cigarette\"[tiab] OR \"cigarettes\"[tiab] OR \"nicotine\"[tiab] OR \"smoking cessation\"[tiab] OR \"quit smoking\"[tiab] OR \"quitting smoking\"[tiab] OR \"tobacco dependence\"[tiab] OR \"nicotine dependence\"[tiab])) OR \"Behavior, Addictive\"[Mesh] OR \"Substance-Related Disorders\"[Mesh] OR \"vaping\"[tiab] OR \"e-cigarette*\"[tiab] OR \"cigar*\"[tiab]) AND (((Mindfulness[Mesh] OR Meditation[Mesh] OR Acceptance and Commitment Therapy[Mesh] OR Yoga[Mesh] OR \"mindful*\"[tiab] OR \"MBSR\"[tiab] OR \"MBCT\"[tiab] OR \"acceptance and commitment\"[tiab] OR \"yoga\"[tiab] OR \"meditation\"[tiab] OR \"meditative\"[tiab])) OR \"Mind-Body Therapies\"[Mesh] OR \"Cognitive Behavioral Therapy\"[Mesh] OR \"mind-body\"[tiab] OR \"vipassana\"[tiab] OR \"zen\"[tiab] OR \"compassion\"[tiab]) AND ((randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh])))) NOT (((Smoking[Mesh] OR Tobacco Use[Mesh] OR Smoking Cessation[Mesh] OR Tobacco Use Disorder[Mesh] OR \"smoking\"[tiab] OR \"smoker\"[tiab] OR \"smokers\"[tiab] OR \"tobacco\"[tiab] OR \"cigarette\"[tiab] OR \"cigarettes\"[tiab] OR \"nicotine\"[tiab] OR \"smoking cessation\"[tiab] OR \"quit smoking\"[tiab] OR \"quitting smoking\"[tiab] OR \"tobacco dependence\"[tiab] OR \"nicotine dependence\"[tiab])) AND ((Mindfulness[Mesh] OR Meditation[Mesh] OR Acceptance and Commitment Therapy[Mesh] OR Yoga[Mesh] OR \"mindful*\"[tiab] OR \"MBSR\"[tiab] OR \"MBCT\"[tiab] OR \"acceptance and commitment\"[tiab] OR \"yoga\"[tiab] OR \"meditation\"[tiab] OR \"meditative\"[tiab])) AND ((randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh]))))",
+  "originalHits": 204,
+  "marginHits": 2057,
+  "searchDate": "2021-04-15",
+  "model": "gemini-3.5-flash",
+  "createdAt": "2026-09-14T04:13:34.829Z",
+  "gitCommit": "b9bff8751baa7de7015112c4d977bcef5c1ec4b9",
+  "gitDirty": true,
+  "sha256": "ad633eb893f18736d7b5646a87f68cdab3db04c683500e1d52e22bf98a0ababa"
+}
