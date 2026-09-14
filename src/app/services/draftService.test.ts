@@ -549,6 +549,7 @@ test('正式名への展開と重複除去を後続設計・式・版へ反映�
     { descriptor: 'Myocardial Infarction', tagSyntax: '"Myocardial Infarction"[Mesh:NoExp]', rationale: '理由' },
     { descriptor: 'Tobacco Products', tagSyntax: '"Tobacco Products"[Majr]', rationale: '理由' },
     { descriptor: 'Nicotiana', tagSyntax: '"Nicotiana"[Majr]', rationale: '理由' },
+    { descriptor: 'Myocardial Infarction', tagSyntax: '"Myocardial Infarction"[Mesh]', rationale: '' },
     { descriptor: 'Neoplasms', tagSyntax: '"Neoplasms"[Mesh]', rationale: '' },
   ]);
   expect(result.replacedMeshHeadings).toEqual(['Population', 'Intervention'].flatMap((blockLabel, blockIndex) => [
@@ -563,7 +564,28 @@ test('正式名への展開と重複除去を後続設計・式・版へ反映�
   expect(prompts).not.toContain('Heart Attack');
   expect(result.markdown).not.toContain('Heart Attack');
   expect(result.markdown).toContain('"Myocardial Infarction"[Mesh:NoExp]');
+  expect(result.markdown).toContain('"Myocardial Infarction"[Mesh]');
   const append = fetchMock.mock.calls.find((call) => String(call[0]).includes('FormulaVersions') && String(call[0]).includes(':append'))!;
   const row = JSON.parse(append[1].body as string).values[0] as string[];
   expect(row[SHEET_HEADERS.FormulaVersions.indexOf('note')]).toBe('MeSH 辞書に無い見出しを外しました: #1 Missing、#2 Missing／MeSH の同義語を正式な見出しに置き換えました: #1 Heart Attack → Myocardial Infarction、#1 Tobacco → Tobacco Products、Nicotiana、#2 Heart Attack → Myocardial Infarction、#2 Tobacco → Tobacco Products、Nicotiana');
+});
+
+test.each(['Mesh', 'Mesh:NoExp', 'Majr'])('正式名とタグ %s が同じ候補は大文字小文字を無視してブロックごとに最初の候補だけ残す', async (tag) => {
+  const { deps } = setupDeps();
+  deps.llmFactory.forPurpose = (purpose) => {
+    const provider = skillProviderFor(purpose);
+    if (purpose === 'suggest_mesh') provider.chat = async () => ({ text: JSON.stringify({ suggestions: [
+      { descriptor: 'Heart Attack', tag_syntax: `Heart Attack[${tag}]`, rationale: '最初の理由' },
+      { descriptor: 'Myocardial Infarction', tag_syntax: `Myocardial Infarction[${tag.toLowerCase()}]`, rationale: '後の理由' },
+    ] }), tokensIn: null, tokensOut: null, raw: {} });
+    return provider;
+  };
+  deps.resolveMeshDescriptors = async () => new Map<string, import('@/lib/ncbi/mesh').MeshResolution>([
+    ['Heart Attack', { status: 'resolved', headings: ['Myocardial Infarction'] }],
+    ['Myocardial Infarction', { status: 'resolved', headings: ['myocardial infarction'] }],
+  ]);
+  const result = await generateDraft(deps);
+  expect(result.meshSuggestions).toEqual([0, 1].map(() => [
+    { descriptor: 'Myocardial Infarction', tagSyntax: `"Myocardial Infarction"[${tag}]`, rationale: '最初の理由' },
+  ]));
 });

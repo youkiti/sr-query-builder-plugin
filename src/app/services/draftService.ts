@@ -265,7 +265,7 @@ export async function generateDraftFormula(
             tagSyntax: buildMeshTag({ descriptor: heading, tagSyntax: candidate.tagSyntax }) }));
         }
         return candidates.filter((item) => {
-          const key = meshDescriptor(item).toLowerCase();
+          const key = buildMeshTag(item).toLowerCase();
           if (seen.has(key)) return false;
           seen.add(key);
           return true;
