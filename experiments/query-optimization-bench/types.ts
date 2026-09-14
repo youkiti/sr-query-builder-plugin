@@ -165,6 +165,11 @@ export interface LlmUsage {
 }
 
 export interface RunResult {
+  /** 旧版ハーネスの実行記録。 */
+  legacy?: boolean;
+  /** 要求ラウンド数。古い記録の欠落は 0 と読む。 */
+  oracleRounds?: number;
+  oracle?: OracleSummary;
   id: string;
   runId: string;
   // 登録済みの default/tight-1000 に加え、--max-hits 指定時は `custom-<n>` を動的に発行するため string。
@@ -214,4 +219,29 @@ export interface RunResult {
   elapsedMs: number;
   llmLogs: string[];
   error?: string;
+}
+
+export interface OracleRound {
+  round: number;
+  presentedPmids: string[];
+  includedPmids: string[];
+  includedStudyIds: string[];
+  excludedCount: number;
+  seedPmids: string[];
+  runId: string;
+  optimization: QueryOptimizationResult;
+  final: ConditionResult;
+  comparisonToPrevious: Comparison | null;
+  rejectedCandidates: NonNullable<RunResult['rejectedCandidates']>;
+  adoptionAudit: AdoptionAudit;
+  confirmation: ConfirmationAudit;
+}
+
+export interface OracleSummary {
+  requestedRounds: number;
+  stopReason: 'no_new_includes' | 'round_limit' | 'confirmation_unavailable' | 'no_best_formula';
+  rounds: OracleRound[];
+  final: ConditionResult;
+  exposedHeldOutStudies: string[];
+  unexposedHeldOut: { total: number; captured: number; recall: number | null };
 }
