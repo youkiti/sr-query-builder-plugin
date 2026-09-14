@@ -1545,7 +1545,7 @@ async function runValidationPhase(
       // 再生成・再検証したら過去の原因分析は古くなるため破棄する
       missedAnalysis: null,
       draftRun: s.draftRun?.removedMeshHeadings.length
-        ? { ...s.draftRun, status: 'done', progressLabel: '', progress: null } : null,
+        ? { ...s.draftRun, status: 'done', progressLabel: '', progress: null, blockHits: [] } : null,
     }));
     return summary;
   } catch (err) {
@@ -1559,7 +1559,7 @@ async function runValidationPhase(
  * LLM を一切呼ばず検証フェーズだけをやり直す。生成成功・検証失敗のときに
  * 「再生成して再検証」しか手がなく LLM コストを二重払いする問題の解消。
  * 直前の実行（検証フェーズまで到達したもの）で計測済みの blockHits は
- * precomputed として再利用し、概念ブロックの再 esearch も省く。
+ * 式が一致するものだけ precomputed として再利用し、概念ブロックの再 esearch も省く。
  */
 async function runRevalidateOnly(
   store: AppStore,
@@ -1592,10 +1592,17 @@ async function runRevalidateOnly(
     },
   }));
   const precomputed = new Map<string, number>();
-  for (const hit of prevBlockHits) {
-    if (hit.error === null && hit.hitCount !== null) {
-      precomputed.set(hit.blockId, hit.hitCount);
+  try {
+    const formula = parsePubmedFormulaMd(initial.currentFormulaMarkdown);
+    for (const hit of prevBlockHits) {
+      const block = formula.blocks.find((b) => b.id === hit.blockId);
+      if (hit.error === null && hit.hitCount !== null &&
+          block?.expression.trim() === hit.expression.trim()) {
+        precomputed.set(hit.blockId, hit.hitCount);
+      }
     }
+  } catch {
+    // 解析に失敗した式には計測値を再利用せず、通常の検証に委ねる。
   }
   const summary = await runValidationPhase(store, runtime, precomputed);
   if (summary !== null) {
