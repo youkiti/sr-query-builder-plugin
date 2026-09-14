@@ -237,7 +237,7 @@ npm run eval:optimize -- --case r2-pdr-prognostic --c0 criteria-only-draft2 --se
 
 ## 外側の候補の段階別ログ（issue #126）
 
-`eval:freeze-margin` は凍結 C0 から拡張語を一度生成し、拡張式と margin（拡張式 NOT 現式）を固定します。`eval:outside-stages` はその固定拡張語で製品の `searchOutsideCandidates` を実行し、held-out 研究が現式で捕捉済みか、取りこぼしならどの段階まで到達したかを記録します。取得戦略や製品の既定値（retmax=50、書誌取得上限=20）は変更しません。
+`eval:freeze-margin` は凍結 C0 から拡張語を一度生成し、拡張式と margin（拡張式 NOT 現式）を固定します。`eval:outside-stages` はその固定拡張語で製品の `searchOutsideCandidates` を実行し、held-out 研究が現式で捕捉済みか、取りこぼしならどの段階まで到達したかを記録します。取得戦略の既定は先頭からの取得のままで、製品の既定値（retmax=50、書誌取得上限=20）は変更しません。
 
 凍結の引数は `--case <id>` と `--c0 <name>` が必須、`--draft <正の整数>` は既定 1、`--dry-run` は任意です。`fixtures/<case>/c0/<name>.json` をハッシュ検証して読み、拡張語が 0 件なら凍結せず終了コード 1 にします。現式・margin の件数はケースの検索日で制限した ESearch（retmax=0、strictCounts）で測ります。
 
@@ -253,13 +253,20 @@ npm run eval:optimize -- --case r2-pdr-prognostic --c0 criteria-only-draft2 --se
 | `--retmax <n>` | 既定 50、1〜10000 |
 | `--candidate-limit <n>` | 書誌取得上限。既定 20、正の整数 |
 | `--sort relevance` | 省略時は NCBI 既定順。margin の取得だけに適用 |
+| `--retrieval head\|year-stratified` | 既定 head。先頭取得と出版年代による層別取得を比較 |
 | `--rank-depth <n>` | 既定 10000、1〜10000。0 で追加取得を省略 |
 | `--label <name>` | 英数字・`.`・`_`・`-` の 1〜40 文字。`replay-` 始まりは禁止 |
 | `--dry-run` | 引数・artifact・C0 ハッシュ・シード分割・保存先を確認 |
 
 両コマンドの dry-run は `.env` を読まず、通信・書き込みを行いません。margin が無ければ「margin fixture が見つかりません: <path>」で終了コード 1 です。参照先 C0 のハッシュや、C0 に記録されたシード分割が実行条件と違う場合も停止します。製品が組んだ margin が凍結クエリと一致しなければ failed とし、別の式の段階結果は保存しません。
 
-段階測定の保存先は `results/outside-stages/<case>/<marginName>/<splitId>/r<retmax>-l<limit>-<relevance|default>[+<label>]/run.json`。同じ階層の `<runId>/llm/` に LLM ログ、`<runId>/progress.jsonl` に進捗・実 API 通信・共有リミッタ・バックオフを保存します。完了結果は gitCommit が同じときだけスキップし、別コミットなら `--label` を促して停止します。失敗は再試行でき、試行ログは残ります。`rankDepth` は保存先キーに含まれないため、同じコミットで値を変えて再測定する場合も別の `--label` を付けてください。API キーは保存前に既存の redact で除去します。
+段階測定の保存先は `results/outside-stages/<case>/<marginName>/<splitId>/r<retmax>-l<limit>-<relevance|default>[+<label>]/run.json`。層別取得は並び順の後、label の前に `-yearstrat` を付け、head の既存キーは維持します。`config.retrieval` に取得戦略を保存します。同じ階層の `<runId>/llm/` に LLM ログ、`<runId>/progress.jsonl` に進捗・実 API 通信・共有リミッタ・バックオフを保存します。完了結果は gitCommit が同じときだけスキップし、別コミットなら `--label` を促して停止します。失敗は再試行でき、試行ログは残ります。`rankDepth` は保存先キーに含まれないため、同じコミットで値を変えて再測定する場合も別の `--label` を付けてください。API キーは保存前に既存の redact で除去します。
+
+`year-stratified` は出版年代を古い順に 〜1979、1980–1989、1990–1999、2000–2009、2010–2019、2020〜 の固定 6 層に分けます。検索語は `(<margin>) AND (<日付範囲>)`。日付範囲は `"1000/01/01"[dp] : "1979/12/31"[dp]`、中間の各年代は初年の 01/01〜末年の 12/31、最後は `"2020/01/01"[dp] : "3000"[dp]` です。出版日は検索語で絞り、検索日の制限に使う `datetype=crdt` は維持します。
+
+1 巡目は各層に `floor(retmax / 6)` 件を配り、余りを新しい層から 1 件ずつ加えます（50 件なら古い順に 8、8、8、8、9、9）。0 枠の層も件数取得を行います。取得できず余った枠は、`count` が取得済み件数を超える層へ、新しい層から 1 件ずつ均等に再配分します。残り件数を超えて配らず、2 巡目を `retstart=取得済み件数` で一度だけ実行します。配り切れない枠や追加取得で埋まらない枠は捨てます。各層内の取得順を保ち、新しい層から順のラウンドロビンで並べて重複を除き、既知除外・書誌取得・AI 選別へ渡します。取得上限と書誌上限は増やしません。`stages.strata` に各層の `label`、検索語に入れた `dateRange`、初回の `count`、追加取得を含む `retrievedPmids` を保存します。`marginHits` は層の件数の合計ではなく、margin 全体を別に測った件数です。
+
+層別取得かつ `rankDepth > 0` の場合、候補選定終了後に同じ sort で各層を rankDepth 件ずつ取得し、研究ごとに `stratum`（報告 PMID が現れた層）と `stratumDeepRank`（層内の 1 始まり順位）を保存・標準出力に表示します。複数の層に報告があれば古い層から最初に見つかった層を採用し、その層で最小の順位を記録します。どの層にも無い場合、head、または rankDepth=0 では両方 null です。margin 全体の `deepRank` も従来どおり記録し、追加取得は候補選定には使いません。
 
 `stages` は取得順の `retrievedPmids`、既知除外後の `novelPmids`、上限適用後の `requestedPmids`、書誌が返って AI 入力になった `fetchedPmids`、最終候補順の `pickedPmids` を持ちます。研究の複数 PMID のどれか一つが通過すれば、その研究がその段階に到達したと判定します。
 
@@ -288,6 +295,8 @@ npm run eval:outside-stages -- --case r3-vascular-bleeding --margin criteria-onl
 ```
 
 通信量の目安（再送なし）: 凍結は LLM 1 回＋ESearch 2 回。段階測定は ESearch 数回＋EFetch 1 回＋LLM 1 回です。内訳は margin 取得と現式件数で ESearch 2 回、事後の gold 日付確認で 100 PMID ごとに 1 回、held-out 全研究の PMID をまとめた現式・margin 照合でそれぞれ重複を除いた 100 PMID ごとに 1 回（100 PMID ごとに計 2 回）、rankDepth > 0 なら追加 1 回です。書誌取得対象が空なら EFetch・LLM を省略し、書誌が全件欠落した場合も LLM 通信はありません。対象は 1 ケースずつ逐次実行します。
+
+層別取得では上記の margin 取得 1 回が、margin 全体の件数 1 回＋1 巡目 6 回＋2 巡目最大 6 回になります（現式件数の 1 回は別）。rankDepth > 0 では margin 全体の順位取得 1 回に加え、事後集計で各層 1 回、最大 6 回を追加します。EFetch・LLM と gold 照合の通信量は head と同じ条件で数えます。
 
 ## gold の監査と凍結
 

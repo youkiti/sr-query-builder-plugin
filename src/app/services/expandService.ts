@@ -243,6 +243,7 @@ export interface OutsideSearchInput extends Pick<ExpandServiceDeps,
   existingPmids: ReadonlySet<string>;
   additions?: BlockRecallAdditions[];
   sort?: 'relevance';
+  retrieval?: 'head' | 'year-stratified';
 }
 
 /** 外側探索の各段階で通過した PMID。配列はその段階の順序を保持する。 */
@@ -254,6 +255,61 @@ export interface OutsideSearchStages {
   requestedPmids: string[];
   fetchedPmids: string[];
   pickedPmids: string[];
+  strata?: { label: string; dateRange: string; count: number; retrievedPmids: string[] }[];
+}
+
+/** 出版年代ごとに取得枠を配り、余りを一度だけ再配分する。 */
+async function searchYearStratified(marginQuery: string, deps: OutsideSearchInput,
+  stages: OutsideSearchStages): Promise<{ count: number; pmids: string[] }> {
+  const ranges = [
+    ['〜1979', '1000/01/01', '1979/12/31'],
+    ['1980–1989', '1980/01/01', '1989/12/31'],
+    ['1990–1999', '1990/01/01', '1999/12/31'],
+    ['2000–2009', '2000/01/01', '2009/12/31'],
+    ['2010–2019', '2010/01/01', '2019/12/31'],
+    ['2020〜', '2020/01/01', '3000'],
+  ] as const;
+  const retmax = deps.retmax ?? 50;
+  const sort = deps.sort ? { sort: deps.sort } : {};
+  const total = await esearch(marginQuery, deps.eutils, { retmax: 0 });
+  const strata: NonNullable<OutsideSearchStages['strata']> = [];
+  let remaining = 0;
+  for (const [index, [label, start, end]] of ranges.entries()) {
+    const allocation = Math.floor(retmax / ranges.length) + (index >= ranges.length - retmax % ranges.length ? 1 : 0);
+    const dateRange = `"${start}"[dp] : "${end}"[dp]`;
+    const result = await esearch(`(${marginQuery}) AND (${dateRange})`, deps.eutils, { retmax: allocation, ...sort });
+    strata.push({ label, dateRange, count: result.count, retrievedPmids: [...result.pmids] });
+    remaining += Math.max(0, allocation - result.pmids.length);
+  }
+  const newestFirst = [...strata].reverse();
+  const extra = newestFirst.map(() => 0);
+  while (remaining > 0) {
+    let allocated = false;
+    for (const [index, stratum] of newestFirst.entries()) {
+      if (remaining > 0 && stratum.count > stratum.retrievedPmids.length + extra[index]!) {
+        extra[index]!++;
+        remaining--;
+        allocated = true;
+      }
+    }
+    if (!allocated) break;
+  }
+  for (const [index, stratum] of newestFirst.entries()) {
+    if (extra[index] === 0) continue;
+    const result = await esearch(`(${marginQuery}) AND (${stratum.dateRange})`, deps.eutils,
+      { retmax: extra[index]!, retstart: stratum.retrievedPmids.length, ...sort });
+    stratum.retrievedPmids.push(...result.pmids);
+  }
+  const pmids = new Set<string>();
+  const depth = Math.max(...strata.map((stratum) => stratum.retrievedPmids.length));
+  for (let index = 0; index < depth; index++) {
+    for (const stratum of newestFirst) {
+      const pmid = stratum.retrievedPmids[index];
+      if (pmid !== undefined) pmids.add(pmid);
+    }
+  }
+  stages.strata = strata;
+  return { count: total.count, pmids: [...pmids] };
 }
 
 /** 指定された式の外側から、人が判定する境界事例を取得する。 */
@@ -299,7 +355,7 @@ export async function searchOutsideCandidates(deps: OutsideSearchInput): Promise
 
   // 式の外側（margin）を検索。現式は拡張式の部分集合なので broadenedHits = originalHits + marginHits。
   deps.onProgress?.('esearch');
-  const marginResult = await esearch(marginQuery, deps.eutils, {
+  const marginResult = deps.retrieval === 'year-stratified' ? await searchYearStratified(marginQuery, deps, stages) : await esearch(marginQuery, deps.eutils, {
     retmax: deps.retmax ?? 50,
     ...(deps.sort ? { sort: deps.sort } : {}),
   });

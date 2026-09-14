@@ -5,6 +5,79 @@ import { PICK_BOUNDARY_SYSTEM_PROMPT } from '@/features/formula/skills/pickBound
 
 afterEach(() => jest.restoreAllMocks());
 
+const stratifiedRanges = [
+  '"1000/01/01"[dp] : "1979/12/31"[dp]', '"1980/01/01"[dp] : "1989/12/31"[dp]',
+  '"1990/01/01"[dp] : "1999/12/31"[dp]', '"2000/01/01"[dp] : "2009/12/31"[dp]',
+  '"2010/01/01"[dp] : "2019/12/31"[dp]', '"2020/01/01"[dp] : "3000"[dp]',
+];
+const stratifiedMargin = '((best[tiab]) OR outside[tiab]) NOT (best[tiab])';
+function outsideInput() {
+  return { formula: { blocks: [{ id: '1', expression: 'best[tiab]', isCombination: false }], combinationExpression: null },
+    researchQuestion: 'RQ', inclusionCriteria: '', exclusionCriteria: '', existingPmids: new Set<string>(),
+    additions: [{ blockId: '1', additions: [{ term: 'outside[tiab]', axis: 'freeword' as const, rationale: '別名' }] }],
+    eutils: { fetch: jest.fn() }, llmFactory: { model: 'fake', forPurpose: jest.fn() } };
+}
+
+test('head の明示と未指定は通信引数・回数・戻り値が同一', async () => {
+  const search = jest.spyOn(ncbi, 'esearch').mockResolvedValue({ count: 0, pmids: [] });
+  const deps = outsideInput();
+  const implicit = await searchOutsideCandidates(deps);
+  const calls = [...search.mock.calls];
+  search.mockClear();
+  expect(await searchOutsideCandidates({ ...deps, retrieval: 'head' })).toEqual(implicit);
+  expect(search.mock.calls).toEqual(calls);
+  expect(search).toHaveBeenCalledTimes(2);
+  expect(implicit.stages).not.toHaveProperty('strata');
+});
+
+test('年代層の検索語・50 件の配分・sort・交互順・重複除去を記録する', async () => {
+  const allocations = [8, 8, 8, 8, 9, 9];
+  const pools = allocations.map((size, layer) => Array.from({ length: size }, (_, i) => i === 0 ? 'shared' : `${layer}-${i}`));
+  const search = jest.spyOn(ncbi, 'esearch').mockResolvedValueOnce({ count: 999, pmids: [] });
+  pools.forEach((pmids) => search.mockResolvedValueOnce({ count: 100, pmids }));
+  search.mockResolvedValueOnce({ count: 10, pmids: [] });
+  const fetch = jest.spyOn(ncbi, 'efetchArticles').mockResolvedValue([]);
+  jest.spyOn(skills, 'pickBoundaryCases').mockResolvedValue([]);
+  const deps = { ...outsideInput(), retrieval: 'year-stratified' as const, sort: 'relevance' as const };
+  const result = await searchOutsideCandidates(deps);
+  expect(search).toHaveBeenCalledTimes(8);
+  expect(search).toHaveBeenNthCalledWith(1, stratifiedMargin, deps.eutils, { retmax: 0 });
+  stratifiedRanges.forEach((range, index) => expect(search).toHaveBeenNthCalledWith(index + 2,
+    `(${stratifiedMargin}) AND (${range})`, deps.eutils, { retmax: allocations[index], sort: 'relevance' }));
+  const expected = ['shared', ...Array.from({ length: 7 }, (_, i) => [5, 4, 3, 2, 1, 0].map((layer) => `${layer}-${i + 1}`)).flat(), '5-8', '4-8'];
+  expect(result.stages?.retrievedPmids).toEqual(expected);
+  expect(fetch).toHaveBeenCalledWith(expected.slice(0, 20), deps.eutils);
+  expect(result.marginHits).toBe(999);
+  expect(result.stages?.strata).toEqual(stratifiedRanges.map((dateRange, index) => ({ dateRange,
+    label: ['〜1979', '1980–1989', '1990–1999', '2000–2009', '2010–2019', '2020〜'][index],
+    count: 100, retrievedPmids: pools[index] })));
+});
+
+test.each([false, true])('余りは新しい未取得層へ均等配分し、2 巡目だけで終了する（容量不足: %s）', async (scarce) => {
+  const search = jest.spyOn(ncbi, 'esearch').mockResolvedValueOnce({ count: 100, pmids: [] });
+  [0, 0, 0, 0, 4, scarce ? 3 : 20].forEach((count, layer) =>
+    search.mockResolvedValueOnce({ count, pmids: count ? [`${layer}-0`, `${layer}-1`] : [] }));
+  search.mockResolvedValueOnce({ count: scarce ? 3 : 20, pmids: scarce ? ['5-2'] : ['5-2', '5-3'] });
+  search.mockResolvedValueOnce({ count: 4, pmids: ['4-2', '4-3'] });
+  search.mockResolvedValueOnce({ count: 10, pmids: [] });
+  const deps = { ...outsideInput(), retrieval: 'year-stratified' as const, retmax: 12, skillCandidateLimit: 0, sort: 'relevance' as const };
+  const result = await searchOutsideCandidates(deps);
+  expect(search).toHaveBeenCalledTimes(10);
+  expect(search).toHaveBeenNthCalledWith(8, `(${stratifiedMargin}) AND (${stratifiedRanges[5]})`, deps.eutils,
+    { retmax: scarce ? 1 : 6, retstart: 2, sort: 'relevance' });
+  expect(search).toHaveBeenNthCalledWith(9, `(${stratifiedMargin}) AND (${stratifiedRanges[4]})`, deps.eutils,
+    { retmax: 2, retstart: 2, sort: 'relevance' });
+  expect(result.stages?.retrievedPmids).toEqual(['5-0', '4-0', '5-1', '4-1', '5-2', '4-2', ...(scarce ? [] : ['5-3']), '4-3']);
+  expect(result.stages?.strata?.[5]?.retrievedPmids).toEqual(['5-0', '5-1', '5-2', ...(scarce ? [] : ['5-3'])]);
+});
+
+test('6 件未満の枠も新しい層から割り当て、0 枠の層も件数を測る', async () => {
+  const search = jest.spyOn(ncbi, 'esearch').mockResolvedValue({ count: 0, pmids: [] });
+  await searchOutsideCandidates({ ...outsideInput(), retrieval: 'year-stratified', retmax: 2 });
+  expect(search.mock.calls.slice(1, 7).map((call) => call[2])).toEqual([0, 0, 0, 0, 1, 1].map((retmax) => ({ retmax })));
+  expect(search).toHaveBeenCalledTimes(8);
+});
+
 test('指定式を拡張して NOT の右辺にも使い、全シードを除外し既定 50 / 20 件を保つ', async () => {
   const formula = { blocks: [{ id: '1', expression: 'best[tiab]', isCombination: false }], combinationExpression: null };
   jest.spyOn(skills, 'expandQueryForRecall').mockResolvedValue([{ blockId: '1', additions: [

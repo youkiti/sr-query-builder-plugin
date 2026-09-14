@@ -69,7 +69,7 @@ afterEach(() => {
 
 test('引数の既定値、上限、未知・重複・不正な値を検証する', () => {
   expect(parseOutsideStagesArgs(args)).toEqual({ caseId, marginName: name, seed: 20260912, retmax: 50,
-    candidateLimit: 20, sort: undefined, rankDepth: 10000, label: undefined, dryRun: false });
+    candidateLimit: 20, sort: undefined, retrieval: 'head', rankDepth: 10000, label: undefined, dryRun: false });
   expect(parseOutsideStagesArgs([...args, '--seeds', 'named', '--retmax', '10000', '--candidate-limit', '30',
     '--sort', 'relevance', '--rank-depth', '0', '--label', 'a.B_1-2', '--dry-run']))
     .toMatchObject({ seed: 'named', retmax: 10000, candidateLimit: 30, sort: 'relevance', rankDepth: 0, dryRun: true });
@@ -132,7 +132,7 @@ test.each(['margin', 'c0', 'reference', 'split', 'date'])('dry-run でもハッ�
   await expect(main([...args, '--dry-run'], fixture.root, fixture.results)).rejects.toThrow('一致しません');
 });
 
-function fakeNetwork() {
+function fakeNetwork(stratified = false) {
   const events: { kind: string; params: URLSearchParams; body: string }[] = [];
   const network = jest.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const url = new URL(String(input));
@@ -157,6 +157,11 @@ function fakeNetwork() {
         pmids = [...term.matchAll(/(\d+)\[uid\]/g)].map((match) => match[1]!);
         if (term.startsWith(`(${marginQuery}) AND (`)) pmids = pmids.filter((pmid) => !['1', '8'].includes(pmid));
         else if (term.startsWith('(base[tiab]) AND (')) pmids = pmids.filter((pmid) => pmid === '8');
+      } else if (stratified && term.startsWith(`(${marginQuery}) AND (`) && term.includes('[dp]')) {
+        const start = /"(\d+)\/01\/01"/.exec(term)?.[1];
+        const pools: Record<string, string[]> = { '1000': ['100'], '1980': ['101'], '1990': ['5', '2'],
+          '2000': ['4'], '2010': ['6'], '2020': ['7'] };
+        pmids = pools[start ?? ''] ?? [];
       } else if (term === marginQuery) pmids = ['100', '5', '6', '7', '4', '2'];
       else if (term === 'base[tiab]') pmids = ['100', '101', '102'];
       else throw new Error('想定外の式');
@@ -177,6 +182,8 @@ test.each([0, 10])('実サービスとフェイク通信で段階測定・事後
   const saved = readFileSync(join(dir, 'run.json'), 'utf8');
   const result = JSON.parse(saved) as OutsideRun;
   expect(result.status).toBe('completed');
+  expect(result.config.retrieval).toBe('head');
+  expect(result.heldOutStages.every((study) => study.stratum === null && study.stratumDeepRank === null)).toBe(true);
   expect([...outside.mock.calls[0]![0].existingPmids]).toEqual(['100', '101', '102']);
   expect(outside.mock.calls[0]![0]).toMatchObject({ researchQuestion: '研究課題', inclusionCriteria: '組入', exclusionCriteria: '除外', additions: fixture.margin.additions });
   expect(result.stages).toMatchObject({ retrievedPmids: ['100', '5', '6', '7', '4'], novelPmids: ['5', '6', '7', '4'],
@@ -225,6 +232,51 @@ test('凍結クエリ不一致は failed にし別の式の段階結果や gold 
   expect(result).toMatchObject({ status: 'failed', stages: null, candidates: [], heldOutStages: [] });
   expect(events.some((event) => event.params.get('term')?.includes('[uid]'))).toBe(false);
   expect(process.stdout.write).toHaveBeenCalledWith(expect.stringContaining('対象研究 0 件'));
+});
+
+test('取得戦略の引数・保存先キーは head の既存キーを維持する', () => {
+  expect(outsideResultDir('results', parseOutsideStagesArgs(args))).toBe(
+    join('results', 'outside-stages', caseId, name, 's20260912', 'r50-l20-default'));
+  expect(outsideResultDir('results', parseOutsideStagesArgs([...args, '--retrieval', 'head']))).toBe(
+    outsideResultDir('results', parseOutsideStagesArgs(args)));
+  const options = parseOutsideStagesArgs([...args, '--retrieval', 'year-stratified', '--sort', 'relevance', '--label', 'captured']);
+  expect(options.retrieval).toBe('year-stratified');
+  expect(outsideResultDir('results', options)).toBe(
+    join('results', 'outside-stages', caseId, name, 's20260912', 'r50-l20-relevance-yearstrat+captured'));
+  for (const extra of [['--retrieval', 'invalid'], ['--retrieval'], ['--retrieval', 'head', '--retrieval', 'head']]) {
+    expect(() => parseOutsideStagesArgs([...args, ...extra])).toThrow();
+  }
+});
+
+test.each([0, 10])('層の順位は選定終了後だけ取得し config と研究行に保存する（深さ: %i）', async (depth) => {
+  const fixture = setup();
+  const { events } = fakeNetwork(true);
+  const runArgs = [...args, '--retrieval', 'year-stratified', '--retmax', '6', '--candidate-limit', '3',
+    '--sort', 'relevance', '--rank-depth', String(depth)];
+  await main(runArgs, fixture.root, fixture.results);
+  const result = JSON.parse(readFileSync(join(outsideResultDir(fixture.results, parseOutsideStagesArgs(runArgs)), 'run.json'), 'utf8')) as OutsideRun;
+  expect(result.config.retrieval).toBe('year-stratified');
+  expect(result.stages?.retrievedPmids).toEqual(['7', '6', '4', '5', '101', '100']);
+  expect(result.heldOutStages.find((study) => study.studyId === '研究2')).toMatchObject({
+    stage: 'beyond_retmax', stratum: depth ? '1990–1999' : null, stratumDeepRank: depth ? 2 : null });
+  expect(result.heldOutStages.find((study) => study.studyId === '研究7')).toMatchObject({
+    stage: 'presented', stratum: depth ? '2020〜' : null, stratumDeepRank: depth ? 1 : null });
+  expect(result.heldOutStages.find((study) => study.studyId === '研究1')).toMatchObject({ stratum: null, stratumDeepRank: null });
+  const layers = events.filter((event) => event.params.get('term')?.includes('[dp]'));
+  expect(layers).toHaveLength(depth ? 12 : 6);
+  for (const layer of layers) {
+    expect(layer.params.get('sort')).toBe('relevance');
+    expect(layer.params.get('datetype')).toBe('crdt');
+    expect(layer.params.get('maxdate')).toBe('2022/03/31');
+  }
+  if (depth) {
+    const deepLayers = layers.slice(6);
+    expect(deepLayers.map((event) => event.params.get('term'))).toEqual(layers.slice(0, 6).map((event) => event.params.get('term')));
+    expect(deepLayers.every((event) => event.params.get('retmax') === '10')).toBe(true);
+    expect(events.indexOf(deepLayers[0]!)).toBeGreaterThan(events.findIndex((event) => event.kind === 'llm'));
+    expect(process.stdout.write).toHaveBeenCalledWith(expect.stringContaining(' / 1990–1999 / 2\n'));
+  }
+  expect(result.apiCalls).toEqual({ ncbi: depth ? 19 : 12, llm: 1 });
 });
 
 test('完了結果は同一コミットならスキップし別コミットなら --label を促す。失敗は再試行する', async () => {

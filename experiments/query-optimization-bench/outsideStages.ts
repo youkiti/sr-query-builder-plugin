@@ -24,6 +24,7 @@ export interface OutsideStagesArgs {
   retmax: number;
   candidateLimit: number;
   sort?: 'relevance';
+  retrieval: 'head' | 'year-stratified';
   rankDepth: number;
   label?: string;
   dryRun: boolean;
@@ -35,7 +36,7 @@ export function parseOutsideStagesArgs(args: string[]): OutsideStagesArgs {
   for (let i = 0; i < args.length; i++) {
     const key = args[i]!;
     if (key === '--dry-run' && !dryRun) dryRun = true;
-    else if (['--case', '--margin', '--seeds', '--retmax', '--candidate-limit', '--sort', '--rank-depth', '--label'].includes(key)
+    else if (['--case', '--margin', '--seeds', '--retmax', '--candidate-limit', '--sort', '--retrieval', '--rank-depth', '--label'].includes(key)
       && values[key] === undefined && args[i + 1] !== undefined && !args[i + 1]!.startsWith('--')) values[key] = args[++i]!;
     else throw new Error(`未対応・重複または値のない引数: ${key}`);
   }
@@ -52,6 +53,8 @@ export function parseOutsideStagesArgs(args: string[]): OutsideStagesArgs {
     return value;
   };
   const sort = values['--sort'];
+  const retrieval = values['--retrieval'] ?? 'head';
+  if (retrieval !== 'head' && retrieval !== 'year-stratified') throw new Error('--retrieval には head または year-stratified を指定してください');
   if (sort !== undefined && sort !== 'relevance') throw new Error('--sort には relevance を指定してください');
   const label = values['--label'];
   if (label !== undefined && (!/^[A-Za-z0-9._-]{1,40}$/.test(label) || /^replay-/i.test(label))) {
@@ -59,7 +62,7 @@ export function parseOutsideStagesArgs(args: string[]): OutsideStagesArgs {
   }
   return { caseId, marginName, seed: values['--seeds'] === undefined ? SEED : parseSeedSplit(values['--seeds']),
     retmax: integer('--retmax', 50, 1, 10000), candidateLimit: integer('--candidate-limit', 20, 1, Number.MAX_SAFE_INTEGER),
-    sort, rankDepth: integer('--rank-depth', 10000, 0, 10000), label, dryRun };
+    sort, retrieval, rankDepth: integer('--rank-depth', 10000, 0, 10000), label, dryRun };
 }
 
 export const STAGE_NAMES = ['captured_by_current', 'not_in_margin', 'beyond_retmax', 'excluded_as_known', 'beyond_candidate_limit',
@@ -71,6 +74,8 @@ export interface StudyStage {
   stage: OutsideStage;
   retrievedRank: number | null;
   deepRank: number | null;
+  stratum: string | null;
+  stratumDeepRank: number | null;
 }
 
 /** 複数報告のいずれかが通過すれば、その研究が到達した段階として数える。 */
@@ -84,12 +89,12 @@ export function classifyStudy(study: { studyId: string; pmids: string[] }, inCur
   const passed = [inMargin, stages.retrievedPmids, stages.novelPmids, stages.requestedPmids, stages.fetchedPmids, stages.pickedPmids];
   const firstMissing = passed.findIndex((pmids) => !has(pmids));
   return { ...study, stage: has(inCurrent) ? 'captured_by_current' : STAGE_NAMES[firstMissing < 0 ? 7 : firstMissing + 1]!,
-    retrievedRank: rank(stages.retrievedPmids), deepRank: rank(deepPmids) };
+    retrievedRank: rank(stages.retrievedPmids), deepRank: rank(deepPmids), stratum: null, stratumDeepRank: null };
 }
 
 export function outsideResultDir(resultsDir: string, options: OutsideStagesArgs): string {
   return join(resultsDir, 'outside-stages', options.caseId, options.marginName, seedSplitId(options.seed),
-    `r${options.retmax}-l${options.candidateLimit}-${options.sort ?? 'default'}${options.label ? `+${options.label}` : ''}`);
+    `r${options.retmax}-l${options.candidateLimit}-${options.sort ?? 'default'}${options.retrieval === 'year-stratified' ? '-yearstrat' : ''}${options.label ? `+${options.label}` : ''}`);
 }
 
 export function decideOutsideExisting(existing: { status: string; gitCommit: string | null }, gitCommit: string | null): 'run' | 'skip' {
@@ -106,7 +111,7 @@ export interface OutsideRun {
   margin: { name: string; sha256: string };
   c0: { name: string; sha256: string };
   seedSplit: string;
-  config: { retmax: number; candidateLimit: number; sort: 'relevance' | null; rankDepth: number };
+  config: { retmax: number; candidateLimit: number; sort: 'relevance' | null; retrieval: 'head' | 'year-stratified'; rankDepth: number };
   label: string | null;
   searchDate: string;
   model: string;
@@ -135,7 +140,7 @@ export async function executeOutsideStages(fixture: BenchCase, seeds: FrozenSeed
   const outside = await searchOutsideCandidates({ formula: c0.formula,
     researchQuestion: c0.protocol.researchQuestion, inclusionCriteria: c0.protocol.inclusionCriteria,
     exclusionCriteria: c0.protocol.exclusionCriteria, existingPmids: new Set(seeds.selections.map((seed) => seed.pmid)),
-    additions: margin.additions, retmax: options.retmax, skillCandidateLimit: options.candidateLimit, sort: options.sort,
+    additions: margin.additions, retmax: options.retmax, skillCandidateLimit: options.candidateLimit, sort: options.sort, retrieval: options.retrieval,
     eutils: deps.eutils, llmFactory: deps.llmFactory, onProgress: (step) => deps.progress({ step }) });
   if (!outside.stages || outside.stages.marginQuery !== margin.marginQuery) {
     throw new Error('凍結した margin クエリと段階測定のクエリが一致しません');
@@ -160,8 +165,24 @@ export async function executeOutsideStages(fixture: BenchCase, seeds: FrozenSeed
   const inMargin = await capturedGold(margin.marginQuery, heldOutPmids, deps.eutils);
   const deepPmids = options.rankDepth === 0 ? null : (await esearch(margin.marginQuery, deps.eutils,
     { retmax: options.rankDepth, ...(options.sort ? { sort: options.sort } : {}) })).pmids;
+  const deepStrata: { label: string; pmids: string[] }[] = [];
+  if (options.retrieval === 'year-stratified' && options.rankDepth > 0) {
+    for (const stratum of outside.stages.strata ?? []) {
+      const searched = await esearch(`(${margin.marginQuery}) AND (${stratum.dateRange})`, deps.eutils,
+        { retmax: options.rankDepth, ...(options.sort ? { sort: options.sort } : {}) });
+      deepStrata.push({ label: stratum.label, pmids: searched.pmids });
+    }
+  }
   for (const study of studies) {
     const classified = classifyStudy(study, inCurrent, inMargin, outside.stages, deepPmids);
+    // 複数の層に報告があれば、古い層から最初に見つかった報告の順位を記録する。
+    for (const stratum of deepStrata) {
+      const index = stratum.pmids.findIndex((pmid) => study.pmids.includes(pmid));
+      if (index < 0) continue;
+      classified.stratum = stratum.label;
+      classified.stratumDeepRank = index + 1;
+      break;
+    }
     result.heldOutStages.push(classified);
     result.stageCounts[classified.stage]++;
   }
@@ -170,10 +191,10 @@ export async function executeOutsideStages(fixture: BenchCase, seeds: FrozenSeed
 }
 
 export function printOutsideStages(result: OutsideRun): void {
-  process.stdout.write('研究名 / 判定 / 取得順位 / 深い取得の順位（事後集計）\n');
+  process.stdout.write('研究名 / 判定 / 取得順位 / 深い取得の順位（事後集計） / 出版年代の層 / 層内順位（事後集計）\n');
   if (result.heldOutStages.length === 0) process.stdout.write('対象研究 0 件（失敗時は未集計）\n');
   for (const study of result.heldOutStages) {
-    process.stdout.write(`${study.studyId} / ${study.stage} / ${study.retrievedRank ?? '-'} / ${study.deepRank ?? '-'}\n`);
+    process.stdout.write(`${study.studyId} / ${study.stage} / ${study.retrievedRank ?? '-'} / ${study.deepRank ?? '-'} / ${study.stratum ?? '-'} / ${study.stratumDeepRank ?? '-'}\n`);
   }
   process.stdout.write(`判定別研究数: ${JSON.stringify(result.stageCounts)}\n`);
   process.stdout.write(`取りこぼし（現式で未捕捉）: ${result.missedHeldOutCount ?? '未集計'} 研究\n`);
@@ -215,7 +236,7 @@ export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES,
   const usage = createLlmUsageTracker();
   const result: OutsideRun = { status: 'failed', error: null, runId, caseId, margin: { name: marginName, sha256: margin.sha256 },
     c0: margin.c0, seedSplit: splitId, config: { retmax: options.retmax, candidateLimit: options.candidateLimit,
-      sort: options.sort ?? null, rankDepth: options.rankDepth }, label: options.label ?? null,
+      sort: options.sort ?? null, retrieval: options.retrieval, rankDepth: options.rankDepth }, label: options.label ?? null,
     searchDate: fixture.searchDate, model: '', gitCommit, gitDirty: isGitDirty(), originalHits: null, marginHits: null,
     stages: null, candidates: [], heldOutStages: [], missedHeldOutCount: null,
     stageCounts: Object.fromEntries(STAGE_NAMES.map((stage) => [stage, 0])) as Record<OutsideStage, number>,
