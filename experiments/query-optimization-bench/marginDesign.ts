@@ -716,14 +716,27 @@ export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES,
     const protocol = { researchQuestion: c0.protocol.researchQuestion, inclusionCriteria: c0.protocol.inclusionCriteria,
       exclusionCriteria: c0.protocol.exclusionCriteria };
 
-    // sameAs の参照先が今回の --variants に含まれない案なら、その案の run.json が既に存在することを
-    // 確認する（無ければ選定を再実行せず参照するだけの run.json ができ、参照先を永遠に解決できない）。
+    // sameAs の参照先が今回の --variants に含まれない案なら、その案の run.json が既に「完了」していることを
+    // 確認する（無ければ選定を再実行せず参照するだけの run.json ができ、参照先を永遠に解決できない。
+    // status: 'failed' のまま見逃すと、参照先は今回再試行されず、次回また --variants を絞って再実行しても
+    // sameAs 側は完了扱いのまま measured value の無い失敗した案を参照し続けてしまう）。
+    // 参照先の gitCommit は照合しない: 別コミットの完了結果を参照するのは、既存の完了済み run に新しい案
+    // （per-term-equal / per-term-smallest-first）だけを --variants で足す正当な使い方であり、
+    // ここで別コミットを弾くと、その正当な使い方自体ができなくなる。
     for (const variant of pending) {
       const sameAsTarget = plans.get(variant)!.sameAs;
       if (sameAsTarget !== null && !variantNames.includes(sameAsTarget)) {
         const targetPath = join(dirFor(sameAsTarget), 'run.json');
-        if (!existsSync(targetPath)) {
-          throw new Error(`sameAs の参照先 (${sameAsTarget}) の run.json がありません。--variants に含めるか、先に実行してください: ${targetPath}`);
+        let targetStatus: string | null = null;
+        if (existsSync(targetPath)) {
+          try {
+            targetStatus = (JSON.parse(readFileSync(targetPath, 'utf8')) as { status?: unknown }).status as string | undefined ?? null;
+          } catch {
+            targetStatus = null; // 壊れた JSON も「完了していない」として扱う
+          }
+        }
+        if (targetStatus !== 'completed') {
+          throw new Error(`sameAs の参照先 (${sameAsTarget}) が完了していません。--variants に ${sameAsTarget} を含めて再実行してください: ${targetPath}`);
         }
       }
     }

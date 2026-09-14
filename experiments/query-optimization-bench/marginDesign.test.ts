@@ -769,20 +769,37 @@ test('--variants: 指定外の案は実行もスキップ判定もしない。�
   await expect(main(args, fixture.root, fixture.results)).rejects.toThrow('別コミットの完了結果があります');
 });
 
-test('--variants: sameAs の参照先が指定外の案で、その run.json が無ければエラーにする', async () => {
+test('--variants: sameAs の参照先が指定外の案で「完了」していなければエラーにする（無い・failed・壊れた JSON）。完了していれば従来どおり通る', async () => {
   const fixture = setup();
   fakeNetwork();
+  const dirFor = (variant: string) => marginDesignResultDir(fixture.results, caseId, marginName, 20260912, variant);
   // per-term-smallest-first だけを指定する。additions は語 3 つ（termA1/termA2/termB1）なので取得単位も
   // 3 つになり sameAs は null のはずだが、cutoff-50（全語を残す = full と同一集合で sameAs: 'full'）を
-  // 使って「sameAs 参照先が --variants に含まれず、run.json も無い」状況を再現する。
-  await expect(main([...args, '--thresholds', '50', '--variants', 'cutoff-50'], fixture.root, fixture.results))
-    .rejects.toThrow('sameAs の参照先 (full) の run.json がありません');
+  // 使って「sameAs 参照先が --variants に含まれない」状況を再現する。
 
-  // full を先に完了させておけば、cutoff-50 だけの実行でも通る。
+  // 1) 参照先 (full) の run.json が無い
+  await expect(main([...args, '--thresholds', '50', '--variants', 'cutoff-50'], fixture.root, fixture.results))
+    .rejects.toThrow('sameAs の参照先 (full) が完了していません');
+  expect(existsSync(join(dirFor('cutoff-50'), 'run.json'))).toBe(false);
+
+  // 2) 参照先 (full) の run.json はあるが status: 'failed'（測定値の無い失敗した案）
+  mkdirSync(dirFor('full'), { recursive: true });
+  writeFileSync(join(dirFor('full'), 'run.json'), JSON.stringify({ status: 'failed', error: 'boom' }));
+  await expect(main([...args, '--thresholds', '50', '--variants', 'cutoff-50'], fixture.root, fixture.results))
+    .rejects.toThrow('sameAs の参照先 (full) が完了していません');
+  expect(existsSync(join(dirFor('cutoff-50'), 'run.json'))).toBe(false);
+
+  // 3) 参照先 (full) の run.json が壊れている
+  writeFileSync(join(dirFor('full'), 'run.json'), 'not-json{{');
+  await expect(main([...args, '--thresholds', '50', '--variants', 'cutoff-50'], fixture.root, fixture.results))
+    .rejects.toThrow('sameAs の参照先 (full) が完了していません');
+  expect(existsSync(join(dirFor('cutoff-50'), 'run.json'))).toBe(false);
+
+  // full を正しく完了させておけば、cutoff-50 だけの実行でも従来どおり通る（gitCommit の一致は問わない）。
+  rmSync(dirFor('full'), { recursive: true, force: true });
   const { events } = fakeNetwork();
   await main([...args, '--thresholds', '50', '--variants', 'full'], fixture.root, fixture.results);
   await main([...args, '--thresholds', '50', '--variants', 'cutoff-50'], fixture.root, fixture.results);
-  const dirFor = (variant: string) => marginDesignResultDir(fixture.results, caseId, marginName, 20260912, variant);
   const cutoff50 = JSON.parse(readFileSync(join(dirFor('cutoff-50'), 'run.json'), 'utf8')) as MarginDesignVariantRun;
   expect(cutoff50.status).toBe('completed');
   expect(cutoff50.sameAs).toBe('full');
