@@ -8,7 +8,13 @@
  * 候補が並ぶところまで確認する。
  *
  * 外部 API はすべて `tests/e2e/fixtures/apiStubs.ts` の共通スタブで止める
- * （LLM 2 回 / esearch 2 回 / efetch 1 回）。
+ * （候補取得だけなら LLM 2 回 / esearch 2 回 / efetch 1 回）。
+ *
+ * 候補すべてを判定してラウンドを完了させるテスト（後述）は、この取得に加えて
+ * onRoundComplete 側の再検証（checkSearchLines / checkFinalQuery）が追加で
+ * esearch を呼ぶ。件数はブロック数・seed 数に依存するため固定していないが、
+ * すべて同じ共通スタブ（`registerNcbiStub` の esearch フォールバック）で
+ * 止まる（issue #156 の回帰）。
  */
 
 import { test, expect, type Page } from '@playwright/test';
@@ -20,6 +26,7 @@ import {
   registerDriveStub,
   registerNcbiStub,
   registerGeminiStub,
+  type SheetsFake,
 } from './fixtures/apiStubs';
 
 const APP_URL = '/app/app.html#/expand';
@@ -118,11 +125,14 @@ const EXISTING_SEED_ROW = [
  * Gemini は 1 フロー中に 2 つの skill（expand-query-for-recall / pick-boundary-cases）を
  * 呼ぶので、apiStubs.ts の registerGeminiStub がプロンプト本文に載るスキーマ名で
  * 応答を出し分ける。
+ *
+ * 戻り値の SheetsFake は、ラウンド完了で SeedPapers に追記された行をテスト側から
+ * 検査するために返す（registerSheetsStub の戻り値そのもの）。
  */
-async function setupExpandScenario(page: Page): Promise<void> {
+async function setupExpandScenario(page: Page): Promise<SheetsFake> {
   // 有効 seed を 1 件置いて margin モードへ（margin の候補 30000001/2 とは重複しない PMID）。
   // 他タブは apiStubs 既定に任せる。
-  await registerSheetsStub(page, {
+  const fake = await registerSheetsStub(page, {
     tabs: {
       SeedPapers: [SEED_PAPERS_HEADER, EXISTING_SEED_ROW],
     },
@@ -154,6 +164,7 @@ async function setupExpandScenario(page: Page): Promise<void> {
       extraStorage: { 'apiKeys.gemini': 'dummy-key' },
     })
   );
+  return fake;
 }
 
 test.describe('journey-expand-boundary (J7 回帰)', () => {
@@ -189,6 +200,59 @@ test.describe('journey-expand-boundary (J7 回帰)', () => {
     await expect(firstCandidate.locator('.expand__candidate-status')).not.toHaveText('', {
       timeout: 10_000,
     });
+  });
+
+  test('候補 2 件をすべて判定するとラウンドが完了し、再検証結果が表示される（issue #156 回帰）', async ({
+    page,
+  }) => {
+    // registerSheetsStub の値文字列化（issue #156）を検証する回帰テスト。
+    // ラウンド完了時、bootstrap.ts の onRoundComplete → runValidate → runValidation が
+    // SeedPapers を読み返す（seedRepository.ts の listSeedPapers → fromRow）。append した
+    // 行のセルが boolean/number のまま fake.tabs に残っていると、fromRow の
+    // `cell('is_valid').toLowerCase()` が boolean 相手に呼ばれて TypeError になり、
+    // ラウンド完了は失敗として描画される（本物の Sheets はセルを常に文字列で返すため、
+    // 製品コードのバグではない）。
+    const fake = await setupExpandScenario(page);
+    await page.goto(APP_URL);
+
+    await page.locator('.expand__actions button').click();
+    const candidates = page.locator('.expand__candidate');
+    await expect(candidates).toHaveCount(2, { timeout: 20_000 });
+
+    // 1 件目 include・2 件目 exclude で全件判定を終わらせ、ラウンド完了を発火させる。
+    const first = candidates.nth(0);
+    const second = candidates.nth(1);
+    await first.locator('.expand__candidate-actions button[data-decision="include"]').click();
+    await expect(first.locator('.expand__candidate-status')).toContainText('保存しました', {
+      timeout: 10_000,
+    });
+    await second.locator('.expand__candidate-actions button[data-decision="exclude"]').click();
+    await expect(second.locator('.expand__candidate-status')).toContainText('保存しました', {
+      timeout: 10_000,
+    });
+
+    // ラウンド完了 → 再検証（runValidate）が成功し、再検証結果（捕捉率）が表示される。
+    // 失敗時は同じ .expand__round-error クラスで「再検証に失敗しました: ...」が出るため、
+    // 0 件であることも合わせて確認する。
+    await expect(page.locator('.expand__round-summary')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('.expand__round-error')).toHaveCount(0);
+
+    // include した 30000001 は additions（block #1 の MeSH 語 / block #2 の ECLS）の両方に
+    // ローカル照合でマッチするため、buildUpdateProposals が両ブロック分の更新提案を出す
+    // （src/features/formula/recallExpansion.ts の matchAdditionToPaper 参照）。
+    await expect(page.locator('.expand__proposals')).toBeVisible();
+    await expect(page.locator('.expand__proposal')).toHaveCount(2);
+
+    // include/exclude いずれの判定も SeedPapers に source=interactive で追記される
+    // （src/app/services/expandService.ts の recordDecision は判定によらず is_valid=true）。
+    // 本物の Sheets と同じく文字列化されて保持されていることを確認する。
+    const seedRows = fake.tabs['SeedPapers'] ?? [];
+    for (const pmid of MARGIN_PMIDS) {
+      const row = seedRows.find((r) => r[0] === pmid);
+      expect(row, `SeedPapers に ${pmid} の行が追記されていること`).toBeDefined();
+      expect(row?.[6]).toBe('TRUE'); // is_valid 列（固定順の index 6）
+      expect(typeof row?.[2]).toBe('string'); // year 列も number でなく文字列化されていること
+    }
   });
 });
 
