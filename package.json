@@ -17,6 +17,8 @@
     "eval:freeze-margin": "tsx experiments/query-optimization-bench/freezeMargin.ts",
     "eval:outside-stages": "tsx experiments/query-optimization-bench/outsideStages.ts",
     "eval:merge-margins": "tsx experiments/query-optimization-bench/mergeMargins.ts",
+    "eval:margin-design": "tsx experiments/query-optimization-bench/marginDesign.ts",
+    "eval:margin-design-report": "tsx experiments/query-optimization-bench/marginDesignReport.ts",
     "eval:b1": "tsx experiments/query-optimization-bench/b1.ts",
     "eval:prepare": "tsx experiments/query-optimization-bench/prepare.ts",
     "eval:report": "tsx experiments/query-optimization-bench/report.ts",

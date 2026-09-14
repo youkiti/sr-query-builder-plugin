@@ -311,6 +311,56 @@ npm run eval:outside-stages -- --case r3-vascular-bleeding --margin criteria-onl
 
 層別取得では上記の margin 取得 1 回が、margin 全体の件数 1 回＋1 巡目 6 回＋2 巡目最大 6 回になります（現式件数の 1 回は別）。rankDepth > 0 では margin 全体の順位取得 1 回に加え、事後集計で各層 1 回、最大 6 回を追加します。EFetch・LLM と gold 照合の通信量は head と同じ条件で数えます。
 
+## margin の組み方の比較（issue #154）
+
+`eval:outside-stages`（issue #126）の結論は「取得段階（先頭取得 vs 層別取得）ではなく margin の大きさそのものが律速」でした。取りこぼしが margin に入らない／margin が大きすぎて関連度順の順位が低い、という問題に対し、**拡張語の組み方を変えて margin を小さくする案**を比較するのが `eval:margin-design` です。製品コード（`src/`）は変更せず、比較は評価ハーネス内で完結します。
+
+比較する 3 案（凍結 margin 1 つに対して同時に実行します）:
+
+1. **full**: 凍結 margin の拡張語をすべて使う（現状。基準線）
+2. **cutoff-\<N\>**（`--thresholds` で複数指定可、既定 `1000,2500,5000`）: 拡張語を 1 語だけ足した margin の件数を先に数え、件数が N 以下の語だけで組み直す
+3. **per-block**: ブロックごとに「そのブロックの拡張語だけで広げた margin」を別々に作り、取得枠を分け合う
+
+**取得件数の枠はどの案でも合計をそろえます**: 取得件数は製品既定 `OUTSIDE_DEFAULT_RETMAX`（200）、AI に渡す書誌の上限は `OUTSIDE_DEFAULT_SKILL_CANDIDATE_LIMIT`（200）、並びは `OUTSIDE_DEFAULT_SORT`（relevance）。これらは `src/app/services/expandService.ts` から import した値をそのまま使い、数値は直書きしません。AI（`pickBoundaryCases`）の呼び出しは案ごとに 1 回だけです。
+
+段階は 3 つです。保証しているのは**「gold（held-out の PMID）を選定（拡張語の選別・取得・書誌上限・AI 選定）の入力に一切渡さない」**ことで、「段階 3 まで gold 絡みの通信が一切起きない」ことではありません。事後集計の共通処理（gold の日付照合・現式での捕捉確認。下記の段階 3 の前半）は**案のループより前に 1 回だけ**実行するため、時系列としては段階 2（各案の選定）より先に gold 絡みの通信が発生します。ただしこの共通処理は gold PMID を使って現式の捕捉集合を求めるだけで、その結果を選定（どの拡張語を残すか・どの PMID を取得するか・AI に何を見せるか）へは一切戻しません。
+
+- **段階 1（語ごとの件数。gold を使わない）**: 凍結 margin の `additions` の各語について、その語だけを足した margin クエリを組み、`esearch(retmax:0)` で件数を数えます。1 語ごとに `results/margin-design/<case>/<margin>/term-counts.jsonl` へ追記し（キーは margin クエリの sha256、最終行勝ちで圧縮）、数え済みの語は再実行時に通信しません。失敗（例外）した語の行は書き込まず、件数として残しません。
+- **段階 2（案ごとの候補選定。gold を使わない）**: `full` と `cutoff-*` は製品の `searchOutsideCandidates` をそのまま呼びます（`additions` に語集合を渡し、拡張語生成 LLM を飛ばします）。`full` は凍結 margin クエリと一致することを確認します。`cutoff-<N>` は残った語集合が既に計算した案（full、または閾値の昇順で先に処理した cutoff）と同一なら選定を再実行せず `sameAs` を記録します（空集合どうしも同一集合として扱うため、最初に 0 語になった cutoff だけが `emptyMargin: true` を持ち、それ以降の空集合はそれへ `sameAs` します）。**`per-block` だけは製品に対応する経路が無いため、ハーネス内で実装しています**（違いは取得段階だけ）: 取得枠 200 をブロック数で均等配分（余りは先頭ブロックから 1 件ずつ）→ ブロックごとに `esearch` → ブロック順のラウンドロビンで重複を除いて並べる → 既知除外・書誌上限・efetch・`pickBoundaryCases`（1 回）。
+  - **per-block の構造的な限界**: ブロック別 margin の和集合は、常に full の margin の部分集合です。「片方のブロックの拡張語だけでは拡張式に入らず、両方のブロックの拡張語が同時に効いて初めて拡張式に入る」文献（例: ブロック 1 は拡張語 A だけ、ブロック 2 は拡張語 B だけで当たり、A・B どちらか一方では当たらない文献）は、per-block では各ブロックを単独で広げるためどのブロック単独の margin にも入らず、構造的に `not_in_margin` になります。full との差（`missedHeldOutCount` や `presented` の違い）を per-block の欠点として読むときは、この構造的な取りこぼしが混ざっていることを踏まえてください。
+- **段階 3（事後集計）**: 案のループの前に一度だけ `buildPostHocContext` を呼び、gold PMID の検索日内存在確認と、held-out 研究が現式で捕捉済みかどうか（`inCurrent`）を求めます（この 1 回だけは案に依存しない共通の gold 通信で、どの案の `apiCalls` にも計上しません）。その後、案ごとに `classifyStudy`（outsideStages と共通）で 8 段階に判定します。`inMargin` は `full`/`cutoff-*` がその margin クエリの捕捉、`per-block` はブロック別 margin クエリそれぞれの捕捉の和集合です（これも案自身の通信として `apiCalls` に計上します）。`deepRank`（`--rank-depth` > 0 のとき）は `per-block` だけ研究ごとに最良（最小）の順位とそのブロック ID（`deepRankBlockId`）を記録します。`emptyMargin`/`sameAs` の案はこの事後集計でも通信しません（margin が数学的に空 = `(拡張式) NOT (拡張式)` なので取りこぼしはすべて `not_in_margin` と分かっており、`sameAs` は参照先の案を見れば済むため）。加えて、案に依存しない**語ごとの捕捉表**を一度だけ作ります: 現式で未捕捉の held-out 研究について、段階 1 の各語 margin クエリでの捕捉を `results/margin-design/<case>/<margin>/<splitId>/term-capture.json` に `{ term, blockId, count, capturedStudyIds }[]` として保存します（診断用。選定へは戻しません。この通信もどの案の `apiCalls` にも計上しません）。
+
+**`apiCalls` の読み方**: 段階 1（語ごとの件数取得）と事後集計の共通処理（`buildPostHocContext`・語ごとの捕捉表）の通信は、どの案の `run.json` の `apiCalls`/`apiElapsedMs`/`progress.jsonl` にも計上されません（案に依存しない一度きりの前処理のため）。`cutoff-<N>` の実際の通信コストを見るときは、その案自身の `apiCalls`（margin 取得・efetch・LLM・事後の捕捉確認）に、段階 1 で新たに数えた語数ぶんの件数取得（初回実行時のみ。2 回目以降は `term-counts.jsonl` に残っていれば通信しません）を足して考えてください。
+
+引数:
+
+| 引数 | 指定・既定値 |
+|---|---|
+| `--case <id>` | 必須 |
+| `--margin <name>` | 必須 |
+| `--seeds <split>` | 既定分割 20260912。他コマンドと同じ解釈 |
+| `--thresholds <n1,n2,...>` | 正整数をカンマ区切り。既定 `1000,2500,5000`。重複・非整数・0 以下はエラー、昇順に正規化 |
+| `--rank-depth <n>` | 既定 10000、0〜10000 |
+| `--label <name>` | 英数字・`.`・`_`・`-` の 1〜40 文字。`replay-` 始まりは禁止 |
+| `--dry-run` | 引数・artifact・C0 ハッシュ・シード分割を確認し、案の一覧・出力先に加えて、語ごとの捕捉表（`term-capture.json`）の出力先と作成済みかどうかを表示する |
+
+保存先は `results/margin-design/<case>/<margin>/<splitId>/<variant>[+<label>]/run.json`（`variant` は `full` / `cutoff-<N>` / `per-block`）。同じ階層の `<runId>/progress.jsonl` に進捗・実 API 通信、`<runId>/llm/` に LLM ログを保存します。既存結果の扱いは `eval:outside-stages` と同じ `decideOutsideExisting` を再利用し、同じコミットの完了はスキップ、別コミットの完了は `--label` を促して停止、失敗は再試行します。**スキップの判定は案ごと**なので、1 案だけ失敗していれば次回実行はその案だけを再実行し、他の完了済み案には通信しません。1 案が失敗しても残りの案は続行し、最後に失敗があれば非ゼロ終了します。標準出力には案ごとに 1 行（案名・語数・margin 件数・判定別研究数・AI が選んだ件数・sameAs・emptyMargin）を出します（0 件でも出します）。API キーは既存の `redact` で保存前に除去します。
+
+**語ごとの捕捉表（`<splitId>/term-capture.json`）も、無ければ作り直します**: 保存は run.json と同じく tmp へ書いてから rename するため、通信中に落ちた不完全なファイルを「完了」とは扱いません。全案が完了済み（スキップ）でも捕捉表が無ければ、共通前処理（段階 1 の語ごとの件数取得。数え済みの語は通信しません）と事後集計の共通処理（gold の日付照合・現式での捕捉確認）だけを実行して捕捉表を作り直します。**このとき案の選定（LLM・efetch・margin の取得）は一切行いません**（`GEMINI_API_KEY` も要求しません。案の選定でしか使わないため）。捕捉表の作成が失敗すれば run.json は完了のままファイルだけ残らず、非ゼロ終了して次回実行時にまた作り直されます。全案が完了済みで捕捉表もあれば、従来どおり `config()` も通信も一切行いません。
+
+集計は `npm run eval:margin-design-report`（実体は `marginDesignReport.ts`。`report.ts` とは対象スキーマが別のため別ファイルにしました）で行い、`results/margin-design/summary.md` / `summary.csv` にケース・margin・シード分割・案ごとの比較表を書き出します。行の並び順は case / margin / seedSplit / variant（`full` → `cutoff-<N>` は N の数値昇順 → `per-block`。文字列比較だと `cutoff-500` と `cutoff-1000` が逆転するため数値で並べます）/ label です。列は `seedSplit`（`--seeds` で選んだシード分割。既定は `s20260912`。別の分割は held-out 集合が変わるため別行として区別します）・`label`（`--label` の値。無指定は `-`）・sameAs・語数・margin 件数（`per-block` は `件数+件数` の表示）・取りこぼし研究数・presented 研究数・取りこぼし研究ごとの「研究名:判定@取得\<順位|-\>/深い\<順位|-\>」（取得順位と、rankDepth 件まで別途取得した深い順位を区別。per-block はどのブロックの順位かを `(#ブロックID)` で示す）・AI に渡した書誌数・AI が選んだ件数・LLM 入力トークン・費用・所要時間です。**sameAs のある run は選定・事後集計を再実行していないため**、margin 件数・取りこぼし研究数・presented 研究数・AI に渡した書誌数・AI が選んだ件数・LLM トークン・費用の列は `0` や `-` ではなく `=<参照先の案名>` と表示します（比較表だけを見て「提示 0 件」と誤読しないため。参照先は同じ case・margin・seedSplit・label の中の案を指します）。`status: failed` の run は該当列を「失敗」として表示し、黙って落としません。
+
+コマンド例:
+
+```powershell
+npm run eval:margin-design -- --case r3-vascular-bleeding --margin seeded-draft1-margin1 --dry-run
+npm run eval:margin-design -- --case r3-vascular-bleeding --margin seeded-draft1-margin1
+npm run eval:margin-design -- --case r3-vascular-bleeding --margin seeded-draft1-margin1 --thresholds 500,1000,2000 --rank-depth 200
+npm run eval:margin-design-report
+```
+
+解釈の限界: 語ごとの件数は margin クエリ全体を OR で組んだときの件数と単純には足し算にならない（語の重複ヒットぶん、cutoff で残した語だけの margin 件数が N の合計を超えることがあります）。段階 1 の件数は「その語 1 つだけを足した margin」の件数であり、cutoff 後の実際の margin 件数は段階 2 の実測（`marginHits`）を見てください。AI（`pickBoundaryCases`）の選択は同じ入力でも実行ごとにぶれうるため、`presented` の件数や内容を案の優劣の唯一の根拠にしないでください。
+
 ## gold の監査と凍結
 
 `audit.json` に含入・除外 PMID の重複、複数 study 対応、PMID の無い study、対応不明 PMID を記録します。群は PMID 共有の推移的な連結成分で、各研究名とその研究に属する PMID を保持します。分割は群単位、採点は研究単位です。各研究の報告を 1 件でも捕捉すれば、その研究を捕捉したと数えます。
