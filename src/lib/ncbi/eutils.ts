@@ -161,7 +161,8 @@ interface EsearchResponseJson {
 
 /**
  * esearch レスポンスの in-band エラー（`ERROR` / `errorlist`）を検査し、
- * あれば permanent な EutilsError を throw する。warninglist は正常系の揺らぎなので無視する。
+ * あれば EutilsError を throw する。Search Backend failed で始まる ERROR は一時障害、
+ * それ以外は permanent とする。warninglist は正常系の揺らぎなので無視する。
  */
 function assertNoInbandError(json: EsearchResponseJson): void {
   const result = json.esearchresult;
@@ -176,6 +177,11 @@ function assertNoInbandError(json: EsearchResponseJson): void {
     throw new EutilsError(`構文エラー: phrase not found ${phrases}`, 200, true);
   }
   if (result?.ERROR) {
+    if (/^Search Backend failed/i.test(result.ERROR.trim())) {
+      // HTTP 自体は 200 だが、検索バックエンドの一時障害を画面の classifyApiError でも
+      // temporary に分類できるよう、エラーの status は 503 とする。
+      throw new EutilsError(`esearch エラー: ${result.ERROR}`, 503);
+    }
     throw new EutilsError(`esearch エラー: ${result.ERROR}`, 200, true);
   }
 }

@@ -207,6 +207,47 @@ describe('esearch', () => {
     });
   });
 
+  test.each([false, true])('検索バックエンドの一時障害は再送して件数を返す（strictCounts: %s）', async (strictCounts) => {
+    const fetch = jest.fn()
+      .mockResolvedValueOnce(makeJsonResponse({ esearchresult: { ERROR: 'Search Backend failed: XML Exception at … XML: Parse failed' } }))
+      .mockResolvedValueOnce(makeJsonResponse({ esearchresult: { count: '2', idlist: ['111', '222'] } }));
+    const sleep = jest.fn().mockResolvedValue(undefined);
+    const acquire = jest.fn().mockResolvedValue(undefined);
+    await expect(esearch('x', { fetch, sleep, strictCounts, rateLimiter: { acquire } }))
+      .resolves.toEqual({ count: 2, pmids: ['111', '222'] });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(acquire).toHaveBeenCalledTimes(2);
+    expect(sleep.mock.calls).toEqual([[1000]]);
+  });
+
+  test.each([false, true])('検索バックエンドの障害が続くと再送上限で一時エラーを返す（strictCounts: %s）', async (strictCounts) => {
+    const message = 'Search Backend failed: An error occurred while processing request. Status: 500. Source: /api/search';
+    const fetch = jest.fn().mockResolvedValue(makeJsonResponse({ esearchresult: { ERROR: message } }));
+    const sleep = jest.fn().mockResolvedValue(undefined);
+    const maxRetries = 3;
+    const promise = esearch('x', { fetch, sleep, maxRetries, strictCounts, rateLimiter: { acquire: async () => undefined } });
+    await expect(promise).rejects.toBeInstanceOf(EutilsError);
+    await expect(promise).rejects.toMatchObject({ permanent: false, status: 503, message: `esearch エラー: ${message}` });
+    expect(fetch).toHaveBeenCalledTimes(maxRetries + 1);
+    expect(sleep.mock.calls).toEqual([[1000], [2000], [4000]]);
+  });
+
+  test('検索バックエンド障害の判定は前後空白と大小文字を無視し、元のメッセージを保持する', async () => {
+    const message = ' \t sEaRcH bAcKeNd FaIlEd: temporary failure \n';
+    const fetch = jest.fn().mockResolvedValue(makeJsonResponse({ esearchresult: { ERROR: message } }));
+    await expect(esearch('x', { fetch, maxRetries: 0 })).rejects.toMatchObject({
+      permanent: false, status: 503, message: `esearch エラー: ${message}`,
+    });
+  });
+
+  test('途中に Search Backend failed を含む ERROR は再送しない', async () => {
+    const fetch = jest.fn().mockResolvedValue(makeJsonResponse({ esearchresult: { ERROR: 'Other error: Search Backend failed' } }));
+    const sleep = jest.fn().mockResolvedValue(undefined);
+    await expect(esearch('x', { fetch, sleep })).rejects.toMatchObject({ permanent: true, status: 200 });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
   test('esearchresult.ERROR は permanent な EutilsError になる', async () => {
     const fetch = jest.fn().mockResolvedValue(
       makeJsonResponse({ esearchresult: { ERROR: 'Empty term and query_key - nothing todo' } })

@@ -30,6 +30,11 @@ describe('classifyApiError', () => {
     expect(classifyApiError(new EutilsError('esearch failed', status))).toBe(kind);
   });
 
+  test('検索バックエンド障害の再送上限で返るエラーは一時障害に分類する', () => {
+    const error = new EutilsError('esearch エラー: Search Backend failed: Status: 500', 503);
+    expect(classifyApiError(error)).toBe('temporary');
+  });
+
   test('NCBI の恒久エラー（構文エラー等）は再試行を勧めない', () => {
     // permanent は status に関わらず other。500 で来ても再試行しても解消しない。
     expect(classifyApiError(new EutilsError('不明なタグ', 500, true))).toBe('other');

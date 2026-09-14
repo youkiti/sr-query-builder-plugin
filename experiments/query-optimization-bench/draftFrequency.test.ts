@@ -106,6 +106,18 @@ test('実 fetch 失敗は生成と診断の両経路で未完了になり、キ�
   check(results);
 });
 
+test('検索バックエンド障害が再送上限まで続いた試行は未完了になる', async () => {
+  const { results, path, deps } = setup();
+  deps.fetch = jest.fn(async () => new Response(JSON.stringify({ esearchresult: { ERROR: 'Search Backend failed: Status: 500' } })));
+  deps.eutils = { maxRetries: 2, sleep: jest.fn(async () => undefined) };
+  await main([...baseArgs.slice(0, -1), '1'], FIXTURES, results, deps);
+  const result = JSON.parse(readFileSync(path(1), 'utf8')) as Trial;
+  expect(result).toMatchObject({ outcome: 'network_error', complete: false });
+  expect(result.diagnostics.map((item) => item.status)).toEqual(['network_error', 'network_error']);
+  expect(deps.fetch).toHaveBeenCalledTimes(6);
+  expect(deps.eutils.sleep).toHaveBeenCalledTimes(4);
+});
+
 test('集計は生成失敗も完了分母に含め、未完了と未実行を分ける', async () => {
   const { results, root, path, deps } = setup();
   deps.generate = async () => { throw new Error('生成失敗'); };
