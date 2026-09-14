@@ -222,6 +222,17 @@ test.each([0, 10])('実サービスとフェイク通信で段階測定・事後
   expect(process.stdout.write).toHaveBeenCalledWith('取りこぼし（現式で未捕捉）: 6 研究\n');
 });
 
+test('sort 未指定は製品に none と旧件数を渡し、NCBI 既定順の比較を維持する', async () => {
+  const fixture = setup();
+  const search = jest.spyOn(expand, 'searchOutsideCandidates');
+  const { events } = fakeNetwork();
+  await main(args, fixture.root, fixture.results);
+  expect(search).toHaveBeenCalledWith(expect.objectContaining({ sort: 'none', retmax: 50, skillCandidateLimit: 20 }));
+  const marginSearches = events.filter((event) => event.kind === 'esearch' && event.params.get('term') === marginQuery);
+  expect(marginSearches.length).toBeGreaterThan(0);
+  for (const event of marginSearches) expect(event.params.has('sort')).toBe(false);
+});
+
 test('凍結クエリ不一致は failed にし別の式の段階結果や gold 通信を残さない', async () => {
   const fixture = setup();
   fixture.margin.marginQuery = 'different[tiab]';

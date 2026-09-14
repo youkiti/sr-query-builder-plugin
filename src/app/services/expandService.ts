@@ -119,10 +119,10 @@ export interface ExpandServiceDeps {
   llmFactory: LlmProviderFactory;
   /** 判定者メールアドレス（SeedPapers.decided_by に記録する）。取得できなければ null */
   userEmail?: string | null;
-  /** esearch で取得する上位件数。既定 50 */
+  /** esearch で取得する上位件数。既定は margin で 200、inside で 50 */
   retmax?: number;
   /**
-   * pick skill に渡す候補件数上限。既定は margin / inside(current) で 20、
+   * pick skill に渡す候補件数上限。既定は margin で 200、inside(current) で 20、
    * inside(specific) では relevance 上位を全部見せたいので retmax と同じ 50
    */
   skillCandidateLimit?: number;
@@ -234,6 +234,11 @@ async function fetchMarginCandidates(
   return searchOutsideCandidates({ ...deps, formula, ...protocol, existingPmids });
 }
 
+// 関連度順で取得・AI 入力を 200 件に増やしたときだけ、測定で取りこぼし研究が提示まで届いた。
+export const OUTSIDE_DEFAULT_RETMAX = 200;
+export const OUTSIDE_DEFAULT_SKILL_CANDIDATE_LIMIT = 200;
+export const OUTSIDE_DEFAULT_SORT = 'relevance';
+
 export interface OutsideSearchInput extends Pick<ExpandServiceDeps,
   'eutils' | 'llmFactory' | 'retmax' | 'skillCandidateLimit' | 'onProgress'> {
   formula: PubmedFormula;
@@ -242,7 +247,7 @@ export interface OutsideSearchInput extends Pick<ExpandServiceDeps,
   exclusionCriteria: string;
   existingPmids: ReadonlySet<string>;
   additions?: BlockRecallAdditions[];
-  sort?: 'relevance';
+  sort?: 'relevance' | 'none';
   retrieval?: 'head' | 'year-stratified';
 }
 
@@ -269,8 +274,8 @@ async function searchYearStratified(marginQuery: string, deps: OutsideSearchInpu
     ['2010–2019', '2010/01/01', '2019/12/31'],
     ['2020〜', '2020/01/01', '3000'],
   ] as const;
-  const retmax = deps.retmax ?? 50;
-  const sort = deps.sort ? { sort: deps.sort } : {};
+  const retmax = deps.retmax ?? OUTSIDE_DEFAULT_RETMAX;
+  const sort = deps.sort === 'none' ? {} : { sort: deps.sort ?? OUTSIDE_DEFAULT_SORT };
   const total = await esearch(marginQuery, deps.eutils, { retmax: 0 });
   const strata: NonNullable<OutsideSearchStages['strata']> = [];
   let remaining = 0;
@@ -356,8 +361,8 @@ export async function searchOutsideCandidates(deps: OutsideSearchInput): Promise
   // 式の外側（margin）を検索。現式は拡張式の部分集合なので broadenedHits = originalHits + marginHits。
   deps.onProgress?.('esearch');
   const marginResult = deps.retrieval === 'year-stratified' ? await searchYearStratified(marginQuery, deps, stages) : await esearch(marginQuery, deps.eutils, {
-    retmax: deps.retmax ?? 50,
-    ...(deps.sort ? { sort: deps.sort } : {}),
+    retmax: deps.retmax ?? OUTSIDE_DEFAULT_RETMAX,
+    ...(deps.sort === 'none' ? {} : { sort: deps.sort ?? OUTSIDE_DEFAULT_SORT }),
   });
   const original = await esearch(originalQuery, deps.eutils, { retmax: 0 });
   const originalHits = original.count;
@@ -365,7 +370,7 @@ export async function searchOutsideCandidates(deps: OutsideSearchInput): Promise
 
   deps.onProgress?.('dedup');
   const novelPmids = marginResult.pmids.filter((p) => !existingPmids.has(p));
-  const limit = deps.skillCandidateLimit ?? 20;
+  const limit = deps.skillCandidateLimit ?? OUTSIDE_DEFAULT_SKILL_CANDIDATE_LIMIT;
   const toFetch = novelPmids.slice(0, limit);
   stages.retrievedPmids = [...marginResult.pmids];
   stages.novelPmids = [...novelPmids];
