@@ -3,7 +3,61 @@ import { join, resolve } from 'node:path';
 import { CASES, type BenchCase, type FrozenSeeds, type GoldAudit, type StudyGroup } from './types';
 
 export const FIXTURES = resolve(__dirname, 'fixtures');
-const SEED = 20260912;
+export const SEED = 20260912;
+
+/** 数値は従来の乱数分割、文字列は名前付き集合。 */
+export type SeedSplit = number | string;
+
+function isSeedName(name: unknown): name is string {
+  return typeof name === 'string' && name.trim() === name && /^[a-z][a-z0-9-]{0,31}$/.test(name) && !/^s-?\d+$/.test(name);
+}
+
+/** 10 進の非負整数表記を先に判定し、それ以外は集合名として検証する。 */
+export function parseSeedSplit(raw: string): SeedSplit {
+  const seed = Number(raw);
+  if (raw.trim() === raw && /^(0|[1-9]\d*)$/.test(raw) && Number.isSafeInteger(seed)) return seed;
+  if (isSeedName(raw)) return raw;
+  throw new Error('--seeds には10 進の非負整数または名前（英小文字で始まる英小文字・数字・ハイフンの 1〜32 文字）を指定してください。s または s- に数字だけを続けた名前は整数分割の id と衝突するため使用できません');
+}
+
+/** 分割を指す短い id（結果ディレクトリのキーやログ表示に使う）。 */
+export function seedSplitId(seed: SeedSplit): string {
+  return typeof seed === 'number' ? `s${seed}` : seed;
+}
+
+export function seedFileName(seed: SeedSplit): string {
+  return seed === SEED ? 'seeds.json' : `seeds-${seed}.json`;
+}
+
+/**
+ * 指定した分割の凍結シードを読む。存在しなければ、先に用意すべきコマンドを示して失敗する。
+ * ファイル名は分割指定から機械的に決まるが、ファイルの中身（`seed` または `name`）が
+ * 要求した値と食い違っていたら（手動編集・コピー間違い等）実行前に拒否する。
+ */
+export function loadSeedsFile(fixtureDir: string, seed: SeedSplit): FrozenSeeds {
+  if (typeof seed === 'string' && !isSeedName(seed)) throw new Error('シード集合名が不正です');
+  const path = join(fixtureDir, seedFileName(seed));
+  if (!existsSync(path)) {
+    if (typeof seed === 'string') {
+      throw new Error(`${path} が見つかりません。名前付き集合は手動で {"name":"${seed}","selections":[{"groupId":"群 ID","pmid":"PMID","year":null}, ...]} の形式で異なる 3 群を指定してください（seed フィールドは指定しない）`);
+    }
+    throw new Error(`${path} が見つかりません。先に \`npm run eval:prepare -- --seed ${seed}\` を実行してください`);
+  }
+  const seeds = JSON.parse(readFileSync(path, 'utf8')) as FrozenSeeds;
+  if (typeof seed === 'string') {
+    if (seeds.name !== seed || seeds.seed !== undefined) {
+      throw new Error(`${path} の name（${seeds.name}）が要求した集合（${seed}）と一致しないか、乱数分割の seed が混在しています`);
+    }
+  } else if (seeds.seed !== seed || seeds.name !== undefined) {
+    throw new Error(`${path} の seed（${seeds.seed}）が要求した分割（${seed}）と一致しません`);
+  }
+  return seeds;
+}
+
+/** held-out = 選択した分割のシード群を除いた残り全群。分割ごとに実行時に求める。 */
+export function computeHeldOut(groups: readonly StudyGroup[], seeds: FrozenSeeds): string[] {
+  return groups.filter((group) => !seeds.selections.some((selection) => selection.groupId === group.id)).map((group) => group.id);
+}
 
 export interface GoldRecord {
   pmcid: string;
@@ -92,7 +146,9 @@ export function selectSeeds(groups: readonly StudyGroup[], years: Record<string,
 }
 
 export function validateSeeds(seeds: FrozenSeeds, groups: StudyGroup[]): void {
-  if (seeds.seed !== SEED || seeds.selections.length !== 3 || new Set(seeds.selections.map((s) => s.groupId)).size !== 3
+  const validIdentity = (Number.isSafeInteger(seeds.seed) && seeds.name === undefined)
+    || (isSeedName(seeds.name) && seeds.seed === undefined);
+  if (!validIdentity || !Array.isArray(seeds.selections) || seeds.selections.length !== 3 || new Set(seeds.selections.map((s) => s.groupId)).size !== 3
     || seeds.selections.some((s) => !groups.find((g) => g.id === s.groupId)?.pmids.includes(s.pmid))) {
     throw new Error('凍結済みシードと gold の群構造が一致しません');
   }

@@ -1,5 +1,10 @@
 /** @jest-environment node */
-import { executeCase } from './run';
+import { executeCase, main, resultDir, type FrozenC0Input } from './run';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { getGitCommit } from './gitInfo';
+import { hashC0Content, type C0Content } from './c0Artifact';
 import { generateDraftFormula } from '../../src/app/services/draftService';
 import { runQueryOptimization } from '../../src/app/services/queryOptimizationService';
 import { extractProtocol } from '../../src/features/formula/skills/extractProtocol';
@@ -10,7 +15,7 @@ import type { LlmProviderFactory } from '../../src/app/services/llmProviderServi
 jest.mock('../../src/app/services/draftService', () => ({ generateDraftFormula: jest.fn() }));
 jest.mock('../../src/app/services/queryOptimizationService', () => ({ runQueryOptimization: jest.fn() }));
 jest.mock('../../src/features/formula/skills/extractProtocol', () => ({ extractProtocol: jest.fn() }));
-jest.mock('./ncbiEval', () => ({ capturedGold: jest.fn(), evaluateSearch: jest.fn(), seedTitles: jest.fn(),
+jest.mock('./ncbiEval', () => ({ redact: jest.requireActual<typeof import('./ncbiEval')>('./ncbiEval').redact, capturedGold: jest.fn(), evaluateSearch: jest.fn(), seedTitles: jest.fn(),
   createEvalFetch: jest.requireActual<typeof import('./ncbiEval')>('./ncbiEval').createEvalFetch }));
 
 const groups = ['a', 'b', 'c', 'd'].map((id, i) => ({ id, members: [{ studyId: id, pmids: [String(i + 1)] }], pmids: [String(i + 1)] }));
@@ -108,4 +113,72 @@ test('tight profile passes its registered limits to optimization without network
   await executeCase(fixture, audit, 'protocol', result, { eutils: { fetch }, llmFactory, progress: jest.fn(), save: jest.fn() });
   expect(runQueryOptimization).toHaveBeenCalledWith(expect.objectContaining({ maxHits: 1000, maxIterations: 5 }), expect.anything());
   expect(fetch).not.toHaveBeenCalled();
+});
+jest.mock('./gitInfo', () => ({ getGitCommit: jest.fn(() => 'legacy-commit'), isGitDirty: () => true }));
+
+const frozen: FrozenC0Input = { id: 'frozen', sha256: 'hash', variant: 'criteria-only', draftIndex: 1,
+  protocol: { frameworkType: 'custom', researchQuestion: 'frozen RQ', inclusionCriteria: 'frozen include', exclusionCriteria: '',
+    studyDesign: 'any', sourceType: 'markdown', sourceFilename: 'protocol.md', rawTextRef: null, rawTextPreview: '', rawTextInline: '' },
+  blocks: { blocks: [{ blockLabel: 'Frozen block', description: '', aiGenerated: true, note: '' }], combinationExpression: '#1' },
+  formula };
+
+test('凍結 C0 では生成を呼ばず、指定シードの held-out と2000件上限を使う', async () => {
+  const result = { ...makeResult(), profileId: 'rerun-2000' as const, maxHits: 2000 };
+  const seeds = { name: 'alternate', selections: groups.slice(1).map((g) => ({ groupId: g.id, pmid: g.pmids[0]!, year: null })) };
+  await executeCase(fixture, audit, '', result,
+    { eutils: { fetch: jest.fn() }, llmFactory, progress: jest.fn(), save: jest.fn(), seeds, frozenC0: frozen });
+  expect(extractProtocol).not.toHaveBeenCalled();
+  expect(generateDraftFormula).not.toHaveBeenCalled();
+  expect(result.denominator!.heldOut).toEqual(['a']);
+  expect(result.conditions.C0!.formula).toEqual(formula);
+  expect(result.c0).toEqual({ source: 'frozen', id: 'frozen', sha256: 'hash', variant: 'criteria-only', draftIndex: 1 });
+  expect(runQueryOptimization).toHaveBeenCalledWith(expect.objectContaining({ initialFormula: formula, seedPmids: ['2', '3', '4'],
+    maxHits: 2000, maxIterations: 5, criteria: expect.objectContaining({ researchQuestion: 'frozen RQ' }),
+    approvedBlocks: [expect.objectContaining({ label: 'Frozen block' })] }), expect.anything());
+});
+
+test('main は試行と最新結果にメタデータを保存し、別コミットの完了結果を書き換えない', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'legacy-execution-'));
+  const fixtureDir = join(root, fixture.id);
+  mkdirSync(join(fixtureDir, 'c0'), { recursive: true });
+  writeFileSync(join(fixtureDir, 'case.json'), JSON.stringify({ ...fixture, searchDate: '2001-02-03' }));
+  writeFileSync(join(fixtureDir, 'audit.json'), JSON.stringify(audit));
+  writeFileSync(join(fixtureDir, 'protocol.md'), 'protocol');
+  writeFileSync(join(fixtureDir, 'seeds.json'), JSON.stringify(fixture.seeds));
+  const content: C0Content = { schemaVersion: 1, caseId: fixture.id, variant: frozen.variant, draftIndex: 1, seedSplit: null,
+    targetHits: 2000, model: 'fake', createdAt: '', gitCommit: null, gitDirty: null, protocol: frozen.protocol,
+    blocks: frozen.blocks, formula, formulaMd: '', seedContext: null, blockApproval: 'auto' };
+  writeFileSync(join(fixtureDir, 'c0', 'frozen.json'), JSON.stringify({ ...content, sha256: hashC0Content(content) }));
+  const previousKey = process.env.GEMINI_API_KEY;
+  process.env.GEMINI_API_KEY = 'mock-only';
+  jest.mocked(getGitCommit).mockReturnValue('legacy-commit');
+  const fetch = jest.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('実 API 禁止'));
+  const args = ['--fixtures', root, '--results', join(root, 'results'), '--case', fixture.id, '--c0', 'frozen',
+    '--profile', 'rerun-2000', '--label', 'legacy'];
+  try {
+    await main(args);
+    const dir = resultDir(join(root, 'results'), 'rerun-2000', fixture.id, 'frozen', 's20260912', 'legacy');
+    const path = join(dir, 'run.json');
+    const text = readFileSync(path, 'utf8');
+    const result = JSON.parse(text) as RunResult;
+    expect(result).toMatchObject({ status: 'completed', searchDate: '2001-02-03', gitCommit: 'legacy-commit', gitDirty: true,
+      seedSplit: 's20260912', label: 'legacy', legacy: true, c0: { source: 'frozen', id: 'frozen', sha256: hashC0Content(content) } });
+    expect(readFileSync(join(dir, result.runId, 'run.json'), 'utf8')).toBe(text);
+    await main(args);
+    expect(runQueryOptimization).toHaveBeenCalledTimes(1);
+    jest.mocked(getGitCommit).mockReturnValue('other-commit');
+    await main(args);
+    expect(readFileSync(path, 'utf8')).toBe(text);
+    expect(process.exitCode).toBe(1);
+    writeFileSync(path, JSON.stringify({ ...result, status: 'failed' }));
+    process.exitCode = 0;
+    await main(args);
+    expect(runQueryOptimization).toHaveBeenCalledTimes(2);
+    expect(fetch).not.toHaveBeenCalled();
+  } finally {
+    if (previousKey === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = previousKey;
+    fetch.mockRestore();
+    process.exitCode = 0;
+  }
 });

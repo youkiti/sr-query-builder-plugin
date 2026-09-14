@@ -9,6 +9,7 @@ export const CASES = [
 
 export const PROFILES = [
   { id: 'default', maxHits: 10000, maxIterations: 5 },
+  { id: 'rerun-2000', maxHits: 2000, maxIterations: 5 },
   { id: 'tight-1000', maxHits: 1000, maxIterations: 5 },
 ] as const;
 
@@ -18,10 +19,9 @@ export interface StudyGroup {
   pmids: string[];
 }
 
-export interface FrozenSeeds {
-  seed: number;
+export type FrozenSeeds = ({ seed: number; name?: never } | { name: string; seed?: never }) & {
   selections: { groupId: string; pmid: string; year: number | null }[];
-}
+};
 
 export interface GoldAudit {
   includedStudyCount: number;
@@ -84,6 +84,13 @@ export interface RunResult {
   runId: string;
   profileId: typeof PROFILES[number]['id'];
   status: 'running' | 'completed' | 'failed' | 'dry-run';
+  /** 旧形式の保存結果も読めるよう、追加メタデータは省略可。 */
+  gitCommit?: string | null;
+  gitDirty?: boolean | null;
+  seedSplit?: string;
+  label?: string | null;
+  c0?: { source: 'live' | 'frozen'; id?: string; sha256?: string; variant?: import('./c0Artifact').C0Variant; draftIndex?: number };
+  legacy?: true;
   startedAt: string;
   model: string;
   searchDate: string;
