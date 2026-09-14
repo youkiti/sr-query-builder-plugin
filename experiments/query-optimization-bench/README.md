@@ -250,7 +250,7 @@ npm run eval:optimize -- --case r2-pdr-prognostic --c0 criteria-only-draft2 --se
 
 `eval:merge-margins` は同じ C0 から複数回生成した拡張語を合わせ、取りこぼしの回収率と margin 件数の変化を比較するためのコマンドです。`--case <id>`、`--margins <name1,name2,...>`（2 件以上、重複不可）、`--name <新しい margin 名>` が必須で、`--dry-run` は任意です。名前の規則は凍結 margin と同じです。元 margin と参照先 C0 のハッシュを検証し、C0 名・C0 ハッシュ・検索日が全員で一致し、ケースの検索日とも一致することを確認します。
 
-拡張語は `blockId` ごとに `--margins` の指定順に連結し、前後の空白を除いた `term` の文字列で重複を除きます（大文字小文字は区別、最初の語の属性を保持）。ブロックも初出順です。製品の式組み立て関数で拡張式と margin を作り、ケースの検索日で制限した ESearch 2 回（再送なし、retmax=0、strictCounts）で現式・margin の件数を実測します。LLM は呼びません。
+拡張語は `blockId` ごとに `--margins` の指定順に連結し、前後の空白を除いた `term` の文字列で重複を除きます（大文字小文字は区別、最初の語の属性を保持）。ブロックも初出順です。製品の式組み立て関数で拡張式と margin を作り、ケースの検索日で制限した ESearch 2 回（retmax=0、strictCounts。一時的な障害には E-utilities 既定のバックオフ付き再送が効く）で現式・margin の件数を実測します。LLM は呼びません。
 
 出力は `fixtures/<case>/margin/<name>.json` で、通常の margin 形式に指定順の `sources: { name, sha256 }[]` を追加し、`model` は `merged` です。`sources` を含む内容をハッシュ化し、`eval:outside-stages -- --case <id> --margin <name>` でそのまま測定できます。`wx` で上書きを禁止します。dry-run も既存出力があれば停止し、正常時はハッシュ照合・ブロックごとの語数・合計語数・出力先を表示します。dry-run は `.env` を読まず、通信・書き込みを行いません。
 
