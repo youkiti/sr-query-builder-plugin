@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import * as types from './types';
 import { buildReport, csv, distribution, layerC, report, type Entry } from './rerunReport';
-import { buildRunJobs, makeSlots, readConfig, slotName, type Job, type RerunConfig } from './rerun';
+import { buildRunJobs, makeSlots, readConfig, slotName, slotsFile, type Job, type RerunConfig } from './rerun';
 import type { AdoptionAudit, ConditionResult, RunResult } from './types';
 
 const adoption = (harmfulAdopted: number | null = 0): AdoptionAudit => ({ adopted: 1, harmfulAdopted, unscoredAdopted: harmfulAdopted === null ? 1 : 0, trials: [] });
@@ -146,17 +146,20 @@ test('構文エラー率と費用の欠測を示し、0 件では安全・過半
   expect(distribution([0, 1, null, 2, 3])).toEqual({ min: 0, median: 1.5, max: 3, measured: 4, missing: 1 });
 });
 
-test('ローカル run.json と最終 ledger 行から全表 CSV と summary.md を生成する', () => {
+test.each(['new', 'legacy', 'both'])('ローカル run.json と最終 ledger 行から全表 CSV と summary.md を生成する: %s', (location) => {
   const m = matrix(); const root = mkdtempSync(join(tmpdir(), 'rerun-report-'));
   const paths = { root, fixtures: join(root, 'fixtures'), results: join(root, 'results') };
   const jobs = buildRunJobs(m.config, m.slots, paths);
   const write = (path: string, data: unknown) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, JSON.stringify(data)); };
-  write(join(paths.results, 'rerun/c0-slots.json'), m.slots);
+  if (location !== 'legacy') write(slotsFile(paths), m.slots);
+  if (location !== 'new') write(join(paths.results, 'rerun/c0-slots.json'), location === 'both' ? [] : m.slots);
+  mkdirSync(join(paths.results, 'rerun'), { recursive: true });
   for (const job of jobs.slice(1)) { write(job.expected, run(job)); write(join(dirname(job.expected), 'scored.json'), { source: job.id, adoptionAudit: adoption() }); }
   writeFileSync(join(paths.results, 'rerun/ledger.jsonl'), [{ id: jobs[0]!.id, exitCode: 0 }, { id: jobs[0]!.id, exitCode: 1 }].map((r) => JSON.stringify(r)).join('\n') + '\n');
   jest.spyOn(process.stdout, 'write').mockReturnValue(true);
   const output = report(m.config, paths);
   expect(output.tables.layerB[0]!.currentStatus).toBe('失敗');
+  expect(output.tables.c0Quality.map((row) => row.name)).toEqual(m.slots.map((slot) => slot.name));
   const summary = readFileSync(join(paths.results, 'rerun/summary.md'), 'utf8');
   expect(summary).toContain('S1:'); expect(summary).toContain('候補'); expect(summary).toContain('失敗'); expect(summary).toContain('欠測');
   expect(readFileSync(join(paths.results, 'rerun/layerB.csv'), 'utf8')).toContain('criteria-only-draft11');

@@ -1,0 +1,542 @@
+[
+  {
+    "id": "r1-mindfulness-smoking:criteria-only:shared:1",
+    "caseId": "r1-mindfulness-smoking",
+    "variant": "criteria-only",
+    "split": null,
+    "slot": 1,
+    "name": "criteria-only-draft11",
+    "attempts": [
+      {
+        "draft": 11,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "r1-mindfulness-smoking:criteria-only:shared:2",
+    "caseId": "r1-mindfulness-smoking",
+    "variant": "criteria-only",
+    "split": null,
+    "slot": 2,
+    "name": "criteria-only-draft12",
+    "attempts": [
+      {
+        "draft": 12,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "r1-mindfulness-smoking:criteria-only:shared:3",
+    "caseId": "r1-mindfulness-smoking",
+    "variant": "criteria-only",
+    "split": null,
+    "slot": 3,
+    "name": "criteria-only-draft13",
+    "attempts": [
+      {
+        "draft": 13,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "r1-mindfulness-smoking:seeded:s20260912:1",
+    "caseId": "r1-mindfulness-smoking",
+    "variant": "seeded",
+    "split": 20260912,
+    "slot": 1,
+    "name": "seeded-draft11",
+    "attempts": [
+      {
+        "draft": 11,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "r1-mindfulness-smoking:seeded:s20260912:2",
+    "caseId": "r1-mindfulness-smoking",
+    "variant": "seeded",
+    "split": 20260912,
+    "slot": 2,
+    "name": "seeded-draft12",
+    "attempts": [
+      {
+        "draft": 12,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "r1-mindfulness-smoking:seeded:s20260912:3",
+    "caseId": "r1-mindfulness-smoking",
+    "variant": "seeded",
+    "split": 20260912,
+    "slot": 3,
+    "name": "seeded-draft13",
+    "attempts": [
+      {
+        "draft": 13,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "r1-mindfulness-smoking:seeded:s20260915:1",
+    "caseId": "r1-mindfulness-smoking",
+    "variant": "seeded",
+    "split": 20260915,
+    "slot": 1,
+    "name": "seeded-draft11-s20260915",
+    "attempts": [
+      {
+        "draft": 11,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "r1-mindfulness-smoking:seeded:s20260915:2",
+    "caseId": "r1-mindfulness-smoking",
+    "variant": "seeded",
+    "split": 20260915,
+    "slot": 2,
+    "name": "seeded-draft12-s20260915",
+    "attempts": [
+      {
+        "draft": 12,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "r1-mindfulness-smoking:seeded:s20260915:3",
+    "caseId": "r1-mindfulness-smoking",
+    "variant": "seeded",
+    "split": 20260915,
+    "slot": 3,
+    "name": "seeded-draft13-s20260915",
+    "attempts": [
+      {
+        "draft": 13,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "r2-pdr-prognostic:criteria-only:shared:1",
+    "caseId": "r2-pdr-prognostic",
+    "variant": "criteria-only",
+    "split": null,
+    "slot": 1,
+    "name": "criteria-only-draft11",
+    "attempts": [
+      {
+        "draft": 11,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "r2-pdr-prognostic:criteria-only:shared:2",
+    "caseId": "r2-pdr-prognostic",
+    "variant": "criteria-only",
+    "split": null,
+    "slot": 2,
+    "name": "criteria-only-draft12",
+    "attempts": [
+      {
+        "draft": 12,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "r2-pdr-prognostic:criteria-only:shared:3",
+    "caseId": "r2-pdr-prognostic",
+    "variant": "criteria-only",
+    "split": null,
+    "slot": 3,
+    "name": "criteria-only-draft13",
+    "attempts": [
+      {
+        "draft": 13,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "r2-pdr-prognostic:seeded:s20260912:1",
+    "caseId": "r2-pdr-prognostic",
+    "variant": "seeded",
+    "split": 20260912,
+    "slot": 1,
+    "name": "seeded-draft11",
+    "attempts": [
+      {
+        "draft": 11,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "r2-pdr-prognostic:seeded:s20260912:2",
+    "caseId": "r2-pdr-prognostic",
+    "variant": "seeded",
+    "split": 20260912,
+    "slot": 2,
+    "name": "seeded-draft12",
+    "attempts": [
+      {
+        "draft": 12,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "r2-pdr-prognostic:seeded:s20260912:3",
+    "caseId": "r2-pdr-prognostic",
+    "variant": "seeded",
+    "split": 20260912,
+    "slot": 3,
+    "name": "seeded-draft13",
+    "attempts": [
+      {
+        "draft": 13,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "r2-pdr-prognostic:seeded:s20260915:1",
+    "caseId": "r2-pdr-prognostic",
+    "variant": "seeded",
+    "split": 20260915,
+    "slot": 1,
+    "name": "seeded-draft11-s20260915",
+    "attempts": [
+      {
+        "draft": 11,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "r2-pdr-prognostic:seeded:s20260915:2",
+    "caseId": "r2-pdr-prognostic",
+    "variant": "seeded",
+    "split": 20260915,
+    "slot": 2,
+    "name": "seeded-draft12-s20260915",
+    "attempts": [
+      {
+        "draft": 12,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "r2-pdr-prognostic:seeded:s20260915:3",
+    "caseId": "r2-pdr-prognostic",
+    "variant": "seeded",
+    "split": 20260915,
+    "slot": 3,
+    "name": "seeded-draft13-s20260915",
+    "attempts": [
+      {
+        "draft": 13,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "r3-vascular-bleeding:criteria-only:shared:1",
+    "caseId": "r3-vascular-bleeding",
+    "variant": "criteria-only",
+    "split": null,
+    "slot": 1,
+    "name": "criteria-only-draft11",
+    "attempts": [
+      {
+        "draft": 11,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "r3-vascular-bleeding:criteria-only:shared:2",
+    "caseId": "r3-vascular-bleeding",
+    "variant": "criteria-only",
+    "split": null,
+    "slot": 2,
+    "name": "criteria-only-draft12",
+    "attempts": [
+      {
+        "draft": 12,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "r3-vascular-bleeding:criteria-only:shared:3",
+    "caseId": "r3-vascular-bleeding",
+    "variant": "criteria-only",
+    "split": null,
+    "slot": 3,
+    "name": "criteria-only-draft13",
+    "attempts": [
+      {
+        "draft": 13,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "r3-vascular-bleeding:seeded:s20260912:1",
+    "caseId": "r3-vascular-bleeding",
+    "variant": "seeded",
+    "split": 20260912,
+    "slot": 1,
+    "name": "seeded-draft11",
+    "attempts": [
+      {
+        "draft": 11,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "r3-vascular-bleeding:seeded:s20260912:2",
+    "caseId": "r3-vascular-bleeding",
+    "variant": "seeded",
+    "split": 20260912,
+    "slot": 2,
+    "name": "seeded-draft12",
+    "attempts": [
+      {
+        "draft": 12,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "r3-vascular-bleeding:seeded:s20260912:3",
+    "caseId": "r3-vascular-bleeding",
+    "variant": "seeded",
+    "split": 20260912,
+    "slot": 3,
+    "name": "seeded-draft13",
+    "attempts": [
+      {
+        "draft": 13,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "r3-vascular-bleeding:seeded:s20260915:1",
+    "caseId": "r3-vascular-bleeding",
+    "variant": "seeded",
+    "split": 20260915,
+    "slot": 1,
+    "name": "seeded-draft11-s20260915",
+    "attempts": [
+      {
+        "draft": 11,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "r3-vascular-bleeding:seeded:s20260915:2",
+    "caseId": "r3-vascular-bleeding",
+    "variant": "seeded",
+    "split": 20260915,
+    "slot": 2,
+    "name": "seeded-draft12-s20260915",
+    "attempts": [
+      {
+        "draft": 12,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "r3-vascular-bleeding:seeded:s20260915:3",
+    "caseId": "r3-vascular-bleeding",
+    "variant": "seeded",
+    "split": 20260915,
+    "slot": 3,
+    "name": "seeded-draft13-s20260915",
+    "attempts": [
+      {
+        "draft": 13,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "c1-replacing-salt-with:criteria-only:shared:1",
+    "caseId": "c1-replacing-salt-with",
+    "variant": "criteria-only",
+    "split": null,
+    "slot": 1,
+    "name": "criteria-only-draft11",
+    "attempts": [
+      {
+        "draft": 11,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "c1-replacing-salt-with:criteria-only:shared:2",
+    "caseId": "c1-replacing-salt-with",
+    "variant": "criteria-only",
+    "split": null,
+    "slot": 2,
+    "name": "criteria-only-draft12",
+    "attempts": [
+      {
+        "draft": 12,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "c1-replacing-salt-with:criteria-only:shared:3",
+    "caseId": "c1-replacing-salt-with",
+    "variant": "criteria-only",
+    "split": null,
+    "slot": 3,
+    "name": "criteria-only-draft13",
+    "attempts": [
+      {
+        "draft": 13,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "c1-replacing-salt-with:seeded:s20260912:1",
+    "caseId": "c1-replacing-salt-with",
+    "variant": "seeded",
+    "split": 20260912,
+    "slot": 1,
+    "name": "seeded-draft11",
+    "attempts": [
+      {
+        "draft": 11,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "c1-replacing-salt-with:seeded:s20260912:2",
+    "caseId": "c1-replacing-salt-with",
+    "variant": "seeded",
+    "split": 20260912,
+    "slot": 2,
+    "name": "seeded-draft12",
+    "attempts": [
+      {
+        "draft": 12,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "c1-replacing-salt-with:seeded:s20260912:3",
+    "caseId": "c1-replacing-salt-with",
+    "variant": "seeded",
+    "split": 20260912,
+    "slot": 3,
+    "name": "seeded-draft13",
+    "attempts": [
+      {
+        "draft": 13,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "c1-replacing-salt-with:seeded:s20260915:1",
+    "caseId": "c1-replacing-salt-with",
+    "variant": "seeded",
+    "split": 20260915,
+    "slot": 1,
+    "name": "seeded-draft11-s20260915",
+    "attempts": [
+      {
+        "draft": 11,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "c1-replacing-salt-with:seeded:s20260915:2",
+    "caseId": "c1-replacing-salt-with",
+    "variant": "seeded",
+    "split": 20260915,
+    "slot": 2,
+    "name": "seeded-draft12-s20260915",
+    "attempts": [
+      {
+        "draft": 12,
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  {
+    "id": "c1-replacing-salt-with:seeded:s20260915:3",
+    "caseId": "c1-replacing-salt-with",
+    "variant": "seeded",
+    "split": 20260915,
+    "slot": 3,
+    "name": "seeded-draft13-s20260915",
+    "attempts": [
+      {
+        "draft": 13,
+        "success": true,
+        "error": null
+      }
+    ]
+  }
+]

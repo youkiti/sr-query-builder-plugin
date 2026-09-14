@@ -2,7 +2,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { buildRunJobs, executeRerun, logName, makeSlots, parseOptions, readConfig, readLedger, slotName,
+import { buildRunJobs, executeRerun, logName, makeSlots, parseOptions, readConfig, readLedger, readSlots, slotName, slotsFile,
   type Job, type Launch, type Paths, type Slot } from './rerun';
 import { c0FixturePath } from './c0Artifact';
 import { getGitCommit } from './gitInfo';
@@ -20,7 +20,7 @@ function write(path: string, value: unknown) { mkdirSync(dirname(path), { recurs
 function frozen(c = config(), p = paths()) {
   const slots = makeSlots(c).map((slot) => ({ ...slot, name: slotName(slot, c.draftStart + slot.slot - 1) }));
   for (const slot of slots) write(c0FixturePath(p.fixtures, slot.caseId, slot.name!), {});
-  write(join(p.results, 'rerun/c0-slots.json'), slots);
+  write(slotsFile(p), slots);
   return { c, p, slots };
 }
 beforeEach(() => {
@@ -29,6 +29,46 @@ beforeEach(() => {
   jest.mocked(getGitCommit).mockReset().mockReturnValue('current');
 });
 afterEach(() => { jest.restoreAllMocks(); });
+
+test.each(['new', 'legacy', 'both'])('枠記録を復元して run を開始する: %s', async (location) => {
+  const p = paths(); const c = config();
+  const slots = makeSlots(c).map((slot) => ({ ...slot, name: slotName(slot, 14) }));
+  for (const slot of slots) write(c0FixturePath(p.fixtures, slot.caseId, slot.name!), {});
+  if (location !== 'legacy') write(slotsFile(p), slots);
+  if (location !== 'new') write(join(p.results, 'rerun/c0-slots.json'), location === 'both' ? [] : slots);
+  if (location === 'new') expect(existsSync(p.results)).toBe(false);
+  expect(readSlots(p)).toEqual(slots);
+  const start = jest.fn<ReturnType<Launch>, Parameters<Launch>>(async (job) => {
+    expect(job.blocked).toBeUndefined();
+    expect(job.c0).toContain('draft14');
+    write(job.expected, { status: 'completed' }); return 0;
+  });
+  const result = await executeRerun(c, parseOptions(['run', '--filter', 'current:']), start, p);
+  expect(result).toMatchObject({ completed: 4, failed: [] });
+  expect(start).toHaveBeenCalledTimes(4);
+});
+
+test('旧枠記録は次の保存で新パスへ移行し、秘密値をマスクする', async () => {
+  const p = paths(); const c = config(); const slots = makeSlots(c);
+  slots[0]!.pendingDraft = 14;
+  const oldPath = join(p.results, 'rerun/c0-slots.json');
+  write(oldPath, slots);
+  const old = readFileSync(oldPath, 'utf8');
+  const start: Launch = async (_job, _env, log) => {
+    log(`fake-secret\n${rejection}\n${p.root}\nC:\\private\\freeze.ts:1\n/private/freeze.ts:1\n\\\\server\\share\\freeze.ts:1`); return 1;
+  };
+  await executeRerun(c, parseOptions(['freeze', '--filter', 'criteria-only', '--limit', '1']), start, p);
+  expect(slotsFile(p)).toBe(join(p.root, 'experiments/query-optimization-bench/rerun/c0-slots.json'));
+  const raw = readFileSync(slotsFile(p), 'utf8');
+  expect(raw).not.toContain('fake-secret');
+  expect(raw).toContain('[REDACTED]');
+  expect(raw).not.toContain(JSON.stringify(p.root).slice(1, -1));
+  expect(raw).not.toContain('private');
+  expect(raw).not.toContain('server');
+  expect(raw).toContain('[PATH]');
+  expect(readSlots(p)[0]!.attempts[0]!.draft).toBe(14);
+  expect(readFileSync(oldPath, 'utf8')).toBe(old);
+});
 
 test('行列はケースごと current → legacy → legacyLive、criteria-only C0 は分割間で共有する', () => {
   const { c, p, slots } = frozen();
@@ -77,13 +117,13 @@ test('凍結失敗は次の空き番号で再試行し、各試行を永続化�
     calls++;
     if (calls === 1) { log(rejection); return 1; }
     if (calls === 2) {
-      const saved = JSON.parse(readFileSync(join(p.results, 'rerun/c0-slots.json'), 'utf8')) as Slot[];
+      const saved = JSON.parse(readFileSync(slotsFile(p), 'utf8')) as Slot[];
       expect(saved[0]!.attempts).toEqual([{ draft: 11, success: false, error: rejection }]);
     }
     write(job.expected, {}); return 0;
   });
   await executeRerun(c, parseOptions(['freeze']), start, p);
-  const saved = JSON.parse(readFileSync(join(p.results, 'rerun/c0-slots.json'), 'utf8')) as Slot[];
+  const saved = JSON.parse(readFileSync(slotsFile(p), 'utf8')) as Slot[];
   expect(saved[0]!.name).toBe('criteria-only-draft14');
   expect(saved[0]!.attempts.map((a) => a.draft)).toEqual([11, 14]);
   expect(saved.slice(1, 3).map((s) => s.name)).toEqual(['criteria-only-draft12', 'criteria-only-draft13']);
@@ -104,7 +144,7 @@ test('実測拒否の文言はチャンク境界と長い後続ログに依存�
     write(job.expected, {}); return 0;
   });
   const result = await executeRerun(c, parseOptions(['freeze', '--filter', 'criteria-only']), start, p);
-  const saved = JSON.parse(readFileSync(join(p.results, 'rerun/c0-slots.json'), 'utf8')) as Slot[];
+  const saved = JSON.parse(readFileSync(slotsFile(p), 'utf8')) as Slot[];
   expect(saved[0]!.attempts.map((a) => a.draft)).toEqual([11, 12]);
   expect(result).toMatchObject({ completed: 1, executed: 2, failed: [start.mock.calls[0]![0].id] });
 });
@@ -112,13 +152,14 @@ test('実測拒否の文言はチャンク境界と長い後続ログに依存�
 test.each([
   ['GEMINI_API_KEY が未設定です', 1],
   ['fetch failed', 1],
+  ['#1: HTTP 503\n実測中に一時的な通信障害があったため凍結しない。同じ番号で再試行できる', 1],
   ['LLM service unavailable', 1],
   ['構文エラー', 1],
   ['', 1],
   ['', 0],
 ] as const)('実測拒否以外は枠と番号を消費せず、次回だけ再試行する: %s / %s', async (message, exitCode) => {
   const p = paths(); const c = config(); const slots = makeSlots(c);
-  const slotsPath = join(p.results, 'rerun/c0-slots.json');
+  const slotsPath = slotsFile(p);
   write(slotsPath, slots);
   const start = jest.fn<ReturnType<Launch>, Parameters<Launch>>(async (_job, _env, log) => { log(message); return exitCode; });
   const options = parseOptions(['freeze']);
@@ -147,7 +188,7 @@ test.each([
 test('過去の未分類の失敗試行は保持し、新しい一時失敗だけを記録しない', async () => {
   const p = paths(); const c = config(); const slots = makeSlots(c);
   slots[0]!.attempts.push({ draft: 11, success: false, error: 'GEMINI_API_KEY が未設定です' });
-  const slotsPath = join(p.results, 'rerun/c0-slots.json');
+  const slotsPath = slotsFile(p);
   write(slotsPath, slots);
   const options = parseOptions(['freeze', '--filter', 'criteria-only']);
   const start = jest.fn<ReturnType<Launch>, Parameters<Launch>>(async () => { throw new Error('fetch failed'); });
@@ -166,7 +207,7 @@ test('再試行待ちの番号を後続枠が使わず、再開後の生成物�
   const p = paths(); const c = { ...config(), drafts: 2 };
   const slots = makeSlots(c);
   for (const slot of slots.slice(0, 2)) slot.attempts.push({ draft: 10 + slot.slot, success: false, error: rejection });
-  const slotsPath = join(p.results, 'rerun/c0-slots.json');
+  const slotsPath = slotsFile(p);
   write(slotsPath, slots);
   const start = jest.fn<ReturnType<Launch>, Parameters<Launch>>(async () => 1);
   const options = parseOptions(['freeze', '--filter', 'criteria-only']);
@@ -301,6 +342,7 @@ test('各チェックアウトの HEAD を一度だけ取得し、旧版は 2000
 test.each(['{"id":"previous"}\n{"id":', '{"id":'])('起動時に ledger の末尾を修復してから追記する: %s', async (raw) => {
   const { c, p } = frozen();
   const ledgerPath = join(p.results, 'rerun/ledger.jsonl');
+  mkdirSync(dirname(ledgerPath), { recursive: true });
   writeFileSync(ledgerPath, raw);
   const start = jest.fn(async () => 0);
   await executeRerun(c, parseOptions(['score', '--dry-run']), start, p);

@@ -33,6 +33,11 @@ export interface Options { stage: string; config: string; legacyDir?: string; fi
 export interface Paths { root: string; fixtures: string; results: string }
 export const defaultPaths: Paths = { root: resolve(BENCH, '../..'), fixtures: FIXTURES, results: RESULTS };
 export const readJson = <T>(path: string): T | null => existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) as T : null;
+export const slotsFile = (paths: Paths): string => join(paths.root, 'experiments/query-optimization-bench/rerun/c0-slots.json');
+export function readSlots(paths: Paths): Slot[] {
+  // 旧記録は読み取りだけに使い、次の保存から版管理対象へ移行する。
+  return readJson<Slot[]>(slotsFile(paths)) ?? readJson<Slot[]>(join(paths.results, 'rerun/c0-slots.json')) ?? [];
+}
 const secrets = () => Object.entries(process.env).filter(([key]) => /KEY|TOKEN|SECRET|PASSWORD/i.test(key)).map(([, value]) => value ?? '');
 export const mask = (value: string): string => redact(value, secrets());
 export function atomicJson(path: string, value: unknown): void {
@@ -40,6 +45,13 @@ export function atomicJson(path: string, value: unknown): void {
   const temp = `${path}.${process.pid}.tmp`;
   writeFileSync(temp, mask(JSON.stringify(value, null, 2)) + '\n');
   renameSync(temp, path);
+}
+function saveSlots(path: string, slots: Slot[]): void {
+  // 版管理する失敗理由から、子プロセスのログに含まれる絶対パスも除く。
+  const withoutPaths = (error: string | null) => error?.replace(/(?:[A-Za-z]:[\\/]|\\\\|(?<![\w:/])\/)[^\s"'<>]+/g, '[PATH]') ?? null;
+  atomicJson(path, slots.map((slot) => ({ ...slot,
+    attempts: slot.attempts.map((attempt) => ({ ...attempt, error: withoutPaths(attempt.error) })),
+  })));
 }
 export function readConfig(path = CONFIG): RerunConfig {
   const config = readJson<RerunConfig>(path);
@@ -176,8 +188,8 @@ export async function executeRerun(config: RerunConfig, options: Options, start:
       process.stdout.write('ledger の書きかけの末尾を取り除きました\n');
     }
   }
-  const slotsPath = join(paths.results, 'rerun/c0-slots.json');
-  const slots = makeSlots(config, readJson<Slot[]>(slotsPath) ?? []);
+  const slotsPath = slotsFile(paths);
+  const slots = makeSlots(config, readSlots(paths));
   const summary = { completed: 0, skipped: 0, failed: [] as string[], executed: 0 };
   const selected = (job: Job) => !options.filter || job.id.includes(options.filter);
   const perform = async (job: Job, skip: boolean): Promise<{ success: boolean; error: string | null; artifactFailure: boolean } | null> => {
@@ -246,13 +258,13 @@ export async function executeRerun(config: RerunConfig, options: Options, start:
           // 設定・通信・判定不能の失敗は枠を消費せず、次回の実行で同じ番号を再試行する。
           if (!result.success && !result.artifactFailure) {
             slot.pendingDraft = draft;
-            atomicJson(slotsPath, slots);
+            saveSlots(slotsPath, slots);
             break;
           }
           delete slot.pendingDraft;
           slot.attempts.push({ draft, success: result.success, error: result.error });
           if (result.success) slot.name = name;
-          atomicJson(slotsPath, slots);
+          saveSlots(slotsPath, slots);
           attemptsThisPass++;
           if (result.success) break;
         } while (attemptsThisPass < config.maxDraftAttempts && slot.attempts.length < config.maxDraftAttempts);
