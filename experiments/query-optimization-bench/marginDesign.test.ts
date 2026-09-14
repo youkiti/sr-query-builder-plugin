@@ -1,5 +1,5 @@
 /** @jest-environment node */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { config } from 'dotenv';
@@ -13,6 +13,7 @@ import { hashC0Content, type C0Artifact } from './c0Artifact';
 import { installDomParser } from './domParser';
 import { hashMarginContent, type MarginContent } from './freezeMargin';
 import * as gitInfo from './gitInfo';
+import { STAGE_NAMES, type OutsideStage } from './outsideStages';
 import {
   allocatePerBlockRetmax,
   interleaveRoundRobin,
@@ -22,6 +23,7 @@ import {
   parseMarginDesignArgs,
   planMarginDesignVariants,
   runPerBlockVariant,
+  termCaptureTablePath,
   termCountsPath,
   type MarginDesignVariantRun,
 } from './marginDesign';
@@ -308,8 +310,12 @@ interface EfetchEvent { kind: 'efetch'; ids: string[] }
 interface LlmEvent { kind: 'llm'; body: string }
 type FakeEvent = EsearchEvent | EfetchEvent | LlmEvent;
 
-/** @param options.failTermCountFor 段階 1（retmax=0 の件数取得）でこの語の margin クエリだけ 1 回失敗させる */
-function fakeNetwork(options: { failTermCountFor?: string } = {}) {
+/**
+ * @param options.failTermCountFor 段階 1（retmax=0 の件数取得）でこの語の margin クエリだけ 1 回失敗させる
+ * @param options.failCaptureFor 語ごとの捕捉表（writeTermCaptureTable）がこの語の margin クエリを
+ *   base にした gold 照合（`(<marginQuery>) AND (...)` 形の uid クエリ）を送ったときだけ 1 回失敗させる
+ */
+function fakeNetwork(options: { failTermCountFor?: string; failCaptureFor?: string } = {}) {
   const events: FakeEvent[] = [];
   const marginInfo: Record<string, { count: number; pmids: string[] }> = {
     [termA1MarginQuery]: { count: 5, pmids: ['201', '202'] },
@@ -328,6 +334,7 @@ function fakeNetwork(options: { failTermCountFor?: string } = {}) {
   ];
   let failTermA1SelectionOnce = false;
   let termCountFailurePending = options.failTermCountFor !== undefined;
+  let captureFailurePending = options.failCaptureFor !== undefined;
   const network = jest.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const url = new URL(String(input));
     const body = String(init?.body ?? '');
@@ -355,6 +362,10 @@ function fakeNetwork(options: { failTermCountFor?: string } = {}) {
       }
       if (term.includes('[uid]')) {
         const matched = goldBases.find((base) => term.startsWith(`(${base.key}) AND (`));
+        if (captureFailurePending && matched?.key === options.failCaptureFor) {
+          captureFailurePending = false;
+          return new Response(JSON.stringify({ esearchresult: { ERROR: 'simulated-term-capture-failure' } }));
+        }
         const uidSection = matched ? term.slice(`(${matched.key}) AND (`.length, -1) : term.slice(1, -1);
         const requested = [...uidSection.matchAll(/([\w-]+)\[uid\]/g)].map((m) => m[1]!);
         const allowed = matched ? matched.allowed : requested; // 日付範囲の検証は全件 in-date とする
@@ -466,23 +477,24 @@ test('main(): 段階 1〜3・保存・スキップ・失敗の再実行を一気
 
   // --report: 失敗行・sameAs 行を含めて集計できる
   const rows = marginDesignRows([full, cutoff1, cutoff50, perBlock, cutoff5Failed]);
-  expect(rows[0]).toEqual(['case', 'margin', 'variant', 'label', 'sameAs', 'keptTerms', 'marginHits', 'missedHeldOutCount',
+  expect(rows[0]).toEqual(['case', 'margin', 'seedSplit', 'variant', 'label', 'sameAs', 'keptTerms', 'marginHits', 'missedHeldOutCount',
     'presentedCount', 'missedStudies', 'fetchedCount', 'pickedCount', 'llmTokensIn', 'llmCostUsd', 'elapsedMs']);
-  const perBlockRow = rows.find((row) => row[2] === 'per-block')!;
-  expect(perBlockRow[6]).toBe('6+30');
-  const failedRow = rows.find((row) => row[2] === 'cutoff-5')!;
-  expect(failedRow[6]).toBe('失敗');
+  const perBlockRow = rows.find((row) => row[3] === 'per-block')!;
+  expect(perBlockRow[2]).toBe('s20260912');
+  expect(perBlockRow[7]).toBe('6+30');
+  const failedRow = rows.find((row) => row[3] === 'cutoff-5')!;
+  expect(failedRow[7]).toBe('失敗');
   // sameAs（cutoff-50 -> full）の行は測定していない列を =full と表示し、0 や - を出さない
-  const sameAsRow = rows.find((row) => row[2] === 'cutoff-50')!;
-  expect(sameAsRow[4]).toBe('full');
-  expect([sameAsRow[6], sameAsRow[7], sameAsRow[8], sameAsRow[10], sameAsRow[11], sameAsRow[12], sameAsRow[13]])
+  const sameAsRow = rows.find((row) => row[3] === 'cutoff-50')!;
+  expect(sameAsRow[5]).toBe('full');
+  expect([sameAsRow[7], sameAsRow[8], sameAsRow[9], sameAsRow[11], sameAsRow[12], sameAsRow[13], sameAsRow[14]])
     .toEqual(['=full', '=full', '=full', '=full', '=full', '=full', '=full']);
   // missedStudies は取得順位と深い順位を区別し、per-block はブロック ID を付記する
-  const fullRow = rows.find((row) => row[2] === 'full')!;
+  const fullRow = rows.find((row) => row[3] === 'full')!;
   const fullPresented = full.heldOutStages.find((s) => s.studyId === 'H-presented')!;
-  expect(fullRow[9]).toContain(`H-presented:presented@取得${fullPresented.retrievedRank ?? '-'}/深い${fullPresented.deepRank ?? '-'}`);
-  expect(fullRow[9]).not.toContain('(#');
-  expect(perBlockRow[9]).toContain(`H-presented:presented@取得${presented.retrievedRank ?? '-'}/深い${presented.deepRank ?? '-'} (#1)`);
+  expect(fullRow[10]).toContain(`H-presented:presented@取得${fullPresented.retrievedRank ?? '-'}/深い${fullPresented.deepRank ?? '-'}`);
+  expect(fullRow[10]).not.toContain('(#');
+  expect(perBlockRow[10]).toContain(`H-presented:presented@取得${presented.retrievedRank ?? '-'}/深い${presented.deepRank ?? '-'} (#1)`);
 
   // cutoff-5 は failed のままなので再実行される。他の完了済み案は再実行時に触られない
   // （このモックへ問い合わせが行かない = 同じコミットの完了はスキップされている）。今度は成功させる。
@@ -534,6 +546,90 @@ test('段階 1 で esearch が恒久失敗した語は jsonl に残らず main �
   expect(termCountCalls.map((e) => e.term)).toEqual([termA2MarginQuery, termB1MarginQuery]);
 });
 
+test('全案 completed で term-capture.json が無ければ、選定を一切せずに捕捉表だけを作り直す', async () => {
+  const fixture = setup();
+  const runArgs = [...args, '--thresholds', '1,5,50', '--rank-depth', '5'];
+  fakeNetwork();
+  await main(runArgs, fixture.root, fixture.results); // 通常どおり完走させる（term-capture.json も作られる）
+
+  const capturePath = termCaptureTablePath(fixture.results, caseId, marginName, 20260912);
+  expect(existsSync(capturePath)).toBe(true);
+  rmSync(capturePath); // 何らかの理由で欠落したことを模擬する
+
+  // GEMINI_API_KEY を外しても失敗しないこと（この経路は LLM を一切使わない）を合わせて確認する。
+  delete process.env.GEMINI_API_KEY;
+  const { events } = fakeNetwork();
+  await main(runArgs, fixture.root, fixture.results);
+
+  expect(existsSync(capturePath)).toBe(true);
+  // 案の選定（LLM・efetch）は一切走らない
+  expect(events.some((e) => e.kind === 'llm')).toBe(false);
+  expect(events.some((e) => e.kind === 'efetch')).toBe(false);
+  // margin の取得・件数の再取得（[uid] を含まない esearch）も一切ない。段階 1 はキャッシュ済みで、
+  // 案を実行しないので originalHitsShared の再計算もしない。gold 照合（[uid]）だけが通信する。
+  const nonUidEsearch = events.filter((e): e is EsearchEvent => e.kind === 'esearch' && !e.term.includes('[uid]'));
+  expect(nonUidEsearch).toEqual([]);
+});
+
+test('term-capture.json の作成が失敗したら run.json は完了のまま・ファイルは残らず非ゼロ終了。次回また作り直す', async () => {
+  const fixture = setup();
+  const runArgs = [...args, '--thresholds', '1,5,50', '--rank-depth', '5'];
+  fakeNetwork();
+  await main(runArgs, fixture.root, fixture.results);
+
+  const capturePath = termCaptureTablePath(fixture.results, caseId, marginName, 20260912);
+  expect(existsSync(capturePath)).toBe(true);
+  rmSync(capturePath);
+  const fullRunPath = join(marginDesignResultDir(fixture.results, caseId, marginName, 20260912, 'full'), 'run.json');
+  const fullBefore = readFileSync(fullRunPath, 'utf8');
+
+  fakeNetwork({ failCaptureFor: termA1MarginQuery });
+  await main(runArgs, fixture.root, fixture.results);
+  expect(existsSync(capturePath)).toBe(false);
+  expect(existsSync(`${capturePath}.tmp`)).toBe(false);
+  expect(process.exitCode).toBe(1);
+  process.exitCode = 0;
+  // 案の run.json は触られていない（完了のまま）
+  expect(readFileSync(fullRunPath, 'utf8')).toBe(fullBefore);
+
+  // 次の実行でまた作られる
+  fakeNetwork();
+  await main(runArgs, fixture.root, fixture.results);
+  expect(existsSync(capturePath)).toBe(true);
+});
+
+// ---------------------------------------------------------------------------
+// marginDesignRows: seedSplit（別の --seeds の run を取り違えないこと）
+// ---------------------------------------------------------------------------
+
+/** marginDesignRows のテスト専用の最小限の run。実行結果には興味がなく、識別列の挙動だけを見る。 */
+function fakeRun(overrides: Partial<MarginDesignVariantRun> & Pick<MarginDesignVariantRun, 'caseId' | 'seedSplit' | 'variant'>): MarginDesignVariantRun {
+  return {
+    status: 'completed', error: null, runId: 'r', margin: { name: marginName, sha256: 'x' }, c0: { name: 'c0', sha256: 'x' },
+    threshold: null, label: null, searchDate: '2022-03-31', model: 'fake', gitCommit: null, gitDirty: null,
+    sameAs: null, emptyMargin: false, keptTerms: [], droppedTerms: [],
+    config: { retmax: 200, candidateLimit: 200, sort: 'relevance', rankDepth: 0 },
+    originalHits: 10, marginHits: 5, marginHitsByBlock: null, marginHitsSumAllowingOverlap: null,
+    stages: { broadenedQuery: null, marginQuery: null, retrievedPmids: [], novelPmids: [], requestedPmids: [], fetchedPmids: [], pickedPmids: [] },
+    candidates: [], heldOutStages: [], missedHeldOutCount: 0,
+    stageCounts: Object.fromEntries(STAGE_NAMES.map((stage) => [stage, 0])) as Record<OutsideStage, number>,
+    apiCalls: { ncbi: 0, llm: 0 }, apiElapsedMs: { ncbi: 0, llm: 0 },
+    llmUsage: { calls: 0, tokensIn: 0, tokensOut: 0, costUsd: 0, unpricedCalls: 0, untrackedCalls: 0 },
+    elapsedMs: 1, llmLogs: [],
+    ...overrides,
+  };
+}
+
+test('marginDesignRows: 同じ case・margin で seedSplit だけ違う run は別行になり、seedSplit 順に並ぶ', () => {
+  // 投入順はわざと「既定分割 -> 名前付き分割」にし、ソートが効いていることを検査する。
+  const runDefault = fakeRun({ caseId, seedSplit: 's20260912', variant: 'full' });
+  const runNamed = fakeRun({ caseId, seedSplit: 'confirmed', variant: 'full' });
+  const rows = marginDesignRows([runDefault, runNamed]);
+  expect(rows).toHaveLength(3); // header + 2 行（同じ case・margin・variant でも別 run として混ざらない）
+  expect(rows[1]![2]).toBe('confirmed'); // 'c' < 's' なので seedSplit 順で先に来る
+  expect(rows[2]![2]).toBe('s20260912');
+});
+
 test('dry-run は margin・C0 ハッシュを照合するだけで .env・通信・書き込みなし', async () => {
   const fixture = setup();
   const network = jest.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('実通信禁止'));
@@ -542,6 +638,9 @@ test('dry-run は margin・C0 ハッシュを照合するだけで .env・通信
   expect(config).not.toHaveBeenCalled();
   expect(existsSync(fixture.results)).toBe(false);
   expect(process.stdout.write).toHaveBeenCalledWith(expect.stringContaining('full ->'));
+  // term-capture.json の出力先と要否（未作成なので「案の実行後に作成する」）も表示する
+  expect(process.stdout.write).toHaveBeenCalledWith(expect.stringContaining('term-capture ->'));
+  expect(process.stdout.write).toHaveBeenCalledWith(expect.stringContaining('案の実行後に作成する'));
 });
 
 test('前提（margin・C0 ハッシュ、検索日）の不一致は dry-run でも拒否する', async () => {

@@ -53,24 +53,24 @@ function variantOrder(variant: string): readonly [number, number] {
 function compareRuns(a: MarginDesignVariantRun, b: MarginDesignVariantRun): number {
   const [aKind, aNum] = variantOrder(a.variant);
   const [bKind, bNum] = variantOrder(b.variant);
-  return a.caseId.localeCompare(b.caseId) || a.margin.name.localeCompare(b.margin.name)
+  return a.caseId.localeCompare(b.caseId) || a.margin.name.localeCompare(b.margin.name) || a.seedSplit.localeCompare(b.seedSplit)
     || aKind - bKind || aNum - bNum || (a.label ?? '').localeCompare(b.label ?? '');
 }
 
 export function marginDesignRows(runs: readonly MarginDesignVariantRun[]): string[][] {
-  const header = ['case', 'margin', 'variant', 'label', 'sameAs', 'keptTerms', 'marginHits', 'missedHeldOutCount', 'presentedCount',
+  const header = ['case', 'margin', 'seedSplit', 'variant', 'label', 'sameAs', 'keptTerms', 'marginHits', 'missedHeldOutCount', 'presentedCount',
     'missedStudies', 'fetchedCount', 'pickedCount', 'llmTokensIn', 'llmCostUsd', 'elapsedMs'];
   const rows: string[][] = [header];
   for (const run of [...runs].sort(compareRuns)) {
     if (run.status === 'failed') {
-      rows.push([run.caseId, run.margin.name, run.variant, run.label ?? '-', run.sameAs ?? '-', String(run.keptTerms.length),
+      rows.push([run.caseId, run.margin.name, run.seedSplit, run.variant, run.label ?? '-', run.sameAs ?? '-', String(run.keptTerms.length),
         '失敗', '失敗', '失敗', `失敗: ${run.error ?? '不明'}`, '失敗', '失敗', '失敗', '失敗', String(run.elapsedMs)]);
       continue;
     }
     // sameAs の run は選定・事後集計を再実行していないため、これらの列は「未測定」であって
     // 0 件・欠測ではない。参照先の案名を =<案名> の形で出し、比較表を「提示 0 件」と誤読させない。
     const sameAsRef = run.sameAs ? `=${run.sameAs}` : null;
-    rows.push([run.caseId, run.margin.name, run.variant, run.label ?? '-', run.sameAs ?? '-', String(run.keptTerms.length),
+    rows.push([run.caseId, run.margin.name, run.seedSplit, run.variant, run.label ?? '-', run.sameAs ?? '-', String(run.keptTerms.length),
       sameAsRef ?? formatMarginHits(run),
       sameAsRef ?? (run.missedHeldOutCount === null ? '-' : String(run.missedHeldOutCount)),
       sameAsRef ?? String(run.stageCounts.presented),
@@ -90,8 +90,9 @@ export function report(resultsDir = RESULTS): void {
   const runs = findRunFiles(root).map((path) => JSON.parse(readFileSync(path, 'utf8')) as MarginDesignVariantRun);
   const rows = marginDesignRows(runs);
   writeFileSync(join(root, 'summary.csv'), renderCsv(rows));
-  const context = 'label は --label 付きの run を区別する列（無指定は -）。並び順は case/margin/variant（full → cutoff-<N> は N の数値昇順 → per-block）/label の順（文字列比較では cutoff-500 と cutoff-1000 が逆転するため数値で並べる）。'
-    + 'sameAs は既に計算した案（full または先に処理した cutoff）と拡張語集合が同一だったため、選定・事後集計を再実行せず参照した案。'
+  const context = 'seedSplit は --seeds で選んだシード分割（既定は s20260912）を区別する列。同じ case・margin でも分割が違えば held-out 集合が変わるため別の行として扱う。'
+    + 'label は --label 付きの run を区別する列（無指定は -）。並び順は case/margin/seedSplit/variant（full → cutoff-<N> は N の数値昇順 → per-block）/label の順（文字列比較では cutoff-500 と cutoff-1000 が逆転するため数値で並べる）。'
+    + 'sameAs は既に計算した案（full または先に処理した cutoff）と拡張語集合が同一だったため、選定・事後集計を再実行せず参照した案。sameAs の参照先は同じ case・margin・seedSplit・label の中の案を指す（`=full` 等の行を探すときは同じ行の case・margin・seedSplit・label が一致する行を見ること）。'
     + 'marginHits・missedHeldOutCount・presentedCount・fetchedCount・pickedCount・llmTokensIn・llmCostUsd は sameAs の run では測定していないため `=<参照先の案名>` と表示する（0 や - ではない。数値として読まず、参照先の行を見ること）。'
     + 'marginHits は per-block では「ブロック別件数」を `+` で連結した表示で、和集合の件数ではない（重複を含む）。'
     + 'missedStudies は現式で未捕捉の held-out 研究の「研究名:判定@取得<順位|->/深い<順位|->」一覧。取得順位は取得一覧（`retrievedPmids`）での順位、深い順位は rankDepth 件まで別途取得した一覧での順位で、両者は別物（取得一覧に無くても深い取得でだけ順位が付くことがある）。per-block はどのブロックで付いた順位かを `(#ブロックID)` で示す。'

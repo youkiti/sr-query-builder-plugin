@@ -396,7 +396,15 @@ async function postHocPerBlock(subMargins: readonly SubMarginInfo[], ctx: PostHo
   return { heldOutStages, stageCounts, missedHeldOutCount: ctx.heldOutStudies.length - stageCounts.captured_by_current };
 }
 
-/** 案に依存しない語ごとの捕捉表。現式で未捕捉の held-out 研究についてのみ、各語の margin クエリで捕捉を見る診断。 */
+export function termCaptureTablePath(resultsDir: string, caseId: string, marginName: string, seed: SeedSplit): string {
+  return join(resultsDir, 'margin-design', caseId, marginName, seedSplitId(seed), 'term-capture.json');
+}
+
+/**
+ * 案に依存しない語ごとの捕捉表。現式で未捕捉の held-out 研究についてのみ、各語の margin クエリで捕捉を見る診断。
+ * tmp へ書いてから rename する（run.json と同じ流儀）。捕捉表の完了判定（`existsSync(最終パス)`）は
+ * このファイルの有無だけを見るため、通信中に落ちても不完全なファイルを完了とみなさない。
+ */
 async function writeTermCaptureTable(dir: string, termCounts: Map<string, TermCountRecord>, ctx: PostHocContext, eutils: EutilsDeps): Promise<void> {
   const missedStudies = ctx.heldOutStudies.filter((study) => !study.pmids.some((pmid) => ctx.inCurrent.includes(pmid)));
   const missedPmids = [...new Set(missedStudies.flatMap((study) => study.pmids))];
@@ -409,7 +417,10 @@ async function writeTermCaptureTable(dir: string, termCounts: Map<string, TermCo
     }
   }
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'term-capture.json'), JSON.stringify(rows, null, 2) + '\n');
+  const finalPath = join(dir, 'term-capture.json');
+  const temporary = `${finalPath}.tmp`;
+  writeFileSync(temporary, JSON.stringify(rows, null, 2) + '\n');
+  renameSync(temporary, finalPath);
 }
 
 // ---------------------------------------------------------------------------
@@ -498,18 +509,24 @@ export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES,
     }
   }
 
+  const termCapturePath = termCaptureTablePath(resultsDir, caseId, marginName, seed);
+  const termCaptureExists = existsSync(termCapturePath);
+
   if (dryRun) {
     const lines = variantNames.map((variant) => `${variant} -> ${join(dirFor(variant), 'run.json')}`);
-    process.stdout.write(`${caseId}: dry-run OK (margin・C0 ハッシュ照合済み、通信・書き込みなし)\n${lines.join('\n')}\n`);
+    const captureLine = `term-capture -> ${termCapturePath}（${termCaptureExists ? '作成済み' : pending.length === 0 ? '未作成。捕捉表だけを作成する' : '未作成。案の実行後に作成する'}）`;
+    process.stdout.write(`${caseId}: dry-run OK (margin・C0 ハッシュ照合済み、通信・書き込みなし)\n${lines.join('\n')}\n${captureLine}\n`);
     return;
   }
   for (const variant of skipped) process.stdout.write(`${variant}: 同じコミットの完了結果をスキップ -> ${join(dirFor(variant), 'run.json')}\n`);
-  if (pending.length === 0) return;
+  // 全案が完了済みでも、語ごとの捕捉表（案に依存しない共通の診断）がまだ無ければ作り直す。
+  // その場合でも案の選定（LLM・efetch・margin の取得）は一切行わない。
+  if (pending.length === 0 && termCaptureExists) return;
+  if (pending.length === 0) process.stdout.write(`${caseId}: 案はすべて完了済みだが term-capture.json が無いため、捕捉表だけを作成します -> ${termCapturePath}\n`);
 
   config();
   installDomParser();
   const secrets = [process.env.GEMINI_API_KEY ?? '', process.env.NCBI_API_KEY ?? ''];
-  if (!process.env.GEMINI_API_KEY) throw new Error('GEMINI_API_KEY が未設定です');
 
   // 案ごとの選定・margin 捕捉だけを apiCalls/progress に計上する（term-counts・事後集計の共有前処理は
   // どの案の通信でもないため計上しない）。activeSink が null の間の呼び出しは静かに数えないだけで、
@@ -525,108 +542,114 @@ export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES,
   const eutils: EutilsDeps = { fetch: observed, apiKey: process.env.NCBI_API_KEY, strictCounts: true,
     sleep: observeBackoff((ms) => activeSink?.progress({ backoff: ms })) };
   eutils.rateLimiter = observeRateLimiter(eutils, (limiter) => activeSink?.progress({ limiter }));
-  const provider = new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY, fetch: observed });
 
-  const originalQuery = expandFormula(c0.formula).trim();
   const termCounts = await countTerms(c0, margin, termCountsPath(resultsDir, caseId, marginName), eutils);
-  const lookup = termCountLookup(termCounts);
-  const plans = planMarginDesignVariants(margin.additions, lookup, thresholds);
   const ctx = await buildPostHocContext(fixture, seeds, c0, eutils);
-  const originalHitsShared = (await esearch(originalQuery, eutils, { retmax: 0 })).count;
-  const existingPmids = new Set(seeds.selections.map((selection) => selection.pmid));
-  const protocol = { researchQuestion: c0.protocol.researchQuestion, inclusionCriteria: c0.protocol.inclusionCriteria,
-    exclusionCriteria: c0.protocol.exclusionCriteria };
 
   let anyFailed = false;
-  for (const variant of pending) {
-    const plan = plans.get(variant)!;
-    const dir = dirFor(variant);
-    const outPath = join(dir, 'run.json');
-    const runId = randomUUID();
-    const attemptDir = join(dir, runId);
-    mkdirSync(join(attemptDir, 'llm'), { recursive: true });
-    const serialize = (value: unknown) => redact(JSON.stringify(value, null, 2), secrets) + '\n';
-    const progress = (event: unknown) => appendFileSync(join(attemptDir, 'progress.jsonl'),
-      redact(JSON.stringify({ at: new Date().toISOString(), event }), secrets) + '\n');
-    const usage = createLlmUsageTracker();
-    const result: MarginDesignVariantRun = { status: 'failed', error: null, runId, caseId,
-      margin: { name: marginName, sha256: margin.sha256 }, c0: margin.c0, seedSplit: splitId, variant, threshold: plan.threshold,
-      label: options.label ?? null, searchDate: fixture.searchDate, model: provider.model, gitCommit, gitDirty: isGitDirty(),
-      sameAs: plan.sameAs, emptyMargin: plan.emptyMargin, keptTerms: plan.keptTerms, droppedTerms: plan.droppedTerms,
-      config: { retmax: OUTSIDE_DEFAULT_RETMAX, candidateLimit: OUTSIDE_DEFAULT_SKILL_CANDIDATE_LIMIT, sort: OUTSIDE_DEFAULT_SORT, rankDepth },
-      originalHits: null, marginHits: null, marginHitsByBlock: null, marginHitsSumAllowingOverlap: null,
-      stages: null, candidates: [], heldOutStages: [], missedHeldOutCount: null, stageCounts: emptyStageCounts(),
-      apiCalls: { ncbi: 0, llm: 0 }, apiElapsedMs: { ncbi: 0, llm: 0 }, llmUsage: usage.usage, elapsedMs: 0, llmLogs: [] };
-    const sink: Sink = { apiCalls: result.apiCalls, apiElapsedMs: result.apiElapsedMs, progress };
-    const start = Date.now();
-    try {
-      progress({ process: { pid: process.pid, variant, gitCommit, gitDirty: result.gitDirty, runId } });
-      if (plan.sameAs !== null) {
-        result.originalHits = originalHitsShared;
-        result.status = 'completed';
-      } else if (plan.emptyMargin) {
-        result.originalHits = originalHitsShared;
-        result.marginHits = 0;
-        const stages: OutsideSearchStages = { broadenedQuery: null, marginQuery: null, retrievedPmids: [], novelPmids: [], requestedPmids: [], fetchedPmids: [], pickedPmids: [] };
-        result.stages = stages;
-        const post = classifyWithoutMargin(ctx, stages);
-        result.heldOutStages = post.heldOutStages;
-        result.stageCounts = post.stageCounts;
-        result.missedHeldOutCount = post.missedHeldOutCount;
-        result.status = 'completed';
-      } else if (plan.kind === 'per-block') {
-        activeSink = sink;
-        const write = (path: string, value: unknown) => writeFileSync(join(attemptDir, path), serialize(value));
-        const llmFactory = loggedFactory(provider, write, result.llmLogs, usage.record);
-        result.originalHits = originalHitsShared;
-        const perBlock = await runPerBlockVariant(c0, plan.blocksWithTerms!, existingPmids, protocol, originalQuery,
-          { retmax: OUTSIDE_DEFAULT_RETMAX, skillCandidateLimit: OUTSIDE_DEFAULT_SKILL_CANDIDATE_LIMIT, sort: OUTSIDE_DEFAULT_SORT },
-          { eutils, llmFactory, progress });
-        result.stages = perBlock.stages;
-        result.candidates = perBlock.candidates;
-        result.marginHitsByBlock = perBlock.subMargins.map(({ blockId, marginQuery, count }) => ({ blockId, marginQuery, count }));
-        result.marginHitsSumAllowingOverlap = perBlock.subMargins.reduce((sum, sub) => sum + sub.count, 0);
-        const post = await postHocPerBlock(perBlock.subMargins, ctx, rankDepth, OUTSIDE_DEFAULT_SORT, eutils, perBlock.stages);
-        result.heldOutStages = post.heldOutStages;
-        result.stageCounts = post.stageCounts;
-        result.missedHeldOutCount = post.missedHeldOutCount;
-        result.status = 'completed';
-      } else {
-        activeSink = sink;
-        const write = (path: string, value: unknown) => writeFileSync(join(attemptDir, path), serialize(value));
-        const llmFactory = loggedFactory(provider, write, result.llmLogs, usage.record);
-        const outside = await searchOutsideCandidates({ formula: c0.formula, researchQuestion: protocol.researchQuestion,
-          inclusionCriteria: protocol.inclusionCriteria, exclusionCriteria: protocol.exclusionCriteria, existingPmids,
-          additions: plan.additions!, retmax: OUTSIDE_DEFAULT_RETMAX, skillCandidateLimit: OUTSIDE_DEFAULT_SKILL_CANDIDATE_LIMIT,
-          sort: OUTSIDE_DEFAULT_SORT, retrieval: 'head', eutils, llmFactory, onProgress: (step) => progress({ step }) });
-        if (variant === 'full' && (!outside.stages || outside.stages.marginQuery !== margin.marginQuery)) {
-          throw new Error('凍結した margin クエリと段階測定のクエリが一致しません');
-        }
-        result.originalHits = outside.originalHits;
-        result.marginHits = outside.marginHits;
-        result.stages = outside.stages ?? null;
-        result.candidates = outside.candidates.map(({ pmid, reason }) => ({ pmid, reason }));
-        if (outside.stages?.marginQuery) {
-          const post = await postHocSingleMargin(outside.stages.marginQuery, ctx, rankDepth, OUTSIDE_DEFAULT_SORT, eutils, outside.stages);
+  if (pending.length > 0) {
+    // GEMINI_API_KEY・GeminiProvider は案の選定（pick_boundary 等の LLM 呼び出し）でのみ必要。
+    // 全案スキップで捕捉表だけを作り直す経路は LLM を一切使わないため、ここでだけ要求する。
+    if (!process.env.GEMINI_API_KEY) throw new Error('GEMINI_API_KEY が未設定です');
+    const provider = new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY, fetch: observed });
+    const originalQuery = expandFormula(c0.formula).trim();
+    const lookup = termCountLookup(termCounts);
+    const plans = planMarginDesignVariants(margin.additions, lookup, thresholds);
+    const originalHitsShared = (await esearch(originalQuery, eutils, { retmax: 0 })).count;
+    const existingPmids = new Set(seeds.selections.map((selection) => selection.pmid));
+    const protocol = { researchQuestion: c0.protocol.researchQuestion, inclusionCriteria: c0.protocol.inclusionCriteria,
+      exclusionCriteria: c0.protocol.exclusionCriteria };
+
+    for (const variant of pending) {
+      const plan = plans.get(variant)!;
+      const dir = dirFor(variant);
+      const outPath = join(dir, 'run.json');
+      const runId = randomUUID();
+      const attemptDir = join(dir, runId);
+      mkdirSync(join(attemptDir, 'llm'), { recursive: true });
+      const serialize = (value: unknown) => redact(JSON.stringify(value, null, 2), secrets) + '\n';
+      const progress = (event: unknown) => appendFileSync(join(attemptDir, 'progress.jsonl'),
+        redact(JSON.stringify({ at: new Date().toISOString(), event }), secrets) + '\n');
+      const usage = createLlmUsageTracker();
+      const result: MarginDesignVariantRun = { status: 'failed', error: null, runId, caseId,
+        margin: { name: marginName, sha256: margin.sha256 }, c0: margin.c0, seedSplit: splitId, variant, threshold: plan.threshold,
+        label: options.label ?? null, searchDate: fixture.searchDate, model: provider.model, gitCommit, gitDirty: isGitDirty(),
+        sameAs: plan.sameAs, emptyMargin: plan.emptyMargin, keptTerms: plan.keptTerms, droppedTerms: plan.droppedTerms,
+        config: { retmax: OUTSIDE_DEFAULT_RETMAX, candidateLimit: OUTSIDE_DEFAULT_SKILL_CANDIDATE_LIMIT, sort: OUTSIDE_DEFAULT_SORT, rankDepth },
+        originalHits: null, marginHits: null, marginHitsByBlock: null, marginHitsSumAllowingOverlap: null,
+        stages: null, candidates: [], heldOutStages: [], missedHeldOutCount: null, stageCounts: emptyStageCounts(),
+        apiCalls: { ncbi: 0, llm: 0 }, apiElapsedMs: { ncbi: 0, llm: 0 }, llmUsage: usage.usage, elapsedMs: 0, llmLogs: [] };
+      const sink: Sink = { apiCalls: result.apiCalls, apiElapsedMs: result.apiElapsedMs, progress };
+      const start = Date.now();
+      try {
+        progress({ process: { pid: process.pid, variant, gitCommit, gitDirty: result.gitDirty, runId } });
+        if (plan.sameAs !== null) {
+          result.originalHits = originalHitsShared;
+          result.status = 'completed';
+        } else if (plan.emptyMargin) {
+          result.originalHits = originalHitsShared;
+          result.marginHits = 0;
+          const stages: OutsideSearchStages = { broadenedQuery: null, marginQuery: null, retrievedPmids: [], novelPmids: [], requestedPmids: [], fetchedPmids: [], pickedPmids: [] };
+          result.stages = stages;
+          const post = classifyWithoutMargin(ctx, stages);
           result.heldOutStages = post.heldOutStages;
           result.stageCounts = post.stageCounts;
           result.missedHeldOutCount = post.missedHeldOutCount;
+          result.status = 'completed';
+        } else if (plan.kind === 'per-block') {
+          activeSink = sink;
+          const write = (path: string, value: unknown) => writeFileSync(join(attemptDir, path), serialize(value));
+          const llmFactory = loggedFactory(provider, write, result.llmLogs, usage.record);
+          result.originalHits = originalHitsShared;
+          const perBlock = await runPerBlockVariant(c0, plan.blocksWithTerms!, existingPmids, protocol, originalQuery,
+            { retmax: OUTSIDE_DEFAULT_RETMAX, skillCandidateLimit: OUTSIDE_DEFAULT_SKILL_CANDIDATE_LIMIT, sort: OUTSIDE_DEFAULT_SORT },
+            { eutils, llmFactory, progress });
+          result.stages = perBlock.stages;
+          result.candidates = perBlock.candidates;
+          result.marginHitsByBlock = perBlock.subMargins.map(({ blockId, marginQuery, count }) => ({ blockId, marginQuery, count }));
+          result.marginHitsSumAllowingOverlap = perBlock.subMargins.reduce((sum, sub) => sum + sub.count, 0);
+          const post = await postHocPerBlock(perBlock.subMargins, ctx, rankDepth, OUTSIDE_DEFAULT_SORT, eutils, perBlock.stages);
+          result.heldOutStages = post.heldOutStages;
+          result.stageCounts = post.stageCounts;
+          result.missedHeldOutCount = post.missedHeldOutCount;
+          result.status = 'completed';
+        } else {
+          activeSink = sink;
+          const write = (path: string, value: unknown) => writeFileSync(join(attemptDir, path), serialize(value));
+          const llmFactory = loggedFactory(provider, write, result.llmLogs, usage.record);
+          const outside = await searchOutsideCandidates({ formula: c0.formula, researchQuestion: protocol.researchQuestion,
+            inclusionCriteria: protocol.inclusionCriteria, exclusionCriteria: protocol.exclusionCriteria, existingPmids,
+            additions: plan.additions!, retmax: OUTSIDE_DEFAULT_RETMAX, skillCandidateLimit: OUTSIDE_DEFAULT_SKILL_CANDIDATE_LIMIT,
+            sort: OUTSIDE_DEFAULT_SORT, retrieval: 'head', eutils, llmFactory, onProgress: (step) => progress({ step }) });
+          if (variant === 'full' && (!outside.stages || outside.stages.marginQuery !== margin.marginQuery)) {
+            throw new Error('凍結した margin クエリと段階測定のクエリが一致しません');
+          }
+          result.originalHits = outside.originalHits;
+          result.marginHits = outside.marginHits;
+          result.stages = outside.stages ?? null;
+          result.candidates = outside.candidates.map(({ pmid, reason }) => ({ pmid, reason }));
+          if (outside.stages?.marginQuery) {
+            const post = await postHocSingleMargin(outside.stages.marginQuery, ctx, rankDepth, OUTSIDE_DEFAULT_SORT, eutils, outside.stages);
+            result.heldOutStages = post.heldOutStages;
+            result.stageCounts = post.stageCounts;
+            result.missedHeldOutCount = post.missedHeldOutCount;
+          }
+          result.status = 'completed';
         }
-        result.status = 'completed';
+      } catch (err) {
+        result.status = 'failed';
+        result.error = redact(err instanceof Error ? err.message : String(err), secrets);
+        anyFailed = true;
+      } finally {
+        activeSink = null;
+        result.elapsedMs = Date.now() - start;
+        progress({ status: result.status, error: result.error });
+        const temporary = join(attemptDir, 'run.json.tmp');
+        writeFileSync(temporary, serialize(result));
+        renameSync(temporary, outPath);
       }
-    } catch (err) {
-      result.status = 'failed';
-      result.error = redact(err instanceof Error ? err.message : String(err), secrets);
-      anyFailed = true;
-    } finally {
-      activeSink = null;
-      result.elapsedMs = Date.now() - start;
-      progress({ status: result.status, error: result.error });
-      const temporary = join(attemptDir, 'run.json.tmp');
-      writeFileSync(temporary, serialize(result));
-      renameSync(temporary, outPath);
+      printVariantSummary(variant, JSON.parse(serialize(result)) as MarginDesignVariantRun);
     }
-    printVariantSummary(variant, JSON.parse(serialize(result)) as MarginDesignVariantRun);
   }
 
   try {
