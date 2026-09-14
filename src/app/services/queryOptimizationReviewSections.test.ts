@@ -24,6 +24,8 @@ test('4 区分が確認済みなら未確認事項は空で、既知シードの
   expect(review.unconfirmed).toEqual([]);
   expect(review.sections[0].lines).toContain('既知シード 1/1 件捕捉');
   expect(review.sections[2].lines[0]).toContain('外側 150 件');
+  expect(review.sections[2].maybeCount).toBe(0);
+  for (const index of [0, 1, 3]) expect(review.sections[index]).not.toHaveProperty('maybeCount');
 });
 
 test.each(['zero', 'unmeasured', 'missed', 'captured'] as const)('既知シード %s の判定', (kind) => {
@@ -48,6 +50,7 @@ test.each(['missing', 'running', 'skipped', 'error'] as const)('外側の確認 
   if (status === 'missing') delete run.outsideCheck;
   else { run.outsideCheck!.status = status; run.outsideCheck!.reason = status === 'running' ? null : '取得できません'; }
   expect(section(run, 'outside_check').state).toBe('unconfirmed');
+  expect(section(run, 'outside_check')).not.toHaveProperty('maybeCount');
   if (status === 'error' || status === 'skipped') expect(section(run, 'outside_check').lines).toContain('取得できません');
 });
 
@@ -65,8 +68,27 @@ test.each(['outside', 'lost'] as const)('%s の候補は保存済みだけを判
   }
   for (const decision of ['exclude', 'maybe'] as const) {
     run.outsideCheck!.decisions['2'] = { decision, status: 'saved', error: null };
-    expect(section(run, key).state).toBe('confirmed');
+    const current = section(run, key);
+    expect(current.state).toBe(decision === 'maybe' ? 'decided' : 'confirmed');
+    expect(current.maybeCount).toBe(decision === 'maybe' ? 1 : 0);
+    expect(current.lines.includes('maybe で保存した候補 1 件は未確認として残ります')).toBe(decision === 'maybe');
+    expect(buildOptimizationReviewSections(run).unconfirmed.some((line) => line.startsWith(`${current.label}:`))).toBe(decision === 'maybe');
+    if (source === 'lost') expect(current.lines).toContain('残り 149 件は未確認');
   }
+  run.outsideCheck!.candidates.push({ ...candidate(source), pmid: '3' });
+  run.outsideCheck!.decisions['3'] = { decision: 'include', status: 'saved', error: null };
+  const mixed = section(run, key);
+  expect(mixed.state).toBe('unmet');
+  expect(mixed.maybeCount).toBe(1);
+  expect(mixed.lines[mixed.lines.length - 2]).toBe('maybe で保存した候補 1 件は未確認として残ります');
+  expect(mixed.lines[mixed.lines.length - 1]).toContain('保護して再調整してください');
+  run.outsideCheck!.decisions['3']!.status = 'saving';
+  expect(section(run, key).state).toBe('needs_decision');
+  expect(section(run, key).maybeCount).toBe(1);
+  run.outsideCheck!.decisions['2']!.status = 'error';
+  expect(section(run, key).state).toBe('needs_decision');
+  expect(section(run, key).maybeCount).toBe(0);
+  expect(section(run, key).lines.join('')).not.toContain('maybe で保存した候補');
   if (source === 'lost') {
     expect(section(run, key).lines).toContain('保留候補 candidate-1: 失う集合 150 件のうち書誌を確認できたのは先頭 1 件');
     expect(section(run, key).lines).toContain('残り 149 件は未確認');
@@ -74,7 +96,11 @@ test.each(['outside', 'lost'] as const)('%s の候補は保存済みだけを判
     run.outsideCheck!.candidates = [];
     run.trials[0]!.impact!.error = '書誌取得失敗';
     expect(section(run, key).state).toBe('unconfirmed');
+    expect(section(run, key)).not.toHaveProperty('maybeCount');
     expect(section(run, key).lines).toContain('書誌取得失敗');
+    delete run.trials[0]!.impact;
+    expect(section(run, key).state).toBe('unconfirmed');
+    expect(section(run, key).lines.join('')).toContain('失う集合 未測定');
   }
 });
 
@@ -91,6 +117,7 @@ test('結果なしは他の状態が残っていても全区分を未確認に�
   run.result = null;
   const review = buildOptimizationReviewSections(run);
   expect(review.sections.every((item) => item.state === 'unconfirmed')).toBe(true);
+  for (const item of review.sections) expect(item).not.toHaveProperty('maybeCount');
   expect(review.unconfirmed).toHaveLength(4);
   expect(JSON.stringify(review).match(/既知シードの捕捉は、/g)).toHaveLength(1);
 });

@@ -32,7 +32,8 @@ test.each(['matching', 'run', 'project', 'incomplete', 'missing', 'ownership'] a
   }, deps);
   const before = data.queryOptimizationCheckpoint;
   const write = jest.spyOn(deps, 'write');
-  const sections: OptimizationReviewSection[] = [{ key: 'outside_check', label: '外側の確認', state: 'needs_decision', lines: ['未判定'] }];
+  const sections: OptimizationReviewSection[] = [{ key: 'outside_check', label: '外側の確認', state: 'decided', maybeCount: 1,
+    lines: ['maybe で保存した候補 1 件は未確認として残ります'] }];
   await updateQueryOptimizationReviewSections(kind === 'project' ? 'other' : 'p', kind === 'run' ? 'other' : 'run', sections,
     deps, () => kind !== 'ownership');
   if (kind === 'matching') {
@@ -43,6 +44,17 @@ test.each(['matching', 'run', 'project', 'incomplete', 'missing', 'ownership'] a
     expect(write).not.toHaveBeenCalled();
     expect(data.queryOptimizationCheckpoint).toBe(before);
   }
+});
+
+test('終了記録の区分にある maybeCount を保存して復元する', async () => {
+  const { deps, options } = setup();
+  const sections: OptimizationReviewSection[] = [{ key: 'outside_check', label: '外側の確認', state: 'decided', maybeCount: 1,
+    lines: ['maybe で保存した候補 1 件は未確認として残ります'] }];
+  await saveQueryOptimizationCheckpoint({ ...options,
+    completion: { status: 'achieved', stopReason: 'conditions_met', unmetReasons: [], reviewSections: sections } }, deps);
+  expect((await getQueryOptimizationCheckpoint('p', deps))?.completion?.reviewSections).toEqual(sections);
+  sections[0]!.maybeCount = 2;
+  expect((await getQueryOptimizationCheckpoint('p', deps))?.completion?.reviewSections?.[0]?.maybeCount).toBe(1);
 });
 
 test('保留と差集合件数だけを射影し、書誌は保存せず旧形式も復元する', async () => {
