@@ -9,6 +9,8 @@ export const CASES = [
   { id: 'r1-mindfulness-smoking', pmcid: 'PMC9009295', searchDate: '2021-04-15', role: 'development' },
   { id: 'r2-pdr-prognostic', pmcid: 'PMC9943918', searchDate: '2022-05-27', role: 'development' },
   { id: 'r3-vascular-bleeding', pmcid: 'PMC9936832', searchDate: '2022-03-31', role: 'development' },
+  // eval:select-cases で事前基準を満たした唯一のレビュー（fixtures/_selection/confirmation-cases.json）。
+  { id: 'c1-replacing-salt-with', pmcid: 'PMC9363242', searchDate: '2021-08-18', role: 'confirmation' },
 ] as const satisfies readonly { id: string; pmcid: string; searchDate: string; role: CaseRole }[];
 
 export const PROFILES = [

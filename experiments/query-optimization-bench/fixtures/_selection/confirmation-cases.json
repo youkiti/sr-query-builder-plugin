@@ -1,0 +1,17 @@
+{
+  "seed": 20260915,
+  "count": 3,
+  "eligible": [
+    "PMC9363242"
+  ],
+  "selected": [
+    {
+      "pmcid": "PMC9363242",
+      "cochraneId": "CD015207",
+      "title": "Replacing salt with low‐sodium salt substitutes (LSSS) for cardiovascular health in adults, children and pregnant women",
+      "searchDate": "2021-08-18",
+      "suggestedId": "c1-replacing-salt-with"
+    }
+  ],
+  "screeningSha256": "ded01b44545a9cf18ff5860867b65f2b241b083970c64f6f4886e7f41857f310"
+}

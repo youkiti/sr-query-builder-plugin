@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "caseId": "r3-vascular-bleeding",
+  "variant": "criteria-only",
+  "draftIndex": 12,
+  "seedSplit": null,
+  "targetHits": 2000,
+  "model": "gemini-3.5-flash",
+  "createdAt": "2026-09-14T13:54:21.484Z",
+  "gitCommit": "76f6b600063a86b9d4ca96098f0760ba224d06fe",
+  "gitDirty": true,
+  "protocol": {
+    "frameworkType": "pico",
+    "researchQuestion": "大血管手術または血管処置を受ける成人患者において、抗線溶薬や止血薬・止血材の使用は、プラセボや通常ケアと比較して、術後の輸血や出血を減少させるか。",
+    "inclusionCriteria": "18歳以上の成人\n主要な開腹血管手術または血管内治療（大動脈瘤修復術、大動脈解離手術、末梢動脈バイパス術、大腿切断術など）を受ける患者\n介入として抗線溶薬（トラネキサム酸、EACA、アプロチニン）、デスモプレシン、PCC、rFVII、FXIII、フィブリノゲン製剤、または局所止血材（フィブリン糊、トロンビン製剤など）を使用\nランダム化比較試験（RCT）およびクラスターRCT",
+    "exclusionCriteria": "純粋に実験室的なアウトカムのみを報告する研究\n心臓外科手術（上行大動脈・大動脈基部の手術、CABGを伴う手術）\n待機的な血管内治療（elective endovascular procedures）\n出血や輸血のリスクが極めて低い手術（頸動脈手術、透析用シャント作成、下肢静脈瘤手術、上肢・指切断）\n脳神経外科手術（頭頸部動脈瘤・解離）\n遺伝性凝固障害（フォン・ヴィレブランド病、血友病、低フィブリノゲン血症など）のある患者",
+    "studyDesign": "RCT",
+    "blocks": [
+      {
+        "blockLabel": "Vascular Surgery",
+        "description": "大動脈瘤修復術、大動脈解離手術、末梢動脈バイパス術、大腿切断術などの大血管手術や血管処置を受ける患者を特定するための概念。"
+      },
+      {
+        "blockLabel": "Hemostatic Agents",
+        "description": "トラネキサム酸、アプロチニン、デスモプレシン、プロトロンビン複合体、フィブリノゲン製剤、局所止血材などの抗線溶薬や止血薬・止血材を特定するための概念。"
+      }
+    ],
+    "combinationExpression": "#1 AND #2",
+    "sourceType": "markdown",
+    "sourceFilename": "protocol.md",
+    "rawTextRef": null,
+    "rawTextPreview": "# Drugs to reduce bleeding and transfusion in major open vascular or endovascular surgery: a systematic review and network meta‐analysis\n\n## Objectives\nTo assess the effectiveness and safety of anti‐fibrinolytic and haemostatic drugs and agents in reducing bleeding and the need for blood transfusion in people undergoing major vascular surgery or vascular procedures with a risk of moderate or severe (> 500 mL) blood loss.\n\n## types_of_studies\nWe prespecified our methods for conducting this review",
+    "rawTextInline": "# Drugs to reduce bleeding and transfusion in major open vascular or endovascular surgery: a systematic review and network meta‐analysis\n\n## Objectives\nTo assess the effectiveness and safety of anti‐fibrinolytic and haemostatic drugs and agents in reducing bleeding and the need for blood transfusion in people undergoing major vascular surgery or vascular procedures with a risk of moderate or severe (> 500 mL) blood loss.\n\n## types_of_studies\nWe prespecified our methods for conducting this review in the review protocol (Beverly 2020). We included randomised controlled trials (RCTs) and cluster‐RCTs if the analyses accounted for clustering, or if we were able to adequately adjust for clustering (McKenzie 2016). We included all studies regardless of their language or publication status. We excluded studies with purely experimental laboratory outcomes (for example blood tests for inflammatory markers).\n\n## types_of_participants\nWe included adults (18 years or over) undergoing the following emergency, urgent and elective procedures. Open surgical repair (OSR) of aneurysm of the:abdominal aorta (AAA);thoracic aorta (TAA);thoraco‐abdominal aorta (TAAA);iliac artery;femoral artery; orpopliteal artery.OSR or endovascular repair of dissection of the:abdominal aorta;thoracic aorta; orthoraco‐abdominal aorta.Open bypass surgery for peripheral arterial disease of the:aortic artery;iliac artery;femoral artery; orpopliteal artery.Major lower limb amputation for vascular disease:below knee;above knee; orhindquarter. We included adults (18 years or over) undergoing the following emergency or urgent procedures. Endovascular aneurysm repair (EVAR) of the:abdominal aorta (AAA);thoracic aorta (TAA);thoraco‐abdominal aorta (TAAA);iliac artery;femoral artery; orpopliteal artery.Endovascular stenting for peripheral arterial disease of the:aortic artery;iliac artery;femoral artery; orpopliteal artery We included participants undergoing surgery with or without aortic cross clamping and with or without use of hypothermia. We included participants undergoing open, modifications of open, and minimally invasive, e.g. laparoscopic, surgical approaches. We excluded procedures typically performed by or in conjunction with cardiac surgeons, such as those on the ascending aorta and aortic root, or those using coronary artery bypass grafting. These are the topic of a separate ongoing Cochrane Review entitled Drugs to reduce bleeding and transfusion in adults undergoing cardiac surgery; a systematic review and network meta‐analysis (Beverly 2019). We excluded studies involving elective endovascular procedures. We excluded procedures associated with minimal bleeding and transfusion, such as carotid procedures, arterio‐venous fistulae formation for dialysis, varicose vein surgery and upper limb or digit amputations. We also excluded procedures typically performed by neurosurgeons, such as repair of aneurysms or dissection of arteries in the head or neck. We excluded people with known inherited coagulation disorders, such as von Willebrand factor deficiency, haemophilia or hypofibrinogenaemia. This is because the clotting mechanisms that the drugs promote or interact with may be genetically absent, making response atypical. For trials consisting of mixed populations of participants (e.g. including children, or including procedures other than those specified), we only used data from participants 18 years or over undergoing the specified procedures, without clotting disorders. If the subgroup data required were not provided, we excluded the trial if less than 80% of participants were eligible to be included.\n\n## types_of_interventions\nWe included RCTs of the following interventions, compared to usual care, placebo, or each other. Tranexamic acid (TXA)ε‐aminocaproic acid (EACA)AprotininDesmopressinProthrombin complex concentrate (PCC)Recombinant factor VII (rFVII)Factor XIII (FXIII)Fibrinogen concentrateOther topical agents, categorised as:fibrin‐based agents;thrombin‐based agents;synthetic sealants;passive biomaterials; andcombination agents. We included RCTs that compared one or more of the interventions listed above. We included studies using a combination of the above drugs. We did not exclude trials on the basis of the route, dose, timing, or frequency of drug administration. The comparison groups were as defined by the study, which could be a control group using placebo, standard care, or one of the included drugs, if a second additional drug was being investigated.\n\n## types_of_outcomes\nWe were primarily interested in postsurgical outcomes, and especially the need for blood transfusion. We did not include intraoperative outcomes, such as time to haemostasis, because these outcomes are prone to measurement bias and are of limited clinical relevance or interest to health services. Our primary outcomes were: Red cell transfusions (units per participant*) at up to 30 days post surgeryAll‐cause mortality at up to 30 days; and between 31 and 90 days *If the red cell transfusion outcome was reported in mL, we converted that into units, according to any local mean unit volume data given in the study, or as per the Guidelines for the Blood Transfusion Services in the UK mean stated volume per unit of red cells of 280 ± 60 mLs (JPAC 2013). Our secondary outcomes were as follows. Risk of receiving any allogeneic blood product at up to 30 days post surgeryComposite: packed red cells (PRC), fresh frozen plasma (FFP), platelets (PLTs)Components: PRC, FFP, PLTsRisk of reoperation or repeat procedure for bleeding within 7 daysRisk of a thrombotic/thromboembolic eventComposite: myocardial Infarction (MI), cerebrovascular attack (CVA), deep vein thrombosis (DVT), pulmonary embolus (PE) at up to 30 days and between 31 and 90 daysComponents: MI at up to 30 days, CVA at up to 30 days, DVT at up to 90 days, PE at up to 90 daysRisk of a serious adverse event (SAE) at up to 30 days postsurgeryLength of hospital stay (days) We commented on any cost data, if presented, in a narrative form (Ryan 2016). Cost information was provided as useful additional information, but was not intended to be a formal economic evaluation.\n"
+  },
+  "blocks": {
+    "blocks": [
+      {
+        "blockLabel": "Vascular Surgery",
+        "description": "大動脈瘤修復術、大動脈解離手術、末梢動脈バイパス術、大腿切断術などの大血管手術や血管処置を受ける患者を特定するための概念。",
+        "aiGenerated": true,
+        "note": ""
+      },
+      {
+        "blockLabel": "Hemostatic Agents",
+        "description": "トラネキサム酸、アプロチニン、デスモプレシン、プロトロンビン複合体、フィブリノゲン製剤、局所止血材などの抗線溶薬や止血薬・止血材を特定するための概念。",
+        "aiGenerated": true,
+        "note": ""
+      }
+    ],
+    "combinationExpression": "#1 AND #2"
+  },
+  "formula": {
+    "blocks": [
+      {
+        "id": "1",
+        "expression": "(\"Vascular Surgical Procedures\"[Mesh] OR \"Endovascular Procedures\"[Mesh] OR \"Blood Vessel Prosthesis Implantation\"[Mesh] OR \"Aortic Aneurysm\"[Mesh] OR \"Aorta\"[Mesh] OR \"vascular surgery\"[tiab] OR \"vascular procedure*\"[tiab] OR \"vascular operation*\"[tiab] OR \"aortic repair\"[tiab] OR \"aortic reconstruction\"[tiab] OR \"aortic dissection\"[tiab] OR \"aortic aneurysm*\"[tiab] OR \"peripheral bypass\"[tiab] OR \"arterial bypass\"[tiab] OR \"femoropopliteal bypass\"[tiab] OR \"femoral bypass\"[tiab] OR \"endovascular repair\"[tiab] OR \"EVAR\"[tiab] OR \"TEVAR\"[tiab] OR \"limb amputation*\"[tiab] OR \"leg amputation*\"[tiab] OR \"above-knee amputation*\"[tiab] OR \"thigh amputation*\"[tiab])",
+        "isCombination": false
+      },
+      {
+        "id": "2",
+        "expression": "(\"Antifibrinolytic Agents\"[Mesh] OR \"Hemostatics\"[Mesh] OR \"Tranexamic Acid\"[Mesh] OR \"Aprotinin\"[Mesh] OR \"Deamino Arginine Vasopressin\"[Mesh] OR \"Fibrinogen\"[Mesh] OR \"Fibrin Tissue Adhesive\"[Mesh] OR antifibrinolytic*[tiab] OR anti-fibrinolytic*[tiab] OR hemostatic*[tiab] OR haemostatic*[tiab] OR hemostasis[tiab] OR haemostasis[tiab] OR \"tranexamic acid\"[tiab] OR TXA[tiab] OR aprotinin[tiab] OR desmopressin[tiab] OR DDAVP[tiab] OR \"prothrombin complex*\"[tiab] OR PCC[tiab] OR PCCs[tiab] OR fibrinogen[tiab] OR \"fibrin glue*\"[tiab] OR \"fibrin sealant*\"[tiab] OR \"gelatin sponge*\"[tiab])",
+        "isCombination": false
+      },
+      {
+        "id": "RCTfilter",
+        "expression": "(randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh]))",
+        "isCombination": false
+      },
+      {
+        "id": "3",
+        "expression": "#1 AND #2 AND #RCTfilter",
+        "isCombination": true
+      }
+    ],
+    "combinationExpression": "#1 AND #2 AND #RCTfilter"
+  },
+  "formulaMd": "## PubMed/MEDLINE\n\n```\n#1 (\"Vascular Surgical Procedures\"[Mesh] OR \"Endovascular Procedures\"[Mesh] OR \"Blood Vessel Prosthesis Implantation\"[Mesh] OR \"Aortic Aneurysm\"[Mesh] OR \"Aorta\"[Mesh] OR \"vascular surgery\"[tiab] OR \"vascular procedure*\"[tiab] OR \"vascular operation*\"[tiab] OR \"aortic repair\"[tiab] OR \"aortic reconstruction\"[tiab] OR \"aortic dissection\"[tiab] OR \"aortic aneurysm*\"[tiab] OR \"peripheral bypass\"[tiab] OR \"arterial bypass\"[tiab] OR \"femoropopliteal bypass\"[tiab] OR \"femoral bypass\"[tiab] OR \"endovascular repair\"[tiab] OR \"EVAR\"[tiab] OR \"TEVAR\"[tiab] OR \"limb amputation*\"[tiab] OR \"leg amputation*\"[tiab] OR \"above-knee amputation*\"[tiab] OR \"thigh amputation*\"[tiab])\n#2 (\"Antifibrinolytic Agents\"[Mesh] OR \"Hemostatics\"[Mesh] OR \"Tranexamic Acid\"[Mesh] OR \"Aprotinin\"[Mesh] OR \"Deamino Arginine Vasopressin\"[Mesh] OR \"Fibrinogen\"[Mesh] OR \"Fibrin Tissue Adhesive\"[Mesh] OR antifibrinolytic*[tiab] OR anti-fibrinolytic*[tiab] OR hemostatic*[tiab] OR haemostatic*[tiab] OR hemostasis[tiab] OR haemostasis[tiab] OR \"tranexamic acid\"[tiab] OR TXA[tiab] OR aprotinin[tiab] OR desmopressin[tiab] OR DDAVP[tiab] OR \"prothrombin complex*\"[tiab] OR PCC[tiab] OR PCCs[tiab] OR fibrinogen[tiab] OR \"fibrin glue*\"[tiab] OR \"fibrin sealant*\"[tiab] OR \"gelatin sponge*\"[tiab])\n#RCTfilter (randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh]))\n#3 #1 AND #2 AND #RCTfilter\n```\n",
+  "seedContext": null,
+  "blockApproval": "auto",
+  "sha256": "97212aee893e0bc031a700ae1f6c97ddc670f498d7df0ca68eb4aea28c5b0a1e"
+}

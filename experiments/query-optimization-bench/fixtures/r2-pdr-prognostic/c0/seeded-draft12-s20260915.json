@@ -1,0 +1,357 @@
+{
+  "schemaVersion": 1,
+  "caseId": "r2-pdr-prognostic",
+  "variant": "seeded",
+  "draftIndex": 12,
+  "seedSplit": "s20260915",
+  "targetHits": 2000,
+  "model": "gemini-3.5-flash",
+  "createdAt": "2026-09-14T13:50:02.076Z",
+  "gitCommit": "76f6b600063a86b9d4ca96098f0760ba224d06fe",
+  "gitDirty": true,
+  "protocol": {
+    "frameworkType": "peco",
+    "researchQuestion": "糖尿病網膜症患者において、増殖糖尿病網膜症（PDR）への発症または進行を予測する予後因子は何か。",
+    "inclusionCriteria": "18歳以上の糖尿病網膜症（NPDRまたはHRC-PDR未満のPDR）患者\n前向きまたは後ろ向きコホート研究、症例対照研究、縦断的レジストリデータ\nPDRの発症または進行に関する予後因子を評価している研究",
+    "exclusionCriteria": "過去に糖尿病網膜症の治療歴がある患者\nRCT、横断研究、症例報告、社説、レター\n臨床現場で実用的でない侵襲的処置（房水・硝子体採取など）を伴う予後因子の評価",
+    "studyDesign": "observational",
+    "blocks": [
+      {
+        "blockLabel": "Diabetic Retinopathy",
+        "description": "研究の対象となる糖尿病網膜症（非増殖性または軽度の増殖性）の患者集団を特定するための概念。"
+      },
+      {
+        "blockLabel": "Proliferative Diabetic Retinopathy",
+        "description": "アウトカムである増殖糖尿病網膜症（PDR）およびその重症化（HRC-PDR）を特定するための概念。"
+      },
+      {
+        "blockLabel": "Prognosis",
+        "description": "予後因子、予測、リスク因子、または疾患の進行（progression）に関連する研究を絞り込むための概念。"
+      }
+    ],
+    "combinationExpression": "#1 AND #2 AND #3",
+    "sourceType": "markdown",
+    "sourceFilename": "protocol.md",
+    "rawTextRef": null,
+    "rawTextPreview": "# Prognostic factors for the development and progression of proliferative diabetic retinopathy in people with diabetic retinopathy\n\n## Objectives\nTo assess prognostic factors for predicting the occurrence of PDR in individuals with diabetic retinopathy. To assess prognostic risk factors for predicting the progression of PDR from less than HRC‐PDR to HRC‐PDR.\n\n## types_of_studies\nEligible study designs included prospective or retrospective cohort and case‐control longitudinal studies including pa",
+    "rawTextInline": "# Prognostic factors for the development and progression of proliferative diabetic retinopathy in people with diabetic retinopathy\n\n## Objectives\nTo assess prognostic factors for predicting the occurrence of PDR in individuals with diabetic retinopathy. To assess prognostic risk factors for predicting the progression of PDR from less than HRC‐PDR to HRC‐PDR.\n\n## types_of_studies\nEligible study designs included prospective or retrospective cohort and case‐control longitudinal studies including participants who have not had previous treatment for DR. Although we initially planned to include randomised controlled trials (RCTs) evaluating therapeutic interventions to prevent progression of DR where there was a control, untreated arm, ultimately we decided not to include these (see Differences between protocol and review). We also included studies based on longitudinal registry data. It was a mandatory requirement for inclusion in the review that studies had to evaluate prognostic factors specifically for the development and progression of PDR, as opposed to generalised progression of DR. Studies investigating general microvascular complications of diabetes but including a subset of data related to factors involved in the development of PDR were eligible for inclusion if specific information on this group (PDR) was given. We excluded case reports, as they would have introduced selection bias, and editorials and letters to editors not containing primary data. We did not include cross‐sectional studies, as this type of study design is less appropriate for the evaluation of prognostic factors for the development or progression of disease.\n\n## types_of_participants\nThe target population consisted of adults (≥ 18 years of age) of any gender with NPDR or PDR with less than HRC‐PDR, diagnosed as per standard clinical practice. Studies including participants of all ethnicities, geographical locations, and socioeconomic status were eligible for inclusion. Any appropriate studies including a subset of relevant participants were considered as potentially eligible if data from this subset were given separately.\n\n## types_of_interventions\nThis review considered and included prognostic factor studies only. Specific prognostic factors of interest included, but were not restricted to: routinely collected patient demographics and information, such as age, gender, ethnicity, socioeconomic status, and smoking habits;frequently obtained standard clinical data, such as comorbidities (presence/absence of cardiovascular disease, cerebrovascular disease, nephropathy and specifically chronic kidney failure (defined as estimated GFR of < 60 mL/min/1.73 m2), peripheral neuropathy and specifically foot ulcers, amputation), BMI, neck/waist circumference, glycated haemoglobin, blood pressure, low‐density lipoprotein, high‐density lipoprotein, triglycerides; andfunctional and structural retinal biomarkers in the prognostic context of the development and progression of PDR. We excluded studies evaluating prognostic factors involving invasive procedures that cannot be practically undertaken in a clinical setting (such as aqueous/vitreous sampling) and are thus unlikely to be translatable to routine clinical practice. We expected that prognostic factors would generally have been measured at the time participants entered the studies, and indeed after diagnosis of DR or PDR. If measures of prognostic factors were available at other time points, and these coincided in more than one study, we planned to consider investigating them at these other time points.\n\n## types_of_outcomes\nThe development of PDR was determined by the presence of NVD or NVE, as diagnosed based on fundus examination, fundus photography, or fundus fluorescein angiography. We considered participants requiring laser treatment for PDR specifically to have progressed to the outcome of PDR. Progression from less than HRC‐PDR to HRC‐PDR. HRC‐PDR was defined according to the ETDRS as: i) NVD 0.5 disc area plus vitreous haemorrhage or pre‐retinal haemorrhage; ii) vitreous haemorrhage or pre‐retinal haemorrhage obscuring more than one disc area (Diabetic Retinopathy Study Research Group 1991). These features could have been determined by clinical examination or by the grading of ophthalmic images, both fundus photography and fundus fluorescein angiograms. Participants requiring laser treatment for HRC‐PDR specifically were considered as having progressed to the outcome of HRC‐PDR. The time horizon for the evaluation of health outcomes in this review was three years (± two years), eight years (± two years), or lifelong, if available. If not, we accepted and presented other time points.\n"
+  },
+  "blocks": {
+    "blocks": [
+      {
+        "blockLabel": "Diabetic Retinopathy",
+        "description": "研究の対象となる糖尿病網膜症（非増殖性または軽度の増殖性）の患者集団を特定するための概念。",
+        "aiGenerated": true,
+        "note": ""
+      },
+      {
+        "blockLabel": "Proliferative Diabetic Retinopathy",
+        "description": "アウトカムである増殖糖尿病網膜症（PDR）およびその重症化（HRC-PDR）を特定するための概念。",
+        "aiGenerated": true,
+        "note": ""
+      },
+      {
+        "blockLabel": "Prognosis",
+        "description": "予後因子、予測、リスク因子、または疾患の進行（progression）に関連する研究を絞り込むための概念。",
+        "aiGenerated": true,
+        "note": ""
+      }
+    ],
+    "combinationExpression": "#1 AND #2 AND #3"
+  },
+  "formula": {
+    "blocks": [
+      {
+        "id": "1",
+        "expression": "(\"Diabetic Retinopathy\"[Mesh] OR \"Macular Edema\"[Mesh] OR \"Retinal Neovascularization\"[Mesh] OR \"diabetic retinopath*\"[tiab] OR \"diabetic macular edema\"[tiab] OR \"diabetic macular oedema\"[tiab] OR \"diabetic maculopath*\"[tiab] OR \"NPDR\"[tiab] OR \"PDR\"[tiab] OR \"DME\"[tiab])",
+        "isCombination": false
+      },
+      {
+        "id": "2",
+        "expression": "(\"Diabetic Retinopathy\"[Mesh] OR \"Retinal Neovascularization\"[Mesh] OR \"Vitreous Hemorrhage\"[Mesh] OR \"proliferative diabetic retinopathy\"[tiab] OR \"proliferative diabetic retinopathies\"[tiab] OR \"proliferative retinopathy\"[tiab] OR \"proliferative retinopathies\"[tiab] OR \"PDR\"[tiab] OR \"proliferative DR\"[tiab] OR \"high-risk proliferative\"[tiab] OR \"HRC-PDR\"[tiab] OR \"high risk PDR\"[tiab])",
+        "isCombination": false
+      },
+      {
+        "id": "3",
+        "expression": "(\"Disease Progression\"[Mesh] OR \"Risk Factors\"[Mesh] OR \"Prognosis\"[Mesh] OR \"Time Factors\"[Mesh] OR predict*[tiab] OR predictor*[tiab] OR prognos*[tiab] OR risk*[tiab] OR progress*[tiab] OR develop*[tiab] OR associat*[tiab] OR \"course\"[tiab] OR \"new-onset\"[tiab] OR \"time to progression\"[tiab])",
+        "isCombination": false
+      },
+      {
+        "id": "4",
+        "expression": "#1 AND #2 AND #3",
+        "isCombination": true
+      }
+    ],
+    "combinationExpression": "#1 AND #2 AND #3"
+  },
+  "formulaMd": "## PubMed/MEDLINE\n\n```\n#1 (\"Diabetic Retinopathy\"[Mesh] OR \"Macular Edema\"[Mesh] OR \"Retinal Neovascularization\"[Mesh] OR \"diabetic retinopath*\"[tiab] OR \"diabetic macular edema\"[tiab] OR \"diabetic macular oedema\"[tiab] OR \"diabetic maculopath*\"[tiab] OR \"NPDR\"[tiab] OR \"PDR\"[tiab] OR \"DME\"[tiab])\n#2 (\"Diabetic Retinopathy\"[Mesh] OR \"Retinal Neovascularization\"[Mesh] OR \"Vitreous Hemorrhage\"[Mesh] OR \"proliferative diabetic retinopathy\"[tiab] OR \"proliferative diabetic retinopathies\"[tiab] OR \"proliferative retinopathy\"[tiab] OR \"proliferative retinopathies\"[tiab] OR \"PDR\"[tiab] OR \"proliferative DR\"[tiab] OR \"high-risk proliferative\"[tiab] OR \"HRC-PDR\"[tiab] OR \"high risk PDR\"[tiab])\n#3 (\"Disease Progression\"[Mesh] OR \"Risk Factors\"[Mesh] OR \"Prognosis\"[Mesh] OR \"Time Factors\"[Mesh] OR predict*[tiab] OR predictor*[tiab] OR prognos*[tiab] OR risk*[tiab] OR progress*[tiab] OR develop*[tiab] OR associat*[tiab] OR \"course\"[tiab] OR \"new-onset\"[tiab] OR \"time to progression\"[tiab])\n#4 #1 AND #2 AND #3\n```\n",
+  "seedContext": {
+    "titles": [
+      "Predicting development of proliferative diabetic retinopathy.",
+      "Association of Abnormal Renal Profiles and Proliferative Diabetic Retinopathy and Diabetic Macular Edema in an Asian Population With Type 2 Diabetes.",
+      "The United Kingdom Diabetic Retinopathy Electronic Medical Record Users Group: Report 3: Baseline Retinopathy and Clinical Features Predict Progression of Diabetic Retinopathy."
+    ],
+    "samples": [
+      {
+        "title": "Predicting development of proliferative diabetic retinopathy.",
+        "abstract": "OBJECTIVE: Identifying individuals most at risk for diabetic retinopathy progression and intervening early can limit vision loss and reduce the costs associated with managing more advanced disease. The purpose of this study was to identify factors associated with progression from nonproliferative diabetic retinopathy (NPDR) to proliferative diabetic retinopathy (PDR).\n\nRESEARCH DESIGN AND METHODS: This was a retrospective cohort analysis using a claims database of all eye care recipients age ≥ 30 years enrolled in a large managed-care network from 2001 to 2009. Individuals with newly diagnosed NPDR were followed longitudinally. Multivariable Cox regression analyses identified factors associated with progression to PDR. Three- and five-year probabilities of retinopathy progression were determined.\n\nRESULTS: Among the 4,617 enrollees with incident NPDR, 307 (6.6%) developed PDR. After adjustment for confounders, every 1-point increase in HbA1c was associated with a 14% (adjusted hazard ratio 1.14 [95% CI 1.07-1.21]) increased hazard of developing PDR. Those with nonhealing ulcers had a 54% (1.54 [1.15-2.07]) increased hazard of progressing to PDR, and enrollees with nephropathy had a marginally significant increased hazard of progressing to PDR (1.29 [0.99-1.67]) relative to those without these conditions. The 5-year probability of progression for low-risk individuals with NPDR was 5% (range 2-8) and for high-risk patients was 38% (14-55).\n\nCONCLUSIONS: Along with glycemic control, nonophthalmologic manifestations of diabetes mellitus (e.g., nephropathy and nonhealing ulcers) are associated with an increased risk of diabetic retinopathy progression. Our retinopathy progression risk score can help clinicians stratify patients who are most at risk for disease progression."
+      },
+      {
+        "title": "Association of Abnormal Renal Profiles and Proliferative Diabetic Retinopathy and Diabetic Macular Edema in an Asian Population With Type 2 Diabetes.",
+        "abstract": "IMPORTANCE: The comorbidity of chronic kidney disease and diabetic retinopathy (DR) is well known. However, to our knowledge, no cohort study has demonstrated the effect of chronic kidney disease on the development or progression of DR.\n\nOBJECTIVE: To investigate the association of chronic kidney disease with the development of DR and diabetic macular edema (DME) in type 2 diabetes.\n\nDESIGN, SETTING, AND PARTICIPANTS: This 8-year prospective cohort study that was conducted in 2 medical centers in Taiwan included 2135 patients with type 2 diabetes.\n\nEXPOSURES: The baseline and mean follow-up renal profiles including serum creatinine level, estimated glomerular filtration rate (eGFR), and urinary albumin/creatinine ratio (ACR).\n\nMAIN OUTCOMES AND MEASURES: Diabetic retinopathy and DME were detected with nonmydriatic fundus photography. Cox regression analyses was used to evaluate the hazard ratios (HRs) for the renal profiles of new-onset DR, proliferative DR, and DME.\n\nRESULTS: The mean (SD) age of the study participants was 63.4 (11.9) years and 1025 (48%) were women. A higher serum creatinine level (HR of 2.358 for an increase of 1 mg/dL [to convert to micromoles per liter, multiply by 76.25]; 95% CI, 1.901-2.924; P < .001), an estimated glomerular filtration rate of less than 60 mL/min/1.73m2 (40-60: HR, 2.235; 95% CI, 1.351-4.035; P = .002; 30-45: HR, 2.625; 95% CI, 1.436-4.798; P = .002; <30: HR, 5.488; 95% CI, 2.739-10.993; P < .001), and a urinary albumin to creatinine ratio (ACR) of more than 30 mg/g (31-300: HR, 3.202; 95% CI, 2.029-5.053; P < .001; >300: HR, 6.652; 95% CI, 3.922-11.285; P < .001) at baseline were all associated with the development of proliferative DR. A baseline urinary ACR of more than 30 mg/g (31-300: HR, 1.563; 95% CI, 1.078-2.267; P = .02; >300: HR, 2.707; 95% CI, 1.640-4.470; -2.707; P < 0.001) was associated with the development of DME. After adjusting the baseline values, the mean follow-up renal profiles, including a higher serum creatinine level (HR, 2.369 per mg/dL; 95% CI, 1.704-3.293; P < .001), an estimated glomerular filtration rate of less than 30 mL/min/1.73m2 (HR, 4.215; 95% CI, 1.265-14.039; P = .02), and a urinary ACR of more than 30 mg/g (31-300: HR, 2.344; 95% CI, 1.200-4.503; P = .01; >300: HR, 4.193; 95% CI, 1.638-10.735; P = .003) were still correlated with new-onset PDR during the follow-up periods.\n\nCONCLUSIONS AND RELEVANCE: Abnormal renal profiles at baseline, including a high serum creatinine level, low estimated glomerular filtration rate, and high urinary ACR, were associated with the development of PDR in patients with type 2 diabetes. A high baseline urinary ACR was associated with DME. Abnormal mean follow-up renal profiles were still correlated with new-onset PDR after adjusting for baseline values. Aggressive treatment for chronic kidney disease may have a role in preventing the deterioration of DR."
+      },
+      {
+        "title": "The United Kingdom Diabetic Retinopathy Electronic Medical Record Users Group: Report 3: Baseline Retinopathy and Clinical Features Predict Progression of Diabetic Retinopathy.",
+        "abstract": "PURPOSE: To determine the time and risk factors for developing proliferative diabetic retinopathy (PDR) and vitreous hemorrhage (VH).\n\nDESIGN: Multicenter, national cohort study.\n\nMETHODS: Anonymized data of 50 254 patient eyes with diabetes mellitus at 19 UK hospital eye services were extracted at the initial and follow-up visits between 2007 and 2014. Time to progression of PDR and VH were calculated with Cox regression after stratifying by baseline diabetic retinopathy (DR) severity and adjusting for age, sex, race, and starting visual acuity.\n\nRESULTS: Progression to PDR in 5 years differed by baseline DR: no DR (2.2%), mild (13.0%), moderate (27.2%), severe nonproliferative diabetic retinopathy (NPDR) (45.5%). Similarly, 5-year progression to VH varied by baseline DR: no DR (1.1%), mild (2.9%), moderate (7.3%), severe NPDR (9.8%). Compared with no DR, the patient eyes that presented with mild, moderate, and severe NPDR were 6.71, 14.80, and 28.19 times more likely to develop PDR, respectively. In comparison to no DR, the eyes with mild, moderate, and severe NPDR were 2.56, 5.60, and 7.29 times more likely to develop VH, respectively. In severe NPDR, the eyes with intraretinal microvascular abnormalities (IRMA) had a significantly increased hazard ratio (HR) of developing PDR (HR 1.77, 95% confidence interval [CI] 1.25-2.49, P = .0013) compared with those with venous beading, whereas those with 4-quadrant dot-blot hemorrhages (4Q DBH) had 3.84 higher HR of developing VH (95% CI 1.39-10.62, P = .0095).\n\nCONCLUSIONS: Baseline severities and features of initial DR are prognostic for PDR development. IRMA increases risk of PDR whereas 4Q DBH increases risk of VH."
+      }
+    ],
+    "meshSummary": {
+      "seedCount": 3,
+      "concepts": [
+        {
+          "descriptor": "Diabetic Retinopathy",
+          "count": 3,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "diagnosis",
+              "count": 2
+            },
+            {
+              "name": "epidemiology",
+              "count": 2
+            },
+            {
+              "name": "etiology",
+              "count": 1
+            },
+            {
+              "name": "physiopathology",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Disease Progression",
+          "count": 2,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Risk Factors",
+          "count": 2,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Time Factors",
+          "count": 2,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Cohort Studies",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Databases, Factual",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Diabetes Mellitus, Type 2",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "complications",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Electronic Health Records",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "statistics & numerical data",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Follow-Up Studies",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Glomerular Filtration Rate",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "physiology",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Incidence",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Macular Edema",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "diagnosis",
+              "count": 1
+            },
+            {
+              "name": "epidemiology",
+              "count": 1
+            },
+            {
+              "name": "etiology",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Multivariate Analysis",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Proportional Hazards Models",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Prospective Studies",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Renal Insufficiency, Chronic",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "complications",
+              "count": 1
+            },
+            {
+              "name": "physiopathology",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Retinal Neovascularization",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "diagnosis",
+              "count": 1
+            },
+            {
+              "name": "epidemiology",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Retrospective Studies",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": []
+        },
+        {
+          "descriptor": "Taiwan",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "epidemiology",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "United Kingdom",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "epidemiology",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Visual Acuity",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "physiology",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "descriptor": "Vitreous Hemorrhage",
+          "count": 1,
+          "majorCount": 0,
+          "qualifiers": [
+            {
+              "name": "diagnosis",
+              "count": 1
+            },
+            {
+              "name": "epidemiology",
+              "count": 1
+            }
+          ]
+        }
+      ],
+      "checkTags": [
+        {
+          "descriptor": "Female",
+          "count": 3
+        },
+        {
+          "descriptor": "Humans",
+          "count": 3
+        },
+        {
+          "descriptor": "Male",
+          "count": 3
+        },
+        {
+          "descriptor": "Middle Aged",
+          "count": 3
+        },
+        {
+          "descriptor": "Aged",
+          "count": 2
+        }
+      ]
+    }
+  },
+  "blockApproval": "auto",
+  "sha256": "79dbe954e1aaa4d68b68f3e561223335a97ea498206bd2889720caeb2c771f20"
+}

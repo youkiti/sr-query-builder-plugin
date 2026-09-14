@@ -87,7 +87,8 @@ test('S3 は半数ちょうどでは満たさず、中央値の同値を勝ち�
   const m = matrix(ids.slice(0, 2));
   for (const e of m.entries.filter((entry) => entry.job.caseId === ids[1] && entry.job.arm === 'current')) e.run!.conditions.C1 = condition([]);
   expect(build(m).judgments.S3).toContain('満たさない（1/2');
-  const three = matrix(ids);
+  // CASES の件数に依存させず、3 ケースちょうどの過半数判定を固定する。
+  const three = matrix(ids.slice(0, 3));
   for (const e of three.entries.filter((entry) => entry.job.caseId === ids[1] && entry.job.arm === 'current')) e.run!.conditions.C1 = condition([]);
   expect(build(three).judgments.S3).toContain('満たす（2/3');
   for (const e of m.entries.filter((entry) => entry.job.caseId === ids[1] && entry.job.arm === 'current')) e.run = null;

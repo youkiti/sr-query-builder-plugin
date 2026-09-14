@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "caseId": "c1-replacing-salt-with",
+  "variant": "criteria-only",
+  "draftIndex": 12,
+  "seedSplit": null,
+  "targetHits": 2000,
+  "model": "gemini-3.5-flash",
+  "createdAt": "2026-09-14T14:07:41.740Z",
+  "gitCommit": "76f6b600063a86b9d4ca96098f0760ba224d06fe",
+  "gitDirty": true,
+  "protocol": {
+    "frameworkType": "pico",
+    "researchQuestion": "成人、妊婦、および小児におけるナトリウム摂取量削減のための減塩塩代替物（LSSS）による食塩の置き換えが、心血管健康に及ぼす影響と安全性を評価する。",
+    "inclusionCriteria": "一般人口（成人、妊婦、小児を含む）\n高血圧、心血管疾患、糖尿病、腎機能障害などのリスク因子を持つ者、およびカリウム排泄を阻害する薬剤の服用者も含む\n減塩塩代替物（LSSS）の使用（個別、世帯、地域レベル、任意のタイプ・期間）\n通常の食塩（NaCl）の使用、または減塩のための積極的な介入なしとの比較\n個別ランダム化比較試験（RCT）、クラスターランダム化比較試験（cluster-RCT）、前向きコホート研究",
+    "exclusionCriteria": "第1期のデータが利用できないクロスオーバーRCT\n介入・対照クラスターが2つ未満のクラスターRCT\nLSSSの効果を分離できない多成分介入（生活習慣改善や禁煙など、LSSS以外の要素が主目的であるもの）\n感覚的・官能的アウトカム（味や嗜好など）のみを測定した研究",
+    "studyDesign": "RCT / observational",
+    "blocks": [
+      {
+        "blockLabel": "Salt substitutes",
+        "description": "減塩塩代替物（LSSS）、カリウム代替塩、ナトリウム代替物など、通常の食塩の代わりとして用いられる介入に関する概念。"
+      },
+      {
+        "blockLabel": "Salt and Sodium",
+        "description": "食塩、ナトリウム、塩分摂取量、減塩など、代替の対象となる塩分やその管理に関する概念。"
+      }
+    ],
+    "combinationExpression": "#1 AND #2",
+    "sourceType": "markdown",
+    "sourceFilename": "protocol.md",
+    "rawTextRef": null,
+    "rawTextPreview": "# Replacing salt with low‐sodium salt substitutes (LSSS) for cardiovascular health in adults, children and pregnant women\n\n## Objectives\nTo assess the effects and safety of replacing salt with LSSS to reduce sodium intake on cardiovascular health in adults, pregnant women and children.\n\n## types_of_studies\nThe Populations, Intervention, Comparison, and Outcomes (PICO) were agreed by the WHO NUGAG Subgroup on Diet and Health, who ranked the outcomes and also agreed on subgroups and study designs ",
+    "rawTextInline": "# Replacing salt with low‐sodium salt substitutes (LSSS) for cardiovascular health in adults, children and pregnant women\n\n## Objectives\nTo assess the effects and safety of replacing salt with LSSS to reduce sodium intake on cardiovascular health in adults, pregnant women and children.\n\n## types_of_studies\nThe Populations, Intervention, Comparison, and Outcomes (PICO) were agreed by the WHO NUGAG Subgroup on Diet and Health, who ranked the outcomes and also agreed on subgroups and study designs to be included. As per these agreements and our prospective registration on the international prospective register of systematic reviews (PROSPERO 2020 CRD42020180162; available at https://www.crd.york.ac.uk/prospero/display_record.php?RecordID=180162), we included individually randomised controlled trials (RCTs) and cluster‐randomised controlled trials (cluster‐RCTs) with true randomisation methods, regardless of the unit of allocation. We also planned to include prospective analytical cohort studies, where LSSS intake/exposure was assessed at baseline and related to any of the prespecified outcomes at a later time point using empirical data. We excluded RCTs with a cross‐over trial design if data for the first phase per group were unavailable, due to the possible period and carry‐over effects that would arise with the eligible dietary interventions/exposures and outcomes not being easily reversible, as required for a valid cross‐over design (Younge 2015). We additionally excluded cluster‐RCTs with fewer than two intervention and two control clusters.\n\n## types_of_participants\nWe included studies in the general population, from any setting in any country, including participants with the following condition(s) and/or risk factors: hypertension, cardiovascular disease (CVD), diabetes mellitus, renal impairment and those taking medications that impair potassium excretion. In accordance with the WHO NUGAG PICO conceptualisations and agreements, the following three comparisons were planned if data allowed: LSSS versus regular salt or no active intervention in adults (aged 18 years and older)LSSS versus regular salt or no active intervention in children aged 2 to < 18 yearsLSSS versus regular salt or no active intervention in pregnant women\n\n## types_of_interventions\nWe included studies that assessed the health effects associated with the use of LSSS at an individual, household or community level. LSSS interventions/exposures of any type or duration were included, provided they aimed to replace the dietary intake of any amount of sodium with another mineral or compound. Studies investigating either discretionary (i.e. salt on table or added during cooking) or non‐discretionary use of LSSS (i.e. included during food manufacturing), or both, were included. Eligible comparators/controls included the use of regular salt (NaCl) or no active intervention to reduce salt intake. Studies where the control group received only basic information on sodium reduction at baseline, were included. Studies with multi‐component interventions were included if effects of LSSS could be isolated from the multifactorial design. We excluded studies with multi‐component interventions if the additional intervention components were not aimed primarily at promoting LSSS use by participants or communities, but were instead focussed more broadly on reducing sodium intake (e.g. changing lifestyle and dietary behaviour of which LSSS use is only one component) or aimed at improving health in general (e.g. counselling for exercise or smoking cessation), such that LSSS effects could not be isolated.\n\n## types_of_outcomes\nWe did not exclude studies on the basis of outcomes measured. However, we did exclude studies measuring only sensory or organoleptic outcomes (e.g. taste of or preference for LSSS). Table 3, Table 4 and Table 5 detail the prespecified primary outcomes for each comparison, with outcome ranking by the WHO NUGAG Subgroup on Diet and Health indicated as follows: criticalc, importanti and not important ni. The following primary outcomes were regarded as safety outcomes related to the intake of LSSS with potassium: change in blood potassium, hyperkalaemia and hypokalaemia. Outcome ranking by WHO NUGAG ‐ Subgroup on Diet and Health: criticalc, importanti and not importantni * Outcomes measured at longest follow‐up ** Additional outcomes added by WHO NUGAG during the guideline development process; measured using 24‐h urine samples only (spot samples excluded) Abbreviations: BMI: body mass index DBP: diastolic blood pressure GFR: glomerular filtration rate NUGAG: Nutrition Guidance Expert Advisory Group SBP: systolic blood pressure uACR: urine albumin‐to‐creatinine ratio Outcome ranking by WHO NUGAG ‐ Subgroup on Diet and Health: criticalc, importanti and not importantni * Outcomes measured at longest follow‐up ** Additional outcomes added by WHO NUGAG during the guideline development process; measured using 24‐h urine samples only (spot samples excluded) Abbreviations: DBP: diastolic blood pressure GFR: glomerular filtration rate IUGR: intra‐uterine growth restriction NUGAG: Nutrition Guidance Expert Advisory Group SBP: systolic blood pressure SD: standard deviation SGA: small‐for‐gestational age uACR: urine albumin‐to‐creatinine ratio Outcome ranking by WHO NUGAG ‐ Subgroup on Diet and Health: criticalc, importanti and not importantni * Outcomes measured at longest follow‐up ** Additional outcomes added by WHO NUGAG during the guideline development process; measured using 24‐h urine samples only (spot samples excluded) Abbreviations: ALP: alkaline phosphatase BMI: body mass index BP: blood pressure DBP: diastolic blood pressure GFR: glomerular filtration rate HAZ: height‐for‐age z‐score LAZ: length‐for‐age z‐score NUGAG: Nutrition Guidance Expert Advisory Group SBP: systolic blood pressure uACR: urine albumin‐to‐creatinine ratio WAZ: weight‐for‐age z‐score WHZ: weight‐for‐height z‐score Table 3, Table 4 and Table 5 detail the prespecified secondary outcomes for each comparison, with outcome ranking by the WHO NUGAG Subgroup on Diet and Health indicated as follows: criticalc, importanti and not important ni. The following secondary outcomes were regarded as safety outcomes related to the intake of LSSS with potassium: adverse events, renal function and hyponatraemia.\n"
+  },
+  "blocks": {
+    "blocks": [
+      {
+        "blockLabel": "Salt substitutes",
+        "description": "減塩塩代替物（LSSS）、カリウム代替塩、ナトリウム代替物など、通常の食塩の代わりとして用いられる介入に関する概念。",
+        "aiGenerated": true,
+        "note": ""
+      },
+      {
+        "blockLabel": "Salt and Sodium",
+        "description": "食塩、ナトリウム、塩分摂取量、減塩など、代替の対象となる塩分やその管理に関する概念。",
+        "aiGenerated": true,
+        "note": ""
+      }
+    ],
+    "combinationExpression": "#1 AND #2"
+  },
+  "formula": {
+    "blocks": [
+      {
+        "id": "1",
+        "expression": "(\"Sodium Chloride, Dietary\"[Mesh] OR \"Potassium, Dietary\"[Mesh] OR \"salt substitute*\"[tiab] OR \"salt substitution*\"[tiab] OR \"low sodium salt*\"[tiab] OR \"reduced sodium salt*\"[tiab] OR \"potassium enriched salt*\"[tiab] OR \"potassium salt*\"[tiab] OR \"sodium substitute*\"[tiab])",
+        "isCombination": false
+      },
+      {
+        "id": "2",
+        "expression": "(\"Sodium, Dietary\"[Mesh] OR \"Sodium Chloride, Dietary\"[Mesh] OR \"Diet, Sodium-Restricted\"[Mesh] OR \"dietary sodium\"[tiab] OR \"dietary salt\"[tiab] OR \"sodium intake\"[tiab] OR \"salt intake\"[tiab] OR \"sodium restriction\"[tiab] OR \"salt restriction\"[tiab] OR \"sodium reduction\"[tiab] OR \"salt reduction\"[tiab] OR \"low sodium\"[tiab] OR \"low salt\"[tiab] OR \"sodium-restricted\"[tiab] OR \"salt-restricted\"[tiab])",
+        "isCombination": false
+      },
+      {
+        "id": "RCTfilter",
+        "expression": "(randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh]))",
+        "isCombination": false
+      },
+      {
+        "id": "3",
+        "expression": "#1 AND #2 AND #RCTfilter",
+        "isCombination": true
+      }
+    ],
+    "combinationExpression": "#1 AND #2 AND #RCTfilter"
+  },
+  "formulaMd": "## PubMed/MEDLINE\n\n```\n#1 (\"Sodium Chloride, Dietary\"[Mesh] OR \"Potassium, Dietary\"[Mesh] OR \"salt substitute*\"[tiab] OR \"salt substitution*\"[tiab] OR \"low sodium salt*\"[tiab] OR \"reduced sodium salt*\"[tiab] OR \"potassium enriched salt*\"[tiab] OR \"potassium salt*\"[tiab] OR \"sodium substitute*\"[tiab])\n#2 (\"Sodium, Dietary\"[Mesh] OR \"Sodium Chloride, Dietary\"[Mesh] OR \"Diet, Sodium-Restricted\"[Mesh] OR \"dietary sodium\"[tiab] OR \"dietary salt\"[tiab] OR \"sodium intake\"[tiab] OR \"salt intake\"[tiab] OR \"sodium restriction\"[tiab] OR \"salt restriction\"[tiab] OR \"sodium reduction\"[tiab] OR \"salt reduction\"[tiab] OR \"low sodium\"[tiab] OR \"low salt\"[tiab] OR \"sodium-restricted\"[tiab] OR \"salt-restricted\"[tiab])\n#RCTfilter (randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh]))\n#3 #1 AND #2 AND #RCTfilter\n```\n",
+  "seedContext": null,
+  "blockApproval": "auto",
+  "sha256": "05347675299515fc7bcba01e1c553bf2eb8b6c5705f34ff7c490100b8a4610f4"
+}

@@ -11,6 +11,7 @@ import { PROFILES } from './types';
 jest.mock('./gitInfo', () => ({ getGitCommit: jest.fn() }));
 
 const config = () => ({ ...readConfig(), cases: ['r3-vascular-bleeding'], drafts: 1, liveRunsPerSplit: 1 });
+const rejection = '#1: 構文エラー\n実測できない C0 は凍結しない。再生成するには --draft で別番号を指定する';
 const paths = (): Paths => {
   const root = mkdtempSync(join(tmpdir(), 'rerun-'));
   return { root, fixtures: join(root, 'fixtures'), results: join(root, 'results') };
@@ -23,6 +24,7 @@ function frozen(c = config(), p = paths()) {
   return { c, p, slots };
 }
 beforeEach(() => {
+  jest.replaceProperty(process, 'env', { ...process.env, GEMINI_API_KEY: 'fake-secret' });
   jest.spyOn(process.stdout, 'write').mockReturnValue(true);
   jest.mocked(getGitCommit).mockReset().mockReturnValue('current');
 });
@@ -48,6 +50,7 @@ test('行列はケースごと current → legacy → legacyLive、criteria-only
 });
 
 test('dry-run は保存も起動もせず、未凍結と旧版設定不足を一覧に出す', async () => {
+  delete process.env.GEMINI_API_KEY;
   const p = paths(); const start = jest.fn();
   await executeRerun(config(), parseOptions(['all', '--dry-run']), start, p);
   expect(start).not.toHaveBeenCalled();
@@ -55,15 +58,27 @@ test('dry-run は保存も起動もせず、未凍結と旧版設定不足を一
   expect(jest.mocked(process.stdout.write).mock.calls.flat().join('')).toContain('legacyWorktree');
 });
 
+test.each(['freeze', 'run', 'all'])('%s はキーが未設定・空なら保存や子の起動より前に停止する', async (stage) => {
+  const p = paths(); const start = jest.fn();
+  for (const key of [undefined, '', '   ']) {
+    if (key === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = key;
+    await expect(executeRerun(config(), parseOptions([stage]), start, p)).rejects.toThrow('GEMINI_API_KEY が未設定です');
+    await expect(executeRerun(config(), parseOptions([stage]), start, p)).rejects.toThrow('DOTENV_CONFIG_PATH');
+  }
+  expect(start).not.toHaveBeenCalled();
+  expect(existsSync(p.results)).toBe(false);
+});
+
 test('凍結失敗は次の空き番号で再試行し、各試行を永続化、完了枠は再開でスキップする', async () => {
   const p = paths(); const c = { ...config(), drafts: 3 };
   let calls = 0;
   const start: Launch = jest.fn(async (job, _env, log) => {
     calls++;
-    if (calls === 1) { log('構文エラー'); return 1; }
+    if (calls === 1) { log(rejection); return 1; }
     if (calls === 2) {
       const saved = JSON.parse(readFileSync(join(p.results, 'rerun/c0-slots.json'), 'utf8')) as Slot[];
-      expect(saved[0]!.attempts).toEqual([{ draft: 11, success: false, error: '構文エラー' }]);
+      expect(saved[0]!.attempts).toEqual([{ draft: 11, success: false, error: rejection }]);
     }
     write(job.expected, {}); return 0;
   });
@@ -76,6 +91,101 @@ test('凍結失敗は次の空き番号で再試行し、各試行を永続化�
   const resumed = await executeRerun(c, parseOptions(['freeze']), start, p);
   expect(calls).toBe(previous);
   expect(resumed.skipped).toBe(9);
+});
+
+test('実測拒否の文言はチャンク境界と長い後続ログに依存せず判定する', async () => {
+  const p = paths(); const c = config();
+  const start = jest.fn<ReturnType<Launch>, Parameters<Launch>>(async (job, _env, log) => {
+    if (start.mock.calls.length === 1) {
+      for (const char of rejection) log(char);
+      log('\n' + 'x'.repeat(5000));
+      return 1;
+    }
+    write(job.expected, {}); return 0;
+  });
+  const result = await executeRerun(c, parseOptions(['freeze', '--filter', 'criteria-only']), start, p);
+  const saved = JSON.parse(readFileSync(join(p.results, 'rerun/c0-slots.json'), 'utf8')) as Slot[];
+  expect(saved[0]!.attempts.map((a) => a.draft)).toEqual([11, 12]);
+  expect(result).toMatchObject({ completed: 1, executed: 2, failed: [start.mock.calls[0]![0].id] });
+});
+
+test.each([
+  ['GEMINI_API_KEY が未設定です', 1],
+  ['fetch failed', 1],
+  ['LLM service unavailable', 1],
+  ['構文エラー', 1],
+  ['', 1],
+  ['', 0],
+] as const)('実測拒否以外は枠と番号を消費せず、次回だけ再試行する: %s / %s', async (message, exitCode) => {
+  const p = paths(); const c = config(); const slots = makeSlots(c);
+  const slotsPath = join(p.results, 'rerun/c0-slots.json');
+  write(slotsPath, slots);
+  const start = jest.fn<ReturnType<Launch>, Parameters<Launch>>(async (_job, _env, log) => { log(message); return exitCode; });
+  const options = parseOptions(['freeze']);
+  const first = await executeRerun(c, options, start, p);
+  const jobs = start.mock.calls.map(([job]) => job);
+  expect(jobs).toHaveLength(slots.length);
+  expect(jobs.every((job) => job.c0.includes('draft11'))).toBe(true);
+  expect(first).toMatchObject({ completed: 0, executed: slots.length, failed: jobs.map((job) => job.id) });
+  expect(JSON.parse(readFileSync(slotsPath, 'utf8'))).toEqual(slots.map((slot) => ({ ...slot, pendingDraft: 11 })));
+  const ledgerPath = join(p.results, 'rerun/ledger.jsonl');
+  for (const job of jobs) {
+    expect(readLedger(ledgerPath).get(job.id)).toMatchObject({ exitCode, error: message || `exitCode=${exitCode}, runStatus=null` });
+    expect(readFileSync(join(p.results, 'rerun/logs', logName(job.id)), 'utf8')).toBe(message);
+  }
+  start.mockClear();
+  start.mockImplementation(async (job) => { write(job.expected, {}); return 0; });
+  const resumed = await executeRerun(c, options, start, p);
+  expect(start.mock.calls.map(([job]) => job.command)).toEqual(jobs.map((job) => job.command));
+  expect(resumed).toMatchObject({ completed: slots.length, executed: slots.length, failed: [] });
+  const saved = JSON.parse(readFileSync(slotsPath, 'utf8')) as Slot[];
+  expect(saved.every((slot) => slot.attempts.length === 1 && slot.attempts[0]!.draft === 11 && slot.attempts[0]!.success)).toBe(true);
+  expect(saved.every((slot) => slot.pendingDraft === undefined)).toBe(true);
+  expect(readFileSync(ledgerPath, 'utf8').trim().split('\n')).toHaveLength(slots.length * 2);
+});
+
+test('過去の未分類の失敗試行は保持し、新しい一時失敗だけを記録しない', async () => {
+  const p = paths(); const c = config(); const slots = makeSlots(c);
+  slots[0]!.attempts.push({ draft: 11, success: false, error: 'GEMINI_API_KEY が未設定です' });
+  const slotsPath = join(p.results, 'rerun/c0-slots.json');
+  write(slotsPath, slots);
+  const options = parseOptions(['freeze', '--filter', 'criteria-only']);
+  const start = jest.fn<ReturnType<Launch>, Parameters<Launch>>(async () => { throw new Error('fetch failed'); });
+  await executeRerun(c, options, start, p);
+  expect(start).toHaveBeenCalledTimes(1);
+  expect(start.mock.calls[0]![0].c0).toBe('criteria-only-draft12');
+  expect(JSON.parse(readFileSync(slotsPath, 'utf8'))).toEqual(slots.map((slot, i) => i === 0 ? { ...slot, pendingDraft: 12 } : slot));
+  start.mockImplementation(async (job) => { write(job.expected, {}); return 0; });
+  await executeRerun(c, options, start, p);
+  expect(start.mock.calls[1]![0].c0).toBe('criteria-only-draft12');
+  const saved = JSON.parse(readFileSync(slotsPath, 'utf8')) as Slot[];
+  expect(saved[0]!.attempts).toEqual([...slots[0]!.attempts, { draft: 12, success: true, error: null }]);
+});
+
+test('再試行待ちの番号を後続枠が使わず、再開後の生成物の失敗だけで番号を進める', async () => {
+  const p = paths(); const c = { ...config(), drafts: 2 };
+  const slots = makeSlots(c);
+  for (const slot of slots.slice(0, 2)) slot.attempts.push({ draft: 10 + slot.slot, success: false, error: rejection });
+  const slotsPath = join(p.results, 'rerun/c0-slots.json');
+  write(slotsPath, slots);
+  const start = jest.fn<ReturnType<Launch>, Parameters<Launch>>(async () => 1);
+  const options = parseOptions(['freeze', '--filter', 'criteria-only']);
+  await executeRerun(c, options, start, p);
+  expect(start.mock.calls.map(([job]) => job.c0)).toEqual(['criteria-only-draft13', 'criteria-only-draft14']);
+  const pending = JSON.parse(readFileSync(slotsPath, 'utf8')) as Slot[];
+  expect(pending.slice(0, 2).map((slot) => slot.pendingDraft)).toEqual([13, 14]);
+  expect(pending.map((slot) => slot.attempts)).toEqual(slots.map((slot) => slot.attempts));
+  start.mockClear();
+  start.mockImplementation(async (job, _env, log) => {
+    if (start.mock.calls.length === 1) { log(rejection); return 1; }
+    write(job.expected, {}); return 0;
+  });
+  await executeRerun(c, options, start, p);
+  expect(start.mock.calls.map(([job]) => job.c0)).toEqual(['criteria-only-draft13', 'criteria-only-draft15', 'criteria-only-draft14']);
+  const saved = JSON.parse(readFileSync(slotsPath, 'utf8')) as Slot[];
+  expect(saved[0]!.attempts.map((a) => a.draft)).toEqual([11, 13, 15]);
+  expect(saved[1]!.attempts.map((a) => a.draft)).toEqual([12, 14]);
+  expect(saved.every((slot) => slot.pendingDraft === undefined)).toBe(true);
 });
 
 test('試行上限、フィルタと limit を守り、失敗でも次の run に進み ledger とログを追記する', async () => {
@@ -102,7 +212,8 @@ test('試行上限、フィルタと limit を守り、失敗でも次の run �
 });
 
 test('最大試行後は子を再起動せず、不足 C0 は実行失敗として残す', async () => {
-  const p = paths(); const c = config(); const start = jest.fn(async () => 1);
+  const p = paths(); const c = config();
+  const start = jest.fn<ReturnType<Launch>, Parameters<Launch>>(async (_job, _env, log) => { log(rejection); return 1; });
   await executeRerun(c, parseOptions(['freeze', '--filter', 'criteria-only']), start, p);
   expect(start).toHaveBeenCalledTimes(3);
   await executeRerun(c, parseOptions(['freeze', '--filter', 'criteria-only']), start, p);
@@ -123,6 +234,7 @@ test('legacy 未指定は拒否し、上書き指定なら旧版 cwd、0 件で�
 });
 
 test('prepare は追加分割のみ、score は旧版結果ディレクトリを指定する', async () => {
+  delete process.env.GEMINI_API_KEY;
   const p = paths(); const start = jest.fn(async () => 0); const c = config();
   await executeRerun(c, parseOptions(['prepare']), start, p);
   await executeRerun(c, parseOptions(['score']), start, p);

@@ -1,5 +1,5 @@
 {
-  "cases": ["r1-mindfulness-smoking", "r2-pdr-prognostic", "r3-vascular-bleeding"],
+  "cases": ["r1-mindfulness-smoking", "r2-pdr-prognostic", "r3-vascular-bleeding", "c1-replacing-salt-with"],
   "splits": [20260912, 20260915],
   "drafts": 3,
   "draftStart": 11,

@@ -555,6 +555,9 @@ gold の監査とシード凍結を済ませます。検索日は従来どおり
 fixtures と results はこの worktree の絶対パスを渡します。版の切り替えは行いません。
 各 CLI を `npx tsx <script> ...` 相当の子プロセスで直列実行します。Windows はシェル経由の文字列展開を避け、
 npm 同梱の `npx-cli.js` を Node で起動します。親の環境変数をそのまま渡し、`.env` は子 CLI が読みます。
+`freeze` / `run` を含む通常実行（`all` も対象）は、開始時に親の `GEMINI_API_KEY` を確認し、未設定なら子を起動せず停止します。
+環境変数に設定するか、`$env:NODE_OPTIONS='--require=dotenv/config'` で worktree ルートの `.env` を親にも事前読み込みします。
+別の場所の `.env` は `$env:DOTENV_CONFIG_PATH='<絶対パス>'` で指定します。`score` のみと `--dry-run` はキーを確認しません。
 
 [再評価計画 §9](../../docs/query-optimization-rerun-plan.md) の順で進めます。
 
@@ -563,8 +566,10 @@ npm 同梱の `npx-cli.js` を Node で起動します。親の環境変数を�
 2. **ケースの凍結**: 上の選定手順、CASES 登録、`npm run eval:prepare`、gold の監査を行い、
    `npm run eval:rerun -- prepare` で 2 つ目以降のシード分割を準備します。選定記録と fixture を版管理します。
 3. **C0 の凍結**: `npm run eval:rerun -- freeze`。criteria-only はケースごとに枠を持ち、両分割で共有します。
-   seeded はケース・分割ごとに枠を持ちます。凍結失敗は別の空き番号で再試行し、各試行直後に
+   seeded はケース・分割ごとに枠を持ちます。ログに「実測できない C0 は凍結しない。再生成するには --draft で別番号を指定する」がある失敗だけを生成物の失敗として数え、別の空き番号で再試行します。成功・生成物の失敗の直後に
    `results/rerun/c0-slots.json` を一時ファイル + rename で保存します。各枠の上限は `maxDraftAttempts`。
+   それ以外の失敗は attempts に記録せず、番号を進めずその枠を今回打ち切り、次回に同じ番号から再試行します。ledger・ログ・終了集計には失敗として残します。過去の試行記録は変更しません。
+   再試行待ち番号は同じ JSON の `pendingDraft` に保存し、他の枠での使用を防ぎます。
    上限到達時は停止理由を確認して対処します。割当済み C0 が存在する枠は再凍結しません。
 4. **パイロット**: `--filter` は実行 ID の部分文字列、`--limit` は実際に実行する試行数の上限です。
    例えば `npm run eval:rerun -- run --filter current:r3-vascular-bleeding:criteria-only-draft11 --limit 1`。
