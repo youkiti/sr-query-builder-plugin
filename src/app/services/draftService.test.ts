@@ -487,9 +487,9 @@ test('辞書の missing だけを外し、後続設計・式・版の記録に�
     if (purpose === 'expand_freeword') provider.chat = freewordChat;
     return provider;
   };
-  deps.checkMeshDescriptors = jest.fn().mockResolvedValue(new Map([[missing, 'missing'], ['Neoplasms', 'exists'], ['Unknown', 'unknown']]));
+  deps.resolveMeshDescriptors = jest.fn().mockResolvedValue(new Map<string, import('@/lib/ncbi/mesh').MeshResolution>([[missing, { status: 'missing' }], ['Neoplasms', { status: 'resolved', headings: ['Neoplasms'] }], ['Unknown', { status: 'unknown' }]]));
   const result = await generateDraft(deps);
-  expect(deps.checkMeshDescriptors).toHaveBeenCalledWith([missing, 'Neoplasms', 'Unknown']);
+  expect(deps.resolveMeshDescriptors).toHaveBeenCalledWith([missing, 'Neoplasms', 'Unknown']);
   expect(result.meshSuggestions.map((items) => items.map((item) => item.descriptor))).toEqual([
     ['Neoplasms', 'Unknown'], ['Neoplasms', 'Unknown'],
   ]);
@@ -513,9 +513,79 @@ test('辞書確認の注入なしでは全候補を引用符付きで残す', as
   const { deps, fetchMock } = setupDeps();
   const result = await generateDraft(deps);
   expect(result.removedMeshHeadings).toEqual([]);
+  expect(result.replacedMeshHeadings).toEqual([]);
   expect(result.meshSuggestions.flat().map((item) => item.descriptor)).toEqual(['Desc', 'Desc']);
   expect(result.markdown).toContain('"Desc"[Mesh]');
   const append = fetchMock.mock.calls.find((call) => String(call[0]).includes('FormulaVersions') && String(call[0]).includes(':append'))!;
   const row = JSON.parse(append[1].body as string).values[0] as string[];
   expect(row[SHEET_HEADERS.FormulaVersions.indexOf('note')]).toBe('');
+});
+
+
+test('正式名への展開と重複除去を後続設計・式・版へ反映し、タグ指定と理由を保つ', async () => {
+  const { deps, fetchMock } = setupDeps();
+  const freewordChat = jest.fn().mockResolvedValue({ text: JSON.stringify({ freewords: [{ query: 'term[tiab]', rationale: '' }] }), tokensIn: null, tokensOut: null, raw: {} });
+  deps.llmFactory.forPurpose = (purpose) => {
+    const provider = skillProviderFor(purpose);
+    if (purpose === 'suggest_mesh') provider.chat = async () => ({ text: JSON.stringify({ suggestions: [
+      { descriptor: 'Heart Attack', tag_syntax: 'Heart Attack[Mesh:NoExp]', rationale: '理由' },
+      { descriptor: 'Tobacco', tag_syntax: 'Tobacco[Majr]', rationale: '理由' },
+      { descriptor: 'myocardial infarction', tag_syntax: 'myocardial infarction[Mesh]', rationale: '' },
+      { descriptor: 'neoplasms', tag_syntax: 'neoplasms[Mesh]', rationale: '' },
+      { descriptor: 'Missing', tag_syntax: 'Missing[Mesh]', rationale: '' },
+    ] }), tokensIn: null, tokensOut: null, raw: {} });
+    if (purpose === 'expand_freeword') provider.chat = freewordChat;
+    return provider;
+  };
+  deps.resolveMeshDescriptors = async () => new Map<string, import('@/lib/ncbi/mesh').MeshResolution>([
+    ['Heart Attack', { status: 'resolved', headings: ['Myocardial Infarction'] }],
+    ['Tobacco', { status: 'resolved', headings: ['Tobacco Products', 'Nicotiana'] }],
+    ['myocardial infarction', { status: 'resolved', headings: ['Myocardial Infarction'] }],
+    ['neoplasms', { status: 'resolved', headings: ['Neoplasms'] }],
+    ['Missing', { status: 'missing' }],
+  ]);
+  const result = await generateDraft(deps);
+  expect(result.meshSuggestions[0]).toEqual([
+    { descriptor: 'Myocardial Infarction', tagSyntax: '"Myocardial Infarction"[Mesh:NoExp]', rationale: '理由' },
+    { descriptor: 'Tobacco Products', tagSyntax: '"Tobacco Products"[Majr]', rationale: '理由' },
+    { descriptor: 'Nicotiana', tagSyntax: '"Nicotiana"[Majr]', rationale: '理由' },
+    { descriptor: 'Myocardial Infarction', tagSyntax: '"Myocardial Infarction"[Mesh]', rationale: '' },
+    { descriptor: 'Neoplasms', tagSyntax: '"Neoplasms"[Mesh]', rationale: '' },
+  ]);
+  expect(result.replacedMeshHeadings).toEqual(['Population', 'Intervention'].flatMap((blockLabel, blockIndex) => [
+    { blockIndex, blockId: String(blockIndex + 1), blockLabel, from: 'Heart Attack', to: ['Myocardial Infarction'] },
+    { blockIndex, blockId: String(blockIndex + 1), blockLabel, from: 'Tobacco', to: ['Tobacco Products', 'Nicotiana'] },
+  ]));
+  const prompts = JSON.stringify(freewordChat.mock.calls);
+  for (const heading of ['Myocardial Infarction', 'Tobacco Products', 'Nicotiana', 'Neoplasms']) {
+    expect(prompts).toContain(heading);
+    expect(result.markdown).toContain(`"${heading}"[`);
+  }
+  expect(prompts).not.toContain('Heart Attack');
+  expect(result.markdown).not.toContain('Heart Attack');
+  expect(result.markdown).toContain('"Myocardial Infarction"[Mesh:NoExp]');
+  expect(result.markdown).toContain('"Myocardial Infarction"[Mesh]');
+  const append = fetchMock.mock.calls.find((call) => String(call[0]).includes('FormulaVersions') && String(call[0]).includes(':append'))!;
+  const row = JSON.parse(append[1].body as string).values[0] as string[];
+  expect(row[SHEET_HEADERS.FormulaVersions.indexOf('note')]).toBe('MeSH 辞書に無い見出しを外しました: #1 Missing、#2 Missing／MeSH の同義語を正式な見出しに置き換えました: #1 Heart Attack → Myocardial Infarction、#1 Tobacco → Tobacco Products、Nicotiana、#2 Heart Attack → Myocardial Infarction、#2 Tobacco → Tobacco Products、Nicotiana');
+});
+
+test.each(['Mesh', 'Mesh:NoExp', 'Majr'])('正式名とタグ %s が同じ候補は大文字小文字を無視してブロックごとに最初の候補だけ残す', async (tag) => {
+  const { deps } = setupDeps();
+  deps.llmFactory.forPurpose = (purpose) => {
+    const provider = skillProviderFor(purpose);
+    if (purpose === 'suggest_mesh') provider.chat = async () => ({ text: JSON.stringify({ suggestions: [
+      { descriptor: 'Heart Attack', tag_syntax: `Heart Attack[${tag}]`, rationale: '最初の理由' },
+      { descriptor: 'Myocardial Infarction', tag_syntax: `Myocardial Infarction[${tag.toLowerCase()}]`, rationale: '後の理由' },
+    ] }), tokensIn: null, tokensOut: null, raw: {} });
+    return provider;
+  };
+  deps.resolveMeshDescriptors = async () => new Map<string, import('@/lib/ncbi/mesh').MeshResolution>([
+    ['Heart Attack', { status: 'resolved', headings: ['Myocardial Infarction'] }],
+    ['Myocardial Infarction', { status: 'resolved', headings: ['myocardial infarction'] }],
+  ]);
+  const result = await generateDraft(deps);
+  expect(result.meshSuggestions).toEqual([0, 1].map(() => [
+    { descriptor: 'Myocardial Infarction', tagSyntax: `"Myocardial Infarction"[${tag}]`, rationale: '最初の理由' },
+  ]));
 });

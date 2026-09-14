@@ -139,6 +139,7 @@ export interface DraftRunState {
   /** 生成途中に計測したブロックごとのヒット数（ライブ表示用） */
   blockHits: DraftBlockHit[];
   removedMeshHeadings: DraftGeneration['removedMeshHeadings'];
+  replacedMeshHeadings: DraftGeneration['replacedMeshHeadings'];
 }
 
 export interface OptimizationOutsideCheckState {

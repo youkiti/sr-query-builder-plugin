@@ -901,7 +901,7 @@ describe('startApp - wiring 層', () => {
     expect(setHash).toHaveBeenCalledWith('#/seeds');
   });
 
-  test('draft view 既定 onGenerate が generateDraft を呼び FormulaVersions に追記する', async () => {
+  test.each([false, true])('draft view 既定 onGenerate が generateDraft を呼び FormulaVersions に追記する', async (replaced) => {
     const doc = buildDocument();
     const { runtime, fetchMock } = makeRuntime({
       currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
@@ -931,6 +931,10 @@ describe('startApp - wiring 層', () => {
             },
           ],
         });
+      }
+      if (url.includes('db=mesh') && replaced) {
+        if (url.includes('esummary')) return jsonResponse({ result: { uids: ['68009203'], '68009203': { ds_recordtype: 'descriptor', ds_meshterms: ['Myocardial Infarction', 'Desc'] } } });
+        return jsonResponse({ esearchresult: { count: '1', idlist: ['68009203'] } });
       }
       if (url.includes('db=mesh')) return jsonResponse({ esearchresult: { count: '0', warninglist: { quotedphrasesnotfound: ['Desc'] } } });
       if (url.includes('esearch.fcgi')) return jsonResponse({ esearchresult: { count: '5', idlist: [] } });
@@ -980,7 +984,11 @@ describe('startApp - wiring 層', () => {
     expect(handle.store.getState().draftRun?.status).toBe('done');
     expect(handle.store.getState().draftRun?.blockHits).toEqual([]);
     expect(handle.store.getState().validationResult).not.toBeNull();
-    expect(handle.store.getState().draftRun?.removedMeshHeadings).toEqual([
+    expect(handle.store.getState().draftRun?.replacedMeshHeadings).toEqual(replaced ? [
+      { blockIndex: 0, blockId: '1', blockLabel: 'P', from: 'Desc', to: ['Myocardial Infarction'] },
+    ] : []);
+    if (replaced) expect(handle.store.getState().currentFormulaMarkdown).toContain('"Myocardial Infarction"[Mesh]');
+    expect(handle.store.getState().draftRun?.removedMeshHeadings).toEqual(replaced ? [] : [
       { blockIndex: 0, blockId: '1', blockLabel: 'P', descriptor: 'Desc' },
     ]);
     expect(handle.store.getState().currentFormulaMarkdown).not.toContain('"Desc"[Mesh]');
@@ -2564,7 +2572,7 @@ describe('startApp - wiring 層', () => {
         progressLabel: '',
         startedAtMs: Date.now(),
         error: 'NCBI 503',
-        removedMeshHeadings: [], blockHits: [],
+        removedMeshHeadings: [], replacedMeshHeadings: [], blockHits: [],
       },
     }));
   }
@@ -2618,7 +2626,9 @@ describe('startApp - wiring 層', () => {
     });
   }
 
-  test.each([false, true])('「検証のみ再実行」は LLM を呼ばず、除外通知の有無 %s を保持する', async (hasRemoved) => {
+  test.each(['none', 'removed', 'replaced', 'both'])('「検証のみ再実行」は LLM を呼ばず、通知 %s を保持する', async (notice) => {
+    const hasRemoved = notice === 'removed' || notice === 'both';
+    const hasReplaced = notice === 'replaced' || notice === 'both';
     const doc = buildDocument();
     const { runtime, fetchMock } = makeRuntime({
       currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
@@ -2635,7 +2645,8 @@ describe('startApp - wiring 層', () => {
     seedValidatingError(handle);
     const removedMeshHeadings = hasRemoved
       ? [{ blockIndex: 0, blockId: '1', blockLabel: 'P', descriptor: 'Missing' }] : [];
-    handle.store.setState((s) => ({ ...s, draftRun: { ...s.draftRun!, removedMeshHeadings } }));
+    const replacedMeshHeadings = hasReplaced ? [{ blockIndex: 0, blockId: '1', blockLabel: 'P', from: 'Heart Attack', to: ['Myocardial Infarction'] }] : [];
+    handle.store.setState((s) => ({ ...s, draftRun: { ...s.draftRun!, removedMeshHeadings, replacedMeshHeadings } }));
     const btn = doc.querySelector<HTMLButtonElement>('.draft__revalidate');
     expect(btn).not.toBeNull();
     btn!.click();
@@ -2647,10 +2658,13 @@ describe('startApp - wiring 層', () => {
     );
     expect(llmCalls).toHaveLength(0);
     const state = handle.store.getState();
-    if (hasRemoved) {
+    if (hasRemoved || hasReplaced) {
       expect(state.draftRun?.status).toBe('done');
       expect(state.draftRun?.removedMeshHeadings).toEqual(removedMeshHeadings);
-      expect(doc.querySelector('.draft__mesh-notice')?.textContent).toContain('#1 P: Missing');
+      expect(state.draftRun?.replacedMeshHeadings).toEqual(replacedMeshHeadings);
+      expect(state.draftRun?.blockHits).toEqual([]);
+      if (hasRemoved) expect(doc.querySelector('.draft__mesh-notice')?.textContent).toContain('#1 P: Missing');
+      if (hasReplaced) expect(doc.querySelector('.draft__mesh-notice')?.textContent).toContain('#1 P: Heart Attack → Myocardial Infarction');
     } else expect(state.draftRun).toBeNull();
     expect(state.validationResult?.formulaVersionId).toBe('fv-1');
     expect(state.validationResult?.summary.lineHits.length).toBeGreaterThan(0);

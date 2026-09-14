@@ -49,11 +49,11 @@ function handleEsummary(url: URL): Response {
     throw new Error(`[demo] eutilsMock: 未対応の esummary db です: ${db}`);
   }
   const ids = (url.searchParams.get('id') ?? '').split(',').filter((v) => v !== '');
-  const byUid = new Map(Array.from(DEMO_MESH_TREE.values()).map((v) => [v.uid, v]));
+  const byUid = new Map(Array.from(DEMO_MESH_TREE.entries()).map(([name, v]) => [v.uid, { ...v, name }]));
   const result: Record<string, unknown> = { uids: ids };
   for (const uid of ids) {
     const entry = byUid.get(uid);
-    result[uid] = { ds_idxlinks: (entry?.treeNumbers ?? []).map((treenum) => ({ treenum })) };
+    result[uid] = { ds_recordtype: 'descriptor', ds_meshterms: entry ? [entry.name] : [], ds_idxlinks: (entry?.treeNumbers ?? []).map((treenum) => ({ treenum })) };
   }
   return jsonResponse({ result });
 }
