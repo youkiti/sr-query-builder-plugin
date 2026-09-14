@@ -10,6 +10,7 @@
   "scripts": {
     "eval:optimize": "tsx experiments/query-optimization-bench/run.ts",
     "eval:freeze-c0": "tsx experiments/query-optimization-bench/freezeC0.ts",
+    "eval:draft-frequency": "tsx experiments/query-optimization-bench/draftFrequency.ts",
     "eval:import-c0": "tsx experiments/query-optimization-bench/importC0.ts",
     "eval:compare": "tsx experiments/query-optimization-bench/compare.ts",
     "eval:candidates": "tsx experiments/query-optimization-bench/candidates.ts",

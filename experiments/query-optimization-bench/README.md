@@ -146,6 +146,34 @@ npm run eval:import-c0 -- --case r2-pdr-prognostic --variant seeded --formula ./
 
 `--dry-run` は通信・書き込みをせず、式のパースと参照展開、seeded のシード検証、出力先を表示します。LLM 抽出とのブロック数照合・NCBI の実測は本実行まで未検証です。
 
+## 初期式エラーの頻度評価（issue #132）
+
+`eval:draft-frequency` は生成失敗も分母に含めて、初期検索式の失敗頻度を測る独立バッチです。実測できない C0 を拒否する凍結結果だけでは、失敗した生成が分母から落ちます。各条件の `<variant>-draft1` をハッシュ検証して読み、protocol・blocks・seedContext を固定して `generateDraftFormula` だけを呼び直します。criteria-only のシード文脈は空、seeded は凍結内容を使用し、目安件数は常に 2,000 です。プロトコル抽出の揺れは測りません。
+
+```powershell
+npm run eval:draft-frequency -- --dry-run --trials 5
+npm run eval:draft-frequency -- --trials 5 --label baseline
+npm run eval:draft-frequency -- --trials 5 --label baseline --case r2-pdr-prognostic --variant seeded
+npm run eval:draft-frequency -- --report --label baseline
+```
+
+`--trials` は正の整数で必須です。`--case` を省略すると全3ケース、`--variant criteria-only|seeded` を省略すると両方を選びます。`--label` は既存コマンドと同じ英数字・`.`・`_`・`-` の1〜40文字で、`replay-` 接頭辞は禁止です。独立ディレクトリとして使うため `.` と `..` も拒否します。省略名は `default` です。`--report` は通信せず集計だけを行い、`--trials` / `--dry-run` との併用は拒否します。ケース・variant 指定による集計の絞り込みも可能です。
+
+初回本実行で `results/draft-frequency/<label>/plan.json` に試行数、ケース×variant、C0 の名前と sha256、作成日時、コミットを固定します。再開時は同じ試行数、plan の部分集合の条件、同じ C0 ハッシュだけを許可します。実行後に結果を見て回数を変える場合は別ラベルが必要です。
+
+生成後は各非結合ブロック（フィルタを含む）と展開した式全体を、日付制限した厳密な ESearch（retmax=0）で診断します。生成途中の `generationBlockHits` は保存だけで頻度には使いません。
+
+- 生成例外は `generation_failed`。LLM の429・500以上と fetch 自体の失敗は `generation_transient`。
+- 診断は1件以上が `ok`、0件が `zero`、恒久 EutilsError で「構文エラー:」から始まるものが `syntax_error`、非恒久 EutilsError または通信例外が `network_error`、その他が `other_error`。
+- 試行の結論は `generation_transient` → `generation_failed` → `network_error` → `syntax_error` → `other_error` → `zero` → `ok` の優先順です。
+- phrase not found の語が対象式で MeSH タグ付きなら、共有レート制御・バックオフを通して MeSH 辞書を照会します。タグ付き／タグ無しの返答、NoExp、サブヘディングに対応します。辞書0件が `unresolved`、1件が `resolved`、2件以上が `ambiguous`、例外が `lookup_failed`、対象式で MeSH 付きでなければ `not_mesh` です。phrase not found だけで MeSH 不存在とは断定しません。同一試行内の同じ返答語・照会語は重複照会しません。MeSH 照会応答に `ERROR` または1件以上の `errorlist.fieldsnotfound` があれば恒久的な `lookup_failed` とし、それらがなく `errorlist.phrasesnotfound` が1件以上なら `count` の欠落も含め0件（`unresolved`）として扱います。それ以外の `errorlist`（空を含む）は無視して `count` を検証し、欠落・不正なら `lookup_failed` とします。
+
+条件・試行は逐次実行し、1試行ずつ `<case>/<variant>/trial-<k>.json` を一時ファイルと rename で保存します。`generation_transient` / `network_error` は `complete: false` で再試行待ち、それ以外は完了です。再開では完了分をスキップし、未完了分の旧内容を `trial-<k>.history.jsonl` に追記してから再実行します。ログは `trial-<k>/llm/` と `trial-<k>/progress.jsonl` に残し、再試行の LLM ログも保持します。ファイル名の接頭辞は `a<n>-` で、n は `trial-<k>.history.jsonl` の行数 + 1 と、`trial-<k>/llm/` の既存ファイルの `a<n>-` 接頭辞にある最大の n + 1 の大きい方です（履歴・該当ログがなければ各候補は 1）。接頭辞の n は 1 以上の10進整数だけを読み、それ以外の名前は無視します。キーは保存前に redact します。
+
+`--report` は plan と現在の試行ファイルから条件別・全体の同じ表を標準出力、`summary.md`、`summary.csv` に出します。計画数、完了、未完了、未実行を分け、各結論の分母は生成失敗を含む完了数です。ブロックと式全体の構文エラー率は、それぞれ保存された診断対象数を分母にします（完了試行の診断だけを数え、未完了試行と history は含みません）。MeSH も完了試行だけから各分類の語数を出します。試行なしでも「0 件」の行を出します。
+
+`--dry-run` は環境ファイル・通信・書き込みなしで入力ハッシュと既存 plan との整合を検証し、保存先と通信量の目安を表示します。概念ブロック数を N、固定プロトコルから決定するフィルタ数を F とすると、1試行は LLM が 3N 回、NCBI が生成中 N 回＋診断 N+F+1 回＝2N+F+1 回です。MeSH 辞書照会と再送は追加され、途中で生成に失敗した場合は少なくなります。
+
 ### issue #128 の再現用 fixture（R2）
 
 - `fixtures/r2-pdr-prognostic/c0/criteria-only-draft2.json`: PR #104 当時の R2 の C0（16,409 件、913749 未捕捉）を `eval:import-c0 --variant criteria-only --draft 2` で取り込んだもの。出所は当時の `results/default/r2-pdr-prognostic/run.json`（runId `r2-pdr-prognostic-2026-09-11T23-20-18-741Z-19721433`、ファイル sha256 `8da775d2…6f0b40`）の `optimization.trials[initial].formula`。元の C0 は適格基準だけから生成されたため criteria-only とした
