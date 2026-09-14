@@ -44,7 +44,7 @@ function setup() {
   const saveMargin = () => writeFileSync(marginPath, JSON.stringify({ ...margin, sha256: hashMarginContent(margin) }));
   saveMargin();
   const seeds: FrozenSeeds = { seed: 20260912, selections: ['100', '101', '102'].map((pmid) => ({ groupId: pmid, pmid, year: null })) };
-  const gold = ['100', '101', '102', '1', '2', '4', '5', '6', '7'].map((pmid) => ({ id: pmid, pmids: [pmid], members: [{ studyId: `研究${pmid}`, pmids: [pmid] }] }));
+  const gold = ['100', '101', '102', '8', '1', '2', '4', '5', '6', '7'].map((pmid) => ({ id: pmid, pmids: [pmid], members: [{ studyId: `研究${pmid}`, pmids: [pmid] }] }));
   const fixture: BenchCase = { id: caseId, pmcid: 'fake', searchDate: margin.searchDate, license: 'CC BY', protocolPath: 'unused',
     gold, heldOut: [], seeds };
   writeFileSync(join(dir, 'case.json'), JSON.stringify(fixture));
@@ -82,18 +82,21 @@ test('引数の既定値、上限、未知・重複・不正な値を検証す�
     ['--case', caseId, '--margin', 'a'.repeat(65)], [...args, '--margin', name]]) expect(() => parseOutsideStagesArgs(invalid)).toThrow();
 });
 
-test('到達可能な段階配列で 7 判定と 1 始まり順位を区別する', () => {
+test('到達可能な段階配列で 8 判定と 1 始まり順位を区別する', () => {
   // 既知集合が 3、取得上限で 2、書誌取得上限で 4 が落ちた単一の探索を表す。
   const validStages = { ...stages, novelPmids: ['4', '5', '6', '7'], requestedPmids: ['4', '5', '6'],
     fetchedPmids: ['5', '6'], pickedPmids: ['6'] };
-  const outcomes = ['1', '2', '3', '7', '4', '5', '6'].map((pmid) =>
-    classifyStudy({ studyId: pmid, pmids: [pmid] }, ['2', '3', '4', '5', '6', '7'], validStages, ['2', '3', '4', '5', '6', '7']));
+  const outcomes = ['8', '1', '2', '3', '7', '4', '5', '6'].map((pmid) =>
+    classifyStudy({ studyId: pmid, pmids: [pmid] }, ['8'], ['2', '3', '4', '5', '6', '7'], validStages, ['2', '3', '4', '5', '6', '7']));
   expect(outcomes.map((item) => item.stage)).toEqual(STAGE_NAMES);
   expect(outcomes[0]).toMatchObject({ retrievedRank: null, deepRank: null });
-  expect(outcomes[1]).toMatchObject({ retrievedRank: null, deepRank: 1 });
-  expect(outcomes[2]).toMatchObject({ retrievedRank: 1, deepRank: 2 });
-  expect(classifyStudy({ studyId: '複数報告', pmids: ['1', '6', '5'] }, ['5', '6'], validStages, null))
+  expect(outcomes[1]).toMatchObject({ retrievedRank: null, deepRank: null });
+  expect(outcomes[2]).toMatchObject({ retrievedRank: null, deepRank: 1 });
+  expect(outcomes[3]).toMatchObject({ retrievedRank: 1, deepRank: 2 });
+  expect(classifyStudy({ studyId: '複数報告', pmids: ['1', '6', '5'] }, [], ['5', '6'], validStages, null))
     .toMatchObject({ stage: 'presented', retrievedRank: 3, deepRank: null });
+  expect(classifyStudy({ studyId: '現式で捕捉済みの複数報告', pmids: ['8', '6', '5'] }, ['8'], ['5', '6'], validStages, null))
+    .toMatchObject({ stage: 'captured_by_current', retrievedRank: 3, deepRank: null });
 });
 
 test('dry-run は artifact・C0 を照合するだけで .env・通信・書き込みなし', async () => {
@@ -152,7 +155,8 @@ function fakeNetwork() {
       if (term.includes('[uid]')) {
         if (!events.some((event) => event.kind === 'llm')) throw new Error('選定終了前に gold を渡しています');
         pmids = [...term.matchAll(/(\d+)\[uid\]/g)].map((match) => match[1]!);
-        if (term.includes('NOT')) pmids = pmids.filter((pmid) => pmid !== '1');
+        if (term.startsWith(`(${marginQuery}) AND (`)) pmids = pmids.filter((pmid) => !['1', '8'].includes(pmid));
+        else if (term.startsWith('(base[tiab]) AND (')) pmids = pmids.filter((pmid) => pmid === '8');
       } else if (term === marginQuery) pmids = ['100', '5', '6', '7', '4', '2'];
       else if (term === 'base[tiab]') pmids = ['100', '101', '102'];
       else throw new Error('想定外の式');
@@ -177,13 +181,20 @@ test.each([0, 10])('実サービスとフェイク通信で段階測定・事後
   expect(outside.mock.calls[0]![0]).toMatchObject({ researchQuestion: '研究課題', inclusionCriteria: '組入', exclusionCriteria: '除外', additions: fixture.margin.additions });
   expect(result.stages).toMatchObject({ retrievedPmids: ['100', '5', '6', '7', '4'], novelPmids: ['5', '6', '7', '4'],
     requestedPmids: ['5', '6', '7'], fetchedPmids: ['6', '7'], pickedPmids: ['7'] });
-  expect(result.heldOutStages.map((study) => study.stage)).toEqual(['not_in_margin', 'beyond_retmax', 'beyond_candidate_limit', 'efetch_missing', 'not_picked', 'presented']);
-  expect(result.stageCounts).toEqual({ not_in_margin: 1, beyond_retmax: 1, excluded_as_known: 0,
+  expect(result.heldOutStages.map((study) => study.stage)).toEqual(['captured_by_current', 'not_in_margin', 'beyond_retmax', 'beyond_candidate_limit', 'efetch_missing', 'not_picked', 'presented']);
+  expect(result.missedHeldOutCount).toBe(6);
+  expect(result.stageCounts).toEqual({ captured_by_current: 1, not_in_margin: 1, beyond_retmax: 1, excluded_as_known: 0,
     beyond_candidate_limit: 1, efetch_missing: 1, not_picked: 1, presented: 1 });
   expect(result.heldOutStages.find((study) => study.studyId === '研究2')).toMatchObject({ retrievedRank: null, deepRank: depth ? 6 : null });
   expect(result.heldOutStages.find((study) => study.studyId === '研究7')).toMatchObject({ retrievedRank: 4, deepRank: depth ? 4 : null });
   expect(result.deepRankPurpose).toContain('事後集計専用');
-  expect(result.apiCalls).toEqual({ ncbi: depth ? 11 : 10, llm: 1 });
+  expect(result.apiCalls).toEqual({ ncbi: depth ? 7 : 6, llm: 1 });
+  const matching = events.filter((event) => event.kind === 'esearch' && event.params.get('term')?.includes('[uid]')
+    && event.params.get('term')?.includes(' AND '));
+  expect(matching.map((event) => event.params.get('term'))).toEqual([
+    '(base[tiab]) AND (8[uid] OR 1[uid] OR 2[uid] OR 4[uid] OR 5[uid] OR 6[uid] OR 7[uid])',
+    `(${marginQuery}) AND (8[uid] OR 1[uid] OR 2[uid] OR 4[uid] OR 5[uid] OR 6[uid] OR 7[uid])`,
+  ]);
   expect(result.llmUsage).toMatchObject({ calls: 1, tokensIn: 5, tokensOut: 7 });
   expect(result.llmLogs).toEqual(['llm/0001_pick_boundary.json']);
   expect(events.find((event) => event.kind === 'llm')!.body).not.toContain('研究1');
@@ -201,6 +212,7 @@ test.each([0, 10])('実サービスとフェイク通信で段階測定・事後
     expect(text).not.toContain('fake-ncbi-secret');
   }
   expect(process.stdout.write).toHaveBeenCalledWith(expect.stringContaining('判定別研究数'));
+  expect(process.stdout.write).toHaveBeenCalledWith('取りこぼし（現式で未捕捉）: 6 研究\n');
 });
 
 test('凍結クエリ不一致は failed にし別の式の段階結果や gold 通信を残さない', async () => {

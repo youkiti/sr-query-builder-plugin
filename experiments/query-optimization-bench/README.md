@@ -209,7 +209,7 @@ npm run eval:optimize -- --case r2-pdr-prognostic --c0 criteria-only-draft2 --se
 
 ## 外側の候補の段階別ログ（issue #126）
 
-`eval:freeze-margin` は凍結 C0 から拡張語を一度生成し、拡張式と margin（拡張式 NOT 現式）を固定します。`eval:outside-stages` はその固定拡張語で製品の `searchOutsideCandidates` を実行し、既知の取りこぼし研究がどの段階まで到達したかを記録します。取得戦略や製品の既定値（retmax=50、書誌取得上限=20）は変更しません。
+`eval:freeze-margin` は凍結 C0 から拡張語を一度生成し、拡張式と margin（拡張式 NOT 現式）を固定します。`eval:outside-stages` はその固定拡張語で製品の `searchOutsideCandidates` を実行し、held-out 研究が現式で捕捉済みか、取りこぼしならどの段階まで到達したかを記録します。取得戦略や製品の既定値（retmax=50、書誌取得上限=20）は変更しません。
 
 凍結の引数は `--case <id>` と `--c0 <name>` が必須、`--draft <正の整数>` は既定 1、`--dry-run` は任意です。`fixtures/<case>/c0/<name>.json` をハッシュ検証して読み、拡張語が 0 件なら凍結せず終了コード 1 にします。現式・margin の件数はケースの検索日で制限した ESearch（retmax=0、strictCounts）で測ります。
 
@@ -237,7 +237,8 @@ npm run eval:optimize -- --case r2-pdr-prognostic --c0 criteria-only-draft2 --se
 
 | 判定 | 意味 |
 |---|---|
-| `not_in_margin` | 検索日内の研究 PMID と margin の積集合が空 |
+| `captured_by_current` | 検索日内の研究 PMID のどれかが現式で捕捉済み。別の PMID が margin にあっても最優先 |
+| `not_in_margin` | 現式で未捕捉で、margin にも入らない（拡張式でも捕捉されない） |
 | `beyond_retmax` | margin 内だが取得一覧に無い |
 | `excluded_as_known` | 取得されたが既知 PMID として除外された |
 | `beyond_candidate_limit` | 既知除外を通過したが書誌取得上限の外 |
@@ -245,7 +246,7 @@ npm run eval:optimize -- --case r2-pdr-prognostic --c0 criteria-only-draft2 --se
 | `not_picked` | AI 入力にはあるが最終候補に選ばれなかった |
 | `presented` | 最終候補に含まれる |
 
-gold（held-out を含む）は候補検索・LLM の入力に渡しません。既知集合は選択した分割のシード PMID だけです。候補選定終了後の事後集計で初めて gold 全 PMID の検索日内存在を確認し、`computeHeldOut` で分母を固定して研究単位に照合します。正常な群分割では held-out とシードは重ならないため、held-out の `excluded_as_known` は通常 0 件です。`retrievedRank` は取得一覧での 1 始まりの最小順位、無ければ null。`deepRank` は同じ margin・sort を rankDepth 件まで別途取得した一覧での順位です。この追加取得は事後集計専用であり、候補選定には戻しません。研究名・判定・両順位の表と判定別研究数を標準出力にも表示します（0 件も明示）。
+gold（held-out を含む）は候補検索・LLM の入力に渡しません。既知集合は選択した分割のシード PMID だけです。候補選定終了後の事後集計で初めて gold 全 PMID の検索日内存在を確認し、`computeHeldOut` で分母を固定して研究単位に照合します。正常な群分割では held-out とシードは重ならないため、held-out の `excluded_as_known` は通常 0 件です。`retrievedRank` は取得一覧での 1 始まりの最小順位、無ければ null。`deepRank` は同じ margin・sort を rankDepth 件まで別途取得した一覧での順位です。この追加取得は事後集計専用であり、候補選定には戻しません。研究名・判定・両順位の表と判定別研究数を標準出力にも表示します（0 件も明示）。現式で未捕捉の held-out 研究数（取りこぼしの分母）を `missedHeldOutCount` に保存し、標準出力にも表示します（未集計時は null）。
 
 R3 の実行例（凍結の本実行は API 通信を伴います）:
 
@@ -258,7 +259,7 @@ npm run eval:outside-stages -- --case r3-vascular-bleeding --margin seeded-draft
 npm run eval:outside-stages -- --case r3-vascular-bleeding --margin criteria-only-draft1-margin1 --retmax 500 --candidate-limit 100 --sort relevance
 ```
 
-通信量の目安（再送なし）: 凍結は LLM 1 回＋ESearch 2 回。段階測定は ESearch 数回＋EFetch 1 回＋LLM 1 回です。内訳は margin 取得と現式件数で ESearch 2 回、事後の gold 日付確認で 100 PMID ごとに 1 回、held-out 各研究の margin 照合で研究内 100 PMID ごとに 1 回、rankDepth > 0 なら追加 1 回です。書誌取得対象が空なら EFetch・LLM を省略し、書誌が全件欠落した場合も LLM 通信はありません。対象は 1 ケースずつ逐次実行します。
+通信量の目安（再送なし）: 凍結は LLM 1 回＋ESearch 2 回。段階測定は ESearch 数回＋EFetch 1 回＋LLM 1 回です。内訳は margin 取得と現式件数で ESearch 2 回、事後の gold 日付確認で 100 PMID ごとに 1 回、held-out 全研究の PMID をまとめた現式・margin 照合でそれぞれ重複を除いた 100 PMID ごとに 1 回（100 PMID ごとに計 2 回）、rankDepth > 0 なら追加 1 回です。書誌取得対象が空なら EFetch・LLM を省略し、書誌が全件欠落した場合も LLM 通信はありません。対象は 1 ケースずつ逐次実行します。
 
 ## gold の監査と凍結
 
