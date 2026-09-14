@@ -25,7 +25,7 @@ function validatingErrorRun(): NonNullable<AppState['draftRun']> {
     progressLabel: '',
     startedAtMs: Date.now(),
     error: 'NCBI 一時障害',
-    blockHits: [],
+    removedMeshHeadings: [], blockHits: [],
   };
 }
 

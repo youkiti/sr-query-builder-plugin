@@ -1,5 +1,5 @@
 import type { EutilsDeps } from './eutils';
-import { EutilsError, resolveRateLimiter } from './eutils';
+import { EutilsError, resolveRateLimiter, shouldRetryEutils } from './eutils';
 import { retryWithBackoff } from './rateLimit';
 
 /**
@@ -27,6 +27,41 @@ import { retryWithBackoff } from './rateLimit';
 
 const BASE_URL = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils';
 const DEFAULT_TOOL = 'sr-query-builder-plugin';
+
+/** 辞書に無い見出しだけを除外できるよう、照会失敗は unknown として返す。 */
+export async function checkMeshDescriptors(
+  descriptors: readonly string[], deps: EutilsDeps
+): Promise<Map<string, 'exists' | 'missing' | 'unknown'>> {
+  const result = new Map<string, 'exists' | 'missing' | 'unknown'>();
+  for (const descriptor of new Set(descriptors.map((value) => value.trim()).filter(Boolean))) {
+    result.set(descriptor, 'unknown');
+    try {
+      const params = new URLSearchParams({ db: 'mesh', term: `"${descriptor}"[mh]`, retmode: 'json', retmax: '0' });
+      appendCommonParams(params, deps);
+      const rateLimiter = resolveRateLimiter(deps);
+      const json = await retryWithBackoff(async () => {
+        await rateLimiter.acquire();
+        const res = await deps.fetch(`${BASE_URL}/esearch.fcgi?${params.toString()}`);
+        if (!res.ok) throw new EutilsError(`MeSH 辞書の照会に失敗しました: HTTP ${res.status}`, res.status);
+        return await res.json() as {
+          ERROR?: unknown;
+          esearchresult?: { ERROR?: unknown; count?: unknown;
+            errorlist?: { phrasesnotfound?: string[]; fieldsnotfound?: string[] } };
+        };
+      }, { sleep: deps.sleep, maxRetries: deps.maxRetries ?? 5, shouldRetry: shouldRetryEutils });
+      const search = json.esearchresult;
+      if (json.ERROR !== undefined || !search || search.ERROR !== undefined || search.errorlist?.fieldsnotfound?.length) continue;
+      if (typeof search.count === 'string' && /^\d+$/.test(search.count) && Number.isSafeInteger(Number(search.count))) {
+        result.set(descriptor, Number(search.count) > 0 ? 'exists' : 'missing');
+      } else if (search.errorlist?.phrasesnotfound?.length) {
+        result.set(descriptor, 'missing');
+      }
+    } catch {
+      // 通信失敗や不正な応答でも生成を止めず、候補を残す。
+    }
+  }
+  return result;
+}
 
 function appendCommonParams(params: URLSearchParams, deps: EutilsDeps): void {
   params.set('tool', deps.tool ?? DEFAULT_TOOL);

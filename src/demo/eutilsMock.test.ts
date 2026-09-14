@@ -1,3 +1,4 @@
+import { checkMeshDescriptors } from '@/lib/ncbi/mesh';
 import { efetchArticles, esearch, fetchMeshTreeNumbers, type EutilsDeps } from '@/lib/ncbi';
 import { handleEutilsRequest } from './eutilsMock';
 import { demoFetch } from './fetchMock';
@@ -84,4 +85,10 @@ describe('db=mesh モック（MeSH 階層）', () => {
     expect(treeMap.get('Respiratory Distress Syndrome')).toEqual(['C08.618.248']);
     expect(treeMap.get('Extracorporeal Membrane Oxygenation')).toEqual(['E04.100.400']);
   });
+});
+
+
+test('引用符付きの辞書確認と引用符なしの既存検索を両立する', async () => {
+  const result = await checkMeshDescriptors(['Respiratory Distress Syndrome', 'Diabetic Retinopathy, Proliferative'], makeDeps());
+  expect([...result]).toEqual([['Respiratory Distress Syndrome', 'exists'], ['Diabetic Retinopathy, Proliferative', 'missing']]);
 });

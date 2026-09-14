@@ -9,7 +9,7 @@ import type {
   ValidationProgress,
   ValidationSummary,
 } from './services/validationService';
-import type { DraftBlockHit, DraftProgress } from './services/draftService';
+import type { DraftBlockHit, DraftProgress, DraftGeneration } from './services/draftService';
 import type {
   BoundaryCasesResult,
   ExpandFetchStep,
@@ -121,7 +121,7 @@ export type DraftRunProgressDetail =
   | ({ phase: 'validating' } & ValidationProgress);
 
 export interface DraftRunState {
-  status: 'running' | 'error';
+  status: 'running' | 'error' | 'done';
   /** 実行中の段階。error 時は失敗した段階を保持する */
   phase: 'generating' | 'validating';
   /** 現在処理中ステップの表示用ラベル（例: 「MeSH を提案中（ブロック 1/2）」） */
@@ -138,6 +138,7 @@ export interface DraftRunState {
   error: string | null;
   /** 生成途中に計測したブロックごとのヒット数（ライブ表示用） */
   blockHits: DraftBlockHit[];
+  removedMeshHeadings: DraftGeneration['removedMeshHeadings'];
 }
 
 export interface OptimizationOutsideCheckState {

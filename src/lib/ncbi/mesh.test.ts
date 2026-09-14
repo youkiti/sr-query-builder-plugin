@@ -1,4 +1,4 @@
-import { fetchMeshTreeNumbers, parseMeshSummaryJson } from './mesh';
+import { checkMeshDescriptors, fetchMeshTreeNumbers, parseMeshSummaryJson } from './mesh';
 import { sharedEutilsRateLimiters } from './eutils';
 import type { RateLimiter } from './rateLimit';
 
@@ -326,5 +326,55 @@ describe('レートリミッタ（issue #58 chunk 3a フォローアップ）', 
 
     withoutApiKeySpy.mockRestore();
     withApiKeySpy.mockRestore();
+  });
+});
+
+
+describe('checkMeshDescriptors', () => {
+  test.each([
+    [{ count: '1' }, 'exists'],
+    [{ count: '2' }, 'exists'],
+    [{ count: '0', warninglist: { quotedphrasesnotfound: ['Diabetic Retinopathy, Proliferative'] } }, 'missing'],
+    [{ count: '0' }, 'missing'],
+    [{ errorlist: { phrasesnotfound: ['Term'] } }, 'missing'],
+    [{ count: '1', errorlist: { fieldsnotfound: ['mh'], phrasesnotfound: ['Term'] } }, 'unknown'],
+    [{ count: '1', ERROR: '失敗' }, 'unknown'],
+    [{}, 'unknown'],
+    [{ count: '' }, 'unknown'],
+    [{ count: '-1' }, 'unknown'],
+    [{ count: 'NaN' }, 'unknown'],
+    [{ count: '1.5' }, 'unknown'],
+    [{ count: 1 }, 'unknown'],
+  ])('応答 %j を %s と判定する', async (esearchresult, expected) => {
+    const fetchMock = jest.fn().mockResolvedValue(jsonResponse({ esearchresult }));
+    const result = await checkMeshDescriptors(['Diabetic Retinopathy, Proliferative'], { fetch: fetchMock });
+    expect(result.get('Diabetic Retinopathy, Proliferative')).toBe(expected);
+  });
+
+  test('空白と重複を除き、引用符・共通パラメータ・レート制限を適用する', async () => {
+    const fetchMock = jest.fn().mockResolvedValue(jsonResponse({ esearchresult: { count: '1' } }));
+    const rateLimiter = { acquire: jest.fn().mockResolvedValue(undefined) } as unknown as RateLimiter;
+    const result = await checkMeshDescriptors([' Neoplasms ', 'Neoplasms', '', '  '], {
+      fetch: fetchMock, rateLimiter, tool: 'test', apiKey: 'fake-key', email: 'test@example.com',
+    });
+    expect([...result]).toEqual([['Neoplasms', 'exists']]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(rateLimiter.acquire).toHaveBeenCalledTimes(1);
+    const params = new URL(fetchMock.mock.calls[0]![0] as string).searchParams;
+    expect(Object.fromEntries(params)).toEqual({ db: 'mesh', term: '"Neoplasms"[mh]', retmode: 'json', retmax: '0', tool: 'test', api_key: 'fake-key', email: 'test@example.com' });
+  });
+
+  test.each([jsonResponse({ ERROR: '失敗' }), jsonResponse({}), errorResponse(400)])('エラー応答は unknown にする', async (response) => {
+    const fetchMock = jest.fn().mockResolvedValue(response);
+    expect((await checkMeshDescriptors(['Term'], { fetch: fetchMock, maxRetries: 0 })).get('Term')).toBe('unknown');
+  });
+
+  test.each(['network', 'http'])('%s のリトライ後も失敗したら unknown にする', async (kind) => {
+    const fetchMock = kind === 'network' ? jest.fn().mockRejectedValue(new TypeError('通信失敗'))
+      : jest.fn().mockResolvedValue(errorResponse(503));
+    const rateLimiter = { acquire: jest.fn().mockResolvedValue(undefined) } as unknown as RateLimiter;
+    expect((await checkMeshDescriptors(['Term'], { fetch: fetchMock, rateLimiter, maxRetries: 2, sleep: async () => {} })).get('Term')).toBe('unknown');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(rateLimiter.acquire).toHaveBeenCalledTimes(3);
   });
 });

@@ -82,7 +82,7 @@ function runningState(progressLabel = 'MeSH を提案中（ブロック 1/2）')
     progressLabel,
     startedAtMs: Date.now() - 65_000,
     error: null,
-    blockHits: [],
+    removedMeshHeadings: [], blockHits: [],
   };
 }
 
@@ -224,7 +224,7 @@ describe('createDraftView', () => {
           progressLabel: '開始します…',
           startedAtMs: Date.now() - 5_000,
           error: null,
-          blockHits: [],
+          removedMeshHeadings: [], blockHits: [],
         },
       }),
       navigate: jest.fn(),
@@ -244,7 +244,7 @@ describe('createDraftView', () => {
           progressLabel: '',
           startedAtMs: Date.now(),
           error: 'Gemini API failed: HTTP 503',
-          blockHits: [],
+          removedMeshHeadings: [], blockHits: [],
         },
       }),
       navigate: jest.fn(),
@@ -269,7 +269,7 @@ describe('createDraftView', () => {
           progressLabel: '',
           startedAtMs: Date.now(),
           error: null,
-          blockHits: [],
+          removedMeshHeadings: [], blockHits: [],
         },
       }),
       navigate: jest.fn(),
@@ -296,7 +296,7 @@ describe('createDraftView', () => {
           progressLabel: 'フリーワードを展開中',
           startedAtMs: Date.now(),
           error: null,
-          blockHits: [
+          removedMeshHeadings: [], blockHits: [
             { blockIndex: 0, blockId: '1', blockLabel: 'P', expression: 'a', hitCount: 1234, error: null },
           ],
         },
@@ -408,7 +408,7 @@ describe('検証のみ再実行（fix-plan 2-2）', () => {
         progressLabel: '',
         startedAtMs: Date.now(),
         error: 'NCBI 503',
-        blockHits: [],
+        removedMeshHeadings: [], blockHits: [],
       },
       ...extra,
     });
@@ -447,7 +447,7 @@ describe('検証のみ再実行（fix-plan 2-2）', () => {
           progressLabel: '',
           startedAtMs: Date.now(),
           error: 'LLM 503',
-          blockHits: [],
+          removedMeshHeadings: [], blockHits: [],
         },
       }),
       navigate: jest.fn(),
@@ -861,4 +861,23 @@ describe('currentStepIndex', () => {
     expect(currentStepIndex({ phase: 'validating', step: 'logging' }, 2)).toBe(15);
     expect(currentStepIndex({ phase: 'validating', step: 'done' }, 2)).toBe(16);
   });
+});
+
+
+test.each(['done', 'error', 'running'] as const)('除外通知は %s のとき実行中以外で表示する', (status) => {
+  const container = buildContainer();
+  const view = createDraftView();
+  const run: DraftRunState = { ...runningState(), status, removedMeshHeadings: [
+    { blockIndex: 0, blockId: '1', blockLabel: '対象', descriptor: 'Diabetic Retinopathy, Proliferative' },
+  ] };
+  view(container, { state: stateReady({ draftRun: run }), navigate: jest.fn() });
+  const notice = container.querySelector('.draft__mesh-notice');
+  if (status === 'running') expect(notice).toBeNull();
+  else {
+    expect(notice?.textContent).toContain('MeSH 辞書に無い見出しを式から外しました');
+    expect(notice?.querySelector('li')?.textContent).toBe('#1 対象: Diabetic Retinopathy, Proliferative');
+    expect(container.querySelector('.draft__error')?.textContent).toBe(status === 'done' ? '' : '生成に失敗しました: 不明なエラー');
+  }
+  view(container, { state: stateReady({ draftRun: { ...run, status: 'done', removedMeshHeadings: [] } }), navigate: jest.fn() });
+  expect(container.querySelector('.draft__mesh-notice')).toBeNull();
 });

@@ -473,3 +473,49 @@ test.each(['generateDraftFormula', 'generateDraft'] as const)('%s が目安を�
     for (const prompt of prompts[purpose]!) expect(prompt).not.toContain('1234');
   }
 });
+
+
+test('辞書の missing だけを外し、後続設計・式・版の記録に反映する', async () => {
+  const { deps, fetchMock } = setupDeps();
+  const missing = 'Diabetic Retinopathy, Proliferative';
+  const freewordChat = jest.fn().mockResolvedValue({ text: JSON.stringify({ freewords: [{ query: 'term[tiab]', rationale: '' }] }), tokensIn: null, tokensOut: null, raw: {} });
+  deps.llmFactory.forPurpose = (purpose) => {
+    const provider = skillProviderFor(purpose);
+    if (purpose === 'suggest_mesh') provider.chat = async () => ({ text: JSON.stringify({ suggestions:
+      [missing, 'Neoplasms', 'Unknown'].map((descriptor) => ({ descriptor, tag_syntax: `${descriptor}[Mesh]`, rationale: '' })) }),
+      tokensIn: null, tokensOut: null, raw: {} });
+    if (purpose === 'expand_freeword') provider.chat = freewordChat;
+    return provider;
+  };
+  deps.checkMeshDescriptors = jest.fn().mockResolvedValue(new Map([[missing, 'missing'], ['Neoplasms', 'exists'], ['Unknown', 'unknown']]));
+  const result = await generateDraft(deps);
+  expect(deps.checkMeshDescriptors).toHaveBeenCalledWith([missing, 'Neoplasms', 'Unknown']);
+  expect(result.meshSuggestions.map((items) => items.map((item) => item.descriptor))).toEqual([
+    ['Neoplasms', 'Unknown'], ['Neoplasms', 'Unknown'],
+  ]);
+  expect(result.removedMeshHeadings).toEqual([
+    { blockIndex: 0, blockId: '1', blockLabel: 'Population', descriptor: missing },
+    { blockIndex: 1, blockId: '2', blockLabel: 'Intervention', descriptor: missing },
+  ]);
+  expect(result.markdown).not.toContain(missing);
+  expect(result.markdown).toContain('"Unknown"[Mesh]');
+  expect(result.markdown).toContain('"Neoplasms"[Mesh]');
+  const messages = JSON.stringify(freewordChat.mock.calls);
+  expect(messages).not.toContain(missing);
+  expect(messages).toContain('Neoplasms');
+  expect(messages).toContain('Unknown');
+  const append = fetchMock.mock.calls.find((call) => String(call[0]).includes('FormulaVersions') && String(call[0]).includes(':append'))!;
+  const row = JSON.parse(append[1].body as string).values[0] as string[];
+  expect(row[SHEET_HEADERS.FormulaVersions.indexOf('note')]).toBe(`MeSH 辞書に無い見出しを外しました: #1 ${missing}、#2 ${missing}`);
+});
+
+test('辞書確認の注入なしでは全候補を引用符付きで残す', async () => {
+  const { deps, fetchMock } = setupDeps();
+  const result = await generateDraft(deps);
+  expect(result.removedMeshHeadings).toEqual([]);
+  expect(result.meshSuggestions.flat().map((item) => item.descriptor)).toEqual(['Desc', 'Desc']);
+  expect(result.markdown).toContain('"Desc"[Mesh]');
+  const append = fetchMock.mock.calls.find((call) => String(call[0]).includes('FormulaVersions') && String(call[0]).includes(':append'))!;
+  const row = JSON.parse(append[1].body as string).values[0] as string[];
+  expect(row[SHEET_HEADERS.FormulaVersions.indexOf('note')]).toBe('');
+});

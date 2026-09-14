@@ -152,6 +152,7 @@ export async function registerDriveStub(page: Page): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export interface NcbiStubOptions {
+  meshEsearch?: (decodedUrl: string) => { count: string; idlist: string[] };
   /** esearch.fcgi の応答をクエリ文字列（decodeURIComponent 済み）から動的に組み立てる。省略時は { count: '0', idlist: [] } */
   esearch?: (decodedUrl: string) => { count: string; idlist: string[] };
   /** efetch.fcgi が返す PubMed XML 文字列または URL ごとの応答。省略時は空の PubmedArticleSet */
@@ -191,7 +192,10 @@ export async function registerNcbiStub(page: Page, options: NcbiStubOptions = {}
       // 既存の spec が GET と同じ形でパラメータを読めるよう、フォーム本文を URL に載せる。
       esearchUrl.search = new URLSearchParams(request.postData() ?? '').toString();
     }
-    const result = options.esearch?.(decodeURIComponent(esearchUrl.toString())) ?? { count: '0', idlist: [] };
+    const decoded = decodeURIComponent(esearchUrl.toString());
+    const result = esearchUrl.searchParams.get('db') === 'mesh'
+      ? options.meshEsearch?.(decoded) ?? { count: '1', idlist: ['1'] }
+      : options.esearch?.(decoded) ?? { count: '0', idlist: [] };
     await route.fulfill({
       status: 200,
       contentType: 'application/json',

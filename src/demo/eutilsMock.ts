@@ -14,7 +14,7 @@ import { evaluateQuery } from './queryEngine';
 /** `db=mesh` の esearch: `"<descriptor>"[mh]` から UID を 1 件に解決する。 */
 function handleMeshEsearch(term: string): Response {
   // resolveMeshUid は `${descriptor}[mh]` の形で term を組み立てる（mesh.ts）。
-  const descriptor = term.replace(/\[mh\]\s*$/i, '').trim();
+  const descriptor = term.replace(/\[mh\]\s*$/i, '').trim().replace(/^"|"$/g, '').trim();
   const entry = Array.from(DEMO_MESH_TREE.entries()).find(
     ([name]) => name.toLowerCase() === descriptor.toLowerCase()
   );

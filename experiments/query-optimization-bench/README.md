@@ -148,6 +148,8 @@ npm run eval:import-c0 -- --case r2-pdr-prognostic --variant seeded --formula ./
 
 ## 初期式エラーの頻度評価（issue #132）
 
+初期式の生成時に MeSH 辞書で見出しの実在を確認し、存在しない見出しは式から外します。試行ファイルの `removedMeshHeadings` に除外した見出しを保存し、`--report` の「外した見出し」列で完了試行の合計語数を表示します。
+
 `eval:draft-frequency` は生成失敗も分母に含めて、初期検索式の失敗頻度を測る独立バッチです。実測できない C0 を拒否する凍結結果だけでは、失敗した生成が分母から落ちます。各条件の `<variant>-draft1` をハッシュ検証して読み、protocol・blocks・seedContext を固定して `generateDraftFormula` だけを呼び直します。criteria-only のシード文脈は空、seeded は凍結内容を使用し、目安件数は常に 2,000 です。プロトコル抽出の揺れは測りません。
 
 ```powershell

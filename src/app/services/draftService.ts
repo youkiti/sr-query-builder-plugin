@@ -1,4 +1,5 @@
 import type { AppStore, ProtocolDraft, BlocksDraft } from '../store';
+import { meshDescriptor } from '@/features/formula/assembleFormulaMd';
 import {
   assembleFormulaMd,
   buildBlockExpression,
@@ -90,6 +91,7 @@ export interface DraftServiceDeps {
    * draftService 自身は NCBI を直接叩かず、配線側（bootstrap）が esearch を渡す。
    */
   countBlockHits?: (expression: string) => Promise<number>;
+  checkMeshDescriptors?: (descriptors: string[]) => Promise<Map<string, 'exists' | 'missing' | 'unknown'>>;
   /** 1 ブロックの計測が確定するたびに呼ぶ（view のライブ表示更新用） */
   onBlockCounted?: (hit: DraftBlockHit) => void;
   /** テスト時に差し替え可能な UUID / 時刻 */
@@ -103,6 +105,7 @@ export interface DraftGeneration {
   filter: FilterDesignerResult;
   blockSkeletons: BlockSkeleton[];
   meshSuggestions: MeshSuggestion[][];
+  removedMeshHeadings: { blockIndex: number; blockId: string; blockLabel: string; descriptor: string }[];
   freewordSuggestions: FreewordSuggestion[][];
   /** 生成途中に計測した概念ブロックごとのヒット数。countBlockHits 未注入なら空配列 */
   blockHits: DraftBlockHit[];
@@ -123,7 +126,7 @@ export interface DraftGenerationInput {
 
 /** LLM と計測・進捗の副作用は注入元が管理する。保存なし用途ではロガーなしの LLM を渡す。 */
 export type DraftGenerationDeps = Pick<
-  DraftServiceDeps, 'llmFactory' | 'onProgress' | 'countBlockHits' | 'onBlockCounted'
+  DraftServiceDeps, 'llmFactory' | 'onProgress' | 'countBlockHits' | 'onBlockCounted' | 'checkMeshDescriptors'
 >;
 
 export interface DraftGenerationOptions {
@@ -171,7 +174,9 @@ export async function generateDraft(deps: DraftServiceDeps, options: DraftGenera
       formulaMd: generated.markdown,
       createdBy: 'ai_draft',
       createdAt,
-      note: null,
+      note: generated.removedMeshHeadings.length > 0
+        ? `MeSH 辞書に無い見出しを外しました: ${generated.removedMeshHeadings.map((item) => `#${item.blockId} ${item.descriptor}`).join('、')}`
+        : null,
       model,
     },
     deps.google
@@ -204,6 +209,7 @@ export async function generateDraftFormula(
   const meshes: MeshSuggestion[][] = [];
   const freewords: FreewordSuggestion[][] = [];
   const blockHits: DraftBlockHit[] = [];
+  const removedMeshHeadings: DraftGeneration['removedMeshHeadings'] = [];
 
   for (let i = 0; i < blockCount; i += 1) {
     const block = blocks.blocks[i];
@@ -225,7 +231,7 @@ export async function generateDraftFormula(
     skeletons.push(skeleton);
 
     notifyProgress({ step: 'mesh-suggester', blockIndex: i, blockCount });
-    const mesh = await suggestMesh(
+    let mesh = await suggestMesh(
       {
         conceptSummary: skeleton.conceptSummary,
         meshRequirements: skeleton.meshRequirements,
@@ -233,6 +239,15 @@ export async function generateDraftFormula(
       },
       deps.llmFactory.forPurpose('suggest_mesh')
     );
+    if (deps.checkMeshDescriptors) {
+      const checked = await deps.checkMeshDescriptors(mesh.map(meshDescriptor).filter(Boolean));
+      mesh = mesh.filter((candidate) => {
+        const descriptor = meshDescriptor(candidate);
+        if (checked.get(descriptor) !== 'missing') return true;
+        removedMeshHeadings.push({ blockIndex: i, blockId: String(i + 1), blockLabel: block.blockLabel, descriptor });
+        return false;
+      });
+    }
     meshes.push(mesh);
 
     notifyProgress({ step: 'freeword-designer', blockIndex: i, blockCount });
@@ -301,6 +316,7 @@ export async function generateDraftFormula(
     meshSuggestions: meshes,
     freewordSuggestions: freewords,
     blockHits,
+    removedMeshHeadings,
   };
 }
 

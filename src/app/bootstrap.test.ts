@@ -932,6 +932,8 @@ describe('startApp - wiring 層', () => {
           ],
         });
       }
+      if (url.includes('db=mesh')) return jsonResponse({ esearchresult: { count: '0', warninglist: { quotedphrasesnotfound: ['Desc'] } } });
+      if (url.includes('esearch.fcgi')) return jsonResponse({ esearchresult: { count: '5', idlist: [] } });
       if (typeof url === 'string' && url.includes('/upload/drive/v3/files')) {
         return jsonResponse({ id: 'f', webViewLink: '' });
       }
@@ -974,6 +976,14 @@ describe('startApp - wiring 層', () => {
     const calls = fetchMock.mock.calls.map((c) => c[0] as string);
     expect(calls.some((u) => u.includes('FormulaVersions') && u.includes(':append'))).toBe(true);
     expect(handle.store.getState().currentFormulaVersionId).toBeTruthy();
+    expect(calls.some((url) => url.includes('db=mesh') && new URL(url).searchParams.get('term') === '"Desc"[mh]')).toBe(true);
+    expect(handle.store.getState().draftRun?.status).toBe('done');
+    expect(handle.store.getState().draftRun?.blockHits).toEqual([]);
+    expect(handle.store.getState().validationResult).not.toBeNull();
+    expect(handle.store.getState().draftRun?.removedMeshHeadings).toEqual([
+      { blockIndex: 0, blockId: '1', blockLabel: 'P', descriptor: 'Desc' },
+    ]);
+    expect(handle.store.getState().currentFormulaMarkdown).not.toContain('"Desc"[Mesh]');
   });
 
   test('export view 既定 onExport が Conversions に 4 行追記する', async () => {
@@ -2554,7 +2564,7 @@ describe('startApp - wiring 層', () => {
         progressLabel: '',
         startedAtMs: Date.now(),
         error: 'NCBI 503',
-        blockHits: [],
+        removedMeshHeadings: [], blockHits: [],
       },
     }));
   }
@@ -2608,7 +2618,7 @@ describe('startApp - wiring 層', () => {
     });
   }
 
-  test('「検証のみ再実行」は LLM を呼ばずに検証を回す（fix-plan 2-2）', async () => {
+  test.each([false, true])('「検証のみ再実行」は LLM を呼ばず、除外通知の有無 %s を保持する', async (hasRemoved) => {
     const doc = buildDocument();
     const { runtime, fetchMock } = makeRuntime({
       currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
@@ -2623,6 +2633,9 @@ describe('startApp - wiring 層', () => {
     });
     await flush();
     seedValidatingError(handle);
+    const removedMeshHeadings = hasRemoved
+      ? [{ blockIndex: 0, blockId: '1', blockLabel: 'P', descriptor: 'Missing' }] : [];
+    handle.store.setState((s) => ({ ...s, draftRun: { ...s.draftRun!, removedMeshHeadings } }));
     const btn = doc.querySelector<HTMLButtonElement>('.draft__revalidate');
     expect(btn).not.toBeNull();
     btn!.click();
@@ -2634,9 +2647,66 @@ describe('startApp - wiring 層', () => {
     );
     expect(llmCalls).toHaveLength(0);
     const state = handle.store.getState();
-    expect(state.draftRun).toBeNull();
+    if (hasRemoved) {
+      expect(state.draftRun?.status).toBe('done');
+      expect(state.draftRun?.removedMeshHeadings).toEqual(removedMeshHeadings);
+      expect(doc.querySelector('.draft__mesh-notice')?.textContent).toContain('#1 P: Missing');
+    } else expect(state.draftRun).toBeNull();
     expect(state.validationResult?.formulaVersionId).toBe('fv-1');
     expect(state.validationResult?.summary.lineHits.length).toBeGreaterThan(0);
+  });
+
+  test.each(['error', 'done'] as const)('「検証のみ再実行」は %s の古い式を再検索し、未変更の式だけ再利用する', async (status) => {
+    const doc = buildDocument();
+    const { runtime, fetchMock } = makeRuntime({
+      currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
+    });
+    mockValidationFetch(fetchMock, '0');
+    const handle = startApp(doc, {
+      getHash: () => '#/draft',
+      onHashChange: jest.fn().mockReturnValue(() => undefined),
+      setHash: jest.fn(),
+      runtime,
+    });
+    await flush();
+    seedValidatingError(handle);
+    handle.store.setState((s) => ({
+      ...s,
+      draftRun: {
+        ...s.draftRun!, status,
+        blockHits: [
+          { blockIndex: 0, blockId: '1', blockLabel: 'P', expression: '"asthma"[tiab]', hitCount: 99, error: null },
+          { blockIndex: 1, blockId: '2', blockLabel: 'I', expression: '  "children"[tiab]  ', hitCount: 12, error: null },
+          { blockIndex: 3, blockId: '4', blockLabel: 'O', expression: '"absent"[tiab]', hitCount: 88, error: null },
+        ],
+      },
+    }));
+    const newExpression = '"wheeze"[tiab]';
+    handle.store.setState((s) => ({
+      ...s,
+      currentFormulaMarkdown: REVALIDATE_MD.replace('"asthma"[tiab]', newExpression),
+    }));
+    doc.querySelector<HTMLButtonElement>('.draft__revalidate')!.click();
+    for (let i = 0; i < 30; i += 1) {
+      await flush();
+    }
+    const searchedTerms = fetchMock.mock.calls
+      .map((c) => c[0] as string)
+      .filter((url) => url.includes('esearch.fcgi'))
+      .map((url) => new URL(url).searchParams.get('term'));
+    expect(searchedTerms).toContain(newExpression);
+    expect(searchedTerms).not.toContain('"children"[tiab]');
+    expect(searchedTerms).not.toContain('"asthma"[tiab]');
+    expect(handle.store.getState().validationResult?.summary.lineHits).toEqual([
+      expect.objectContaining({ blockId: '1', expression: newExpression, hitCount: 0, error: null }),
+      expect.objectContaining({ blockId: '2', hitCount: 12, error: null }),
+      expect.objectContaining({ blockId: '3', hitCount: 0, error: null }),
+    ]);
+    const savedRows = fetchMock.mock.calls
+      .filter((c) => (c[0] as string).includes('ValidationLog') && (c[0] as string).includes(':append'))
+      .flatMap((c) => (JSON.parse((c[1] as RequestInit).body as string) as { values: unknown[][] }).values)
+      .filter((row) => row[SHEET_HEADERS.ValidationLog.indexOf('check_type')] === 'line_hits');
+    expect(savedRows.map((row) => row[SHEET_HEADERS.ValidationLog.indexOf('total_hits')])).toEqual([0, 12, 0]);
   });
 
   test('検証完了時に総ヒット > 10,000 なら design_filter を呼び提案を保存する（fix-plan 2-1）', async () => {

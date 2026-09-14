@@ -1,3 +1,4 @@
+import { checkMeshDescriptors } from '../../src/lib/ncbi/mesh';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { config } from 'dotenv';
@@ -54,7 +55,7 @@ export async function generateC0Content(input: GenerateC0Input, deps: GenerateC0
   const context = await prepareC0Context(input, deps);
   // C0 の目安はプロファイルに依存させず固定する。
   const draft = await generateDraftFormula({ ...context, targetHits: DEFAULT_OPTIMIZATION_MAX_HITS },
-    { llmFactory: deps.llmFactory, countBlockHits: async (query) => (await esearch(query, deps.eutils, { retmax: 0 })).count });
+    { llmFactory: deps.llmFactory, checkMeshDescriptors: (descriptors) => checkMeshDescriptors(descriptors, deps.eutils), countBlockHits: async (query) => (await esearch(query, deps.eutils, { retmax: 0 })).count });
   return finalizeC0Content(input, deps, context, draft);
 }
 

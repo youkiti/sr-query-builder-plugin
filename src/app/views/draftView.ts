@@ -236,7 +236,7 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
       if (run.status === 'running') {
         status.textContent = runningStatusText(run.phase, run.progressLabel, run.startedAtMs);
         startElapsedTicker(status, run.phase, run.progressLabel, run.startedAtMs);
-      } else {
+      } else if (run.status === 'error') {
         const phaseLabel = run.phase === 'validating' ? '検証' : '生成';
         errorBox.textContent = `${phaseLabel}に失敗しました: ${run.error ?? '不明なエラー'}`;
         // 「検証のみ再実行」ボタンは実行状態から独立して .draft__actions に描画する
@@ -257,6 +257,22 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
     const blockHits = run?.blockHits ?? [];
     if (blockHits.length > 0 || running) {
       container.appendChild(renderLiveBlockHits(doc, ctx.state, blockHits, running));
+    }
+    if (!running && run?.removedMeshHeadings.length) {
+      const notice = doc.createElement('div');
+      notice.className = 'draft__mesh-notice';
+      notice.setAttribute('role', 'status');
+      const message = doc.createElement('p');
+      message.textContent = '⚠ MeSH 辞書に無い見出しを式から外しました（AI が提案した見出しが MeSH に存在しないため）';
+      notice.appendChild(message);
+      const list = doc.createElement('ul');
+      for (const item of run.removedMeshHeadings) {
+        const li = doc.createElement('li');
+        li.textContent = `#${item.blockId} ${item.blockLabel}: ${item.descriptor}`;
+        list.appendChild(li);
+      }
+      notice.appendChild(list);
+      container.appendChild(notice);
     }
 
     // 検証結果（捕捉率 / MeSH / 階層）。生成完了後に自動実行され store に保存される。
