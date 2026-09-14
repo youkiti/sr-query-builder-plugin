@@ -140,7 +140,7 @@ export async function executeOutsideStages(fixture: BenchCase, seeds: FrozenSeed
   const outside = await searchOutsideCandidates({ formula: c0.formula,
     researchQuestion: c0.protocol.researchQuestion, inclusionCriteria: c0.protocol.inclusionCriteria,
     exclusionCriteria: c0.protocol.exclusionCriteria, existingPmids: new Set(seeds.selections.map((seed) => seed.pmid)),
-    additions: margin.additions, retmax: options.retmax, skillCandidateLimit: options.candidateLimit, sort: options.sort, retrieval: options.retrieval,
+    additions: margin.additions, retmax: options.retmax, skillCandidateLimit: options.candidateLimit, sort: options.sort ?? 'none', retrieval: options.retrieval,
     eutils: deps.eutils, llmFactory: deps.llmFactory, onProgress: (step) => deps.progress({ step }) });
   if (!outside.stages || outside.stages.marginQuery !== margin.marginQuery) {
     throw new Error('凍結した margin クエリと段階測定のクエリが一致しません');
