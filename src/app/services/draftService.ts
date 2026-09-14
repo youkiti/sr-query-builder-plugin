@@ -246,11 +246,19 @@ export async function generateDraftFormula(
       deps.llmFactory.forPurpose('suggest_mesh')
     );
     if (deps.resolveMeshDescriptors) {
-      const resolutions = await deps.resolveMeshDescriptors(mesh.map(meshDescriptor).filter(Boolean));
-      const seen = new Set<string>();
-      mesh = mesh.flatMap((candidate) => {
+      const descriptors = mesh.map((candidate) => {
         const descriptor = meshDescriptor(candidate);
-        const resolution = resolutions.get(descriptor);
+        const slash = descriptor.indexOf('/');
+        const heading = descriptor.slice(0, slash).trim();
+        const subheading = descriptor.slice(slash + 1).trim();
+        return slash >= 0 && heading && subheading
+          ? { candidate, descriptor, heading, subheading }
+          : { candidate, descriptor, heading: descriptor, subheading: '' };
+      });
+      const resolutions = await deps.resolveMeshDescriptors([...new Set(descriptors.map((item) => item.heading).filter(Boolean))]);
+      const seen = new Set<string>();
+      mesh = descriptors.flatMap(({ candidate, descriptor, heading, subheading }) => {
+        const resolution = resolutions.get(heading);
         const blockRef = { blockIndex: i, blockId: String(i + 1), blockLabel: block.blockLabel };
         if (resolution?.status === 'missing') {
           removedMeshHeadings.push({ ...blockRef, descriptor });
@@ -258,11 +266,12 @@ export async function generateDraftFormula(
         }
         let candidates = [candidate];
         if (resolution?.status === 'resolved') {
-          if (resolution.headings.some((heading) => heading.toLowerCase() !== descriptor.toLowerCase())) {
-            replacedMeshHeadings.push({ ...blockRef, from: descriptor, to: resolution.headings });
+          const resolvedDescriptors = resolution.headings.map((h) => subheading ? `${h}/${subheading}` : h);
+          if (resolution.headings.some((h) => h.toLowerCase() !== heading.toLowerCase())) {
+            replacedMeshHeadings.push({ ...blockRef, from: descriptor, to: resolvedDescriptors });
           }
-          candidates = resolution.headings.map((heading) => ({ ...candidate, descriptor: heading,
-            tagSyntax: buildMeshTag({ descriptor: heading, tagSyntax: candidate.tagSyntax }) }));
+          candidates = resolvedDescriptors.map((resolvedDescriptor) => ({ ...candidate, descriptor: resolvedDescriptor,
+            tagSyntax: buildMeshTag({ descriptor: resolvedDescriptor, tagSyntax: candidate.tagSyntax }) }));
         }
         return candidates.filter((item) => {
           const key = buildMeshTag(item).toLowerCase();
