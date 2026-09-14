@@ -35,7 +35,8 @@ function setup() {
 test.each([[], ['--trials', '0'], ['--trials', '1.5'], ['--trials', '01'], ['--trials', '9007199254740992'],
   ['--trials'], ['--unknown'], ['--report', '--dry-run'], ['--report', '--trials', '1'],
   ['--report', '--case', 'unknown'], ['--report', '--variant', 'unknown'], ['--report', '--label', '../x'],
-  ['--report', '--label', '..'], ['--report', '--label', 'replay-x'], ['--report', '--report']])('引数を拒否: %j', (...args) => {
+  ['--report', '--label', '..'], ['--report', '--label', 'replay-x'], ['--report', '--report'],
+  ['--relookup', '--trials', '1'], ['--relookup', '--dry-run'], ['--relookup', '--report']])('引数を拒否: %j', (...args) => {
   expect(() => parseFrequencyArgs(args)).toThrow();
 });
 
@@ -111,7 +112,7 @@ test('集計は生成失敗も完了分母に含め、未完了と未実行を�
   pending.complete = false; pending.outcome = 'generation_transient';
   pending.diagnostics = (['block', 'formula'] as const).map((target) => ({ target, id: '1', expression: 'missing[Mesh]',
     status: 'syntax_error', count: null, error: '構文エラー', phrasesNotFound: ['missing'], fieldsNotFound: [] }));
-  pending.meshLookups = [{ phrase: 'missing', term: 'missing', status: 'unresolved', error: null }];
+  pending.meshLookups = [{ phrase: 'missing', term: 'missing', unquotedComma: true, status: 'unresolved', error: null }];
   writeFileSync(path(3), JSON.stringify(pending));
   const summary = reportFrequency(root, plan);
   expect(summary).toContain('| 全体 | 4 | 2 | 1 | 1 | 2/2 | 0/2 | 0/2 | 0/2 | 0/2 | 0/0 | 0/0 | 0 | 0 | 0 | 0 | 0 |');
@@ -187,4 +188,88 @@ test('dry-run と結果なし report は環境も通信も使わず、dry-run �
   expect(output).toHaveBeenCalledWith(expect.stringContaining('0 件'));
   expect(config).not.toHaveBeenCalled();
   expect(deps.fetch).not.toHaveBeenCalled();
+});
+
+test('再照会は plan がなければ入力読込や通信前に拒否する', async () => {
+  const { results, root, deps } = setup();
+  await expect(main(['--relookup'], '存在しない入力', results, deps)).rejects.toThrow('plan.json が必要');
+  expect(deps.fetch).not.toHaveBeenCalled();
+  expect(deps.generate).not.toHaveBeenCalled();
+  expect(existsSync(root)).toBe(false);
+});
+
+test('再照会は完了診断だけを置換し、初回値と履歴を保持して LLM を呼ばない', async () => {
+  const { results, deps } = setup();
+  const root = join(results, 'draft-frequency', 'saved');
+  const path = (k: number) => join(root, id, 'criteria-only', `trial-${k}.json`);
+  mkdirSync(join(root, id, 'criteria-only'), { recursive: true });
+  const condition = { caseId: id, variant: 'criteria-only' as const, c0Name: 'criteria-only-draft1', c0Sha256: 'sha' };
+  const plan: Plan = { trials: 4, conditions: [condition, { ...condition, variant: 'seeded' }, { ...condition, caseId: 'r2-pdr-prognostic' }], createdAt: '', gitCommit: null };
+  writeFileSync(join(root, 'plan.json'), JSON.stringify(plan));
+  const previousMeshLookups = [{ phrase: 'Proliferative', term: null, status: 'not_mesh', error: null }];
+  const diagnostics = (['block', 'formula'] as const).map((target) => ({ target, id: '1',
+    expression: 'x[tiab] OR Diabetic Retinopathy, Proliferative[Mesh]', status: 'syntax_error', count: null,
+    error: '構文エラー', phrasesNotFound: ['Proliferative', 'Proliferative'], fieldsNotFound: [] }));
+  const saved = { complete: true, diagnostics, meshLookups: previousMeshLookups, outcome: 'syntax_error', formulaMd: '保存した式' };
+  writeFileSync(path(1), JSON.stringify(saved));
+  writeFileSync(path(2), JSON.stringify({ ...saved, complete: false }));
+  writeFileSync(path(4), JSON.stringify({ ...saved, diagnostics: [] }));
+  const excluded = plan.conditions.slice(1).map((item) => join(root, item.caseId, item.variant, 'trial-1.json'));
+  for (const file of excluded) { mkdirSync(join(file, '..'), { recursive: true }); writeFileSync(file, JSON.stringify(saved)); }
+  const untouched = [path(2), ...excluded].map((file) => [file, readFileSync(file, 'utf8')] as const);
+  const history = path(1).replace('.json', '.history.jsonl');
+  writeFileSync(history, '{"旧履歴":true}\n');
+  deps.provider = jest.fn(deps.provider!);
+  const secret = 'fake-ncbi-key';
+  const originalKey = process.env.NCBI_API_KEY;
+  process.env.NCBI_API_KEY = secret;
+  deps.fetch = jest.fn().mockResolvedValueOnce(new Response('', { status: 429 }))
+    .mockImplementation(async () => new Response(JSON.stringify({ esearchresult: { count: '0',
+      warninglist: { quotedphrasesnotfound: ['"Diabetic Retinopathy, Proliferative"[mh]'] } } })));
+  deps.eutils = { maxRetries: 1, sleep: jest.fn(async () => undefined) };
+  const args = ['--relookup', '--label', 'saved', '--case', id, '--variant', 'criteria-only'];
+  try {
+    for (let run = 0; run < 2; run++) {
+      await main(args, '存在しない入力', results, deps);
+      const result = JSON.parse(readFileSync(path(1), 'utf8')) as Trial;
+      expect(result.meshLookups).toEqual([{ phrase: 'Proliferative', term: 'Diabetic Retinopathy, Proliferative', unquotedComma: true, status: 'unresolved', error: null }]);
+      expect(result.relookup?.previousMeshLookups).toEqual(previousMeshLookups);
+      expect(Number.isFinite(Date.parse(result.relookup!.at))).toBe(true);
+      expect(result.relookup).toHaveProperty('gitCommit');
+      expect({ ...result, meshLookups: previousMeshLookups, relookup: undefined }).toEqual({ ...saved, relookup: undefined });
+      expect(JSON.parse(readFileSync(path(4), 'utf8')).meshLookups).toEqual([]);
+      for (const [file, content] of untouched) expect(readFileSync(file, 'utf8')).toBe(content);
+      expect(existsSync(path(3))).toBe(false);
+      expect(readFileSync(history, 'utf8')).toBe('{"旧履歴":true}\n');
+      expect(existsSync(path(4).replace('.json', '.history.jsonl'))).toBe(false);
+    }
+    expect(deps.fetch).toHaveBeenCalledTimes(3);
+    expect(deps.eutils.sleep).toHaveBeenCalledWith(1000);
+    expect(sharedEutilsRateLimiters.withApiKey.acquire).toHaveBeenCalledTimes(3);
+    for (const [input] of jest.mocked(deps.fetch!).mock.calls) {
+      const params = new URL(String(input)).searchParams;
+      expect(params.get('db')).toBe('mesh');
+      expect(params.get('term')).toBe('"Diabetic Retinopathy, Proliferative"[mh]');
+      expect(params.get('api_key')).toBe(secret);
+      for (const key of ['maxdate', 'mindate', 'datetype']) expect(params.has(key)).toBe(false);
+    }
+    expect(deps.generate).not.toHaveBeenCalled();
+    expect(deps.provider).not.toHaveBeenCalled();
+    expect(output).toHaveBeenCalledWith(expect.stringContaining('trial-4: 照会語数=0'));
+    const events = readFileSync(join(root, 'relookup-progress.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line).event);
+    expect(events.filter((event) => event.api)).toHaveLength(3);
+    expect(events.filter((event) => event.terms === 0)).toHaveLength(2);
+    const summary = reportFrequency(root, plan, { caseId: id, variant: 'criteria-only' });
+    expect(summary).toContain('| not_mesh語 | カンマ未引用の語 |');
+    expect(summary.split('\n').find((line) => line.startsWith('| 全体 |'))).toMatch(/\| 1 \| 0 \| 0 \| 0 \| 0 \| 1 \|$/);
+    const check = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const file = join(dir, entry.name);
+        if (entry.isDirectory()) check(file); else expect(readFileSync(file, 'utf8')).not.toContain(secret);
+      }
+    };
+    check(root);
+  } finally {
+    if (originalKey === undefined) delete process.env.NCBI_API_KEY; else process.env.NCBI_API_KEY = originalKey;
+  }
 });

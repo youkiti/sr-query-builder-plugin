@@ -35,6 +35,26 @@ test.each([[0, 'unresolved'], [1, 'resolved'], [2, 'ambiguous'], [10, 'ambiguous
 });
 
 test.each([
+  ['x[tiab] OR Diabetic Retinopathy, Proliferative[Mesh] OR y[tiab]', 'Proliferative', 'Diabetic Retinopathy, Proliferative', true],
+  ['x[tiab] OR Retinopathy, Nonproliferative, Diabetic[Mesh]', 'Diabetic', 'Retinopathy, Nonproliferative, Diabetic', true],
+  ['"Diabetic Retinopathy, Proliferative"[Mesh]', 'Proliferative', null, false],
+  ['Retinopathy, Nonproliferative, Diabetic[Mesh] OR Diabetic[Mesh]', 'Diabetic', 'Diabetic', false],
+  ['Diabetic[Mesh] OR Retinopathy, Nonproliferative, Diabetic[Mesh]', 'Diabetic', 'Diabetic', false],
+  ['x[tiab] OR Retinopathy, Nonproliferative, Diabetic /drug therapy[MeSH:NoExp]', ' diabetic ', 'Retinopathy, Nonproliferative, Diabetic', true],
+  ['x[tiab] OR Wounds and Injuries, Other[Mesh]', 'other', 'Wounds and Injuries, Other', true],
+  ['x[tiab] OR Diabetic Retinopathy, Proliferative[tiab]', 'Proliferative', null, false],
+  ['Retinopathy, Nonproliferative, Diabetic[Mesh]', 'Nonproliferative', null, false],
+  ['Diabetic Retinopathy, Proliferative[Mesh]', 'Diabetic Retinopathy, Proliferative', 'Diabetic Retinopathy, Proliferative', false],
+] as const)('全体一致を優先し、未引用の最後のカンマ断片だけを照合: %s', async (expression, phrase, term, unquotedComma) => {
+  const input = deps({ esearchresult: { count: '0', idlist: [], translationset: [], querytranslation: `"${term}"[mh]`,
+    warninglist: { phrasesignored: [], quotedphrasesnotfound: [`"${term}"[mh]`], outputmessages: ['No items found.'] } } });
+  expect(meshTerm(phrase, expression)).toBe(term);
+  expect(await lookupMesh(phrase, expression, input)).toEqual({ phrase, term, unquotedComma, status: term === null ? 'not_mesh' : 'unresolved', error: null });
+  if (term === null) expect(input.fetch).not.toHaveBeenCalled();
+  else expect(new URL(jest.mocked(input.fetch).mock.calls[0]![0] as string).searchParams.get('term')).toBe(`"${term}"[mh]`);
+});
+
+test.each([
   ['Nonexistent Termxyz Qwerty', 'unresolved', '{"header":{"type":"esearch","version":"0.3"},"esearchresult":{"count":"0","retmax":"0","retstart":"0","idlist":[],"translationset":[],"querytranslation":"(\\"Nonexistent Termxyz Qwerty\\"[mh])","warninglist":{"phrasesignored":[],"quotedphrasesnotfound":["\\"Nonexistent Termxyz Qwerty\\"[mh]"],"outputmessages":["No items found."]}}}'],
   ['Neoplasms', 'resolved', '{"header":{"type":"esearch","version":"0.3"},"esearchresult":{"count":"1","retmax":"1","retstart":"0","idlist":["68009369"],"translationset":[],"translationstack":[{"term":"\\"Neoplasms\\"[mh]","field":"mh","count":"1","explode":"N"},"GROUP"],"querytranslation":"\\"Neoplasms\\"[mh]"}}'],
 ])('MeSH の実応答を分類する: %s', async (term, status, body) => {

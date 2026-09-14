@@ -12,7 +12,7 @@ export interface Diagnostic {
   count: number | null; error: string | null; phrasesNotFound: string[]; fieldsNotFound: string[];
 }
 export interface MeshLookup {
-  phrase: string; term: string | null;
+  phrase: string; term: string | null; unquotedComma: boolean;
   status: 'resolved' | 'ambiguous' | 'unresolved' | 'lookup_failed' | 'not_mesh';
   error: string | null;
 }
@@ -42,20 +42,31 @@ function normalizeTerm(value: string): string {
 }
 
 export function meshTerm(phrase: string, expression: string): string | null {
+  return matchMeshTerm(phrase, expression).term;
+}
+
+function matchMeshTerm(phrase: string, expression: string): Pick<MeshLookup, 'term' | 'unquotedComma'> {
   const term = normalizeTerm(phrase);
   // タグ無しの返答も、対象式のタグ付き語との照合で判定する。
   const atoms = expression.match(/(?:"[^"]+"|[^()[\]"]+)\[[^\]]+\]/g) ?? [];
+  const candidates: { term: string; quoted: boolean }[] = [];
   for (const atom of atoms) {
     if (!meshTag.test(atom)) continue;
     const candidate = normalizeTerm(atom.startsWith('"') ? atom : atom.replace(/^.*\b(?:AND|OR|NOT)\s+/, ''));
-    if (candidate.toLowerCase() === term.toLowerCase()) return term;
+    if (candidate.toLowerCase() === term.toLowerCase()) return { term, unquotedComma: false };
+    candidates.push({ term: candidate, quoted: atom.startsWith('"') });
   }
-  return null;
+  for (const candidate of candidates) {
+    if (!candidate.quoted && candidate.term.includes(',') && candidate.term.split(',').pop()!.trim().toLowerCase() === term.toLowerCase()) {
+      return { term: candidate.term, unquotedComma: true };
+    }
+  }
+  return { term: null, unquotedComma: false };
 }
 
 export async function lookupMesh(phrase: string, expression: string, deps: EutilsDeps): Promise<MeshLookup> {
-  const term = meshTerm(phrase, expression);
-  if (term === null) return { phrase, term, status: 'not_mesh', error: null };
+  const { term, unquotedComma } = matchMeshTerm(phrase, expression);
+  if (term === null) return { phrase, term, unquotedComma, status: 'not_mesh', error: null };
   try {
     const count = await retryWithBackoff(async () => {
       await resolveRateLimiter(deps).acquire();
@@ -77,8 +88,18 @@ export async function lookupMesh(phrase: string, expression: string, deps: Eutil
       }
       return Number(result!.count);
     }, { sleep: deps.sleep, maxRetries: deps.maxRetries, shouldRetry: shouldRetryEutils });
-    return { phrase, term, status: count === 0 ? 'unresolved' : count === 1 ? 'resolved' : 'ambiguous', error: null };
-  } catch (error) { return { phrase, term, status: 'lookup_failed', error: errorText(error) }; }
+    return { phrase, term, unquotedComma, status: count === 0 ? 'unresolved' : count === 1 ? 'resolved' : 'ambiguous', error: null };
+  } catch (error) { return { phrase, term, unquotedComma, status: 'lookup_failed', error: errorText(error) }; }
+}
+
+export async function lookupDiagnosticMesh(diagnostics: Diagnostic[], deps: EutilsDeps, meshLookups: MeshLookup[] = []): Promise<MeshLookup[]> {
+  for (const diagnostic of diagnostics) {
+    for (const phrase of diagnostic.phrasesNotFound) {
+      const term = meshTerm(phrase, diagnostic.expression);
+      if (!meshLookups.some((lookup) => lookup.phrase === phrase && lookup.term === term)) meshLookups.push(await lookupMesh(phrase, diagnostic.expression, deps));
+    }
+  }
+  return meshLookups;
 }
 
 export async function diagnoseFormula(formula: PubmedFormula, deps: EutilsDeps): Promise<{ diagnostics: Diagnostic[]; meshLookups: MeshLookup[] }> {
@@ -109,10 +130,7 @@ export async function diagnoseFormula(formula: PubmedFormula, deps: EutilsDeps):
       if (diagnostic.status === 'syntax_error') Object.assign(diagnostic, parseSyntaxMessage(diagnostic.error));
     }
     diagnostics.push(diagnostic);
-    for (const phrase of diagnostic.phrasesNotFound) {
-      const term = meshTerm(phrase, diagnostic.expression);
-      if (!meshLookups.some((lookup) => lookup.phrase === phrase && lookup.term === term)) meshLookups.push(await lookupMesh(phrase, diagnostic.expression, deps));
-    }
+    await lookupDiagnosticMesh([diagnostic], deps, meshLookups);
   }
   return { diagnostics, meshLookups };
 }

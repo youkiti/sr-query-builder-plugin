@@ -155,9 +155,10 @@ npm run eval:draft-frequency -- --dry-run --trials 5
 npm run eval:draft-frequency -- --trials 5 --label baseline
 npm run eval:draft-frequency -- --trials 5 --label baseline --case r2-pdr-prognostic --variant seeded
 npm run eval:draft-frequency -- --report --label baseline
+npm run eval:draft-frequency -- --relookup --label baseline --case r2-pdr-prognostic --variant criteria-only
 ```
 
-`--trials` は正の整数で必須です。`--case` を省略すると全3ケース、`--variant criteria-only|seeded` を省略すると両方を選びます。`--label` は既存コマンドと同じ英数字・`.`・`_`・`-` の1〜40文字で、`replay-` 接頭辞は禁止です。独立ディレクトリとして使うため `.` と `..` も拒否します。省略名は `default` です。`--report` は通信せず集計だけを行い、`--trials` / `--dry-run` との併用は拒否します。ケース・variant 指定による集計の絞り込みも可能です。
+`--trials` は生成実行・dry-run では正の整数で必須です。`--case` を省略すると全3ケース、`--variant criteria-only|seeded` を省略すると両方を選びます。`--label` は既存コマンドと同じ英数字・`.`・`_`・`-` の1〜40文字で、`replay-` 接頭辞は禁止です。独立ディレクトリとして使うため `.` と `..` も拒否します。省略名は `default` です。`--report` は通信せず集計だけを行い、`--trials` / `--dry-run` との併用は拒否します。ケース・variant 指定による集計の絞り込みも可能です。
 
 初回本実行で `results/draft-frequency/<label>/plan.json` に試行数、ケース×variant、C0 の名前と sha256、作成日時、コミットを固定します。再開時は同じ試行数、plan の部分集合の条件、同じ C0 ハッシュだけを許可します。実行後に結果を見て回数を変える場合は別ラベルが必要です。
 
@@ -170,7 +171,11 @@ npm run eval:draft-frequency -- --report --label baseline
 
 条件・試行は逐次実行し、1試行ずつ `<case>/<variant>/trial-<k>.json` を一時ファイルと rename で保存します。`generation_transient` / `network_error` は `complete: false` で再試行待ち、それ以外は完了です。再開では完了分をスキップし、未完了分の旧内容を `trial-<k>.history.jsonl` に追記してから再実行します。ログは `trial-<k>/llm/` と `trial-<k>/progress.jsonl` に残し、再試行の LLM ログも保持します。ファイル名の接頭辞は `a<n>-` で、n は `trial-<k>.history.jsonl` の行数 + 1 と、`trial-<k>/llm/` の既存ファイルの `a<n>-` 接頭辞にある最大の n + 1 の大きい方です（履歴・該当ログがなければ各候補は 1）。接頭辞の n は 1 以上の10進整数だけを読み、それ以外の名前は無視します。キーは保存前に redact します。
 
-`--report` は plan と現在の試行ファイルから条件別・全体の同じ表を標準出力、`summary.md`、`summary.csv` に出します。計画数、完了、未完了、未実行を分け、各結論の分母は生成失敗を含む完了数です。ブロックと式全体の構文エラー率は、それぞれ保存された診断対象数を分母にします（完了試行の診断だけを数え、未完了試行と history は含みません）。MeSH も完了試行だけから各分類の語数を出します。試行なしでも「0 件」の行を出します。
+MeSH の照合は、正規化した返答語とタグ付き語の全体一致を最優先します。一致しなければ、引用符で囲まれていないカンマを含む MeSH 語の最後のカンマ以降を、空白・サブヘディング `/...` を除いて大文字小文字を無視して照合します。例えば `Diabetic Retinopathy, Proliferative[Mesh]` に PubMed が `Proliferative` だけを返した場合も、見出し全体の `"Diabetic Retinopathy, Proliferative"[mh]` を辞書照会します。タグ・サブヘディングを除き、演算子の除去は従来どおり大文字の `AND` / `OR` / `NOT` だけです。断片一致で見つけた場合だけ `meshLookups[].unquotedComma: true` とし、全体一致と `not_mesh` は `false` にします。引用符付きの見出しには断片照合を行いません。この実例の辞書応答は0件なので `unresolved` になります。
+
+`--relookup` は、修正前に保存した照合結果を、LLM で式を作り直さずに更新するモードです。`--label` の plan が必須で、`--case` / `--variant` で plan の条件を絞れます。`--trials` / `--dry-run` / `--report` とは併用できません。plan に含まれる `complete: true` の試行だけ、保存済み `diagnostics[].expression` と `phrasesNotFound` から、通常診断と同じ重複除去規則で MeSH 辞書を照会し、`meshLookups` を置き換えます。未完了・ファイルの無い試行は触りません。各試行に `relookup: { at, gitCommit, previousMeshLookups }` を付け、一時ファイルと rename で保存します。`at` は ISO 時刻、`previousMeshLookups` は初回の再照会前の値を繰り返し実行しても保持します。実行番号用の `trial-<k>.history.jsonl` は作成・追記しません。通信は `.env` の `NCBI_API_KEY`、`createEvalFetch`、共有レート制御・バックオフを使用し、MeSH 辞書には検索日制限を付けません。進捗・API 通信はキーをマスクして `results/draft-frequency/<label>/relookup-progress.jsonl` に追記し、各対象試行の照会語数・分類内訳を0語でも1行表示します。
+
+`--report` は plan と現在の試行ファイルから条件別・全体の同じ表を標準出力、`summary.md`、`summary.csv` に出します。計画数、完了、未完了、未実行を分け、各結論の分母は生成失敗を含む完了数です。ブロックと式全体の構文エラー率は、それぞれ保存された診断対象数を分母にします（完了試行の診断だけを数え、未完了試行と history は含みません）。MeSH も完了試行だけから各分類の語数を出します。`not_mesh語` の直後の `カンマ未引用の語` は `unquotedComma: true` の語数です。`relookup` の有無にかかわらず現在の `meshLookups` を数え、再照会前の値は集計しません。試行なしでも「0 件」の行を出します。
 
 `--dry-run` は環境ファイル・通信・書き込みなしで入力ハッシュと既存 plan との整合を検証し、保存先と通信量の目安を表示します。概念ブロック数を N、固定プロトコルから決定するフィルタ数を F とすると、1試行は LLM が 3N 回、NCBI が生成中 N 回＋診断 N+F+1 回＝2N+F+1 回です。MeSH 辞書照会と再送は追加され、途中で生成に失敗した場合は少なくなります。
 
