@@ -85,3 +85,5 @@ B1 は任意の `fixtures/<id>/b1.json` に `{ "query": "展開済みの PubMed 
 `--c0` は `<case>/c0/<名前>.json` のハッシュ・ケース・記録済み分割を検証し、protocol/blocks/formula をそのまま使用します。省略時は従来の生成です。`--seeds` の既定は20260912（seeds.json）、他の整数や名前は seeds-<値>.json を読み、held-out は選択分割から再計算します。`--label` は英数字・ドット・アンダースコア・ハイフンの1〜40文字で、replay- 始まりは禁止です。
 
 保存先は従来の記述に代わり `<results>/<profile>/<case>/<c0名またはlive>/<分割ID>[+<label>]/run.json`、試行は同じ階層の `<runId>/` です。コミット・dirty状態・分割・C0由来・label・legacy=true を記録します。同一コミット・同一上限の完了はスキップし、別コミットの完了は保護、失敗は再実行します。`--dry-run` は通信・書き込みなしで入力を検証し、ケースごとに1行表示します。追加シードの準備は master 側で行います（移植した欠落時メッセージの --seed は旧版 prepare.ts には未対応）。既存の report.ts は新しい深さの保存先を探索しないため、集計側の対応は別途必要です。
+
+`--c0 live` はその場生成の保存先（C0 キー `live`）と衝突するため拒否します。`eval:candidates`（`candidates.ts`）は新しい保存先に対応していません。このブランチの `run.ts` は却下候補の計測を run 内で行うため、再評価では `eval:candidates` を使いません。

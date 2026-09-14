@@ -45,7 +45,7 @@ test('既定と追加の引数を解釈し、fixtures にある追加ケース�
 });
 
 test.each([
-  ['--fixtures', 'relative'], ['--results', 'relative'], ['--case', '../escape'], ['--c0', '../escape'],
+  ['--fixtures', 'relative'], ['--results', 'relative'], ['--case', '../escape'], ['--c0', '../escape'], ['--c0', 'live'],
   ['--label', 'replay-test'], ['--label', 'Replay-test'], ['--label', 'a+b'], ['--label', ''], ['--label', 'a'.repeat(41)],
   ['--seeds', '01'], ['--seeds', '-1'], ['--seeds', '1.2'], ['--seeds', 's123'], ['--seeds', 's-123'],
   ['--seeds', 'UPPER'], ['--seeds', '9007199254740992'], ['--seeds', 'a'.repeat(33)],

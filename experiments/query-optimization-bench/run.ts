@@ -94,6 +94,8 @@ export function parseArgs(args: string[]): ParsedArgs {
   if (label !== undefined && (!/^[A-Za-z0-9._-]{1,40}$/.test(label) || label.trim() !== label)) throw new Error('--label は英数字・.・_・- の 1〜40 文字で指定してください');
   if (label !== undefined && /^replay-/i.test(label)) throw new Error('--label は "replay-" で始められません（--replay の保存先と衝突します）');
   if (c0Name !== undefined && !/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(c0Name)) throw new Error('--c0 にはパスではなく名前を指定してください');
+  // 保存先の C0 キーは --c0 省略時に 'live' になるため、同名の凍結 C0 と保存先が衝突しないよう拒否する。
+  if (c0Name === 'live') throw new Error('--c0 に live は指定できません（その場生成の保存先と衝突します）');
   if (fixturesArg !== undefined && !isAbsolute(fixturesArg)) throw new Error('--fixtures には絶対パスを指定してください');
   if (resultsArg !== undefined && !isAbsolute(resultsArg)) throw new Error('--results には絶対パスを指定してください');
   const fixturesDir = fixturesArg ?? FIXTURES;
