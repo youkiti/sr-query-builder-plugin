@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "name": "seeded-draft1-margin3",
+  "caseId": "r3-vascular-bleeding",
+  "c0": {
+    "name": "seeded-draft1",
+    "sha256": "21f9521e4f9e58edbe2c5800e1b68cc86954d2daeb8c94d988d8fc42866010fb"
+  },
+  "additions": [
+    {
+      "blockId": "1",
+      "additions": [
+        {
+          "term": "\"Cardiovascular Surgical Procedures\"[Mesh]",
+          "axis": "mesh",
+          "rationale": "血管手術の上位概念である心臓血管外科手術全体に広げることで、心臓と血管の境界領域の手術を網羅します。"
+        },
+        {
+          "term": "\"Aortic Diseases\"[Mesh]",
+          "axis": "mesh",
+          "rationale": "大動脈瘤の上位概念である大動脈疾患に広げることで、解離など他の大動脈疾患に対する手術を網羅します。"
+        },
+        {
+          "term": "\"revascularization*\"[tiab]",
+          "axis": "freeword",
+          "rationale": "血管再建・血行再建術という表現で記述された血管手術の論文を拾い上げます。"
+        },
+        {
+          "term": "\"endovascular therapy\"[tiab]",
+          "axis": "freeword",
+          "rationale": "endovascular repairやprocedure以外の、血管内治療を表す一般的なフリーワード表現をカバーします。"
+        },
+        {
+          "term": "\"aortofemoral\"[tiab]",
+          "axis": "freeword",
+          "rationale": "大動脈大腿動脈バイパス術など、具体的な血管手術の解剖学的部位名からアプローチします。"
+        }
+      ]
+    },
+    {
+      "blockId": "2",
+      "additions": [
+        {
+          "term": "\"Coagulants\"[Mesh]",
+          "axis": "mesh",
+          "rationale": "止血薬（Hemostatics）の親概念である凝固薬（Coagulants）に広げることで、血液凝固を促進する薬剤全般を網羅します。"
+        },
+        {
+          "term": "\"Tissue Adhesives\"[Mesh]",
+          "axis": "mesh",
+          "rationale": "フィブリン接着剤（Fibrin Tissue Adhesive）の親概念である組織接着剤に広げることで、他の組成の止血用接着剤をカバーします。"
+        },
+        {
+          "term": "\"aminocaproic\"[tiab]",
+          "axis": "freeword",
+          "rationale": "トラネキサム酸と並んで汎用される抗線維素溶解薬であるアミノカプロン酸を拾い上げます。"
+        },
+        {
+          "term": "\"EACA\"[tiab]",
+          "axis": "freeword",
+          "rationale": "イプシロン・アミノカプロン酸の一般的な略語での言及をカバーします。"
+        },
+        {
+          "term": "\"coagulant*\"[tiab]",
+          "axis": "freeword",
+          "rationale": "hemostatic以外の、血液凝固を促進する薬剤を表すフリーワード表現を拾います。"
+        },
+        {
+          "term": "\"fibrin sealant*\"[tiab]",
+          "axis": "freeword",
+          "rationale": "fibrin glueやfibrin adhesive以外の、フィブリンシーラントという表記のバリエーションを網羅します。"
+        }
+      ]
+    }
+  ],
+  "broadenedQuery": "(((Vascular Surgical Procedures[Mesh] OR Endovascular Procedures[Mesh] OR Aortic Aneurysm[Mesh] OR Blood Vessel Prosthesis Implantation[Mesh] OR \"vascular surgery\"[tiab] OR \"vascular procedure*\"[tiab] OR \"vascular reconstruction*\"[tiab] OR \"vascular operation*\"[tiab] OR \"aortic aneurysm repair*\"[tiab] OR \"endovascular repair*\"[tiab] OR \"EVAR\"[tiab] OR \"TEVAR\"[tiab] OR \"arterial bypass*\"[tiab] OR \"vascular bypass*\"[tiab] OR \"abdominal aortic aneurysm*\"[tiab] OR \"AAA\"[tiab] OR \"vascular surgical procedure*\"[tiab])) OR \"Cardiovascular Surgical Procedures\"[Mesh] OR \"Aortic Diseases\"[Mesh] OR \"revascularization*\"[tiab] OR \"endovascular therapy\"[tiab] OR \"aortofemoral\"[tiab]) AND (((Hemostatics[Mesh] OR Antifibrinolytic Agents[Mesh] OR Tranexamic Acid[Mesh] OR Aprotinin[Mesh] OR Thrombin[Mesh] OR Fibrin Tissue Adhesive[Mesh] OR Gelatin Sponge, Absorbable[Mesh] OR \"antifibrinolytic*\"[tiab] OR \"anti-fibrinolytic*\"[tiab] OR \"hemostatic*\"[tiab] OR \"haemostatic*\"[tiab] OR \"hemostasis\"[tiab] OR \"haemostasis\"[tiab] OR \"hemostat*\"[tiab] OR \"haemostat*\"[tiab] OR \"sealant*\"[tiab] OR \"glue*\"[tiab] OR \"adhesive*\"[tiab] OR \"tranexamic\"[tiab] OR \"TXA\"[tiab] OR \"aprotinin\"[tiab] OR \"desmopressin\"[tiab] OR \"DDAVP\"[tiab] OR \"fibrinogen\"[tiab] OR \"thrombin\"[tiab] OR \"gelatin-thrombin*\"[tiab] OR \"FloSeal\"[tiab] OR \"Gelfoam\"[tiab])) OR \"Coagulants\"[Mesh] OR \"Tissue Adhesives\"[Mesh] OR \"aminocaproic\"[tiab] OR \"EACA\"[tiab] OR \"coagulant*\"[tiab] OR \"fibrin sealant*\"[tiab]) AND ((randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh])))",
+  "marginQuery": "((((Vascular Surgical Procedures[Mesh] OR Endovascular Procedures[Mesh] OR Aortic Aneurysm[Mesh] OR Blood Vessel Prosthesis Implantation[Mesh] OR \"vascular surgery\"[tiab] OR \"vascular procedure*\"[tiab] OR \"vascular reconstruction*\"[tiab] OR \"vascular operation*\"[tiab] OR \"aortic aneurysm repair*\"[tiab] OR \"endovascular repair*\"[tiab] OR \"EVAR\"[tiab] OR \"TEVAR\"[tiab] OR \"arterial bypass*\"[tiab] OR \"vascular bypass*\"[tiab] OR \"abdominal aortic aneurysm*\"[tiab] OR \"AAA\"[tiab] OR \"vascular surgical procedure*\"[tiab])) OR \"Cardiovascular Surgical Procedures\"[Mesh] OR \"Aortic Diseases\"[Mesh] OR \"revascularization*\"[tiab] OR \"endovascular therapy\"[tiab] OR \"aortofemoral\"[tiab]) AND (((Hemostatics[Mesh] OR Antifibrinolytic Agents[Mesh] OR Tranexamic Acid[Mesh] OR Aprotinin[Mesh] OR Thrombin[Mesh] OR Fibrin Tissue Adhesive[Mesh] OR Gelatin Sponge, Absorbable[Mesh] OR \"antifibrinolytic*\"[tiab] OR \"anti-fibrinolytic*\"[tiab] OR \"hemostatic*\"[tiab] OR \"haemostatic*\"[tiab] OR \"hemostasis\"[tiab] OR \"haemostasis\"[tiab] OR \"hemostat*\"[tiab] OR \"haemostat*\"[tiab] OR \"sealant*\"[tiab] OR \"glue*\"[tiab] OR \"adhesive*\"[tiab] OR \"tranexamic\"[tiab] OR \"TXA\"[tiab] OR \"aprotinin\"[tiab] OR \"desmopressin\"[tiab] OR \"DDAVP\"[tiab] OR \"fibrinogen\"[tiab] OR \"thrombin\"[tiab] OR \"gelatin-thrombin*\"[tiab] OR \"FloSeal\"[tiab] OR \"Gelfoam\"[tiab])) OR \"Coagulants\"[Mesh] OR \"Tissue Adhesives\"[Mesh] OR \"aminocaproic\"[tiab] OR \"EACA\"[tiab] OR \"coagulant*\"[tiab] OR \"fibrin sealant*\"[tiab]) AND ((randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh])))) NOT (((Vascular Surgical Procedures[Mesh] OR Endovascular Procedures[Mesh] OR Aortic Aneurysm[Mesh] OR Blood Vessel Prosthesis Implantation[Mesh] OR \"vascular surgery\"[tiab] OR \"vascular procedure*\"[tiab] OR \"vascular reconstruction*\"[tiab] OR \"vascular operation*\"[tiab] OR \"aortic aneurysm repair*\"[tiab] OR \"endovascular repair*\"[tiab] OR \"EVAR\"[tiab] OR \"TEVAR\"[tiab] OR \"arterial bypass*\"[tiab] OR \"vascular bypass*\"[tiab] OR \"abdominal aortic aneurysm*\"[tiab] OR \"AAA\"[tiab] OR \"vascular surgical procedure*\"[tiab])) AND ((Hemostatics[Mesh] OR Antifibrinolytic Agents[Mesh] OR Tranexamic Acid[Mesh] OR Aprotinin[Mesh] OR Thrombin[Mesh] OR Fibrin Tissue Adhesive[Mesh] OR Gelatin Sponge, Absorbable[Mesh] OR \"antifibrinolytic*\"[tiab] OR \"anti-fibrinolytic*\"[tiab] OR \"hemostatic*\"[tiab] OR \"haemostatic*\"[tiab] OR \"hemostasis\"[tiab] OR \"haemostasis\"[tiab] OR \"hemostat*\"[tiab] OR \"haemostat*\"[tiab] OR \"sealant*\"[tiab] OR \"glue*\"[tiab] OR \"adhesive*\"[tiab] OR \"tranexamic\"[tiab] OR \"TXA\"[tiab] OR \"aprotinin\"[tiab] OR \"desmopressin\"[tiab] OR \"DDAVP\"[tiab] OR \"fibrinogen\"[tiab] OR \"thrombin\"[tiab] OR \"gelatin-thrombin*\"[tiab] OR \"FloSeal\"[tiab] OR \"Gelfoam\"[tiab])) AND ((randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh]))))",
+  "originalHits": 2320,
+  "marginHits": 1173,
+  "searchDate": "2022-03-31",
+  "model": "gemini-3.5-flash",
+  "createdAt": "2026-09-14T02:19:16.824Z",
+  "gitCommit": "94d05468cf17e08cd77195fcdd49d0f528691672",
+  "gitDirty": false,
+  "sha256": "4f56eebd7747782c60dda74c474e556dbc3a894e4698e5db60de294075673e87"
+}

@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "name": "criteria-only-draft1-margin4",
+  "caseId": "r3-vascular-bleeding",
+  "c0": {
+    "name": "criteria-only-draft1",
+    "sha256": "1d141894fdb3326a48bb66e69655b171b59b2fb8b8043ce48b81e6af3d81cc1b"
+  },
+  "additions": [
+    {
+      "blockId": "1",
+      "additions": [
+        {
+          "term": "Cardiovascular Surgical Procedures[Mesh]",
+          "axis": "mesh",
+          "rationale": "血管手術の上位概念である心臓血管外科手術を含めることで、心臓と血管の両方にまたがる境界領域の手術をカバーします。"
+        },
+        {
+          "term": "vascular reconstruction*[tiab]",
+          "axis": "freeword",
+          "rationale": "「血管再建」という表現を用いることで、手術名が具体的に記載されていない血管外科手術の論文を拾い上げます。"
+        },
+        {
+          "term": "revascularization*[tiab]",
+          "axis": "freeword",
+          "rationale": "「血行再建」という広範な治療概念の表現を含めることで、血管手術を伴う介入研究の取りこぼしを防ぎます。"
+        },
+        {
+          "term": "endovascular intervention*[tiab]",
+          "axis": "freeword",
+          "rationale": "「血管内介入」という表現をカバーすることで、EVARやTEVAR以外の低侵襲血管内治療の論文を網羅します。"
+        }
+      ]
+    },
+    {
+      "blockId": "2",
+      "additions": [
+        {
+          "term": "Coagulants[Mesh]",
+          "axis": "mesh",
+          "rationale": "止血薬（Hemostatics）と密接に関連する上位・周辺概念である「凝固薬」を含めることで、MeSH付与の揺れに対応します。"
+        },
+        {
+          "term": "hemostasis[tiab]",
+          "axis": "freeword",
+          "rationale": "薬剤名ではなく「止血（管理）」という現象や目的のキーワードで記載された論文を広く拾い上げます。"
+        },
+        {
+          "term": "haemostasis[tiab]",
+          "axis": "freeword",
+          "rationale": "hemostasis の英国式表記ゆれを網羅することで、欧州や豪州などの文献の取りこぼしを防ぎます。"
+        },
+        {
+          "term": "procoagulant*[tiab]",
+          "axis": "freeword",
+          "rationale": "「向凝固薬」や「凝固促進因子」といった表現で記載されている止血・抗線溶作用を持つ薬剤をカバーします。"
+        },
+        {
+          "term": "blood conservation[tiab]",
+          "axis": "freeword",
+          "rationale": "止血薬の投与目的である「血液温存（プログラム）」の文脈で書かれた臨床試験を包括します。"
+        }
+      ]
+    }
+  ],
+  "broadenedQuery": "(((Vascular Surgical Procedures[Mesh] OR Endovascular Procedures[Mesh] OR Aortic Aneurysm[Mesh] OR Aneurysm, Dissecting[Mesh] OR Bypass, Vascular[Mesh] OR Amputation[Mesh] OR \"vascular surgery\"[tiab] OR \"vascular surgical\"[tiab] OR vascular procedure*[tiab] OR vascular intervention*[tiab] OR \"aortic aneurysm repair\"[tiab] OR \"aortic dissection repair\"[tiab] OR \"aortic reconstruction\"[tiab] OR \"peripheral arterial bypass\"[tiab] OR \"femoropopliteal bypass\"[tiab] OR \"lower extremity bypass\"[tiab] OR \"lower limb amputation\"[tiab] OR \"leg amputation\"[tiab] OR \"above-knee amputation\"[tiab] OR \"below-knee amputation\"[tiab] OR \"endovascular repair\"[tiab] OR EVAR[tiab] OR TEVAR[tiab] OR angioplasty[tiab] OR atherectomy[tiab])) OR Cardiovascular Surgical Procedures[Mesh] OR vascular reconstruction*[tiab] OR revascularization*[tiab] OR endovascular intervention*[tiab]) AND (((Hemostatics[Mesh] OR Antifibrinolytic Agents[Mesh] OR Tranexamic Acid[Mesh] OR Aprotinin[Mesh] OR Desmopressin[Mesh] OR Fibrinogen[Mesh] OR Thrombin[Mesh] OR antifibrinolytic*[tiab] OR anti-fibrinolytic*[tiab] OR tranexamic acid*[tiab] OR TXA[tiab] OR aprotinin*[tiab] OR desmopressin*[tiab] OR DDAVP[tiab] OR fibrinogen concentrate*[tiab] OR thrombin[tiab] OR hemostatic*[tiab] OR haemostatic*[tiab] OR hemostat*[tiab] OR haemostat*[tiab] OR fibrin sealant*[tiab] OR fibrin glue*[tiab] OR gelatin sponge*[tiab] OR collagen patch*[tiab])) OR Coagulants[Mesh] OR hemostasis[tiab] OR haemostasis[tiab] OR procoagulant*[tiab] OR blood conservation[tiab]) AND ((randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh])))",
+  "marginQuery": "((((Vascular Surgical Procedures[Mesh] OR Endovascular Procedures[Mesh] OR Aortic Aneurysm[Mesh] OR Aneurysm, Dissecting[Mesh] OR Bypass, Vascular[Mesh] OR Amputation[Mesh] OR \"vascular surgery\"[tiab] OR \"vascular surgical\"[tiab] OR vascular procedure*[tiab] OR vascular intervention*[tiab] OR \"aortic aneurysm repair\"[tiab] OR \"aortic dissection repair\"[tiab] OR \"aortic reconstruction\"[tiab] OR \"peripheral arterial bypass\"[tiab] OR \"femoropopliteal bypass\"[tiab] OR \"lower extremity bypass\"[tiab] OR \"lower limb amputation\"[tiab] OR \"leg amputation\"[tiab] OR \"above-knee amputation\"[tiab] OR \"below-knee amputation\"[tiab] OR \"endovascular repair\"[tiab] OR EVAR[tiab] OR TEVAR[tiab] OR angioplasty[tiab] OR atherectomy[tiab])) OR Cardiovascular Surgical Procedures[Mesh] OR vascular reconstruction*[tiab] OR revascularization*[tiab] OR endovascular intervention*[tiab]) AND (((Hemostatics[Mesh] OR Antifibrinolytic Agents[Mesh] OR Tranexamic Acid[Mesh] OR Aprotinin[Mesh] OR Desmopressin[Mesh] OR Fibrinogen[Mesh] OR Thrombin[Mesh] OR antifibrinolytic*[tiab] OR anti-fibrinolytic*[tiab] OR tranexamic acid*[tiab] OR TXA[tiab] OR aprotinin*[tiab] OR desmopressin*[tiab] OR DDAVP[tiab] OR fibrinogen concentrate*[tiab] OR thrombin[tiab] OR hemostatic*[tiab] OR haemostatic*[tiab] OR hemostat*[tiab] OR haemostat*[tiab] OR fibrin sealant*[tiab] OR fibrin glue*[tiab] OR gelatin sponge*[tiab] OR collagen patch*[tiab])) OR Coagulants[Mesh] OR hemostasis[tiab] OR haemostasis[tiab] OR procoagulant*[tiab] OR blood conservation[tiab]) AND ((randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh])))) NOT (((Vascular Surgical Procedures[Mesh] OR Endovascular Procedures[Mesh] OR Aortic Aneurysm[Mesh] OR Aneurysm, Dissecting[Mesh] OR Bypass, Vascular[Mesh] OR Amputation[Mesh] OR \"vascular surgery\"[tiab] OR \"vascular surgical\"[tiab] OR vascular procedure*[tiab] OR vascular intervention*[tiab] OR \"aortic aneurysm repair\"[tiab] OR \"aortic dissection repair\"[tiab] OR \"aortic reconstruction\"[tiab] OR \"peripheral arterial bypass\"[tiab] OR \"femoropopliteal bypass\"[tiab] OR \"lower extremity bypass\"[tiab] OR \"lower limb amputation\"[tiab] OR \"leg amputation\"[tiab] OR \"above-knee amputation\"[tiab] OR \"below-knee amputation\"[tiab] OR \"endovascular repair\"[tiab] OR EVAR[tiab] OR TEVAR[tiab] OR angioplasty[tiab] OR atherectomy[tiab])) AND ((Hemostatics[Mesh] OR Antifibrinolytic Agents[Mesh] OR Tranexamic Acid[Mesh] OR Aprotinin[Mesh] OR Desmopressin[Mesh] OR Fibrinogen[Mesh] OR Thrombin[Mesh] OR antifibrinolytic*[tiab] OR anti-fibrinolytic*[tiab] OR tranexamic acid*[tiab] OR TXA[tiab] OR aprotinin*[tiab] OR desmopressin*[tiab] OR DDAVP[tiab] OR fibrinogen concentrate*[tiab] OR thrombin[tiab] OR hemostatic*[tiab] OR haemostatic*[tiab] OR hemostat*[tiab] OR haemostat*[tiab] OR fibrin sealant*[tiab] OR fibrin glue*[tiab] OR gelatin sponge*[tiab] OR collagen patch*[tiab])) AND ((randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh]))))",
+  "originalHits": 1872,
+  "marginHits": 1544,
+  "searchDate": "2022-03-31",
+  "model": "gemini-3.5-flash",
+  "createdAt": "2026-09-14T02:18:05.397Z",
+  "gitCommit": "b305d6a35b286c6a08e9229ea80be974cd8923b3",
+  "gitDirty": false,
+  "sha256": "c49d1fb01c5a52e998fbf381162db84496d77bde24661a314e84588bec4f5011"
+}
