@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { createLlmUsageTracker } from './llmUsage';
 import { CASES, type AdoptionAudit, type CaseRole, type Metrics, type RunResult } from './types';
 import { buildRunJobs, CONFIG, defaultPaths, makeSlots, mask, readConfig, readJson, readLedger, readSlots,
   type Job, type LedgerRow, type Paths, type RerunConfig, type Slot } from './rerun';
@@ -21,6 +22,22 @@ const role = (id: string): CaseRole | '欠測' => CASES.find((c) => c.id === id)
 const names = (list: string[] | null) => list === null ? null : list.join('; ');
 const subtract = (a: string[], b: string[]) => a.filter((id) => !b.includes(id));
 const intersection = (a: string[], b: string[]) => a.filter((id) => b.includes(id));
+export function usageFromLogs(entry: Entry) {
+  const run = entry.run;
+  if (!run || !run.runId || !Array.isArray(run.llmLogs)) return null;
+  const tracker = createLlmUsageTracker();
+  const token = (value: unknown): value is number | null => value === null || typeof value === 'number' && Number.isFinite(value) && value >= 0;
+  for (const path of run.llmLogs) {
+    if (typeof path !== 'string' || !path) return null;
+    let log: Record<string, unknown> | null;
+    try { log = readJson<Record<string, unknown>>(join(dirname(entry.job.expected), run.runId, path)); }
+    catch { return null; }
+    if (!log || typeof log !== 'object' || typeof log.model !== 'string' || !log.model || !('response' in log)
+      || !token(log.tokensIn) || !token(log.tokensOut)) return null;
+    tracker.record(log.model, log.tokensIn, log.tokensOut, log.response !== null);
+  }
+  return tracker.usage;
+}
 const delta = (a: number | null | undefined, b: number | null | undefined) => a == null || b == null ? null : a - b;
 export function distribution(values: (number | null | undefined)[]) {
   const sorted = values.filter((n): n is number => n != null && Number.isFinite(n)).sort((a, b) => a - b);
@@ -158,12 +175,17 @@ export function buildReport(config: RerunConfig, slots: Slot[], entries: Entry[]
   const costs: Row[] = ['current', 'legacy', 'legacyLive'].map((arm) => {
     const armEntries = entries.filter((entry) => entry.job.arm === arm);
     const runs = armEntries.flatMap((entry) => entry.run ? [entry.run] : []);
+    const usages = armEntries.map((entry) => {
+      const recorded = entry.run?.llmUsage;
+      return { usage: recorded ?? usageFromLogs(entry), fromLogs: recorded == null };
+    });
     return { arm, expectedRuns: armEntries.length, runs: runs.length, completed: armEntries.filter((e) => status(e) === '完了').length,
       failed: armEntries.filter((e) => status(e) === '失敗').length, missing: armEntries.filter((e) => status(e) === '欠測').length,
-      costUsdKnownSum: runs.some((r) => r.llmUsage?.costUsd != null) ? runs.reduce((sum, r) => sum + (r.llmUsage?.costUsd ?? 0), 0) : null,
-      costMissing: armEntries.length - runs.filter((r) => r.llmUsage?.costUsd != null).length,
-      llmCallsKnownSum: runs.some((r) => r.llmUsage) ? runs.reduce((sum, r) => sum + (r.llmUsage?.calls ?? 0), 0) : null,
-      llmCallsMissing: armEntries.length - runs.filter((r) => r.llmUsage).length,
+      costUsdKnownSum: usages.some((r) => r.usage?.costUsd != null) ? usages.reduce((sum, r) => sum + (r.usage?.costUsd ?? 0), 0) : null,
+      costMissing: armEntries.length - usages.filter((r) => r.usage?.costUsd != null).length,
+      costFromLogs: usages.filter((r) => r.fromLogs && r.usage).length,
+      llmCallsKnownSum: usages.some((r) => r.usage) ? usages.reduce((sum, r) => sum + (r.usage?.calls ?? 0), 0) : null,
+      llmCallsMissing: armEntries.length - usages.filter((r) => r.usage).length,
       ncbiKnownSum: runs.some((r) => r.apiCalls?.ncbi != null) ? runs.reduce((sum, r) => sum + (r.apiCalls?.ncbi ?? 0), 0) : null,
       ncbiMissing: armEntries.length - runs.filter((r) => r.apiCalls?.ncbi != null).length,
       elapsedMsKnownSum: runs.some((r) => r.elapsedMs != null) ? runs.reduce((sum, r) => sum + (r.elapsedMs ?? 0), 0) : null,
@@ -197,6 +219,7 @@ export function report(config: RerunConfig, paths: Paths = defaultPaths) {
   const output = join(paths.results, 'rerun');
   mkdirSync(output, { recursive: true });
   const notes = '\nS1 は全 run の有害採用 0 に加え、旧版で有害採用があった C0 の同種候補の保留・却下を人が照合する。S2 の原因は空欄を人が分類し、調整ロジック起因 0 を確認する。\n\n'
+    + '旧版はハーネスが `llmUsage` を記録しないため、LLM 呼び出しログのトークン数から同じ単価表で算出した。costFromLogs は使用量をログから復元した run 数（価格表外・トークン不明による費用欠測も含む）。ログの欠落・破損は欠測として数える。\n\n'
     + 'S5 は割合の報告であり、合否の数値閾値はない。ハーネスは画面の区分を作らないため、基本 run の確認負荷が ready かつ total=0 を「確認済み」の近似とする。対象 0 件では割合を定義しない。\n\n'
     + '提示負担は基本 run と各ラウンドの確認候補 PMID 数の合計（段階間は重複を数える）。include 数は実行された模擬判定の合計。構文エラー率は失敗理由の「構文 / syntax / phrase not found / invalid query・mesh」による機械分類で、他の失敗理由も枠の表で確認する。費用の合計は観測済み部分のみで、欠測数を併記する。層 A の role 小計は run をプールした参考分布。\n';
   let md = '# 再評価の集計\n\n' + Object.entries(result.judgments).map(([key, value]) => `${key}: ${value}`).join('\n\n') + '\n' + notes;
