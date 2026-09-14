@@ -1,7 +1,7 @@
 import { serializePubmedFormulaMd } from '@/lib/search-formula-md';
 import { buildPubmedSearchUrl } from '@/lib/ncbi/pubmedUrl';
 import type { QueryOptimizationRunState } from '../store';
-import { buildOptimizationReviewSections } from '../services/queryOptimizationReviewSections';
+import { buildOptimizationReviewSections, type ReviewSectionState } from '../services/queryOptimizationReviewSections';
 
 export interface OptimizationReviewActions {
   adopt: (() => Promise<void>) | undefined;
@@ -46,7 +46,7 @@ export function renderOptimizationReview(
   const seeds = best?.evaluation.seedPmids.length ?? run.seedCount;
   const review = buildOptimizationReviewSections(run);
   subheading('確認の状況');
-  const stateLabels = { confirmed: '確認済み', unmet: '未達', needs_decision: '判定待ち', unconfirmed: '未確認' };
+  const stateLabels: Record<ReviewSectionState, string> = { confirmed: '確認済み', unmet: '未達', needs_decision: '判定待ち', decided: '判定済み（残件あり）', unconfirmed: '未確認' };
   for (const item of review.sections) {
     const group = doc.createElement('section');
     group.className = 'optimization__review-section';

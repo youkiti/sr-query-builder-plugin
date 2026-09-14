@@ -33,6 +33,22 @@ test('4区分と未確認事項を文字で表示し、捕捉の限界は1回だ
   expect(container.textContent!.match(/既知シードの捕捉は、/g)).toHaveLength(1);
 });
 
+test('保存済み maybe が残る外側の確認は判定済み（残件あり）として未確認事項にも出す', () => {
+  const current = run('achieved');
+  current.outsideCheck = { status: 'ready', reason: null, originalHits: 12, marginHits: 1, evaluatedCount: 1,
+    candidates: [{ pmid: '22', title: '外側の研究', year: 1990, abstract: null, source: 'outside', reason: '' }],
+    decisions: { '22': { decision: 'maybe', status: 'saved', error: null } } };
+  const container = document.createElement('div');
+  renderOptimizationReview(container, current, actions);
+  expect(container.querySelector('.optimization__review-section[data-state="decided"] h5')?.textContent)
+    .toBe('判定済み（残件あり）：外側の確認');
+  const heading = Array.from(container.querySelectorAll('h4')).find((node) => node.textContent === '未確認事項')!;
+  expect(heading.nextElementSibling?.tagName).toBe('UL');
+  expect(heading.nextElementSibling?.textContent).toContain('外側の確認:');
+  expect(heading.nextElementSibling?.textContent).toContain('maybe で保存した候補 1 件は未確認として残ります');
+  expect(container.textContent).not.toContain('未確認事項はありません');
+});
+
 test.each(['unjudged', 'saving', 'saved', 'error'] as const)('候補カードは判定 %s を再描画して操作状態を復元する', (status) => {
   const current = run('achieved');
   current.outsideCheck = { status: 'ready', reason: null, originalHits: 12, marginHits: 1, evaluatedCount: 1,

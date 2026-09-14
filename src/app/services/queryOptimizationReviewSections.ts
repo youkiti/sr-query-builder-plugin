@@ -1,17 +1,19 @@
 import type { OptimizationOutsideCheckState, QueryOptimizationRunState } from '../store';
 
-export type ReviewSectionState = 'confirmed' | 'unmet' | 'needs_decision' | 'unconfirmed';
+export type ReviewSectionState = 'confirmed' | 'unmet' | 'needs_decision' | 'decided' | 'unconfirmed';
 export interface OptimizationReviewSection {
   key: 'known_capture' | 'hit_target' | 'outside_check' | 'deletion_impact';
   label: string;
   state: ReviewSectionState;
   lines: string[];
+  maybeCount?: number;
 }
 
 function decisionState(check: OptimizationOutsideCheckState | undefined, source: 'outside' | 'lost'): ReviewSectionState {
   const candidates = check?.candidates.filter((candidate) => candidate.source === source) ?? [];
   if (candidates.some((candidate) => check?.decisions[candidate.pmid]?.status !== 'saved')) return 'needs_decision';
-  return candidates.some((candidate) => check?.decisions[candidate.pmid]?.decision === 'include') ? 'unmet' : 'confirmed';
+  if (candidates.some((candidate) => check?.decisions[candidate.pmid]?.decision === 'include')) return 'unmet';
+  return candidates.some((candidate) => check?.decisions[candidate.pmid]?.decision === 'maybe') ? 'decided' : 'confirmed';
 }
 
 /** 表示と保存で同じ判定を使う。取得した先頭の書誌と集合全体の件数を区別する。 */
@@ -41,11 +43,14 @@ export function buildOptimizationReviewSections(run: QueryOptimizationRunState):
     const candidates = check?.candidates.filter((candidate) => candidate.source === 'outside') ?? [];
     if (check?.status === 'ready') {
       outside.state = decisionState(check, 'outside');
+      outside.maybeCount = candidates.filter((candidate) => check.decisions[candidate.pmid]?.status === 'saved'
+        && check.decisions[candidate.pmid]?.decision === 'maybe').length;
       if (!candidates.length) outside.lines.push(`拡張式の外側 ${check.marginHits ?? '未測定'} 件から判定候補は選ばれませんでした。網羅性の保証ではありません`);
       else {
         const included = candidates.filter((candidate) => check.decisions[candidate.pmid]?.status === 'saved'
           && check.decisions[candidate.pmid]?.decision === 'include').length;
         outside.lines.push(`外側の判定候補 ${candidates.length} 件、保存済み ${candidates.filter((candidate) => check.decisions[candidate.pmid]?.status === 'saved').length} 件`);
+        if (outside.maybeCount) outside.lines.push(`maybe で保存した候補 ${outside.maybeCount} 件は未確認として残ります`);
         if (included) outside.lines.push(`式の外側に include した文献が ${included} 件あります。保護して再調整してください`);
       }
     } else outside.lines.push(check?.reason ?? (check?.status === 'running' ? '外側の確認を実行中です' : '外側の確認は未実行です'));
@@ -56,6 +61,8 @@ export function buildOptimizationReviewSections(run: QueryOptimizationRunState):
     } else {
       const lost = check?.candidates.filter((candidate) => candidate.source === 'lost') ?? [];
       deletion.state = lost.length ? decisionState(check, 'lost') : 'unconfirmed';
+      if (lost.length) deletion.maybeCount = lost.filter((candidate) => check?.decisions[candidate.pmid]?.status === 'saved'
+        && check?.decisions[candidate.pmid]?.decision === 'maybe').length;
       deletion.lines.push(`保留した候補 ${held.length} 件の削除影響の確認`);
       for (const trial of held) {
         const count = trial.impact?.inspected.length ?? 0;
@@ -64,6 +71,7 @@ export function buildOptimizationReviewSections(run: QueryOptimizationRunState):
         if (lostHits != null && lostHits > count) deletion.lines.push(`残り ${lostHits - count} 件は未確認`);
         if (trial.impact?.error) deletion.lines.push(trial.impact.error);
       }
+      if (deletion.maybeCount) deletion.lines.push(`maybe で保存した候補 ${deletion.maybeCount} 件は未確認として残ります`);
       if (deletion.state === 'unmet') deletion.lines.push('失う文献に include した文献があります。保護して再調整してください');
     }
   } else {
