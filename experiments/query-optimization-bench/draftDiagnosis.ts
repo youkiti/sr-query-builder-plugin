@@ -63,10 +63,16 @@ export async function lookupMesh(phrase: string, expression: string, deps: Eutil
       if (deps.apiKey) params.set('api_key', deps.apiKey);
       const response = await deps.fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?${params}`);
       if (!response.ok) throw new EutilsError(`MeSH 照会エラー: HTTP ${response.status}`, response.status);
-      const body = await response.json() as { error?: string; esearchresult?: { count?: string; ERROR?: string; errorlist?: unknown } };
+      const body = await response.json() as { error?: string; esearchresult?: { count?: string; ERROR?: string; errorlist?: { fieldsnotfound?: unknown; phrasesnotfound?: unknown } } };
       if (body.error) throw new EutilsError(`MeSH 照会エラー: ${body.error}`, response.status);
       const result = body.esearchresult;
-      if (result?.ERROR || result?.errorlist || !/^\d+$/.test(result?.count ?? '') || !Number.isSafeInteger(Number(result?.count))) {
+      const fields = result?.errorlist?.fieldsnotfound;
+      const phrases = result?.errorlist?.phrasesnotfound;
+      if (result?.ERROR !== undefined || (Array.isArray(fields) && fields.length > 0)) {
+        throw new EutilsError('MeSH 照会の応答が不正です', response.status, true);
+      }
+      if (Array.isArray(phrases) && phrases.length > 0) return 0;
+      if (!/^\d+$/.test(result?.count ?? '') || !Number.isSafeInteger(Number(result?.count))) {
         throw new EutilsError('MeSH 照会の応答が不正です', response.status, true);
       }
       return Number(result!.count);

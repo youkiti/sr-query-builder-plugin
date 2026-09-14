@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { config } from 'dotenv';
@@ -123,9 +123,13 @@ export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES,
         if (previous.complete) continue;
         appendFileSync(historyPath, redact(JSON.stringify(previous), secrets) + '\n');
       }
-      const attempt = existsSync(historyPath) ? readFileSync(historyPath, 'utf8').trim().split('\n').filter(Boolean).length + 1 : 1;
+      let attempt = BigInt(existsSync(historyPath) ? readFileSync(historyPath, 'utf8').trim().split('\n').filter(Boolean).length + 1 : 1);
       const logDir = path.slice(0, -5);
       mkdirSync(join(logDir, 'llm'), { recursive: true });
+      for (const entry of readdirSync(join(logDir, 'llm'), { withFileTypes: true })) {
+        const match = entry.isFile() ? /^a([1-9]\d*)-/.exec(entry.name) : null;
+        if (match && BigInt(match[1]!) >= attempt) attempt = BigInt(match[1]!) + BigInt(1);
+      }
       const progress = (event: unknown): void => appendFileSync(join(logDir, 'progress.jsonl'), redact(JSON.stringify({ at: new Date().toISOString(), event }), secrets) + '\n');
       const apiCalls = { ncbi: 0, llm: 0 };
       let fetchFailed = false;

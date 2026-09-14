@@ -1,5 +1,5 @@
 /** @jest-environment node */
-import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { config } from 'dotenv';
@@ -150,6 +150,31 @@ test('未完了試行の再実行後も実行回数の接頭辞で LLM ログを
   expect(JSON.parse(readFileSync(path(1), 'utf8')).complete).toBe(true);
   expect(readdirSync(logDir).sort()).toEqual(['a1-0001_draft_block.json', 'a2-0001_draft_block.json']);
   for (const [file, content] of firstLogs) expect(readFileSync(join(logDir, file), 'utf8')).toBe(content);
+});
+
+test.each([
+  { files: ['a1-0001_draft_block.json'], history: 0, attempt: '2' },
+  { files: ['a2-old.json', 'a10-old.json', 'a0-ignore.json', 'a-3-ignore.json', 'a1.5-ignore.json', 'other.json'], history: 0, attempt: '11' },
+  { files: ['a1-old.json'], history: 3, attempt: '4' },
+])('試行保存前の中断ログと履歴から次の実行番号を決める: %j', async ({ files, history, attempt }) => {
+  const { results, path, deps } = setup();
+  const logDir = join(path(1).slice(0, -5), 'llm');
+  mkdirSync(logDir, { recursive: true });
+  for (const file of files) writeFileSync(join(logDir, file), `interrupted: ${file}`);
+  mkdirSync(join(logDir, 'a99-directory'));
+  const historyPath = path(1).replace('.json', '.history.jsonl');
+  if (history) writeFileSync(historyPath, '{}\n'.repeat(history));
+  expect(existsSync(path(1))).toBe(false);
+  expect(existsSync(historyPath)).toBe(history > 0);
+  deps.provider = () => ({ model: 'fake', providerId: 'gemini', chat: async () => ({ text: 'draft', tokensIn: 1, tokensOut: 1, raw: null }) });
+  deps.generate = async (_input, context) => {
+    await context.llmFactory.forPurpose('draft_block').chat([{ role: 'user', content: 'draft' }]);
+    return draft;
+  };
+  await main([...baseArgs.slice(0, -1), '1'], FIXTURES, results, deps);
+  expect(JSON.parse(readFileSync(path(1), 'utf8')).llmLogs).toEqual([`llm/a${attempt}-0001_draft_block.json`]);
+  expect(existsSync(join(logDir, `a${attempt}-0001_draft_block.json`))).toBe(true);
+  for (const file of files) expect(readFileSync(join(logDir, file), 'utf8')).toBe(`interrupted: ${file}`);
 });
 
 test('dry-run と結果なし report は環境も通信も使わず、dry-run は書かない', async () => {

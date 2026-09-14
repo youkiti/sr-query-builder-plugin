@@ -166,9 +166,9 @@ npm run eval:draft-frequency -- --report --label baseline
 - 生成例外は `generation_failed`。LLM の429・500以上と fetch 自体の失敗は `generation_transient`。
 - 診断は1件以上が `ok`、0件が `zero`、恒久 EutilsError で「構文エラー:」から始まるものが `syntax_error`、非恒久 EutilsError または通信例外が `network_error`、その他が `other_error`。
 - 試行の結論は `generation_transient` → `generation_failed` → `network_error` → `syntax_error` → `other_error` → `zero` → `ok` の優先順です。
-- phrase not found の語が対象式で MeSH タグ付きなら、共有レート制御・バックオフを通して MeSH 辞書を照会します。タグ付き／タグ無しの返答、NoExp、サブヘディングに対応します。辞書0件が `unresolved`、1件が `resolved`、2件以上が `ambiguous`、例外が `lookup_failed`、対象式で MeSH 付きでなければ `not_mesh` です。phrase not found だけで MeSH 不存在とは断定しません。同一試行内の同じ返答語・照会語は重複照会しません。
+- phrase not found の語が対象式で MeSH タグ付きなら、共有レート制御・バックオフを通して MeSH 辞書を照会します。タグ付き／タグ無しの返答、NoExp、サブヘディングに対応します。辞書0件が `unresolved`、1件が `resolved`、2件以上が `ambiguous`、例外が `lookup_failed`、対象式で MeSH 付きでなければ `not_mesh` です。phrase not found だけで MeSH 不存在とは断定しません。同一試行内の同じ返答語・照会語は重複照会しません。MeSH 照会応答に `ERROR` または1件以上の `errorlist.fieldsnotfound` があれば恒久的な `lookup_failed` とし、それらがなく `errorlist.phrasesnotfound` が1件以上なら `count` の欠落も含め0件（`unresolved`）として扱います。それ以外の `errorlist`（空を含む）は無視して `count` を検証し、欠落・不正なら `lookup_failed` とします。
 
-条件・試行は逐次実行し、1試行ずつ `<case>/<variant>/trial-<k>.json` を一時ファイルと rename で保存します。`generation_transient` / `network_error` は `complete: false` で再試行待ち、それ以外は完了です。再開では完了分をスキップし、未完了分の旧内容を `trial-<k>.history.jsonl` に追記してから再実行します。ログは `trial-<k>/llm/` と `trial-<k>/progress.jsonl` に残し、再試行の LLM ログも保持します。ファイル名の接頭辞は `a<n>-` で、n は初回が 1、再実行時は `trial-<k>.history.jsonl` の行数 + 1 です。キーは保存前に redact します。
+条件・試行は逐次実行し、1試行ずつ `<case>/<variant>/trial-<k>.json` を一時ファイルと rename で保存します。`generation_transient` / `network_error` は `complete: false` で再試行待ち、それ以外は完了です。再開では完了分をスキップし、未完了分の旧内容を `trial-<k>.history.jsonl` に追記してから再実行します。ログは `trial-<k>/llm/` と `trial-<k>/progress.jsonl` に残し、再試行の LLM ログも保持します。ファイル名の接頭辞は `a<n>-` で、n は `trial-<k>.history.jsonl` の行数 + 1 と、`trial-<k>/llm/` の既存ファイルの `a<n>-` 接頭辞にある最大の n + 1 の大きい方です（履歴・該当ログがなければ各候補は 1）。接頭辞の n は 1 以上の10進整数だけを読み、それ以外の名前は無視します。キーは保存前に redact します。
 
 `--report` は plan と現在の試行ファイルから条件別・全体の同じ表を標準出力、`summary.md`、`summary.csv` に出します。計画数、完了、未完了、未実行を分け、各結論の分母は生成失敗を含む完了数です。ブロックと式全体の構文エラー率は、それぞれ保存された診断対象数を分母にします（完了試行の診断だけを数え、未完了試行と history は含みません）。MeSH も完了試行だけから各分類の語数を出します。試行なしでも「0 件」の行を出します。
 

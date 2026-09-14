@@ -35,6 +35,34 @@ test.each([[0, 'unresolved'], [1, 'resolved'], [2, 'ambiguous'], [10, 'ambiguous
 });
 
 test.each([
+  ['Nonexistent Termxyz Qwerty', 'unresolved', '{"header":{"type":"esearch","version":"0.3"},"esearchresult":{"count":"0","retmax":"0","retstart":"0","idlist":[],"translationset":[],"querytranslation":"(\\"Nonexistent Termxyz Qwerty\\"[mh])","warninglist":{"phrasesignored":[],"quotedphrasesnotfound":["\\"Nonexistent Termxyz Qwerty\\"[mh]"],"outputmessages":["No items found."]}}}'],
+  ['Neoplasms', 'resolved', '{"header":{"type":"esearch","version":"0.3"},"esearchresult":{"count":"1","retmax":"1","retstart":"0","idlist":["68009369"],"translationset":[],"translationstack":[{"term":"\\"Neoplasms\\"[mh]","field":"mh","count":"1","explode":"N"},"GROUP"],"querytranslation":"\\"Neoplasms\\"[mh]"}}'],
+])('MeSH の実応答を分類する: %s', async (term, status, body) => {
+  const input = deps({});
+  input.fetch = jest.fn(async () => new Response(body));
+  expect((await lookupMesh(term, `"${term}"[mh]`, input)).status).toBe(status);
+});
+
+test.each([
+  [{ count: '0', errorlist: { phrasesnotfound: ['x'] } }, 'unresolved'],
+  [{ errorlist: { phrasesnotfound: ['x'] } }, 'unresolved'],
+  [{ count: '1', errorlist: {} }, 'resolved'],
+  [{ errorlist: { fieldsnotfound: ['x'] } }, 'lookup_failed'],
+  [{ ERROR: 'invalid query' }, 'lookup_failed'],
+  [{ count: '0', errorlist: { fieldsnotfound: ['x'], phrasesnotfound: ['x'] } }, 'lookup_failed'],
+  [{ ERROR: 'invalid query', errorlist: { phrasesnotfound: ['x'] } }, 'lookup_failed'],
+  [{ count: '1', errorlist: { fieldsnotfound: [], phrasesnotfound: [] } }, 'resolved'],
+  [{ errorlist: {} }, 'lookup_failed'],
+  [{ count: 'invalid', errorlist: {} }, 'lookup_failed'],
+  [{ count: '1', errorlist: { other: ['x'] } }, 'resolved'],
+])('MeSH の errorlist と件数を分類する: %j', async (result, status) => {
+  const input = deps({ esearchresult: result });
+  input.maxRetries = 2;
+  expect((await lookupMesh('Missing Term', formula.blocks[0]!.expression, input)).status).toBe(status);
+  expect(input.fetch).toHaveBeenCalledTimes(1);
+});
+
+test.each([
   ['Wounds and Injuries', 'x[tiab] OR "Wounds and Injuries"[Mesh]'],
   ['Wounds and Injuries', 'x[tiab] OR Wounds and Injuries[Mesh]'],
   ['Neoplasms', 'cancer[tiab] OR Neoplasms[Mesh]'],
