@@ -444,7 +444,14 @@ describe('fetchBoundaryCandidates', () => {
     expect(result.evaluatedCount).toBe(1);
   });
 
-  test('retmax / skillCandidateLimit を反映する', async () => {
+  // 意図した仕様変更（issue #154）: fetchBoundaryCandidates（margin モード）の既定の取得方法が
+  // head（margin をまとめて 1 回で取得）から per-term（語ごとの margin を均等配分して取得）に
+  // 変わった。fetchBoundaryCandidates は retrieval を指定できる経路が無い（常に既定を使う）ため、
+  // ここではスタブ側を語ごとのクエリにも対応させ、retmax が「語ごとの取得」に配られることを見る。
+  // DEFAULT_RECALL_BLOCKS は語が 1 つだけなので、その語の margin クエリは全体の margin クエリと
+  // 同一文字列になり、通信は「全体件数（NOT・retmax=0）→ 語の件数（NOT・retmax=0、同一クエリ）
+  // → 語の取得（NOT・retmax=5・sort=relevance）→ 現式件数（NOT 無し・retmax=0）」の 4 回になる。
+  test('retmax / skillCandidateLimit を反映する（per-term で語ごとの取得に retmax が配られる）', async () => {
     const store = createStore(makeState());
     const googleFetch = jest.fn();
     googleFetch.mockImplementation(async (url: string) => {
@@ -457,10 +464,11 @@ describe('fetchBoundaryCandidates', () => {
     const eutilsFetch = jest.fn();
     eutilsFetch.mockImplementation(async (url: string) => {
       if (url.includes('esearch.fcgi')) {
-        // margin 検索（拡張式 NOT 現式）だけ retmax を反映する。現式ヒット数の count 取得は retmax=0。
-        if (url.includes('NOT')) {
+        if (url.includes('NOT') && url.includes('sort=relevance')) {
+          // 語ごとの取得（割当済み）だけが retmax=5（deps.retmax）を反映する。
           expect(url).toContain('retmax=5');
         } else {
+          // 全体件数・語の件数（NOT 含む・sort 無し）と現式件数（NOT 無し）はすべて retmax=0。
           expect(url).toContain('retmax=0');
         }
         return jsonResponse({

@@ -36,6 +36,9 @@ async function setup(page: Page, options: { hasSeeds: boolean; holdAi: boolean; 
   await registerNcbiStub(page, { esearch: (url) => {
     const query = new URL(url).searchParams.get('term')!;
     // margin も差集合なので、拡張語を目印に削除影響より先に判定する。
+    // expand-query-for-recall の応答（下の Gemini スタブ）は拡張語が 1 語だけなので、
+    // 外側の確認（既定 per-term。issue #154）の「全体 margin 件数 → 語の件数 → 語の取得」は
+    // すべて同一クエリ文字列になり、この条件だけで何度呼ばれても同じ結果を返せる。
     if (query.includes(') NOT (') && query.includes('"extracorporeal"[tiab]')) {
       return { count: '1', idlist: [OUTSIDE_PMID] };
     }

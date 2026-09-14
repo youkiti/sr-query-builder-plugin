@@ -28,10 +28,12 @@ export {
   type ImproveBlockTurn,
 } from './skills';
 export {
+  allocateRetmaxEqually,
   buildBroadenedFormula,
   buildMarginQuery,
   buildUpdateProposals,
   flattenAdditions,
+  interleaveRoundRobin,
   matchAdditionToPaper,
   type RecallAxis,
   type RecallAdditionItem,
