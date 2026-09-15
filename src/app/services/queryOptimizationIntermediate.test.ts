@@ -1,3 +1,5 @@
+import { withRetry } from '@/lib/llm/retry';
+import { withSignalDeadline } from '@/lib/llm/signalDeadline';
 import { createSetSearch } from '../../../tests/fixtures/pubmedSets';
 import { isImprovement, runQueryOptimization, QueryOptimizationStopError,
   type QueryOptimizationDeps, type QueryOptimizationInput } from './queryOptimizationService';
@@ -48,7 +50,8 @@ function fixture(proposals = [disease, intervention], seeds = ['11', '22'], bloc
   });
   const deps: QueryOptimizationDeps = {
     eutils: { fetch, maxRetries: 0, rateLimiter: { acquire: async () => undefined } },
-    llmFactory: { model: 'fake', forPurpose: () => ({ providerId: 'gemini', model: 'fake', chat }) },
+    llmFactory: { model: 'fake', forPurpose: (_purpose, onRequestState, attempts) =>
+      withRetry(withSignalDeadline({ providerId: 'gemini', model: 'fake', chat }), { ...attempts, onRequestState }) },
     checkpoint: { read: async () => undefined, write: async () => undefined },
   };
   return { input, deps, sets, events, fetch, chat };
