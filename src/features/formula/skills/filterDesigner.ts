@@ -57,8 +57,29 @@ export const COCHRANE_HSSS_2024_PUBMED =
 
 const RCT_DESIGN_PATTERN = /\b(rct|randomized|randomised)\b/i;
 
+const NON_RCT_DESIGN_PATTERN = /\b(?:observational|cohort|case[- ]control|cross[- ]sectional|non[- ]?(?:rct|randomised|randomized)|quasi[- ](?:experimental|randomised|randomized)|before-after|before and after|interrupted time series|case series|any)\b/gi;
+
+function hasRct(studyDesign: string): boolean {
+  return RCT_DESIGN_PATTERN.test(studyDesign.replace(NON_RCT_DESIGN_PATTERN, ' '));
+}
+
 function isRct(studyDesign: string): boolean {
-  return RCT_DESIGN_PATTERN.test(studyDesign);
+  return hasRct(studyDesign) && !studyDesign.match(NON_RCT_DESIGN_PATTERN);
+}
+
+/** 既定の選択と、混在する研究デザインのため RCT フィルタを見送った理由を返す。 */
+export function explainDefaultFilterSelection(studyDesign: string): {
+  selectedIds: string[]; rctSkippedReason: string | null;
+} {
+  const matches = studyDesign.match(NON_RCT_DESIGN_PATTERN) ?? [];
+  const terms = matches.filter((term, index) =>
+    matches.findIndex((other) => other.toLowerCase() === term.toLowerCase()) === index);
+  return {
+    selectedIds: getDefaultSelectedFilterIds(studyDesign),
+    rctSkippedReason: hasRct(studyDesign) && terms.length > 0
+      ? `研究デザインに RCT 以外（${terms.join('、')}）が含まれるため、RCT フィルタは既定で適用していません。必要なら「検索フィルター」で選択してください。`
+      : null,
+  };
 }
 
 function buildDateExpression(range: NonNullable<FilterDesignerInput['yearRange']>): string | null {
@@ -73,7 +94,7 @@ function buildDateExpression(range: NonNullable<FilterDesignerInput['yearRange']
 }
 
 /**
- * 既定フィルタ（Cochrane RCT + 明示された年代）を決定論的に組み立てる。
+ * 既定フィルタ（RCT のみを示す場合の Cochrane RCT + 明示された年代）を決定論的に組み立てる。
  * LLM 呼び出しなし。
  */
 export function designDefaultFilters(input: FilterDesignerInput): FilterDesignerResult {
@@ -129,7 +150,7 @@ export const PREDEFINED_FILTER_DEFS: readonly PredefinedFilterDef[] = [
     description:
       'Cochrane Handbook 2024 推奨の感度優先 RCT フィルター（PubMed 版）。RCT を対象とするレビューで適用する。',
     expression: COCHRANE_HSSS_2024_PUBMED,
-    defaultForPattern: '\\b(rct|randomized|randomised)\\b',
+    defaultForPattern: RCT_DESIGN_PATTERN.source,
     comment: 'Cochrane HSSS PubMed 2024 (sensitivity-maximizing) を適用',
   },
   {
@@ -150,7 +171,7 @@ export const PREDEFINED_FILTER_DEFS: readonly PredefinedFilterDef[] = [
  */
 export function getDefaultSelectedFilterIds(studyDesign: string): string[] {
   return PREDEFINED_FILTER_DEFS.filter((def) =>
-    new RegExp(def.defaultForPattern, 'i').test(studyDesign)
+    def.id === 'RCTfilter' ? isRct(studyDesign) : new RegExp(def.defaultForPattern, 'i').test(studyDesign)
   ).map((def) => def.id);
 }
 

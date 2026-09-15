@@ -662,3 +662,50 @@ test.each(['Mesh', 'Mesh:NoExp', 'Majr'])('正式名とタグ %s が同じ候補
     { descriptor: 'Myocardial Infarction', tagSyntax: `"Myocardial Infarction"[${tag}]`, rationale: '最初の理由' },
   ]));
 });
+
+test.each([
+  ['observational', ['RCTfilter'], true, false],
+  ['RCT', [], false, false],
+  ['RCT / observational', undefined, false, true],
+  ['RCT / observational', [], false, false],
+  ['RCT', undefined, true, false],
+] as const)('生成は研究デザイン %s と選択 %j に従う', async (studyDesign, selected, rct, notice) => {
+  const { deps, store } = setupDeps();
+  const state = store.getState();
+  const result = await generateDraftFormula({
+    protocol: { ...state.protocolDraft!, studyDesign },
+    blocks: { ...state.blocksDraft!, selectedFilterIds: selected ? [...selected] : undefined },
+    seedContext: { titles: [], samples: [], meshSummary: { seedCount: 0, concepts: [], checkTags: [] } },
+  }, deps);
+  expect(result.filter.filters.some((f) => f.blockId === 'RCTfilter')).toBe(rct);
+  expect(result.filter.filters.some((f) => f.blockId === 'DateFilter')).toBe(false);
+  expect(result.filterNotice !== null).toBe(notice);
+  expect(result.parenthesizedTerms).toEqual([]);
+});
+
+test.each([true, false])('括弧補完を記録し保存する（複数語: %s）', async (multiple) => {
+  const { deps, store, fetchMock } = setupDeps();
+  store.setState((s) => ({ ...s, protocolDraft: { ...s.protocolDraft!, studyDesign: 'RCT / observational' } }));
+  const term = '"NaCl"[tiab] AND "chitosan"[tiab]';
+  deps.llmFactory.forPurpose = (purpose) => {
+    if (purpose === 'draft_block' || (multiple && purpose === 'suggest_mesh')) return skillProviderFor(purpose);
+    return { ...skillProviderFor(purpose), chat: async () => ({
+      text: JSON.stringify(purpose === 'suggest_mesh' ? { suggestions: [] }
+        : { freewords: [{ query: term, rationale: '' }, { query: ' ', rationale: '' }] }),
+      tokensIn: null, tokensOut: null, raw: {},
+    }) };
+  };
+  const count = jest.fn().mockResolvedValue(10);
+  const result = await generateDraft({ ...deps, countBlockHits: count });
+  expect(result.parenthesizedTerms).toEqual(multiple ? [
+    { blockIndex: 0, blockId: '1', blockLabel: 'Population', term },
+    { blockIndex: 1, blockId: '2', blockLabel: 'Intervention', term },
+  ] : []);
+  expect(count.mock.calls[0]![0]).toBe(multiple ? `("Desc"[Mesh] OR (${term}))` : term);
+  const call = fetchMock.mock.calls.find((c) => String(c[0]).includes('FormulaVersions') && String(c[0]).includes(':append'))!;
+  const body = JSON.parse((call[1] as RequestInit).body as string) as { values: string[][] };
+  const note = body.values[0]![SHEET_HEADERS.FormulaVersions.indexOf('note')]!;
+  expect(note).toContain(result.filterNotice);
+  if (multiple) expect(note).toContain(`#1 Population: (${term})`);
+  else expect(note).not.toContain('括弧で囲みました');
+});

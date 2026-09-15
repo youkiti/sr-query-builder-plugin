@@ -138,6 +138,15 @@ export interface DraftRunState {
   error: string | null;
   /** 生成途中に計測したブロックごとのヒット数（ライブ表示用） */
   blockHits: DraftBlockHit[];
+  filterNotice?: string | null;
+  parenthesizedTerms?: DraftGeneration['parenthesizedTerms'];
+  removedMeshHeadings: DraftGeneration['removedMeshHeadings'];
+  replacedMeshHeadings: DraftGeneration['replacedMeshHeadings'];
+}
+
+export interface GenerationNotices {
+  filterNotice: string | null;
+  parenthesizedTerms: DraftGeneration['parenthesizedTerms'];
   removedMeshHeadings: DraftGeneration['removedMeshHeadings'];
   replacedMeshHeadings: DraftGeneration['replacedMeshHeadings'];
 }
@@ -164,6 +173,7 @@ export interface OptimizationOutsideCheckState {
 
 /** 自動調整の実測候補を、実行終了後もレビュー用に保持する。 */
 export interface QueryOptimizationRunState {
+  generationNotices?: GenerationNotices;
   blockDiagnosis?: QueryOptimizationResult['blockDiagnosis'];
   outsideCheck?: OptimizationOutsideCheckState;
   /** 未指定は人がまだ採用保存を要求していない状態。 */

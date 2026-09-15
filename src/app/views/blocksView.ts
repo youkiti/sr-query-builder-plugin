@@ -6,6 +6,7 @@ import {
 import {
   PREDEFINED_FILTER_DEFS,
   getDefaultSelectedFilterIds,
+  explainDefaultFilterSelection,
   buildFiltersFromSelection,
 } from '@/features/formula/skills';
 import { ROUTE_LABELS } from '../router';
@@ -92,11 +93,9 @@ function ensureDraft(store: AppStore): BlocksDraft {
   if (current !== null) {
     return current;
   }
-  const studyDesign = store.getState().protocolDraft?.studyDesign ?? '';
   const initial: BlocksDraft = {
     blocks: [emptyBlock()],
     combinationExpression: defaultCombination(1),
-    selectedFilterIds: getDefaultSelectedFilterIds(studyDesign),
   };
   store.setState((s) => ({ ...s, blocksDraft: initial }));
   return initial;
@@ -556,6 +555,14 @@ function buildFilterSelector(doc: Document, draft: BlocksDraft, store: AppStore)
   header.appendChild(hint);
 
   section.appendChild(header);
+  const reason = draft.selectedFilterIds === undefined
+    ? explainDefaultFilterSelection(protocol?.studyDesign ?? '').rctSkippedReason : null;
+  if (reason) {
+    const notice = doc.createElement('p');
+    notice.className = 'blocks__field-hint';
+    notice.textContent = reason;
+    section.appendChild(notice);
+  }
 
   const list = doc.createElement('ul');
   list.className = 'blocks__filter-list';

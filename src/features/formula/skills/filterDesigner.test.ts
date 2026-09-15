@@ -3,6 +3,8 @@ import {
   COCHRANE_HSSS_2024_PUBMED,
   HIT_THRESHOLD,
   designDefaultFilters,
+  explainDefaultFilterSelection,
+  getDefaultSelectedFilterIds,
   proposeExcessFilters,
 } from './filterDesigner';
 
@@ -130,4 +132,39 @@ describe('proposeExcessFilters', () => {
     );
     expect(result).toEqual([]);
   });
+});
+
+test.each([
+  ['RCT', true, false], ['RCT / observational', false, true],
+  ['RCT and prospective cohort', false, true], ['randomised or non-randomised', false, true],
+  ['any', false, false], ['non-RCT', false, false], ['nonrandomized', false, false],
+  ['non randomised', false, false], ['quasi-randomised', false, false],
+  ['observational', false, false], ['randomized', true, false],
+  ['RCT accompanying', true, false],
+] as const)('研究デザイン %s の既定選択と理由を統一する', (studyDesign, selected, reason) => {
+  const explanation = explainDefaultFilterSelection(studyDesign);
+  expect(explanation.selectedIds.includes('RCTfilter')).toBe(selected);
+  expect(explanation.rctSkippedReason !== null).toBe(reason);
+  expect(getDefaultSelectedFilterIds(studyDesign)).toEqual(explanation.selectedIds);
+  expect(designDefaultFilters({ studyDesign }).filters.some((f) => f.blockId === 'RCTfilter')).toBe(selected);
+});
+
+test.each([
+  'case-control', 'case control', 'cross-sectional', 'cross sectional',
+  'non-RCT', 'non randomized', 'nonrandomised', 'quasi-experimental', 'quasi-randomized',
+  'before-after', 'before and after', 'interrupted time series', 'case series', 'any',
+])('RCT と %s の混在では自動選択しない', (term) => {
+  expect(explainDefaultFilterSelection(`RCT / ${term}`)).toEqual({
+    selectedIds: [], rctSkippedReason: expect.stringContaining(`（${term}）`),
+  });
+});
+
+test('理由は元表記を保ち、同じ語を重複させない', () => {
+  expect(explainDefaultFilterSelection('RCT / Observational / observational / cohort').rctSkippedReason)
+    .toContain('（Observational、cohort）');
+});
+
+test('傘レビューの自動選択は維持する', () => {
+  expect(getDefaultSelectedFilterIds('umbrella review')).toEqual(['SRfilter']);
+  expect(getDefaultSelectedFilterIds('overview of review')).toEqual(['SRfilter']);
 });

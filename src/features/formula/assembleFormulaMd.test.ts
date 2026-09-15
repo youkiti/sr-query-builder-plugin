@@ -4,6 +4,8 @@ import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
 import {
   AssembleFormulaError,
   buildMeshTag,
+  buildBlockExpression,
+  needsParentheses,
   assembleFormulaMd,
   type AssembleInput,
   type BlockOutputs,
@@ -239,4 +241,25 @@ describe('buildMeshTag', () => {
   ])('%s と %s から安全なタグを組み立てる', (descriptor, tagSyntax, expected) => {
     expect(buildMeshTag({ descriptor, tagSyntax })).toBe(expected);
   });
+});
+
+test.each([
+  ['"AND"[tiab]', false], ['(a AND b)', false], ['a and b', false],
+  ['a or b', false], ['a not b', false], ['a AND b', true], ['a OR b', true],
+  ['a NOT b', true], ['c OR (a AND b)', true], ['CANDY', false],
+  ['AND a', true], ['a NOT', true], ['"a ( AND b" OR c', true],
+] as const)('検索語 %s の引用符と括弧の外だけを判定する', (term, expected) => {
+  expect(needsParentheses(term)).toBe(expected);
+});
+
+test('複合フリーワードだけを囲み、単独なら元のまま返す', () => {
+  const term = '"NaCl"[tiab] AND "chitosan"[tiab]';
+  const fw = { query: term, rationale: '' };
+  expect(buildBlockExpression(blockOutputs({ freewords: [fw, { query: '"Symbiosal"[tiab]', rationale: '' }] })))
+    .toBe('("Diabetes Mellitus"[Mesh] OR ("NaCl"[tiab] AND "chitosan"[tiab]) OR "Symbiosal"[tiab])');
+  expect(buildBlockExpression(blockOutputs({ mesh: [], freewords: [fw] }))).toBe(term);
+  expect(buildBlockExpression(blockOutputs({
+    mesh: [{ descriptor: '', tagSyntax: '', rationale: '' }],
+    freewords: [fw, { query: ' ', rationale: '' }],
+  }))).toBe(term);
 });

@@ -1243,15 +1243,21 @@ export async function runOptimizeQuery(
     check();
     const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
     check();
-    const initialFormula = resume?.available ? resume.data.bestFormula!
+    let initialFormula = resume?.available ? resume.data.bestFormula!
       : startingFormula ? startingFormula
       : state.currentFormulaMarkdown ? parsePubmedFormulaMd(state.currentFormulaMarkdown)
-      : (await generateDraftFormula({ protocol: state.protocolDraft, blocks: state.blocksDraft,
+      : null;
+    if (!initialFormula) {
+      const generated = await generateDraftFormula({ protocol: state.protocolDraft, blocks: state.blocksDraft,
         targetHits: fixedSettings.maxHits,
         seedContext: { titles: seeds.flatMap((seed) => seed.title ? [seed.title] : []).slice(0, 30),
           samples: [], meshSummary: { seedCount: 0, concepts: [], checkTags: [] } },
       }, { llmFactory: factory, onProgress: () => check(),
-        resolveMeshDescriptors: (descriptors) => resolveMeshDescriptors(descriptors, eutils) })).formula;
+        resolveMeshDescriptors: (descriptors) => resolveMeshDescriptors(descriptors, eutils) });
+      initialFormula = generated.formula;
+      const { filterNotice, parenthesizedTerms, removedMeshHeadings, replacedMeshHeadings } = generated;
+      update({ generationNotices: { filterNotice, parenthesizedTerms, removedMeshHeadings, replacedMeshHeadings } });
+    }
     check();
     update({ inputSnapshot: { researchQuestion: state.protocolDraft.researchQuestion,
       inclusionCriteria: state.protocolDraft.inclusionCriteria, exclusionCriteria: state.protocolDraft.exclusionCriteria,
@@ -1438,7 +1444,7 @@ async function runGenerateAndValidate(
       startedAtMs: Date.now(),
       error: null,
       blockHits: [],
-      removedMeshHeadings: [], replacedMeshHeadings: [],
+      removedMeshHeadings: [], replacedMeshHeadings: [], filterNotice: null, parenthesizedTerms: [],
     },
   }));
 
@@ -1485,6 +1491,8 @@ async function runGenerateAndValidate(
           draftRun: {
             ...s.draftRun,
             phase: 'validating',
+            filterNotice: draftResult.filterNotice ?? null,
+            parenthesizedTerms: draftResult.parenthesizedTerms ?? [],
             removedMeshHeadings: draftResult.removedMeshHeadings,
             replacedMeshHeadings: draftResult.replacedMeshHeadings,
             progressLabel: '検証を開始します…',
@@ -1545,7 +1553,7 @@ async function runValidationPhase(
           : { formulaVersionId: s.currentFormulaVersionId, summary },
       // 再生成・再検証したら過去の原因分析は古くなるため破棄する
       missedAnalysis: null,
-      draftRun: s.draftRun && (s.draftRun.removedMeshHeadings.length || s.draftRun.replacedMeshHeadings.length)
+      draftRun: s.draftRun && (s.draftRun.removedMeshHeadings.length || s.draftRun.replacedMeshHeadings.length || s.draftRun.filterNotice || s.draftRun.parenthesizedTerms?.length)
         ? { ...s.draftRun, status: 'done', progressLabel: '', progress: null, blockHits: [] } : null,
     }));
     return summary;
@@ -1589,6 +1597,8 @@ async function runRevalidateOnly(
       startedAtMs: Date.now(),
       error: null,
       blockHits: prevBlockHits,
+      filterNotice: initial.draftRun?.phase === 'validating' ? initial.draftRun.filterNotice ?? null : null,
+      parenthesizedTerms: initial.draftRun?.phase === 'validating' ? initial.draftRun.parenthesizedTerms ?? [] : [],
       removedMeshHeadings: initial.draftRun?.phase === 'validating' ? initial.draftRun.removedMeshHeadings : [],
       replacedMeshHeadings: initial.draftRun?.phase === 'validating' ? initial.draftRun.replacedMeshHeadings : [],
     },
@@ -1732,6 +1742,8 @@ function setDraftRunError(
       startedAtMs: s.draftRun?.startedAtMs ?? Date.now(),
       error: err instanceof Error ? err.message : String(err),
       blockHits: s.draftRun?.blockHits ?? [],
+      filterNotice: s.draftRun?.filterNotice ?? null,
+      parenthesizedTerms: s.draftRun?.parenthesizedTerms ?? [],
       removedMeshHeadings: s.draftRun?.removedMeshHeadings ?? [],
       replacedMeshHeadings: s.draftRun?.replacedMeshHeadings ?? [],
     },

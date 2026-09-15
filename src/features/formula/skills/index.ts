@@ -30,6 +30,7 @@ export {
 } from './freewordDesigner';
 export {
   designDefaultFilters,
+  explainDefaultFilterSelection,
   proposeExcessFilters,
   getDefaultSelectedFilterIds,
   buildFiltersFromSelection,

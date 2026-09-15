@@ -1,3 +1,4 @@
+import { renderGenerationNotice } from './generationNotice';
 import { blockDiagnosisLines } from '@/features/validation/blockDiagnosis';
 import { serializePubmedFormulaMd } from '@/lib/search-formula-md';
 import { buildPubmedSearchUrl } from '@/lib/ncbi/pubmedUrl';
@@ -41,6 +42,13 @@ export function renderOptimizationReview(
   if (diagnosis) {
     subheading('ブロック構造の診断');
     for (const line of blockDiagnosisLines(diagnosis)) paragraph(line);
+  }
+  if (run.generationNotices) {
+    const notice = renderGenerationNotice(doc, run.generationNotices);
+    if (notice) {
+      subheading('初期式の生成で行った変更');
+      section.appendChild(notice);
+    }
   }
   subheading('最終式');
   if (best) {

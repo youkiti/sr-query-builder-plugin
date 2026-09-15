@@ -73,6 +73,39 @@ describe('createBlocksView', () => {
     expect(container.querySelector('ol.blocks__list')?.children).toHaveLength(1);
   });
 
+  test('空の下書きを混在デザインで始めるとフィルター選択は未設定で理由を表示する', () => {
+    const store = createStore({
+      ...withProject(),
+      blocksDraft: null,
+      protocolDraft: protocolOf({ studyDesign: 'RCT / observational' }),
+    });
+    const view = createBlocksView(store);
+    const container = buildContainer();
+    view(container, { state: store.getState(), navigate: jest.fn() });
+    expect(store.getState().blocksDraft).not.toBeNull();
+    expect(store.getState().blocksDraft?.selectedFilterIds).toBeUndefined();
+    expect(container.querySelector('.blocks__filter-selector')?.textContent).toContain(
+      'RCT 以外（observational）'
+    );
+  });
+
+  test('空の下書きを RCT で始めると選択は未設定のまま RCT フィルターにチェックが入る', () => {
+    const store = createStore({
+      ...withProject(),
+      blocksDraft: null,
+      protocolDraft: protocolOf({ studyDesign: 'RCT' }),
+    });
+    const view = createBlocksView(store);
+    const container = buildContainer();
+    view(container, { state: store.getState(), navigate: jest.fn() });
+    expect(store.getState().blocksDraft).not.toBeNull();
+    expect(store.getState().blocksDraft?.selectedFilterIds).toBeUndefined();
+    const rctCheckbox = container.querySelector<HTMLInputElement>(
+      '.blocks__filter-item-checkbox[aria-describedby="filter-desc-RCTfilter"]'
+    );
+    expect(rctCheckbox?.checked).toBe(true);
+  });
+
   test('blocksDraftSavedAt があれば未承認の下書きバナーを出す', () => {
     const store = createStore({
       ...withProject(),
@@ -523,4 +556,22 @@ describe('createBlocksView', () => {
     expect(() => labelInput.dispatchEvent(new Event('input'))).not.toThrow();
     expect(store.getState().blocksDraft).toBeNull();
   });
+});
+
+test('混在デザインの理由は選択未設定の間だけ表示する', () => {
+  const store = createStore({
+    ...withProject(), blocksDraft: draftOf(2, '#1 AND #2'),
+    protocolDraft: protocolOf({ studyDesign: 'RCT / observational' }),
+  });
+  const view = createBlocksView(store);
+  const container = buildContainer();
+  view(container, { state: store.getState(), navigate: jest.fn() });
+  expect(container.querySelector('.blocks__filter-selector')?.textContent).toContain('RCT 以外（observational）');
+  const checkbox = container.querySelector<HTMLInputElement>('.blocks__filter-item-checkbox')!;
+  expect(checkbox.checked).toBe(false);
+  checkbox.checked = true;
+  checkbox.dispatchEvent(new Event('change'));
+  view(container, { state: store.getState(), navigate: jest.fn() });
+  expect(store.getState().blocksDraft?.selectedFilterIds).toEqual(['RCTfilter']);
+  expect(container.querySelector('.blocks__filter-selector')?.textContent).not.toContain('RCT 以外（observational）');
 });

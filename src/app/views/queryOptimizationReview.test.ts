@@ -247,3 +247,33 @@ test.each([false, true])('診断の小見出し・削減率・未判定理由を
   if (legacy) expect(container.textContent).not.toContain('ブロック構造の診断');
   else for (const text of ['ブロック構造の診断', '#1 と #2', '削減率 10.0%', '未判定: 階層を取得できなかった']) expect(container.textContent).toContain(text);
 });
+
+test('初期生成の通知を最終式の前に同じ文言と一覧順で表示する', () => {
+  const current = run('achieved');
+  current.generationNotices = {
+    filterNotice: '研究デザインに RCT 以外を含むため RCT フィルタを付けませんでした',
+    parenthesizedTerms: [{ blockIndex: 0, blockId: '1', blockLabel: '疾患', term: 'a AND b' }],
+    removedMeshHeadings: [{ blockIndex: 0, blockId: '1', blockLabel: '疾患', descriptor: 'Unknown' }],
+    replacedMeshHeadings: [{ blockIndex: 0, blockId: '1', blockLabel: '疾患', from: '旧見出し', to: ['正式見出し'] }],
+  };
+  const container = document.createElement('div');
+  renderOptimizationReview(container, current, actions);
+  const notice = container.querySelector('.draft__mesh-notice')!;
+  expect(notice.previousElementSibling?.textContent).toBe('初期式の生成で行った変更');
+  expect(notice.nextElementSibling?.textContent).toBe('最終式');
+  expect(Array.from(notice.querySelectorAll('li')).map((li) => li.textContent)).toEqual([
+    '#1 疾患: 旧見出し → 正式見出し', '#1 疾患: Unknown', '#1 疾患: (a AND b)',
+  ]);
+  expect(notice.textContent).toContain(current.generationNotices.filterNotice);
+  expect(notice.textContent).toContain('MeSH の同義語を正式な見出しに置き換えました');
+  expect(notice.textContent).toContain('検索語の中の AND / OR を括弧で囲みました');
+});
+
+test.each([undefined, { filterNotice: null, parenthesizedTerms: [], removedMeshHeadings: [], replacedMeshHeadings: [] }])(
+  '初期生成の通知が無いか空なら見出しも通知も表示しない（%j）', (generationNotices) => {
+    const container = document.createElement('div');
+    renderOptimizationReview(container, { ...run('achieved'), generationNotices }, actions);
+    expect(container.querySelector('.draft__mesh-notice')).toBeNull();
+    expect(container.textContent).not.toContain('初期式の生成で行った変更');
+  }
+);

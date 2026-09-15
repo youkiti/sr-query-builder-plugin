@@ -439,8 +439,13 @@ LLM は検索式生成時に、プロトコルに書かれていないフィル�
 
 | 条件 | 適用するフィルタ |
 |---|---|
-| `study_design` が `RCT` / `randomized trial` に該当（または `inclusion_criteria` に RCT 明記） | **Cochrane Highly Sensitive Search Strategy（PubMed 版・2024 改訂版・sensitivity-maximizing バージョン）** を RCT ブロックとして挿入。最終結合式に `AND #RCTfilter` を追加。フィルタ文字列の冒頭に `# Cochrane HSSS PubMed 2024 (sensitivity-maximizing)` というコメント行を入れて版を明示する |
+| `study_design` が `RCT` / `randomized trial` を示し、RCT 以外のデザインを含まない（non-RCT・quasi-randomised 等は RCT と数えない） | **Cochrane Highly Sensitive Search Strategy（PubMed 版・2024 改訂版・sensitivity-maximizing バージョン）** を RCT ブロックとして挿入。最終結合式に `AND #RCTfilter` を追加。フィルタ文字列の冒頭に `# Cochrane HSSS PubMed 2024 (sensitivity-maximizing)` というコメント行を入れて版を明示する |
 | プロトコルに年代指定あり（例: 組入基準に "2015 年以降" 等の明示） | その年範囲で `("YYYY/MM/DD"[Date - Publication] : "YYYY/MM/DD"[Date - Publication])` を追加 |
+
+RCT と observational / cohort 等のデザインが混在する場合は RCT フィルタを既定で付けず、見つかった語を含む理由を `#/blocks` と生成完了後の `#/draft` に表示する。`#/blocks` の検索フィルターの明示的な選択（全解除を含む）は生成にも優先して反映し、その場合は既定判定の理由を表示しない。初期式生成では年代フィルタを追加しない。
+手動で空のブロック下書きを始めた場合も、フィルターの選択は未設定（自動推論）のままとする。チェック状態は研究デザインから決まり、混在デザインでは既定判定の理由を表示する。
+
+ブロック内で複数語を OR 結合するとき、フリーワードの引用符・括弧の外にある大文字の AND / OR / NOT を含む語全体を括弧で囲む。単独の語は変更しない。補完した語は生成完了後に一覧で通知し、フィルタの理由とともに保存用の注記にも残す。 自動調整が初期式を生成した場合も最終レビューに同じ通知を表示し、採用時の実行ログに保存する。
 
 **デフォルトでは適用しないフィルタ**（LLM は自発的に足してはいけない）:
 
