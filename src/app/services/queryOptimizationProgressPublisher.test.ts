@@ -64,3 +64,13 @@ test('完了直前のflushは最新値を保持し、dispose後やrun切替後�
   f.publisher.publish(f.progress);
   expect(jest.getTimerCount()).toBe(0);
 });
+
+test('診断の進捗を実行状態に反映する', () => {
+  jest.useFakeTimers();
+  const f = setup();
+  const blockDiagnosis = { fingerprint: '診断した式', note: '未判定: 結合式が単純な AND ではない', overlaps: [], narrowing: [] };
+  f.publisher.publish({ ...f.progress, blockDiagnosis });
+  f.publisher.flush();
+  expect(f.store.getState().queryOptimizationRun?.blockDiagnosis).toEqual(blockDiagnosis);
+  f.publisher.dispose();
+});

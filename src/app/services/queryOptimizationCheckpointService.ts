@@ -93,6 +93,7 @@ export interface QueryOptimizationCompletion {
 }
 
 export interface QueryOptimizationCheckpoint {
+  blockDiagnosis?: QueryOptimizationResult['blockDiagnosis'];
   projectId: string;
   runId: string;
   savedAt: string;
@@ -116,6 +117,7 @@ export interface CompletedQueryOptimization extends QueryOptimizationCheckpoint 
 }
 
 interface SaveCheckpointOptions {
+  blockDiagnosis?: QueryOptimizationResult['blockDiagnosis'];
   projectId: string;
   runId: string;
   maxHits: number;
@@ -127,11 +129,12 @@ interface SaveCheckpointOptions {
 
 /** 最新キーに要約を残す。測定全体やシード書誌・ツリーは保存しない。 */
 export async function saveQueryOptimizationCheckpoint(
-  { projectId, runId, maxHits, trials, resume, now = nowIso, completion }: SaveCheckpointOptions,
+  { projectId, runId, maxHits, trials, resume, now = nowIso, completion, blockDiagnosis }: SaveCheckpointOptions,
   deps: ProjectStoreDeps
 ): Promise<QueryOptimizationCheckpoint> {
   const checkpoint: QueryOptimizationCheckpoint = {
     projectId, runId, maxHits, savedAt: now(),
+    ...(blockDiagnosis ? { blockDiagnosis: JSON.parse(JSON.stringify(blockDiagnosis)) as NonNullable<QueryOptimizationResult['blockDiagnosis']> } : {}),
     resume: JSON.parse(JSON.stringify(resume)) as OptimizationResumeData,
     ...(completion ? { completion: {
       status: completion.status, stopReason: completion.stopReason, unmetReasons: [...completion.unmetReasons],

@@ -159,3 +159,22 @@ test('変更一覧が空ならなし、長い差分はブロックごとに省�
   expect(list).not.toContain('word10');
   expect(list).toContain(' ; #2 削除: なし / 追加: new[tiab]');
 });
+
+test('機械的な診断を一件一行で渡し、狭め方と保留の規則を示す', async () => {
+  const { input, provider, chat } = setup();
+  input.blockDiagnosis = { fingerprint: 'fp', note: '', overlaps: [
+    { blockIds: ['1', '2'], kind: 'same', terms: [], qualified: true, note: '#1 と #2: 同じ MeSH "Disease"[Mesh]' },
+  ], narrowing: [
+    { blockId: '1', label: '疾患', finalHits: 11000, withoutHits: 12345, reduction: 1345 / 12345, ineffective: true, note: '' },
+    { blockId: '2', label: '治療', finalHits: 11000, withoutHits: null, reduction: null, ineffective: null, note: '未判定: 測定失敗' },
+  ] };
+  await optimizeQuery(input, provider);
+  const prompt = chat.mock.calls[0]![0][1].content as string;
+  expect(prompt).toContain('ブロック構造の診断（機械的な検出。AI の判断ではない）');
+  expect(prompt).toContain('#1 と #2: 同じ MeSH "Disease"[Mesh]（修飾付き）');
+  expect(prompt).toContain('外すと 12,345 件 → 最終式 11,000 件（削減率 10.9%）');
+  expect(prompt).toContain('未判定: 測定失敗');
+  const system = chat.mock.calls[0]![0][0].content as string;
+  expect(system).toContain('特異的な語との AND・下位の MeSH への置換');
+  expect(system).toContain('上位語でしか索引されない適格文献');
+});

@@ -10,6 +10,10 @@ function fixture(words: number, mesh: number, rounds: number) {
     initialFormula: { blocks: [...Array.from({ length: 4 }, (_, i) => ({ id: String(i + 1), expression: blockExpression(i + 1, 0), isCombination: false })),
       { id: '5', expression: '#1 AND #2 AND #3 AND #4', isCombination: true }], combinationExpression: '#1 AND #2 AND #3 AND #4' },
     approvedBlocks: Array.from({ length: 4 }, (_, i) => ({ id: String(i + 1), approvedBlockId: String(i + 1), label: '疾患' })),
+    meshContext: Array.from({ length: 4 }, (_, i) => Array.from({ length: mesh }, (_, j) => ({
+      id: `m${i}-${j}`, descriptor: `Mesh${i + 1}term${j}`, label: null, treeNumbers: [`C0${i + 1}.${j}`],
+      parentIds: [], childIds: [], explode: true, note: '取得済み',
+    }))).flat(),
     criteria: { researchQuestion: 'RQ', inclusionCriteria: '', exclusionCriteria: '' },
   };
   const queries: string[] = [];
@@ -43,8 +47,8 @@ test('F=40 B=4 M=8 で5候補と最終再検証を200通信以内に収め、実
   expect(result.status).toBe('achieved');
   expect(result.trials.filter((trial) => trial.kind === 'proposal' && trial.accepted)).toHaveLength(5);
   expect(result.trials.map((trial) => trial.kind)).toEqual(['initial', 'proposal', 'proposal', 'proposal', 'proposal', 'proposal', 'final']);
-  // 語別計測上限 + 初期・5候補・最終の評価各6回 + AI5回 + 採用判定を通った5候補の差集合2方向。
-  expect(result.apiCalls).toBe(MAX_TERM_API_CALLS + 7 * (4 + 2) + 5 + 5 * 2);
+  // 語別計測上限 + 初期・5候補・最終の評価各6回 + AI5回 + 差集合2方向 + 初期診断4回と採用ごとの更新3回。
+  expect(result.apiCalls).toBe(MAX_TERM_API_CALLS + 7 * (4 + 2) + 5 + 5 * 2 + 4 + 5 * 3);
   expect(result.apiCalls).toBeLessThan(200);
   expect(result.best?.formula.blocks[0]?.expression).toContain('b1v5word');
   expect(result.unmetReasons.join(' ')).toContain('未測定');
@@ -88,7 +92,7 @@ test('追加詳細の途中で停止しても実測済みの候補を履歴とbe
 
 test('全体の通信上限に候補の詳細計測中に達しても、実測済みの採用候補を保持する', async () => {
   const f = fixture(2, 1, 2);
-  // 初期評価6回・初期詳細24回・AI1回・候補評価6回・差集合2方向2回の後、追加詳細1回（40通信目）で上限に達する。
+  // 初期評価6回・診断4回・初期詳細13回・AI1回・候補評価6回・差集合2回の後、次の候補評価中に上限に達しても前の採用候補を保持する。
   const result = await runQueryOptimization(f.input, { ...f.deps, maxApiCalls: 40 });
   expect(result.status).toBe('needs_review');
   expect(result.stopReason).toBe('api_budget');
@@ -99,13 +103,13 @@ test('全体の通信上限に候補の詳細計測中に達しても、実測�
 
 test('予算が限られる場合は全語の固有寄与を優先し、MeSH と個別未測定の語にも結果を残す', async () => {
   const f = fixture(2, 1, 1);
-  const result = await runQueryOptimization(f.input, { ...f.deps, maxApiCalls: 36 });
+  const result = await runQueryOptimization(f.input, { ...f.deps, maxApiCalls: 40 });
   const terms = result.trials[1]!.before!.terms!;
   expect(terms).toHaveLength(12);
   expect(terms.every((term) => term.finalContribution === 1)).toBe(true);
   expect(terms.find((term) => term.query === '"Mesh1term0"[Mesh]')).toMatchObject({ finalContribution: 1 });
   expect(terms.find((term) => term.query === 'b2v0word0[tiab]')).toMatchObject({ hits: null, delta: null, finalContribution: 1 });
-  expect(f.queries.slice(6, 18).every((query) => query.includes(' NOT '))).toBe(true);
+  expect(f.queries.slice(10, 22).every((query) => query.includes(' NOT '))).toBe(true);
   expect(result.unmetReasons.join(' ')).toContain('通信予算を確保するため');
   expect(result.unmetReasons.join(' ')).not.toContain('100 通信の上限');
 });
@@ -127,11 +131,11 @@ test('実測件数の降順・同数は元の順で全語の寄与と個別分�
     return response;
   };
   const result = await runQueryOptimization(f.input, f.deps);
-  const contributions = f.queries.slice(6, 18);
+  const contributions = f.queries.slice(10, 22);
   expect(contributions.map((query) => /\(([^()]*) NOT \1\)/.exec(query)?.[1])).toEqual(
     [2, 3, 1, 4].flatMap((id) => [`b${id}v0word0[tiab]`, `b${id}v0word1[tiab]`, `"Mesh${id}term0"[Mesh]`])
   );
-  const individual = f.queries.slice(18, 34).filter((query) => /^b\d.*\[tiab\]$/.test(query) && !query.includes(' OR '));
+  const individual = f.queries.slice(22, 38).filter((query) => /^b\d.*\[tiab\]$/.test(query) && !query.includes(' OR '));
   expect(individual).toEqual([2, 3, 1, 4].flatMap((id) => [`b${id}v0word0[tiab]`, `b${id}v0word1[tiab]`]));
   expect(result.trials[1]!.before!.terms!.map((term) => term.query)).toEqual(
     [1, 2, 3, 4].flatMap((id) => [`b${id}v0word1[tiab]`, `b${id}v0word0[tiab]`, `"Mesh${id}term0"[Mesh]`])
@@ -141,11 +145,11 @@ test('実測件数の降順・同数は元の順で全語の寄与と個別分�
 test('確保分は全体の半分に制限し、残った語の固有寄与をゼロで埋めない', async () => {
   const f = fixture(2, 1, 1);
   const result = await runQueryOptimization(f.input, { ...f.deps, maxApiCalls: 24 });
-  // 初期実測6回、確保は17回から12回に制限されるため、語別計測を6回行える。
+  // 初期実測6回と診断4回、確保は17回から12回に制限されるため、語別計測を2回行える。
   const terms = result.trials[1]!.before!.terms!;
-  expect(f.queries.slice(6, 12).every((query) => query.includes(' NOT '))).toBe(true);
-  expect(terms.filter((term) => term.finalContribution === 1)).toHaveLength(6);
-  expect(terms.filter((term) => term.finalContribution === null)).toHaveLength(6);
+  expect(f.queries.slice(10, 12).every((query) => query.includes(' NOT '))).toBe(true);
+  expect(terms.filter((term) => term.finalContribution === 1)).toHaveLength(2);
+  expect(terms.filter((term) => term.finalContribution === null)).toHaveLength(10);
   expect(terms.every((term) => term.hits === null && term.delta === null)).toBe(true);
 });
 
@@ -166,12 +170,12 @@ test.each([200, 24])('固有寄与の途中から進捗が増え、予算 %i で
     expect(progress[i]!.completed).toBeLessThanOrEqual(progress[i]!.total);
   }
   expect([...new Set(progress.map((p) => p.completed))]).toEqual(Array.from({ length: 25 }, (_, i) => i));
-  const measuredContributions = maxApiCalls === 24 ? 6 : 12;
+  const measuredContributions = maxApiCalls === 24 ? 2 : 12;
   for (let completed = 1; completed <= 12; completed += 1) {
     const snapshot = progress.find((p) => p.completed === completed)!;
     // 各固有寄与の取得直後に通知し、個別件数の取得開始まで待たない。
-    expect(snapshot.queries).toHaveLength(6 + Math.min(completed, measuredContributions));
-    expect(snapshot.queries.slice(6).every((query) => query.includes(' NOT '))).toBe(true);
+    expect(snapshot.queries).toHaveLength(10 + Math.min(completed, measuredContributions));
+    expect(snapshot.queries.slice(10).every((query) => query.includes(' NOT '))).toBe(true);
   }
   const terms = result.trials[1]!.before!.terms!;
   expect(terms.filter((term) => term.finalContribution === 1)).toHaveLength(measuredContributions);
@@ -199,17 +203,17 @@ test('候補実測と差集合と最終再検証の実コストを残し、確�
   expect(result.status).toBe('achieved');
   expect(result.trials.map((trial) => trial.kind)).toEqual(['initial', 'proposal', 'final']);
   expect(result.trials[1]!.impact).toMatchObject({ lostHits: 0, gainedHits: 0 });
-  // 初期実測6回、確保17回（実測2回＋差集合3回＋AIと境界の余裕）、語別17回。
-  expect(limited.queries.slice(6, 23).every((query) => query.includes(' NOT '))).toBe(true);
+  // 初期実測6回、確保17回（実測2回＋差集合3回＋AIと境界の余裕）、診断4回と語別13回。
+  expect(limited.queries.slice(10, 23).every((query) => query.includes(' NOT '))).toBe(true);
   expect(result.apiCalls).toBe(38);
   expect(result.unmetReasons.join(' ')).toContain('通信予算を確保するため');
   const unlimited = fixture(10, 2, 1);
   const withoutReservationStop = await runQueryOptimization(unlimited.input, unlimited.deps);
   expect(withoutReservationStop.status).toBe('achieved');
-  expect(withoutReservationStop.apiCalls).toBe(MAX_TERM_API_CALLS + 3 * 6 + 1 + 2);
+  expect(withoutReservationStop.apiCalls).toBe(MAX_TERM_API_CALLS + 3 * 6 + 1 + 2 + 4 + 3);
   expect(withoutReservationStop.apiCalls).toBeGreaterThan(40);
   // 確保が発動しなければ、40通信目も初期式の語別計測で候補実測へまだ進めない。
-  expect(unlimited.queries.slice(6, 40).every((query) => query.includes(' NOT '))).toBe(true);
+  expect(unlimited.queries.slice(10, 40).every((query) => query.includes(' NOT '))).toBe(true);
   expect(withoutReservationStop.unmetReasons.join(' ')).not.toContain('通信予算を確保するため');
 });
 

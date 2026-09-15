@@ -232,3 +232,18 @@ test('最終レビューと保存の再描画で既存の履歴 DOM・詳細の�
   expect(container.querySelectorAll('.optimization__review')).toHaveLength(1);
   expect(container.querySelector('.optimization__save-status')?.textContent).toContain('保存しました');
 });
+
+test.each([false, true])('診断の小見出し・削減率・未判定理由を参考情報として表示する（旧データ: %s）', (legacy) => {
+  const current = run('needs_review');
+  if (!legacy) current.result!.blockDiagnosis = { fingerprint: 'fp', note: '', overlaps: [
+    { blockIds: ['1', '2'], kind: 'same', terms: [], qualified: false, note: '#1 と #2: 同じ MeSH "Disease"[Mesh]' },
+  ], narrowing: [
+    { blockId: '1', label: '疾患', finalHits: 90, withoutHits: 100, reduction: 0.1, ineffective: true, note: '' },
+    { blockId: '2', label: '治療', finalHits: 90, withoutHits: null, reduction: null, ineffective: null, note: '未判定: 階層を取得できなかった' },
+  ] };
+  const container = document.createElement('div');
+  renderOptimizationReview(container, current, actions);
+  expect(container.querySelectorAll('.optimization__review-section')).toHaveLength(4);
+  if (legacy) expect(container.textContent).not.toContain('ブロック構造の診断');
+  else for (const text of ['ブロック構造の診断', '#1 と #2', '削減率 10.0%', '未判定: 階層を取得できなかった']) expect(container.textContent).toContain(text);
+});

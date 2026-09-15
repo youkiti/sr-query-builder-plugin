@@ -49,6 +49,10 @@ async function setup(page: Page, options: { hasSeeds: boolean; holdAi: boolean; 
     if (options.missedByFilter && query.includes('[uid]')) {
       return query.includes('randomized') ? { count: '0', idlist: [] } : { count: '1', idlist: [PMID] };
     }
+    // 件数診断で片方の概念を外した式も、最終式以上の件数を返す。
+    if (!query.includes('[uid]') && (!query.includes('"ARDS"[tiab]') || !query.includes('"ECMO"[tiab]'))) {
+      return { count: '300', idlist: [] };
+    }
     return url.includes(PMID) ? { count: '1', idlist: [PMID] }
       : { count: url.includes('broad') ? '250' : '50', idlist: [] };
   }, efetchXml: (url) => {
@@ -92,6 +96,8 @@ async function start(page: Page) {
 async function expectReview(page: Page, label: string) {
   await expect(page.getByRole('heading', { name: `最終レビュー：${label}`, exact: true })).toBeVisible({ timeout: 60_000 });
   await expect(page.locator('.optimization__final-formula')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'ブロック構造の診断', exact: true })).toBeVisible();
+  await expect(page.locator('.optimization__review')).toContainText('削減率');
 }
 
 test.describe('検索式の自動調整', () => {
