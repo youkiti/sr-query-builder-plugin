@@ -66,7 +66,8 @@ test('F=40 B=4 M=8 で5候補と最終再検証を200通信以内に収め、実
   expect(result.trials.filter((trial) => trial.kind === 'proposal' && trial.accepted)).toHaveLength(5);
   expect(result.trials.map((trial) => trial.kind)).toEqual(['initial', 'proposal', 'proposal', 'proposal', 'proposal', 'proposal', 'final']);
   // 語別92回（確保で抑制）＋評価7回分＋AI5回＋差集合2方向＋診断更新＋未捕捉時の捕捉表・書誌5回分。
-  expect(result.apiCalls).toBe(92 + 7 * (4 + 2) + 5 + 5 * 2 + 4 + 5 * 3 + 5 * 6);
+  // 未捕捉が残る候補の対象行は採用後に再利用し、全件回収する最後の候補だけ従来より1通信増える。
+  expect(result.apiCalls).toBe(92 + 7 * (4 + 2) + 5 + 5 * 2 + 4 + 5 * 3 + 5 * 6 + 1);
   expect(result.apiCalls).toBeLessThan(200);
   expect(result.best?.formula.blocks[0]?.expression).toContain('b1v5word');
   expect(result.unmetReasons.join(' ')).toContain('未測定');
@@ -213,12 +214,13 @@ test('候補実測と差集合と最終再検証の実コストを残し、確�
   expect(result.trials[1]!.impact).toMatchObject({ lostHits: 0, gainedHits: 10 });
   // 初期実測6回・捕捉表と書誌6回・診断4回。17回を確保し、初期の語別計測は7回。
   expect(limited.queries.slice(15, 22).every((query) => query.includes(' NOT '))).toBe(true);
-  expect(result.apiCalls).toBe(38);
+  // 全件回収する候補にも対象ブロックの捕捉測定を1通信加える。
+  expect(result.apiCalls).toBe(39);
   expect(result.unmetReasons.join(' ')).toContain('通信予算を確保するため');
   const unlimited = fixture(10, 2, 1);
   const withoutReservationStop = await runQueryOptimization(unlimited.input, unlimited.deps);
   expect(withoutReservationStop.status).toBe('achieved');
-  expect(withoutReservationStop.apiCalls).toBe(MAX_TERM_API_CALLS + 3 * 6 + 1 + 2 + 4 + 3 + 6);
+  expect(withoutReservationStop.apiCalls).toBe(MAX_TERM_API_CALLS + 3 * 6 + 1 + 2 + 4 + 3 + 6 + 1);
   expect(withoutReservationStop.apiCalls).toBeGreaterThan(40);
   // 確保が発動しなければ、40通信目も初期式の語別計測で候補実測へまだ進めない。
   expect(unlimited.queries.slice(15, 40).every((query) => query.includes(' NOT '))).toBe(true);

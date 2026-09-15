@@ -224,3 +224,23 @@ test.each(['all', 'retrieved_subset', undefined] as const)('抽出方法 %s を�
   expect(review.lines).toContain('残り 149 件は未確認');
   expect(review.state).not.toBe('confirmed');
 });
+
+test.each([false, true])('中間手の採用は既知文献の捕捉区分に残し、最終結果の捕捉状態を維持する: 回収済み=%s', (recovered) => {
+  const run = fixture();
+  const best = run.result!.best!;
+  best.evaluation.seedPmids = ['1', '2'];
+  best.evaluation.finalQuery.capturedPmids = recovered ? ['1', '2'] : ['1'];
+  best.evaluation.finalQuery.missedPmids = recovered ? [] : ['2'];
+  const reason = 'ブロック #1 のシード捕捉が 1 件から 2 件に増えました（最終式の捕捉数は変わらない中間手を採用）';
+  const intermediate = { kind: 'proposal' as const, candidateId: 'candidate-1', formula: best.formula,
+    before: { ...best.measurement, capturedPmids: ['1'], missedPmids: ['2'] },
+    after: { ...best.measurement, capturedPmids: ['1'], missedPmids: ['2'] },
+    accepted: true, reason, rationale: '', apiEvents: [] };
+  run.trials = [intermediate, { ...intermediate, candidateId: 'rejected', accepted: false },
+    { ...intermediate, candidateId: 'recovered', after: { ...intermediate.after, capturedPmids: ['1', '2'], missedPmids: [] } }];
+  const review = buildOptimizationReviewSections(run);
+  expect(review.sections).toHaveLength(4);
+  expect(review.sections[0].state).toBe(recovered ? 'confirmed' : 'unmet');
+  expect(review.sections[0].lines.filter((line) => line.startsWith('中間手'))).toEqual([`中間手 candidate-1: ${reason}`]);
+  expect(review.sections.slice(1).every((item) => item.lines.every((line) => !line.includes('中間手')))).toBe(true);
+});
