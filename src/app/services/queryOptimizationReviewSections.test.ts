@@ -69,10 +69,10 @@ test.each(['outside', 'lost'] as const)('%s の候補は保存済みだけを判
   for (const decision of ['exclude', 'maybe'] as const) {
     run.outsideCheck!.decisions['2'] = { decision, status: 'saved', error: null };
     const current = section(run, key);
-    expect(current.state).toBe(decision === 'maybe' ? 'decided' : 'confirmed');
+    expect(current.state).toBe(decision === 'maybe' || source === 'lost' ? 'decided' : 'confirmed');
     expect(current.maybeCount).toBe(decision === 'maybe' ? 1 : 0);
     expect(current.lines.includes('maybe で保存した候補 1 件は未確認として残ります')).toBe(decision === 'maybe');
-    expect(buildOptimizationReviewSections(run).unconfirmed.some((line) => line.startsWith(`${current.label}:`))).toBe(decision === 'maybe');
+    expect(buildOptimizationReviewSections(run).unconfirmed.some((line) => line.startsWith(`${current.label}:`))).toBe(decision === 'maybe' || source === 'lost');
     if (source === 'lost') expect(current.lines).toContain('残り 149 件は未確認');
   }
   run.outsideCheck!.candidates.push({ ...candidate(source), pmid: '3' });
@@ -102,6 +102,85 @@ test.each(['outside', 'lost'] as const)('%s の候補は保存済みだけを判
     expect(section(run, key).state).toBe('unconfirmed');
     expect(section(run, key).lines.join('')).toContain('失う集合 未測定');
   }
+});
+
+function deletionFixture(): QueryOptimizationRunState {
+  const run = fixture();
+  run.trials = [{ kind: 'proposal', candidateId: 'candidate-1', formula: run.result!.best!.formula,
+    before: null, after: null, accepted: false, held: true, rationale: '', reason: '', apiEvents: [],
+    impact: { lostHits: 2, gainedHits: 0, inspected: [
+      { pmid: '2', title: '研究', year: 2000 }, { pmid: '3', title: '研究', year: 2000 },
+    ], error: null } }];
+  run.outsideCheck!.candidates = ['2', '3'].map((pmid) => ({
+    ...candidate('lost'), pmid, heldCandidateId: 'candidate-1',
+  }));
+  run.outsideCheck!.decisions = {
+    '2': { decision: 'exclude', status: 'saved', error: null },
+    '3': { decision: 'exclude', status: 'saved', error: null },
+  };
+  return run;
+}
+
+test('失う集合 150 件のうち書誌 1 件だけを exclude 保存しても未確認事項に残る', () => {
+  const run = deletionFixture();
+  run.trials[0]!.impact!.lostHits = 150;
+  run.trials[0]!.impact!.inspected.pop();
+  run.outsideCheck!.candidates.pop();
+  delete run.outsideCheck!.decisions['3'];
+  const review = buildOptimizationReviewSections(run);
+  expect(review.sections[3].state).toBe('decided');
+  expect(review.sections[3].maybeCount).toBe(0);
+  expect(review.sections[3].lines).toContain('残り 149 件は未確認');
+  expect(review.unconfirmed).toEqual([expect.stringMatching(/^削除影響の確認:.*残り 149 件は未確認/)]);
+});
+
+test.each(['exclude', 'maybe'] as const)('失う集合 2 件を全件取得し、最後の判定が %s の場合', (decision) => {
+  const run = deletionFixture();
+  run.outsideCheck!.decisions['3']!.decision = decision;
+  const review = buildOptimizationReviewSections(run);
+  expect(review.sections[3].state).toBe(decision === 'exclude' ? 'confirmed' : 'decided');
+  expect(review.sections[3].maybeCount).toBe(decision === 'maybe' ? 1 : 0);
+  expect(review.unconfirmed.some((line) => line.startsWith('削除影響の確認:'))).toBe(decision === 'maybe');
+});
+
+test.each([2, 3])('重複 PMID の判定候補が片方だけでも全保留試行の取得状況を確認する（後続の失う集合 %i 件）', (lostHits) => {
+  const run = deletionFixture();
+  const first = run.trials[0]!;
+  run.trials.push({ ...first, candidateId: 'candidate-2', impact: { ...first.impact!, lostHits } });
+  const review = buildOptimizationReviewSections(run);
+  expect(review.sections[3].state).toBe(lostHits === 2 ? 'confirmed' : 'decided');
+  expect(review.unconfirmed.some((line) => line.startsWith('削除影響の確認:'))).toBe(lostHits > 2);
+});
+
+test('登録済みシードとして判定候補に載らない PMID は全件取得時の確認を妨げない', () => {
+  const run = deletionFixture();
+  run.outsideCheck!.candidates.pop();
+  delete run.outsideCheck!.decisions['3'];
+  const review = buildOptimizationReviewSections(run);
+  expect(review.sections[3].state).toBe('confirmed');
+  expect(review.unconfirmed).toEqual([]);
+});
+
+test.each(['取得失敗', '未測定', '影響なし', '空のエラー'] as const)('全判定候補を exclude 保存しても影響の状態を確認する: %s', (kind) => {
+  const run = deletionFixture();
+  if (kind === '取得失敗') run.trials[0]!.impact!.error = '書誌取得失敗';
+  if (kind === '未測定') run.trials[0]!.impact!.lostHits = null;
+  if (kind === '影響なし') delete run.trials[0]!.impact;
+  if (kind === '空のエラー') run.trials[0]!.impact!.error = '';
+  const review = buildOptimizationReviewSections(run);
+  expect(review.sections[3].state).toBe(kind === '空のエラー' ? 'confirmed' : 'decided');
+  expect(review.unconfirmed.some((line) => line.startsWith('削除影響の確認:'))).toBe(kind !== '空のエラー');
+  if (kind === '取得失敗') expect(review.sections[3].lines).toContain('書誌取得失敗');
+});
+
+test('保留試行があり判定候補が 0 件なら全件取得済みでも未確認事項に残る', () => {
+  const run = deletionFixture();
+  run.outsideCheck!.candidates = [];
+  run.outsideCheck!.decisions = {};
+  const review = buildOptimizationReviewSections(run);
+  expect(review.sections[3].state).toBe('unconfirmed');
+  expect(review.sections[3]).not.toHaveProperty('maybeCount');
+  expect(review.unconfirmed).toEqual([expect.stringMatching(/^削除影響の確認:/)]);
 });
 
 test('include 保存があっても未判定が残るなら判定待ちを優先する', () => {

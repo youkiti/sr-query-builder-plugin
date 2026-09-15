@@ -61,6 +61,10 @@ export function buildOptimizationReviewSections(run: QueryOptimizationRunState):
     } else {
       const lost = check?.candidates.filter((candidate) => candidate.source === 'lost') ?? [];
       deletion.state = lost.length ? decisionState(check, 'lost') : 'unconfirmed';
+      // 判定は保留候補の所属によらず PMID 単位で確認済み。集合全体の取得状況も全試行で確認する。
+      if (deletion.state === 'confirmed' && !held.every((trial) => trial.impact
+        && trial.impact.lostHits !== null && !trial.impact.error
+        && trial.impact.inspected.length >= trial.impact.lostHits)) deletion.state = 'decided';
       if (lost.length) deletion.maybeCount = lost.filter((candidate) => check?.decisions[candidate.pmid]?.status === 'saved'
         && check?.decisions[candidate.pmid]?.decision === 'maybe').length;
       deletion.lines.push(`保留した候補 ${held.length} 件の削除影響の確認`);
