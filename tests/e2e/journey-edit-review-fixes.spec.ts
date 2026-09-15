@@ -69,10 +69,19 @@ const FREEWORD_DESIGNER_RESPONSE = {
 };
 
 /**
- * #/draft の「生成する」を実操作で通すためのスタブ一式（journey-draft-generate.spec.ts の
- * setupDraftScenario と同じ構成。同ファイルを変更しない方針のためこちらへ複製する）。
+ * #/draft の「最初から作り直す」（.draft__generate）を実操作で通すためのスタブ一式
+ * （journey-draft-generate.spec.ts の setupDraftScenario と同じ構成。同ファイルを
+ * 変更しない方針のためこちらへ複製する）。
  * studyDesign は RCT フィルタが自動付加されない値にしておき、最終行（結合式）の期待値を
  * `#1 AND #2` だけに保つ（RCT だと `AND #RCTfilter` が末尾に追記され、期待値がぶれるため）。
+ *
+ * 主操作が自動調整カード（.optimization__start）に一本化されて以降、「最初から作り直す」
+ * （旧「生成して検証する」= runGenerateAndValidate）は現式があるときだけ補助操作行
+ * （.draft__actions--secondary）に出る。そのため FULL_APP_STATE の
+ * currentFormulaMarkdown はここでは null に上書きしない。#/blocks の結合式入力は
+ * blocksView.ts の input イベントで store の blocksDraft へ即時反映され（承認クリックを
+ * 経由しない）、承認（approveBlocks）だけが currentFormulaMarkdown をリセットするので、
+ * このテストのように #/blocks → #/draft へ location.hash 直接遷移する経路では現式は消えない。
  */
 async function setupDraftGenerationScenario(page: Page): Promise<SheetsFake> {
   const fake = await registerSheetsStub(page, {
@@ -107,7 +116,6 @@ async function setupDraftGenerationScenario(page: Page): Promise<SheetsFake> {
     fullStateScenario({
       preloadedState: {
         ...FULL_APP_STATE,
-        currentFormulaMarkdown: null,
         protocolDraft: { ...FULL_PROTOCOL_DRAFT, studyDesign: 'observational cohort study' },
       },
       extraStorage: { 'apiKeys.gemini': 'dummy-key' },
@@ -137,17 +145,23 @@ test.describe('journey-edit-review-fixes: 1. #/blocks の小文字結合式 → 
       window.location.hash = '#/draft';
     });
 
-    const generateBtn = page.locator('.draft__actions button').first();
+    // 主操作の自動調整カードに一本化された後、生成→検証パイプライン
+    // （runGenerateAndValidate）は現式があるときだけ補助操作行に出る「最初から作り直す」
+    // （.draft__generate）が担う。
+    const generateBtn = page.locator('.draft__generate');
     await expect(generateBtn).toBeEnabled();
     await generateBtn.click();
-    await expect(page.locator('.draft__formula')).toBeVisible({ timeout: 30_000 });
 
     // 観測点 A: #/draft の画面表示（.draft__block--combination）。
+    // FULL_APP_STATE の現式（#3 #1 AND #2）は生成中も .draft__formula に表示され続けるため
+    // 可視化では完了を検知できない。実際に組み合わせのテキストが新しい順序へ変わるまで
+    // 待つ（ブロック × 3 skill の LLM 呼び出しを挟むため timeout を長めに取る）。
     // assembleFormulaMd が組み立てた PubmedFormula を parsePubmedFormulaMd で再パースして
     // 描画したものなので、実際の生成経路（assembleFormulaMd を直接呼ばず、ボタン操作から
     // 辿った結果）を見ていることになる。
     await expect(page.locator('.draft__block--combination .draft__block-expr')).toHaveText(
-      '#2 AND #1'
+      '#2 AND #1',
+      { timeout: 30_000 }
     );
 
     // 観測点 B（傍証）: Sheets（FormulaVersions）へ実際に保存された formula_md 文字列。

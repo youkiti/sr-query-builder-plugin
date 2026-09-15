@@ -26,11 +26,15 @@ import {
 /**
  * 検索式の生成・検証画面（#/draft）。
  *
- * 旧 draft タブと validate タブを統合したもので、1 つの「生成して検証する」操作で
+ * 旧 draft タブと validate タブを統合したもので、主操作は自動調整カードの
+ * 「検索式を作成・自動調整する」（.optimization__start）に一本化している。
+ * 現式があればそれを初期式に、無ければ AI で生成したうえで、
  *   ① ブロックごとに block-designer → mesh → freeword を実行し、出来上がった瞬間に
  *      そのブロックのヒット数（line_hits）を計測してライブ表示する
  *   ② 全ブロックの組み立て・保存後、捕捉率（final_query）・MeSH・階層の検証を自動実行する
- * を続けて行う。
+ * を続けて行う。現式があるときだけ、自動調整カードの直後に「検証のみ再実行」
+ * （onRevalidate）・「最初から作り直す」（onGenerate。旧「生成して検証する」の
+ * 生成→検証 1 アクション連結パイプラインそのもの）の補助操作を出す。
  *
  * - 進捗・エラー・ブロックごとのヒット数は store の state.draftRun から描画する。
  *   LLM コスト集計（cumulativeCostUsd）の setState が走るたびに全ビューが再描画されるため、
@@ -113,41 +117,93 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
     const run = ctx.state.draftRun;
     const running = run?.status === 'running';
 
-    const actions = doc.createElement('div');
-    actions.className = 'draft__actions';
-    const generateBtn = doc.createElement('button');
-    generateBtn.type = 'button';
-    generateBtn.className = 'draft__generate';
-    generateBtn.textContent = running
-      ? '実行中…'
-      : existing
-        ? '再生成して再検証する'
-        : '生成して検証する';
-    generateBtn.disabled = running || ctx.state.queryOptimizationRun?.status === 'running';
-    actions.appendChild(generateBtn);
+    // 主操作は自動調整カードの「検索式を作成・自動調整する」（.optimization__start）に
+    // 一本化した。現式が無ければ「生成して検証する」（.draft__generate）は
+    // 描画しない。現式があるときだけ、自動調整カードの直後に「検証のみ再実行」「最初から
+    // 作り直す」の補助操作行を出す。
+    let generateBtn: HTMLButtonElement | null = null;
+    let discardConfirm: HTMLDivElement | null = null;
+    let discardMessage: HTMLParagraphElement | null = null;
+    let discardConfirmBtn: HTMLButtonElement | null = null;
+    let discardCancelBtn: HTMLButtonElement | null = null;
+    let secondaryActions: HTMLDivElement | null = null;
 
-    // 「検証のみ再実行」(issue #40 症状 A): 検証失敗からのリカバリ導線に限定せず、
-    // 保存済みの式があり実行中でなければ実行状態から独立して常に描画する。
-    // #/edit の手編集保存後や、生成が正常終了した後の「式は変えず検証だけやり直す」
-    // 入口としても使えるようにするため。生成ボタンと同じ .draft__actions の行に置く。
-    const canRevalidate =
-      existing !== null && ctx.state.currentFormulaVersionId !== null && !running
-      && ctx.state.queryOptimizationRun?.status !== 'running';
-    if (canRevalidate) {
-      const revalidateBtn = doc.createElement('button');
-      revalidateBtn.type = 'button';
-      revalidateBtn.className = 'draft__revalidate';
-      revalidateBtn.textContent = '検証のみ再実行（生成はやり直しません）';
-      revalidateBtn.addEventListener('click', () => {
-        if (!callbacks.onRevalidate || revalidateBtn.disabled) {
-          return;
-        }
-        revalidateBtn.disabled = true;
-        void callbacks.onRevalidate();
-      });
-      actions.appendChild(revalidateBtn);
+    if (existing) {
+      secondaryActions = doc.createElement('div');
+      secondaryActions.className = 'draft__actions draft__actions--secondary';
+      const label = doc.createElement('span');
+      label.className = 'draft__actions-label';
+      label.textContent = 'その他の操作:';
+      secondaryActions.appendChild(label);
+
+      // 「検証のみ再実行」(issue #40 症状 A): 検証失敗からのリカバリ導線に限定せず、
+      // 保存済みの式があり実行中でなければ実行状態から独立して常に描画する。
+      // #/edit の手編集保存後や、生成が正常終了した後の「式は変えず検証だけやり直す」
+      // 入口としても使えるようにするため。生成ボタンと同じ補助操作行に置く。
+      const canRevalidate =
+        ctx.state.currentFormulaVersionId !== null && !running
+        && ctx.state.queryOptimizationRun?.status !== 'running';
+      if (canRevalidate) {
+        const revalidateBtn = doc.createElement('button');
+        revalidateBtn.type = 'button';
+        revalidateBtn.className = 'draft__revalidate';
+        revalidateBtn.textContent = '検証のみ再実行（生成はやり直しません）';
+        revalidateBtn.addEventListener('click', () => {
+          if (!callbacks.onRevalidate || revalidateBtn.disabled) {
+            return;
+          }
+          revalidateBtn.disabled = true;
+          void callbacks.onRevalidate();
+        });
+        secondaryActions.appendChild(revalidateBtn);
+      }
+
+      generateBtn = doc.createElement('button');
+      generateBtn.type = 'button';
+      generateBtn.className = 'draft__generate';
+      generateBtn.textContent = running ? '実行中…' : '最初から作り直す';
+      generateBtn.disabled = running || ctx.state.queryOptimizationRun?.status === 'running';
+      secondaryActions.appendChild(generateBtn);
+
+      // 手を加えた版の破棄確認（issue #40 症状 B）: currentFormulaCreatedBy === 'user_edit' の
+      // 版を再生成が無警告で上書きしないよう、生成ボタン押下時にインライン確認を挟む。
+      // 'user_edit' になる経路は #/edit の手編集保存だけでなく、過大ヒットフィルタ承認
+      // （bootstrap.ts の runApplyExcessFilters が内部で saveEditedFormula を呼ぶ）も含むため、
+      // 確認文言・コメントとも経路を特定しない表現にすること（「#/edit で手編集した」と
+      // 断定しない）。ai_draft / null（未生成含む）のときは従来どおり即実行する
+      // （余計なクリックを増やさない）。
+      //
+      // ローカル DOM 状態（store 非経由）: setState による再描画が起きるとこのパネルは
+      // 閉じる。現状 #/draft はパネル表示中に setState を起こすアイドル更新を持たない
+      // （cumulativeCostUsd の再集計は LLM 呼び出し完了時のみ走り、確認中は LLM を呼んで
+      // いないため issue #39 のような消失は起きない）。将来アイドル時の setState（定期更新等）
+      // を #/draft に持ち込むときは、この状態を store（formulaEditNote 等と同様の設計）へ
+      // 移すこと。
+      discardConfirm = doc.createElement('div');
+      discardConfirm.className = 'draft__discard-confirm';
+      discardConfirm.hidden = true;
+      discardMessage = doc.createElement('p');
+      discardMessage.className = 'draft__discard-message';
+      discardMessage.setAttribute('role', 'alert');
+      // textContent は初期描画時ではなく、表示する瞬間（showDiscardConfirm）に設定する。
+      // role="alert" の live region は「内容の変更」で announce されるため、描画時に先に
+      // textContent を入れて hidden を外すだけでは支援技術に読み上げられないことがある。
+      discardConfirm.appendChild(discardMessage);
+
+      const discardActions = doc.createElement('div');
+      discardActions.className = 'draft__discard-actions';
+      discardConfirmBtn = doc.createElement('button');
+      discardConfirmBtn.type = 'button';
+      discardConfirmBtn.className = 'draft__discard-confirm-btn';
+      discardConfirmBtn.textContent = '破棄して再生成する';
+      discardCancelBtn = doc.createElement('button');
+      discardCancelBtn.type = 'button';
+      discardCancelBtn.className = 'draft__discard-cancel';
+      discardCancelBtn.textContent = 'やめる';
+      discardActions.appendChild(discardConfirmBtn);
+      discardActions.appendChild(discardCancelBtn);
+      discardConfirm.appendChild(discardActions);
     }
-    container.appendChild(actions);
 
     const renderCurrentHistory = (state: AppState): void => {
       const setup = state.queryOptimizationSetup?.projectId === state.project?.projectId ? state.queryOptimizationSetup : null;
@@ -162,10 +218,17 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
             maxIterations: checkpoint.resume!.limits.evaluatedTrials }, checkpoint.runId); } : undefined,
         } : undefined);
     };
+    // renderQueryOptimization は呼び出し終了時点で必ず section.optimization__setup を
+    // container の最後尾に appendChild する。補助操作行・破棄確認パネルはその直後に続けて
+    // appendChild することで「自動調整カードの直後」の位置を保証する（renderCurrentHistory /
+    // renderOptimizationReview 等、後続の挿入は info/formula より前の位置を対象にしており、
+    // setup と補助操作行の間には割り込まない）。
     renderQueryOptimization(container, ctx.state, callbacks, (stop) => { stopElapsedTimer = stop; }, (values) => {
       renderCurrentHistory({ ...ctx.state, queryOptimizationSetup: ctx.state.queryOptimizationSetup
         ? { ...ctx.state.queryOptimizationSetup, ...values } : null });
     });
+    if (secondaryActions) container.appendChild(secondaryActions);
+    if (discardConfirm) container.appendChild(discardConfirm);
     renderCurrentHistory(ctx.state);
     renderOptimizationReview(container,
       ctx.state.queryOptimizationRun?.projectId === ctx.state.project.projectId ? ctx.state.queryOptimizationRun : null,
@@ -174,47 +237,6 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
     if (!ctx.state.queryOptimizationSetup && callbacks.onPrepareOptimization) {
       void Promise.resolve().then(() => callbacks.onPrepareOptimization?.());
     }
-
-
-    // 手を加えた版の破棄確認（issue #40 症状 B）: currentFormulaCreatedBy === 'user_edit' の
-    // 版を再生成が無警告で上書きしないよう、生成ボタン押下時にインライン確認を挟む。
-    // 'user_edit' になる経路は #/edit の手編集保存だけでなく、過大ヒットフィルタ承認
-    // （bootstrap.ts の runApplyExcessFilters が内部で saveEditedFormula を呼ぶ）も含むため、
-    // 確認文言・コメントとも経路を特定しない表現にすること（「#/edit で手編集した」と
-    // 断定しない）。ai_draft / null（未生成含む）のときは従来どおり即実行する
-    // （余計なクリックを増やさない）。
-    //
-    // ローカル DOM 状態（store 非経由）: setState による再描画が起きるとこのパネルは
-    // 閉じる。現状 #/draft はパネル表示中に setState を起こすアイドル更新を持たない
-    // （cumulativeCostUsd の再集計は LLM 呼び出し完了時のみ走り、確認中は LLM を呼んで
-    // いないため issue #39 のような消失は起きない）。将来アイドル時の setState（定期更新等）
-    // を #/draft に持ち込むときは、この状態を store（formulaEditNote 等と同様の設計）へ
-    // 移すこと。
-    const discardConfirm = doc.createElement('div');
-    discardConfirm.className = 'draft__discard-confirm';
-    discardConfirm.hidden = true;
-    const discardMessage = doc.createElement('p');
-    discardMessage.className = 'draft__discard-message';
-    discardMessage.setAttribute('role', 'alert');
-    // textContent は初期描画時ではなく、表示する瞬間（showDiscardConfirm）に設定する。
-    // role="alert" の live region は「内容の変更」で announce されるため、描画時に先に
-    // textContent を入れて hidden を外すだけでは支援技術に読み上げられないことがある。
-    discardConfirm.appendChild(discardMessage);
-
-    const discardActions = doc.createElement('div');
-    discardActions.className = 'draft__discard-actions';
-    const discardConfirmBtn = doc.createElement('button');
-    discardConfirmBtn.type = 'button';
-    discardConfirmBtn.className = 'draft__discard-confirm-btn';
-    discardConfirmBtn.textContent = '破棄して再生成する';
-    const discardCancelBtn = doc.createElement('button');
-    discardCancelBtn.type = 'button';
-    discardCancelBtn.className = 'draft__discard-cancel';
-    discardCancelBtn.textContent = 'やめる';
-    discardActions.appendChild(discardConfirmBtn);
-    discardActions.appendChild(discardCancelBtn);
-    discardConfirm.appendChild(discardActions);
-    container.appendChild(discardConfirm);
 
     // 全体の進捗トラッカー（プログレスバー + ステップカウンタ + フェーズ・ステッパー）。
     // 「今やっていること」の 1 行（下の status）に対し、こちらは「全体のどこか」を示し、
@@ -240,8 +262,10 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
       } else if (run.status === 'error') {
         const phaseLabel = run.phase === 'validating' ? '検証' : '生成';
         errorBox.textContent = `${phaseLabel}に失敗しました: ${run.error ?? '不明なエラー'}`;
-        // 「検証のみ再実行」ボタンは実行状態から独立して .draft__actions に描画する
-        // （issue #40 症状 A）。ここでは失敗文言のみを出す。
+        // 「検証のみ再実行」ボタンは実行状態から独立して補助操作行
+        // （.draft__actions--secondary）に描画する（issue #40 症状 A）。
+        // 現式が無ければ補助操作行ごと出ないため、その場合の再試行は
+        // .optimization__start（自動調整）が担う。ここでは失敗文言のみを出す。
       }
     }
 
@@ -281,8 +305,10 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
 
     // 状態遷移（draftRun の running 設定）は bootstrap 側。setState → 再描画で
     // ボタンが即座に無効化されるため、ここでのローカル無効化は保険のみ
+    // generateBtn は現式が無ければそもそも存在しない（主操作は .optimization__start
+    // に一本化したため）。
     const runGenerate = (): void => {
-      if (!callbacks.onGenerate || generateBtn.disabled) {
+      if (!callbacks.onGenerate || !generateBtn || generateBtn.disabled) {
         return;
       }
       generateBtn.disabled = true;
@@ -296,6 +322,9 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
     // - discardConfirmBtn.focus() でキーボード / スクリーンリーダー利用者にも
     //   パネルの出現が伝わるようにする
     const showDiscardConfirm = (): void => {
+      if (!discardConfirm || !discardMessage || !discardConfirmBtn) {
+        return;
+      }
       discardMessage.textContent = `AI の生成結果に手を加えた版（version: ${
         ctx.state.currentFormulaVersionId ?? '(未保存)'
       }）です。再生成するとこの版は破棄され、ブロック定義から作り直されます。よろしいですか？`;
@@ -304,6 +333,9 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
     };
 
     const hideDiscardConfirm = (): void => {
+      if (!discardConfirm || !discardMessage) {
+        return;
+      }
       discardConfirm.hidden = true;
       // 次回表示時に textContent が必ず「変化」として検知されるよう空に戻す
       // （同じバージョンで連続して開いた場合に同一文字列の再設定で announce が
@@ -311,8 +343,8 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
       discardMessage.textContent = '';
     };
 
-    generateBtn.addEventListener('click', () => {
-      if (generateBtn.disabled) {
+    generateBtn?.addEventListener('click', () => {
+      if (!generateBtn || generateBtn.disabled) {
         return;
       }
       // currentFormulaCreatedBy が 'user_edit'（#/edit の手編集保存、または過大ヒット
@@ -325,12 +357,12 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
       runGenerate();
     });
 
-    discardConfirmBtn.addEventListener('click', () => {
+    discardConfirmBtn?.addEventListener('click', () => {
       hideDiscardConfirm();
       runGenerate();
     });
 
-    discardCancelBtn.addEventListener('click', () => {
+    discardCancelBtn?.addEventListener('click', () => {
       hideDiscardConfirm();
       // 開いたきっかけの要素へフォーカスを戻す。何もしないと「やめる」自身が
       // hidden 化した親ごと消え、フォーカスが行き場を失って body に落ちる
@@ -338,7 +370,7 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
       // 直後に runGenerate() → setState で全体再描画されビューごと作り直される
       // ため、どのみちフォーカスは維持できず対応不要（過大ヒットフィルタ承認等の
       // 既存 UI と同じ挙動）。
-      generateBtn.focus();
+      generateBtn?.focus();
     });
   };
 }

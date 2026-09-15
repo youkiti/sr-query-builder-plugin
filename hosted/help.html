@@ -340,14 +340,17 @@
           </h2>
           <p>
             <span class="ja" lang="ja"
-              >「生成して検証する」ボタンひとつで、AI が承認済みブロックから PubMed
-              検索式のドラフトを生成し、ブロックごとのヒット数（line_hits）をライブ表示します。生成が完了すると、シード論文の捕捉率検証と
-              MeSH 検証を自動的に実行します。</span
+              >「検索式を作成・自動調整する」ボタンひとつで、検索式がまだ無ければ AI が承認済みブロックから
+              PubMed 検索式のドラフトを生成し、すでにあれば実測しながら調整します。実測・変更のライブ履歴と、完了後の最終レビューを表示します。すでに検索式があるときは、自動調整カードの直後に「検証のみ再実行」「最初から作り直す」が並び、ブロックごとのヒット数（line_hits）のライブ表示とシード論文の捕捉率・MeSH
+              検証はこの 2 つの操作でのみ実行されます（自動調整そのものは更新しません）。</span
             >
             <span class="en" lang="en"
-              >A single “Generate and validate” action drafts a PubMed search strategy from the approved blocks and
-              shows each block’s hit count (line_hits) live as it runs. Once the draft is complete, seed-paper capture
-              rate validation and a MeSH check run automatically.</span
+              >A single “Create and auto-adjust the search strategy” action either drafts a PubMed search strategy
+              from the approved blocks (if none exists yet) or measures and tunes the existing one, showing a live
+              history of each measurement and change plus a final review when it finishes. Once a search strategy
+              already exists, “Re-run validation only” and “Start over” appear right below the auto-adjust card —
+              only those two actions show each block’s hit count (line_hits) live and run seed-paper capture rate
+              / MeSH validation (auto-adjust itself does not update either).</span
             >
           </p>
         </section>
@@ -555,14 +558,14 @@
           <p>
             <span class="ja" lang="ja"
               >専用のバナーは表示されません。NCBI E-utilities の呼び出しはレート制限（429 等）を検知すると内部で自動的に指数バックオフ再試行するため、進行中の操作（例:
-              「生成して検証する」）がいつもより時間がかかって見えるだけです。頻発する場合は、Options
+              「検索式を作成・自動調整する」）がいつもより時間がかかって見えるだけです。頻発する場合は、Options
               画面で NCBI API キー（任意）を設定すると割り当てが 3 req/s → 10 req/s に上がり緩和されます。</span
             >
             <span class="en" lang="en"
               >There is no dedicated banner. Calls to NCBI E-utilities automatically retry with exponential backoff
-              internally when they hit a rate limit (e.g. 429), so the in-progress action (e.g. “Generate and
-              validate”) just appears to take longer than usual. If this happens often, set the optional NCBI API
-              key in Options — it raises the allowance from 3 req/s to 10 req/s.</span
+              internally when they hit a rate limit (e.g. 429), so the in-progress action (e.g. “Create and
+              auto-adjust the search strategy”) just appears to take longer than usual. If this happens often, set
+              the optional NCBI API key in Options — it raises the allowance from 3 req/s to 10 req/s.</span
             >
           </p>
 
@@ -574,14 +577,15 @@
             <span class="ja" lang="ja"
               >専用のバッジや「再試行」ボタンは無く、その画面のエラー欄に「生成に失敗しました: 〈エラー内容〉」のようにそのまま表示されます。API
               キーが正しいか、利用枠を超えていないかを Options 画面で確認したうえで、同じ操作ボタン（例:
-              「生成して検証する」/「再生成して再検証する」）をもう一度押してください。エラーは成功・失敗を問わず
+              検索式が無ければ「検索式を作成・自動調整する」、すでにあれば自動調整カード直後の「最初から作り直す」）をもう一度押してください。エラーは成功・失敗を問わず
               <code>LLMApiLog</code> タブに自動的に記録されます。</span
             >
             <span class="en" lang="en"
               >There is no dedicated badge or “Retry” button — the screen’s error area shows the message as-is,
               e.g. “Generation failed: 〈error detail〉”. Check in Options that your API key is correct and that you
-              have not exceeded your quota, then press the same action button again (e.g. “Generate and validate” /
-              “Regenerate and revalidate”). Every call — successful or not — is recorded automatically in the
+              have not exceeded your quota, then press the same action button again (e.g. “Create and auto-adjust
+              the search strategy” if no strategy exists yet, or “Start over” right below the auto-adjust card if
+              one already does). Every call — successful or not — is recorded automatically in the
               <code>LLMApiLog</code> tab.</span
             >
           </p>

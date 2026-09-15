@@ -126,7 +126,7 @@ export function createExportView(callbacks: ExportViewCallbacks = {}): RenderVie
 export function buildValidationWarning(state: AppState): string | null {
   const entry = state.validationResult;
   if (entry === null || entry.formulaVersionId !== state.currentFormulaVersionId) {
-    return '⚠ この検索式はまだ検証されていません。#/draft の「生成して検証する」でシード捕捉率を確認してからのエクスポートを推奨します。';
+    return '⚠ この検索式はまだ検証されていません。#/draft の「検証のみ再実行」でシード捕捉率を確認してからのエクスポートを推奨します。';
   }
   const summary = entry.summary;
   if (summary.finalQueryError !== null) {

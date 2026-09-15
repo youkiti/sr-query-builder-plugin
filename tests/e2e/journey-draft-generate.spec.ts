@@ -1,5 +1,5 @@
 /**
- * J8: #/draft の「生成して検証する」を**実操作で**通す回帰テスト。
+ * J8: #/draft の「最初から作り直す」（旧「生成して検証する」）を**実操作で**通す回帰テスト。
  *
  * 既存の app-draft.spec.ts / app-draft-validation.spec.ts は preload した state を
  * 描画できるかを見る静的な確認で、ボタンを押して
@@ -89,27 +89,41 @@ async function setupDraftScenario(page: Page): Promise<void> {
     },
   });
 
+  // 主操作が自動調整カードに一本化された後も「生成 → 検証」パイプライン自体（onGenerate /
+  // runGenerateAndValidate）の回帰を確認するのがこのテストの目的なので、現式ありの状態から
+  // 補助操作行の「最初から作り直す」（.draft__generate）を押す。currentFormulaCreatedBy は
+  // FULL_APP_STATE 由来で 'user_edit' ではない（既定 null）ため、破棄確認は挟まらず即実行される。
   await injectAppStub(
     page,
     fullStateScenario({
-      preloadedState: { ...FULL_APP_STATE, currentFormulaMarkdown: null },
+      preloadedState: FULL_APP_STATE,
       extraStorage: { 'apiKeys.gemini': 'dummy-key' },
     })
   );
 }
 
 test.describe('journey-draft-generate (J8 回帰)', () => {
-  test('「生成する」→ 検索式が組み上がり、行ごとヒット数と捕捉率まで出る', async ({ page }) => {
+  test('「最初から作り直す」→ 検索式が組み上がり、行ごとヒット数と捕捉率まで出る', async ({ page }) => {
     await setupDraftScenario(page);
     await page.goto(APP_URL);
 
-    const generateBtn = page.locator('.draft__actions button').first();
-    await expect(generateBtn).toBeEnabled();
-    await generateBtn.click();
+    // 生成前は旧式（tiab のみ、MeSH 語を含まない）が表示されている
+    await expect(page.locator('.draft__formula')).toContainText('extracorporeal membrane oxygenation');
+    await expect(page.locator('.draft__formula')).not.toContainText('Respiratory Distress Syndrome');
 
-    // 生成完了: 検索式が描画される
+    const generateBtn = page.locator('.draft__generate');
+    await expect(generateBtn).toBeVisible();
+    await expect(generateBtn).toHaveText('最初から作り直す');
+    await expect(generateBtn).toBeEnabled();
+    // user_edit 版の破棄確認は挟まらず、即座に実行状態へ移る
+    await generateBtn.click();
+    await expect(page.locator('.draft__discard-confirm')).toBeHidden();
+
+    // 生成完了: 検索式が新しい内容（MeSH 語を含む）に置き換わる
     await expect(page.locator('.draft__formula')).toBeVisible({ timeout: 30_000 });
     await expect(page.locator('.draft__formula')).toContainText('Respiratory Distress Syndrome');
+    // 旧式の内容（ブロック定義から作り直した新式には出てこない語）は残らない
+    await expect(page.locator('.draft__formula')).not.toContainText('extracorporeal membrane oxygenation');
     await expect(page.locator('.draft__error')).toHaveText('');
 
     // 続けて自動実行される検証の結果（行ごとヒット数 / 全体ヒット数）まで出る

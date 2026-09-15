@@ -450,7 +450,7 @@ function buildDefaultViewOptions(
           ...s, queryOptimizationRun: { ...s.queryOptimizationRun, stopRequested: true },
         });
       },
-      // 「生成して検証する」= 生成 → 検証 を 1 アクションで連結する。
+      // 「最初から作り直す」（旧「生成して検証する」）= 生成 → 検証 を 1 アクションで連結する。
       // 進捗・エラー・ブロックごとのヒット数は store.draftRun で管理する（LLM コスト集計の
       // setState による全ビュー再描画でローカル DOM の進捗表示が消えるため）。view は描画専任。
       onGenerate: async () => runGenerateAndValidate(store, runtime, llmFactoryDepsBase()),
@@ -1421,7 +1421,7 @@ export async function runReadjustOptimization(
 }
 
 /**
- * 「生成して検証する」パイプライン。生成（generateDraft）→ 検証（runValidation）を
+ * 「最初から作り直す」（旧「生成して検証する」）パイプライン。生成（generateDraft）→ 検証（runValidation）を
  * 1 アクションで連結し、draftRun の phase / progressLabel / blockHits と validationResult を
  * すべて store 経由で更新する。各フェーズの失敗は draftRun.status='error' に落とす
  * （生成済みの formula と blockHits は残すので、検証だけ失敗しても結果は確認できる）。
@@ -1515,7 +1515,7 @@ async function runGenerateAndValidate(
 
 /**
  * 検証フェーズ（runValidation + 進捗反映 + 完了時の validationResult 保存）。
- * 「生成して検証する」の後半と「検証のみ再実行」（fix-plan 2-2）で共用する。
+ * 「最初から作り直す」（旧「生成して検証する」）の後半と「検証のみ再実行」（fix-plan 2-2）で共用する。
  * 呼び出し時点で draftRun は status='running' / phase='validating' になっている前提。
  * 成功時は summary を返し、除外通知があれば完了状態を保持する。失敗時は draftRun をエラー化して
  * null を返す（生成済みの blockHits は保持される）。
@@ -1712,7 +1712,7 @@ async function runApplyExcessFilters(
     return;
   }
   if (state.currentFormulaMarkdown === null) {
-    throw new Error('検索式が未生成です。先に「生成して検証する」を実行してください');
+    throw new Error('検索式が未生成です。先に「検索式を作成・自動調整する」を実行してください');
   }
   const newMd = appendExcessFilterBlocks(state.currentFormulaMarkdown, approved);
   await saveEditedFormula(

@@ -971,8 +971,13 @@ describe('startApp - wiring 層', () => {
       // draft ルートのガードは「ブロック承認済み（currentProtocolVersion が採番済み）」を要求するため、
       // wiring 層テストでは明示的に 1 を入れておく
       currentProtocolVersion: 1,
+      // 主操作が自動調整カード（.optimization__start）に一本化されたため、
+      // ここで検証したい onGenerate パイプラインの入口である .draft__generate（補助操作行）を
+      // 描画させるには現式が要る。
+      currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 old[tiab]\n```\n',
+      currentFormulaVersionId: 'fv-old',
     }));
-    const generateBtn = doc.querySelector<HTMLButtonElement>('#app-content button')!;
+    const generateBtn = doc.querySelector<HTMLButtonElement>('.draft__generate')!;
     generateBtn.click();
     for (let i = 0; i < 10; i += 1) {
       await flush();
@@ -2304,7 +2309,7 @@ describe('startApp - wiring 層', () => {
     }
   });
 
-  test.each(['1234', undefined, '', 'abc', '0', '-5', '1.5', '1e999'])('生成して検証する経路で設定欄 %s の目安がプロンプトに届く', async (rawMaxHits) => {
+  test.each(['1234', undefined, '', 'abc', '0', '-5', '1.5', '1e999'])('「最初から作り直す」経路で設定欄 %s の目安がプロンプトに届く', async (rawMaxHits) => {
     const doc = buildDocument();
     const { runtime, fetchMock } = makeRuntime({
       currentProject: { projectId: 'p', spreadsheetId: 'SHEET-1', driveFolderId: 'D', title: 'T' },
@@ -2320,6 +2325,11 @@ describe('startApp - wiring 層', () => {
       setHash: jest.fn(), runtime });
     await flush();
     seedDraftPrereqs(handle);
+    // 主操作が自動調整カードに一本化されたため、.draft__generate（補助操作行）
+    // を描画させるには現式が要る。
+    handle.store.setState((s) => ({
+      ...s, currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 old[tiab]\n```\n', currentFormulaVersionId: 'fv-old',
+    }));
     await flush();
     if (rawMaxHits === undefined) {
       handle.store.setState((s) => ({ ...s, queryOptimizationSetup: null }));
@@ -2329,7 +2339,7 @@ describe('startApp - wiring 層', () => {
       input.dispatchEvent(new Event('input'));
       expect(handle.store.getState().queryOptimizationSetup?.maxHits).toBe(input.value);
     }
-    doc.querySelector<HTMLButtonElement>('#app-content button')!.click();
+    doc.querySelector<HTMLButtonElement>('.draft__generate')!.click();
     for (let i = 0; i < 30; i += 1) await flush();
     const calls = fetchMock.mock.calls.filter((c) => String(c[0]).includes('generativelanguage.googleapis.com'));
     expect(calls.length).toBeGreaterThanOrEqual(3);
@@ -2370,8 +2380,14 @@ describe('startApp - wiring 層', () => {
     handle.store.setState((s) => ({ ...s, queryOptimizationSetup: {
       projectId, status, maxHits: String(DEFAULT_QUERY_OPTIMIZATION_SETTINGS.maxHits),
       maxIterations: '5', seedCount: null, error: status === 'error' ? '読み込み失敗' : null,
-    } }));
-    const generateBtn = doc.querySelector<HTMLButtonElement>('#app-content button')!;
+    },
+    // このテストの狙いは、自動調整カード（.optimization__start）が setup.status !== 'ready'
+    // で無効なままでも、独立した「最初から作り直す」（.draft__generate）から onGenerate
+    // パイプラインが動き、保存済み設定から目安件数を解決できることを確認する点にある
+    // （.draft__generate は現式ありのときだけ描画されるため、現式を用意する）。
+    currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 old[tiab]\n```\n', currentFormulaVersionId: 'fv-old',
+    }));
+    const generateBtn = doc.querySelector<HTMLButtonElement>('.draft__generate')!;
     expect(generateBtn.disabled).toBe(false);
     generateBtn.click();
     for (let i = 0; i < 30; i += 1) await flush();
@@ -2428,7 +2444,12 @@ describe('startApp - wiring 層', () => {
     });
     await flush();
     seedDraftPrereqs(handle);
-    const runBtn = doc.querySelector<HTMLButtonElement>('#app-content button')!;
+    // 主操作が自動調整カードに一本化されたため、.draft__generate（補助操作行）
+    // を描画させるには現式が要る。
+    handle.store.setState((s) => ({
+      ...s, currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 old[tiab]\n```\n', currentFormulaVersionId: 'fv-old',
+    }));
+    const runBtn = doc.querySelector<HTMLButtonElement>('.draft__generate')!;
     runBtn.click();
     for (let i = 0; i < 30; i += 1) {
       await flush();
@@ -2486,7 +2507,12 @@ describe('startApp - wiring 層', () => {
     });
     await flush();
     seedDraftPrereqs(handle);
-    const runBtn = doc.querySelector<HTMLButtonElement>('#app-content button')!;
+    // 主操作が自動調整カードに一本化されたため、.draft__generate（補助操作行）
+    // を描画させるには現式が要る。
+    handle.store.setState((s) => ({
+      ...s, currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 old[tiab]\n```\n', currentFormulaVersionId: 'fv-old',
+    }));
+    const runBtn = doc.querySelector<HTMLButtonElement>('.draft__generate')!;
     runBtn.click();
     for (let i = 0; i < 30; i += 1) {
       await flush();
@@ -2545,7 +2571,12 @@ describe('startApp - wiring 層', () => {
     });
     await flush();
     seedDraftPrereqs(handle);
-    const runBtn = doc.querySelector<HTMLButtonElement>('#app-content button')!;
+    // 主操作が自動調整カードに一本化されたため、.draft__generate（補助操作行）
+    // を描画させるには現式が要る。
+    handle.store.setState((s) => ({
+      ...s, currentFormulaMarkdown: '## PubMed/MEDLINE\n\n```\n#1 old[tiab]\n```\n', currentFormulaVersionId: 'fv-old',
+    }));
+    const runBtn = doc.querySelector<HTMLButtonElement>('.draft__generate')!;
     runBtn.click();
     for (let i = 0; i < 30; i += 1) {
       await flush();
