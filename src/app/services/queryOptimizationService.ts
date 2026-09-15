@@ -16,6 +16,9 @@ import {
   type PreviousOptimizationRejection,
 } from '@/features/formula/skills/optimizeQuery';
 import type { ProjectStoreDeps } from '@/features/project';
+import { fetchMeshTreeNumbers } from '@/lib/ncbi/mesh';
+import { diagnoseStructure, diagnosisTargets, meshOccurrences, queryWithoutBlock, diagnoseNarrowing, MAX_DIAGNOSIS_API_CALLS, DIAGNOSIS_LIMIT_NOTE, DIAGNOSIS_CHANGED_NOTE, type BlockDiagnosis } from '@/features/validation/blockDiagnosis';
+import { diagnosedHeldBlock } from './queryOptimizationDiagnosis';
 import { extractBlockTerms } from '@/features/validation/blockTerms';
 import { analyzeFreewordDelta } from '@/features/validation/freewordDelta';
 import { expandFormula } from '@/features/validation/expandFormula';
@@ -66,6 +69,7 @@ export type QueryOptimizationStep =
   | 'review';
 
 export interface QueryOptimizationProgress {
+  blockDiagnosis?: BlockDiagnosis;
   /** 情報要求と通信リトライを含まない、修正案の評価数。 */
   evaluatedTrials?: number;
   /** 候補評価とは別に数える、情報要求の回数。 */
@@ -82,6 +86,7 @@ export interface QueryOptimizationProgress {
 }
 
 export interface QueryOptimizationDeps {
+  fetchMeshTreeNumbers?: typeof fetchMeshTreeNumbers;
   /**
    * 詳細表示用の追加計測。単独件数・累積 OR は run 共通のクエリキャッシュを使う。
    * 全概念行が OR の初回は 3F − B + M 回（F: フリーワード数、B: そのブロック数、M: MeSH 数）。
@@ -119,7 +124,7 @@ export interface VerifiedOptimizationCandidate {
 export type OptimizationStopReason =
   | 'conditions_met' | 'iteration_limit' | 'repeated_formula' | 'no_improvement'
   | 'user_stop' | 'api_error' | 'api_budget' | 'time_budget' | 'invalid_input'
-  | 'revalidation_failed';
+  | 'revalidation_failed' | 'diagnosed_block_held';
 
 /** NCBI の失敗とは区別する、反復サービスの制御用例外。 */
 export class QueryOptimizationStopError extends Error {
@@ -127,6 +132,7 @@ export class QueryOptimizationStopError extends Error {
     const messages: Record<OptimizationStopReason, string> = {
       conditions_met: '目標条件を達成したため終了しました。',
       iteration_limit: '反復回数の上限に達したため終了しました。',
+      diagnosed_block_held: '診断ブロックを狭める案が連続して保留になったため終了しました。',
       repeated_formula: '評価済みの同じ式に戻ったため終了しました。',
       no_improvement: '改善が連続して得られなかったため終了しました。',
       user_stop: 'ユーザーの停止要求により処理を停止しました。',
@@ -142,6 +148,7 @@ export class QueryOptimizationStopError extends Error {
 }
 
 export interface QueryOptimizationResult {
+  blockDiagnosis?: BlockDiagnosis;
   /** 情報要求の回数。旧形式の結果との互換性のため省略可。 */
   informationTrials?: number;
   /** 旧形式の結果との互換性のため省略可。新しい run は必ず配列を返す。 */
@@ -217,6 +224,12 @@ export async function runQueryOptimization(
   const maxElapsedMs = deps.maxElapsedMs ?? DEFAULT_MAX_ELAPSED_MS;
   const consumedBefore = fixed.resumeBudget?.consumed ?? { apiCalls: 0, elapsedMs: 0, evaluatedTrials: 0 };
   const limits = fixed.resumeBudget?.limits ?? { apiCalls: maxApiCalls, elapsedMs: maxElapsedMs, evaluatedTrials: maxIterations };
+  let blockDiagnosis: BlockDiagnosis | undefined;
+  let diagnosedHeldId: string | null = null;
+  let diagnosisApiCalls = 0;
+  const diagnosisTrees = new Map<string, string[]>();
+  const diagnosisTreeReasons = new Map<string, string>();
+  const diagnosisCounts = new Map<string, number>();
   let apiCalls = 0;
   let lastSavedApiCalls = 0;
   let termApiCalls = 0;
@@ -241,6 +254,7 @@ export async function runQueryOptimization(
     if (!deps.onProgress) return;
     try {
       deps.onProgress({ step, iterations,
+        blockDiagnosis: blockDiagnosis ? JSON.parse(JSON.stringify(blockDiagnosis)) as BlockDiagnosis : undefined,
         evaluatedTrials, informationTrials, task: task ? { ...task } : null,
         apiWaiting: apiWaiting ? { ...apiWaiting } : null,
         apiEvents: apiEvents.map((event) => ({ ...event })),
@@ -422,7 +436,7 @@ export async function runQueryOptimization(
     checkpointWritten = true;
   }
   function checkpointOptions() {
-    return { projectId: fixed.projectId, runId: fixed.runId, maxHits: fixed.maxHits, trials,
+    return { projectId: fixed.projectId, runId: fixed.runId, maxHits: fixed.maxHits, trials, blockDiagnosis,
       now: () => new Date(now()).toISOString(),
       resume: { bestFormula: best?.formula ?? (fixed.resumeBudget ? fixed.initialFormula : null),
         inputIdentity: fixed.inputIdentity ?? '', limits,
@@ -433,6 +447,90 @@ export async function runQueryOptimization(
         ...(fixed.resumeBudget ? { resumedFromRunId: fixed.resumeBudget.runId } : {}),
       },
     };
+  }
+  async function updateDiagnosis(candidate: VerifiedOptimizationCandidate): Promise<void> {
+    const changed = blockDiagnosis !== undefined;
+    const { formula, measurement } = candidate;
+    const { simple, refs, blocks } = diagnosisTargets(formula, fixed.approvedBlocks);
+    const mergeTrees = (descriptor: string, treeNumbers: readonly string[]) => {
+      const key = descriptor.toLowerCase();
+      diagnosisTrees.set(key, [...new Set([...(diagnosisTrees.get(key) ?? []), ...treeNumbers])]);
+    };
+    for (const node of meshContext ?? []) mergeTrees(node.descriptor, node.treeNumbers);
+    const budgetNote = () => diagnosisApiCalls >= MAX_DIAGNOSIS_API_CALLS ? DIAGNOSIS_LIMIT_NOTE
+      : maxApiCalls - apiCalls <= reservedApiCalls ? '未判定: 候補評価・差集合・最終再検証の通信予算を確保するため打ち切った' : '';
+    const observed: EutilsDeps = { ...eutils, maxRetries: 0, fetch: async (resource, init) => {
+      boundary();
+      const note = budgetNote();
+      if (note) throw new Error(note);
+      diagnosisApiCalls += 1;
+      return eutils.fetch(resource, init);
+    } };
+    // 更新途中で停止しても、以前の式の件数を最新として保存しない。
+    blockDiagnosis = { fingerprint: measurement.fingerprint,
+      ...diagnoseStructure(formula, fixed.approvedBlocks, diagnosisTrees, diagnosisTreeReasons),
+      narrowing: blocks.map((block) => diagnoseNarrowing(block, measurement.totalHits, null,
+        changed ? DIAGNOSIS_CHANGED_NOTE : '未判定: 未測定')) };
+    notify();
+    boundary();
+    if (!simple) return;
+    for (const [index, block] of blocks.entries()) {
+      boundary();
+      const query = queryWithoutBlock(formula, refs, block.id);
+      let hits: number | null = null;
+      let note = measurement.totalHits === null ? '未判定: 最終式の件数が不明'
+        : query === null ? '未判定: 対象ブロックを外すと参照が残らない' : '';
+      if (!note && query !== null) {
+        hits = diagnosisCounts.get(query) ?? null;
+        if (hits === null) {
+          note = budgetNote();
+          if (note && changed) note = `${DIAGNOSIS_CHANGED_NOTE}（${note}）`;
+          if (!note) {
+            try {
+              hits = (await esearch(query, observed, { retmax: 0 })).count;
+              boundary();
+              diagnosisCounts.set(query, hits);
+            } catch (err) {
+              if (err instanceof QueryOptimizationStopError) throw err;
+              boundary();
+              apiEvent('failure');
+              note = `未判定: ${err instanceof Error ? err.message : String(err)}`;
+            }
+          }
+        }
+      }
+      blockDiagnosis.narrowing[index] = diagnoseNarrowing(block, measurement.totalHits, hits, note);
+    }
+    // 初回だけ階層を取得する。採用後に登場した語は取得済みの文脈が無ければ未判定。
+    const missing = [...new Set(blocks.flatMap((block) => meshOccurrences(block.expression))
+      .filter((term) => !term.negative).map((term) => term.descriptor))]
+      .filter((descriptor) => !diagnosisTrees.has(descriptor.toLowerCase()));
+    if (!changed && missing.length) {
+      const available = Math.max(0, Math.min(MAX_DIAGNOSIS_API_CALLS - diagnosisApiCalls,
+        maxApiCalls - apiCalls - reservedApiCalls));
+      // descriptor ごとの esearch に加え、最後のまとめた esummary 1 回を残す。
+      const selected = missing.slice(0, Math.max(0, available - 1));
+      for (const descriptor of missing.slice(selected.length)) diagnosisTreeReasons.set(descriptor.toLowerCase(),
+        available === MAX_DIAGNOSIS_API_CALLS - diagnosisApiCalls ? DIAGNOSIS_LIMIT_NOTE
+          : '未判定: 候補評価・差集合・最終再検証の通信予算を確保するため打ち切った');
+      if (selected.length) {
+        apiSource = 'MeSH';
+        try {
+          const trees = await (deps.fetchMeshTreeNumbers ?? fetchMeshTreeNumbers)(selected, observed);
+          boundary();
+          for (const descriptor of selected) mergeTrees(descriptor, trees.get(descriptor) ?? []);
+        } catch (err) {
+          if (err instanceof QueryOptimizationStopError) throw err;
+          boundary();
+          apiEvent('failure');
+          for (const descriptor of selected) diagnosisTreeReasons.set(descriptor.toLowerCase(),
+            `未判定: 階層を取得できなかった: ${err instanceof Error ? err.message : String(err)}`);
+        } finally { apiSource = 'PubMed'; }
+      }
+    }
+    Object.assign(blockDiagnosis, diagnoseStructure(formula, fixed.approvedBlocks, diagnosisTrees, diagnosisTreeReasons));
+    boundary();
+    notify();
   }
   const measure = async (formula: PubmedFormula, candidateId: string) => {
     boundary();
@@ -565,6 +663,7 @@ export async function runQueryOptimization(
     });
     const unrecoverable = seedDiagnoses.filter((seed) => seed.recoverableByTerms === false);
     if (unrecoverable.length) unmetReasons.push(`語の調整では回収できないシードがあります（${unrecoverable.map((seed) => seed.pmid).join(', ')}）。検索概念・フィルタが強すぎる可能性があるため、ブロック承認（#/blocks）で見直してください`);
+    if (diagnosedHeldId) unmetReasons.push(`ブロック #${diagnosedHeldId} を狭める案が 2 回続けて保留になりました（失う集合が残る）。このブロックは上位の MeSH でしか索引されない文献を含む可能性があります。狭めると適格文献を落とすおそれがあるため、件数目標（最大件数）の見直しを検討してください。`);
     if (!best) unmetReasons.push('検証済み候補がありません');
     if (pendingInformation) unmetReasons.push(`情報要求 ${pendingInformation.candidateId} への判断が未了です（文脈へ反映 ${pendingInformation.obtained} / 要求 ${pendingInformation.requested} 件）`);
     if (termBudgetExhausted) unmetReasons.push(`語別計測は ${MAX_TERM_API_CALLS} 通信の上限に達しました。追加取得していない語別件数・固有寄与は未測定です。`);
@@ -584,7 +683,7 @@ export async function runQueryOptimization(
     const result: QueryOptimizationResult = {
       status: reason === 'conditions_met' ? 'achieved' : reason === 'user_stop' ? 'stopped'
         : reason === 'api_error' || reason === 'invalid_input' ? 'error' : 'needs_review',
-      stopReason: reason, best, trials, unmetReasons, seedDiagnoses, iterations, informationTrials, apiCalls, elapsedMs: now() - startedAt,
+      stopReason: reason, best, trials, blockDiagnosis, unmetReasons, seedDiagnoses, iterations, informationTrials, apiCalls, elapsedMs: now() - startedAt,
     };
     // 終了後に残すのは確定した終了記録だけ。停止境界を通さず、候補・測定は更新しない。
     // 試行も通信消費も記録していない run は、既存の別 run のチェックポイントに触れない。
@@ -641,6 +740,7 @@ export async function runQueryOptimization(
     seen.set(initial.evaluation.fingerprint, 'initial');
     // 停止しても実測済みの初期試行は履歴に残す。
     if (initialStop) throw initialStop;
+    if (best) await updateDiagnosis(best);
     await save();
     if (!best) return finish('api_error');
     let noImprovement = 0;
@@ -678,7 +778,7 @@ export async function runQueryOptimization(
         maxHits: fixed.maxHits, measurement: best.measurement,
         missedSeeds: missedSeeds.filter((seed) => best!.measurement.missedPmids?.includes(seed.pmid)),
         seedPapers: fixed.seedPapers ?? fixed.seedPmids.map((pmid) => ({ pmid, title: null })),
-        meshContext, meshRequestResults, trials, previousRejectedTrials: fixed.previousRejectedTrials,
+        blockDiagnosis, meshContext, meshRequestResults, trials, previousRejectedTrials: fixed.previousRejectedTrials,
       }, provider);
       boundary();
       iterations = round;
@@ -778,7 +878,10 @@ export async function runQueryOptimization(
           trials.push(makeTrial({ ...details, candidateId, formula: candidate, before, after: measured.measurement,
             accepted, ...(impact ? { held, impact } : {}), reason: impactReason ?? rejection,
             rationale: proposal.rationale }));
-          if (accepted) best = measured;
+          if (accepted) {
+            best = measured;
+            await updateDiagnosis(best);
+          }
           noImprovement = accepted ? 0 : noImprovement + 1;
           // 追加詳細の停止でも、実測済み候補と採否を履歴へ残してから終了する。
           if (detailStop) throw detailStop;
@@ -799,11 +902,13 @@ export async function runQueryOptimization(
         trials.push(makeTrial({ kind: 'final', candidateId: `final-${round}`, formula: best.formula,
           before: best.measurement, after: verified.measurement, accepted: achieved,
           reason: achieved ? '最終再検証で条件達成' : '最終再検証で条件未達', rationale: '' }));
-        if (achieved) best = verified;
+        if (achieved) { best = verified; await updateDiagnosis(best); }
         await save();
         if (verified.evaluation.status === 'failure') return finish('api_error', verified.measurement);
         return finish(achieved ? 'conditions_met' : 'revalidation_failed', verified.measurement);
       }
+      diagnosedHeldId = diagnosedHeldBlock(trials, blockDiagnosis);
+      if (diagnosedHeldId) return finish('diagnosed_block_held');
       if (noImprovement >= 2) return finish('no_improvement');
     }
     return finish(reason);

@@ -1279,7 +1279,7 @@ export async function runOptimizeQuery(
     });
     publisher.flush();
     if (!owns(store.getState())) return;
-    update({ result, trials: result.trials });
+    update({ result, trials: result.trials, blockDiagnosis: result.blockDiagnosis });
     const outsideCheck: OptimizationOutsideCheckState = {
       status: 'skipped', reason: '自動調整が停止・エラーで終了したため外側の確認は未実行です',
       originalHits: null, marginHits: null, evaluatedCount: 0, candidates: [], decisions: {},

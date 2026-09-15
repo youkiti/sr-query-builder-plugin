@@ -15,7 +15,7 @@ export function createOptimizationProgressPublisher(store: AppStore, owns: (stat
     store.setState((s) => {
       const run = s.queryOptimizationRun;
       if (!owns(s) || !run || JSON.stringify(run.progress) === JSON.stringify(progress)) return s;
-      return { ...s, queryOptimizationRun: { ...run, progress,
+      return { ...s, queryOptimizationRun: { ...run, progress, blockDiagnosis: progress.blockDiagnosis ?? run.blockDiagnosis,
         trials: progress.trial && !run.trials.some((trial) => trial.candidateId === progress.trial!.candidateId)
           ? [...run.trials, progress.trial] : run.trials,
       } };

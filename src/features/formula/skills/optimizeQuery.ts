@@ -1,3 +1,4 @@
+import { blockDiagnosisLines, type BlockDiagnosis } from '@/features/validation/blockDiagnosis';
 import type { LLMProvider } from '@/lib/llm';
 import type { PubmedFormula } from '@/lib/search-formula-md';
 import { renderPromptTemplate } from './renderPromptTemplate';
@@ -154,6 +155,7 @@ export interface PreviousOptimizationRejection {
 }
 
 export interface OptimizeQueryInput {
+  blockDiagnosis?: BlockDiagnosis;
   missedSeeds?: OptimizationMissedSeed[];
   formula: PubmedFormula;
   approvedBlocks: ApprovedOptimizationBlock[];
@@ -201,6 +203,10 @@ export const OPTIMIZE_QUERY_SYSTEM_PROMPT = `
 - 変更前に当たって変更後に当たらない文献（失う集合）が 1 件でもある変更案は自動採用されず保留になります。
   削除・置換を提案するときは、失う集合が 0 件になる冗長整理か、
   失う理由を rationale で説明できる変更に限ってください。
+- ブロック構造の診断で効いていない、または重なりありとされたブロックは、語の削除よりも
+  特異的な語との AND・下位の MeSH への置換を優先して検討してください。
+  重なりは、上位語でしか索引されない適格文献を拾うために必要な場合もあります。
+  失う集合が出る狭め方は保留になります。研究デザインフィルタは変更しません。
 - MeSH は提供された実在ノードと親子関係を根拠にし、未取得の関係を推測しません。
   NoExp・qualifier・MajorTopic の変更は別の操作として理由を示します。
 - 周辺の外を調べる必要があれば mesh_requests に descriptor / tree_number を指定します。
@@ -233,6 +239,8 @@ export const OPTIMIZE_QUERY_USER_PROMPT_TEMPLATE = `
 {{SEED_CAPTURE}}
 未捕捉シードの書誌:
 {{MISSED_SEEDS}}
+ブロック構造の診断（機械的な検出。AI の判断ではない）:
+{{BLOCK_DIAGNOSIS}}
 周辺 MeSH ツリー（親子・全 tree number・explode/NoExp）:
 {{MESH}}
 MeSH 追加取得要求の結果（未取得理由を含む）:
@@ -297,6 +305,7 @@ export async function optimizeQuery(
         : `#${row.blockId}: 捕捉 [${row.capturedPmids.join(', ')}] / 未捕捉 [${input.measurement!.seedCapture!.seedPmids.filter((pmid) => !row.capturedPmids!.includes(pmid)).join(', ')}]`
     ).join('\n') : '(未計測)',
     MISSED_SEEDS: formatContext(input.missedSeeds),
+    BLOCK_DIAGNOSIS: input.blockDiagnosis ? blockDiagnosisLines(input.blockDiagnosis).join('\n') || '検出された重なり・件数診断はありません' : '(未診断)',
     MESH: formatContext(input.meshContext),
     MESH_REQUEST_RESULTS: formatContext(input.meshRequestResults),
     PREVIOUS_REJECTIONS: formatContext(input.previousRejectedTrials ?? []),

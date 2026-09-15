@@ -1,3 +1,4 @@
+import { blockDiagnosisLines } from '@/features/validation/blockDiagnosis';
 import { serializePubmedFormulaMd } from '@/lib/search-formula-md';
 import { buildPubmedSearchUrl } from '@/lib/ncbi/pubmedUrl';
 import type { QueryOptimizationRunState } from '../store';
@@ -36,6 +37,11 @@ export function renderOptimizationReview(
     h.textContent = text;
     section.appendChild(h);
   };
+  const diagnosis = result?.blockDiagnosis ?? run.blockDiagnosis;
+  if (diagnosis) {
+    subheading('ブロック構造の診断');
+    for (const line of blockDiagnosisLines(diagnosis)) paragraph(line);
+  }
   subheading('最終式');
   if (best) {
     const formula = doc.createElement('pre');
