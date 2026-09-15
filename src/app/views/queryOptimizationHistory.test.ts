@@ -352,7 +352,7 @@ test.each(['criteria', 'blocks', 'seeds', 'maxHits', 'unapproved', 'legacy'] as 
   expect(f.container.querySelector('.optimization__restored')!.textContent).toMatch(/変わっている|確認できません|記録がありません/);
 });
 
-test('最大件数の入力中にも再開可否を更新し、フォーカスを維持する', () => {
+test('目安件数の入力中にも再開可否を更新し、フォーカスを維持する', () => {
   const f = resumable({ onOptimize: jest.fn() });
   f.render();
   const input = f.container.querySelector<HTMLInputElement>('.optimization__setup input')!;

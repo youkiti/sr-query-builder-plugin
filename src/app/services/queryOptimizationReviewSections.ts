@@ -22,7 +22,7 @@ export function buildOptimizationReviewSections(run: QueryOptimizationRunState):
   unconfirmed: string[];
 } {
   const known: OptimizationReviewSection = { key: 'known_capture', label: '既知文献の捕捉', state: 'unconfirmed', lines: [] };
-  const hits: OptimizationReviewSection = { key: 'hit_target', label: '件数目標', state: 'unconfirmed', lines: [] };
+  const hits: OptimizationReviewSection = { key: 'hit_target', label: '目安件数', state: 'unconfirmed', lines: [] };
   const outside: OptimizationReviewSection = { key: 'outside_check', label: '外側の確認', state: 'unconfirmed', lines: [] };
   const deletion: OptimizationReviewSection = { key: 'deletion_impact', label: '削除影響の確認', state: 'unconfirmed', lines: [] };
   const sections: [OptimizationReviewSection, OptimizationReviewSection, OptimizationReviewSection, OptimizationReviewSection] = [known, hits, outside, deletion];
@@ -35,7 +35,7 @@ export function buildOptimizationReviewSections(run: QueryOptimizationRunState):
   known.lines.push('既知シードの捕捉は、未知の適格研究の網羅性を保証するものではありません。');
   if (seeds === 0) known.lines.push('検証対象シードがないため、捕捉の確認はできていません。');
   const total = measured?.totalHits;
-  hits.lines.push(`最大件数 ${run.maxHits.toLocaleString()} 件に対して実測 ${total == null ? '未測定' : `${total.toLocaleString()} 件`}（${total == null ? '上限到達は未確認' : total <= run.maxHits ? '上限以下' : '上限超過'}）`);
+  hits.lines.push(`目安件数 ${run.maxHits.toLocaleString()} 件に対して実測 ${total == null ? '未測定' : `${total.toLocaleString()} 件`}（${total == null ? '未測定' : total <= run.maxHits ? '目安以下' : '目安超過'}）`);
   if (run.result) {
     if (seeds && captured) known.state = captured.length < seeds || measured?.missedPmids?.length ? 'unmet' : 'confirmed';
     if (total != null) hits.state = total <= run.maxHits ? 'confirmed' : 'unmet';

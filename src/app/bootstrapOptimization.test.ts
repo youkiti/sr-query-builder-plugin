@@ -160,7 +160,7 @@ test('UI の入力値を実行と固定表示に共用し、入力・停止・�
   document.querySelector<HTMLButtonElement>('.optimization__start')!.click();
   await flush();
   expect(fixture.run.mock.calls[0]![0].maxHits).toBe(321);
-  expect(document.querySelector('.optimization__metrics')!.textContent).toContain('最大件数: 321 件');
+  expect(document.querySelector('.optimization__metrics')!.textContent).toContain('目安件数: 321 件');
   document.querySelector<HTMLButtonElement>('.optimization__stop')!.click();
   expect(fixture.store.getState().queryOptimizationRun?.stopRequested).toBe(true);
   expect(fixture.run.mock.calls[0]![1].shouldStop!()).toBe(true);
@@ -232,7 +232,7 @@ test('プロジェクト切替後の遅延エラーも適用しない', async ()
   expect(fixture.store.getState()).toBe(before);
 });
 
-test('最大件数がシード数未満なら LLM 準備・最適化・設定保存前に止める', async () => {
+test('目安件数がシード数未満なら LLM 準備・最適化・設定保存前に止める', async () => {
   const fixture = setup();
   fixture.list.mockResolvedValue([seed('11'), seed('22')]);
   await fixture.invoke(1);
@@ -243,7 +243,7 @@ test('最大件数がシード数未満なら LLM 準備・最適化・設定保
   expect(fixture.runtime.store.write).not.toHaveBeenCalled();
 });
 
-test.each([0, 1.5, -1])('不正な最大件数 %s はシードの読み込み前に弾く', async (maxHits) => {
+test.each([0, 1.5, -1])('不正な目安件数 %s はシードの読み込み前に弾く', async (maxHits) => {
   const fixture = setup();
   await fixture.invoke(maxHits);
   expect(fixture.list).not.toHaveBeenCalled();
@@ -421,7 +421,7 @@ test('数値に変換済みの Infinity も run を作る前に拒否する', as
   expect(f.list).not.toHaveBeenCalled();
 });
 
-test('自動調整の固定最大件数が初期式の生成プロンプトに届く', async () => {
+test('自動調整の固定目安件数が初期式の生成プロンプトに届く', async () => {
   const f = setup();
   f.store.setState((s) => ({ ...s, currentFormulaMarkdown: null, currentFormulaVersionId: null }));
   const prompts: string[] = [];

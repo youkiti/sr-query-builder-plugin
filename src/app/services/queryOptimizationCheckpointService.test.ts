@@ -119,7 +119,7 @@ test('保存失敗を呼び出し側へ返す', async () => {
 test('終了状態・理由・未達理由を要約へ保存し、完了済みでも再検証を要求する', async () => {
   const { deps, options } = setup();
   const completion = { status: 'needs_review' as const, stopReason: 'revalidation_failed' as const,
-    unmetReasons: ['最大件数 100 件を超えています（実測 120 件）', '未捕捉シード: 11'] };
+    unmetReasons: ['目安件数 100 件を超えています（実測 120 件）', '未捕捉シード: 11'] };
   const saved = await saveQueryOptimizationCheckpoint({ ...options, now: () => 'finished-at', completion }, deps);
   completion.unmetReasons.push('変更後');
   expect(saved.completion!.unmetReasons).toHaveLength(2);

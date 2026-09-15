@@ -56,7 +56,11 @@ test('診断ブロックへの保留を改善なしより先に判定する', as
   const result = await runQueryOptimization(f.input, f.deps);
   expect(result).toMatchObject({ status: 'needs_review', stopReason: 'diagnosed_block_held', iterations: 2 });
   expect(result.unmetReasons.join(' ')).toContain('ブロック #1 を狭める案が 2 回続けて保留');
-  expect(result.unmetReasons.join(' ')).toContain('件数目標（最大件数）の見直し');
+  expect(result.unmetReasons.join(' ')).toContain('目安件数の見直し');
+  const index = result.unmetReasons.indexOf('目安件数 50 件を超えています（実測 200 件）');
+  expect(index).toBeGreaterThanOrEqual(0);
+  expect(result.unmetReasons[index + 1]).toContain('既に捕捉している文献を失わずに件数を減らす変更は見つかりませんでした。');
+  expect(result.unmetReasons[index + 2]).toBe('件数を減らす候補を 2 件保留しました（削除影響の確認を参照）。');
 });
 test('別ブロックの採用で改善なしがゼロに戻っても保留の連続は続く', async () => {
   const f = fixture([{ id: '1', expression: 'a[tiab] AND held1[tiab]' },

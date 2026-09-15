@@ -35,9 +35,9 @@ export function resolveTargetHits(rawMaxHits: string | null | undefined): number
 }
 
 export function validateQueryOptimizationSettings(settings: QueryOptimizationSettings, seedCount = 0): string | null {
-  if (!Number.isSafeInteger(settings.maxHits) || settings.maxHits <= 0) return '最大件数は正の整数で指定してください。';
+  if (!Number.isSafeInteger(settings.maxHits) || settings.maxHits <= 0) return '目安件数は正の整数で指定してください。';
   if (!Number.isSafeInteger(settings.maxIterations) || settings.maxIterations <= 0) return '反復上限は正の整数で指定してください。';
-  if (settings.maxHits < seedCount) return '最大件数が検証対象シード数より少なく、条件を両立できません。';
+  if (settings.maxHits < seedCount) return '目安件数が検証対象シード数より少なく、条件を両立できません。';
   return null;
 }
 

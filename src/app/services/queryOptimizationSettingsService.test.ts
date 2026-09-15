@@ -23,13 +23,13 @@ test('単一キーの設定を同じプロジェクトでだけ復元する', as
   expect(await getQueryOptimizationSettings('p', deps)).toBeNull();
 });
 
-test.each([0, -1, 1.5, NaN, Infinity])('不正な最大件数 %s を保存しない', async (maxHits) => {
+test.each([0, -1, 1.5, NaN, Infinity])('不正な目安件数 %s を保存しない', async (maxHits) => {
   const write = jest.fn();
   await expect(saveQueryOptimizationSettings('p', { maxHits, maxIterations: 5 }, { read: async () => undefined, write })).rejects.toThrow();
   expect(write).not.toHaveBeenCalled();
 });
 
-test('シード数より小さい最大件数と不正な反復上限を弾き、シードなしは許す', () => {
+test('シード数より小さい目安件数と不正な反復上限を弾き、シードなしは許す', () => {
   expect(validateQueryOptimizationSettings({ maxHits: 1, maxIterations: 5 }, 2)).toContain('シード数');
   expect(validateQueryOptimizationSettings({ maxHits: 1, maxIterations: 0 })).toContain('反復上限');
   expect(validateQueryOptimizationSettings({ maxHits: 1, maxIterations: 5 }, 0)).toBeNull();

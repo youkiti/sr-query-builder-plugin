@@ -53,7 +53,7 @@ export function getQueryOptimizationResumeAvailability(
   }
   if (!inputIdentity) return { available: false, reason: '再開に必要な入力を確認できません。開始設定を再読み込みしてください。' };
   if (data.inputIdentity !== inputIdentity) return { available: false,
-    reason: '中断後に研究基準／ブロック／シード／最大件数が変わっているため再開できません。新しく実行してください。' };
+    reason: '中断後に研究基準／ブロック／シード／目安件数が変わっているため再開できません。新しく実行してください。' };
   const keys = ['apiCalls', 'elapsedMs', 'evaluatedTrials'] as const;
   if (keys.some((key) => !Number.isSafeInteger(data.limits[key]) || data.limits[key] <= 0
     || !Number.isSafeInteger(data.consumed[key]) || data.consumed[key] < 0)) {

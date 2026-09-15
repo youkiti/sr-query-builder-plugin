@@ -656,7 +656,7 @@ test('上限だけ満たしてシードを失う候補は却下し、次の AI �
   expect(result).toMatchObject({ status: 'needs_review', stopReason: 'iteration_limit' });
   expect(result.best?.measurement.totalHits).toBe(150);
   expect(result.best?.formula.blocks[0]?.expression).toBe('c[tiab]');
-  expect(result.unmetReasons.join(' ')).toContain('最大件数 100');
+  expect(result.unmetReasons.join(' ')).toContain('目安件数 100');
   const prompt = chat.mock.calls[1]![0][1].content as string;
   for (const text of ['捕捉済みシードを失う: 22', '"accepted": false', '"totalHits": 200', '"totalHits": 50']) expect(prompt).toContain(text);
   expect(result.trials[2]?.before?.totalHits).toBe(200);
@@ -922,7 +922,7 @@ test('最終再検証で条件が崩れたら達成にしない', async () => {
   const result = await runQueryOptimization(input, deps);
   expect(result).toMatchObject({ status: 'needs_review', stopReason: 'revalidation_failed' });
   expect(result.trials[2]?.after?.totalHits).toBe(120);
-  expect(result.unmetReasons.join(' ')).toContain('最大件数 100 件を超えています（実測 120 件）');
+  expect(result.unmetReasons.join(' ')).toContain('目安件数 100 件を超えています（実測 120 件）');
   expect(result.best?.measurement.totalHits).toBe(80);
 });
 
@@ -1719,4 +1719,53 @@ test('実式差分は表記揺れを除外しブロック追加削除と結合�
     { blockId: '4', removed: ['#1 AND #2'], added: ['#1 AND #3'] },
     { blockId: '3', removed: [], added: ['"Disease"[Mesh]'] },
   ]);
+});
+
+const hitTargetGuidance = '既に捕捉している文献を失わずに件数を減らす変更は見つかりませんでした。件数を減らす候補には未確認の損失があります。これは件数を減らせないことの証明ではありません。検索戦略のレビュー（概念と検索語の対応・AND/OR の論理・フィルタの適用対象）か、目安件数の見直しを検討してください。';
+
+describe.each(['no_improvement', 'diagnosed_block_held', 'iteration_limit', 'repeated_formula', 'user_stop', 'api_budget'] as const)(
+  '終了理由 %s の件数の案内', (reason) => {
+    test.each([80, 100, 200])('最終実測 %s 件が目安を超えた対象の終了理由だけ案内する', async (hits) => {
+      const f = setup({ a: { hits, captured: ['11'] } });
+      f.chat.mockRejectedValue(new QueryOptimizationStopError(reason));
+      const result = await runQueryOptimization(f.input, f.deps);
+      expect(result.stopReason).toBe(reason);
+      const show = hits > 100 && reason !== 'user_stop' && reason !== 'api_budget';
+      expect(result.unmetReasons.includes(hitTargetGuidance)).toBe(show);
+      if (show) {
+        const index = result.unmetReasons.indexOf(`目安件数 100 件を超えています（実測 ${hits} 件）`);
+        expect(index).toBeGreaterThanOrEqual(0);
+        expect(result.unmetReasons[index + 1]).toBe(hitTargetGuidance);
+      }
+      expect(result.unmetReasons.some((line) => line.startsWith('件数を減らす候補を'))).toBe(false);
+    });
+  }
+);
+
+test('目安超過で反復上限に達したら保留した試行数を案内する', async () => {
+  const f = setup({ a: { hits: 200, captured: ['11', '22'] },
+    b: { hits: 150, captured: ['11', '22'], lost: { hits: 50 } } });
+  f.input.maxIterations = 1;
+  const result = await runQueryOptimization(f.input, f.deps);
+  expect(result.stopReason).toBe('iteration_limit');
+  expect(result.trials.filter((trial) => trial.held)).toHaveLength(1);
+  const index = result.unmetReasons.indexOf(hitTargetGuidance);
+  expect(index).toBeGreaterThanOrEqual(0);
+  expect(result.unmetReasons[index + 1]).toBe('件数を減らす候補を 1 件保留しました（削除影響の確認を参照）。');
+});
+
+test('目安件数と既知シードの捕捉を満たした終了には件数削減の案内を出さない', async () => {
+  const f = setup({ a: { hits: 80, captured: ['11', '22'] } }, ['a[tiab]']);
+  const result = await runQueryOptimization(f.input, f.deps);
+  expect(result.stopReason).toBe('conditions_met');
+  expect(result.unmetReasons).not.toContain(hitTargetGuidance);
+  expect(result.unmetReasons.some((line) => line.startsWith('件数を減らす候補を'))).toBe(false);
+});
+
+test.each([
+  ['conditions_met', '目安件数と既知シードの捕捉を満たしたため終了しました。'],
+  ['no_improvement', '件数を減らしつつ既に捕捉している文献を失わない変更が、連続して見つからなかったため終了しました。'],
+  ['diagnosed_block_held', '診断したブロックを狭める案が、既に捕捉している文献を失うため連続して保留になり、終了しました。'],
+] as const)('終了理由 %s は満たした条件や保留の理由を明示する', (reason, message) => {
+  expect(new QueryOptimizationStopError(reason).message).toBe(message);
 });

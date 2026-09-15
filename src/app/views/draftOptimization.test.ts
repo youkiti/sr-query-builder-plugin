@@ -61,9 +61,13 @@ test('入力を label で包み、詳細設定に反復上限を置き、エラ�
   const container = document.createElement('div');
   const current = state();
   current.queryOptimizationRun!.status = 'error';
-  current.queryOptimizationRun!.error = '最大件数は正の整数で指定してください。';
+  current.queryOptimizationRun!.error = '目安件数は正の整数で指定してください。';
   createDraftView()(container, { state: current, navigate: jest.fn() });
-  expect(container.querySelector('.optimization__setup label > input[type=number]')).not.toBeNull();
+  const hits = container.querySelector('.optimization__setup label > input[type=number]')!;
+  expect(hits.parentElement!.textContent).toBe('目安件数');
+  const note = container.querySelector(`#${hits.getAttribute('aria-describedby')}`)!;
+  expect(hits.parentElement!.nextElementSibling).toBe(note);
+  expect(note.textContent).toBe('スクリーニングする量の目安です。超えても検索式の誤りではなく、適格な文献を落としてまで合わせるものではありません。');
   expect(container.querySelector('.optimization__setup details label')!.textContent).toContain('反復上限');
   expect(container.querySelector('.optimization__setup [role=alert]')!.textContent).toContain('正の整数');
   expect(container.querySelector('.optimization__start')!.textContent).toBe('検索式を作成・自動調整する');
