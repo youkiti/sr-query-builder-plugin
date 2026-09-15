@@ -1,4 +1,3 @@
-import { waitWithSignal } from '@/utils/abort';
 import {
   LlmProviderError,
   type ChatMessage,
@@ -13,6 +12,7 @@ import {
  * Gemini API は過負荷時に HTTP 503 / レート制限時に 429 を返すことがあり、
  * これらは数秒待って再送すれば成功する可能性が高い。4xx の入力エラー
  * （400 / 401 / 403 など）は再試行しても無駄なので即座に投げ直す。
+ * 試行ごとの signal を下位へ渡す。期限による待機の打ち切りはプロバイダ直上の層が担う。
  */
 
 /** 再試行対象の HTTP ステータス（一時的エラーのみ） */
@@ -23,7 +23,7 @@ export type LlmRequestState = 'retry' | 'failure' | 'idle';
 export interface RetryOptions {
   /** 各送信の直前に呼ぶ。例外は再試行せず、そのまま呼び出し側へ返す。 */
   beforeAttempt?: () => void | Promise<void>;
-  /** 各試行専用の signal を、送信直前の確認後に生成する。 */
+  /** 各試行専用の signal を、送信直前の確認後に生成して下位へ渡す。 */
   createSignal?: () => AbortSignal;
   /** 任意の表示通知。未注入時の再試行回数・待機は変えない。 */
   onRequestState?: (state: LlmRequestState) => void;
@@ -65,8 +65,7 @@ export function withRetry(provider: LLMProvider, options: RetryOptions = {}): LL
         const signal = options.createSignal?.() ?? opts?.signal;
         if (signal?.aborted) throw signal.reason;
         try {
-          const work = provider.chat(messages, signal ? { ...opts, signal } : opts);
-          return await (signal ? waitWithSignal(work, signal) : work);
+          return await provider.chat(messages, signal ? { ...opts, signal } : opts);
         } catch (err) {
           if (attempt >= maxAttempts || !isRetryable(err)) {
             notify('failure');

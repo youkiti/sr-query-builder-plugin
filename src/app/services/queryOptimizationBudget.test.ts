@@ -1,4 +1,5 @@
 import { withRetry } from '@/lib/llm/retry';
+import { withSignalDeadline } from '@/lib/llm/signalDeadline';
 import { createSetSearch } from '../../../tests/fixtures/pubmedSets';
 import { runQueryOptimization, MAX_TERM_API_CALLS, type QueryOptimizationDeps, type QueryOptimizationInput } from './queryOptimizationService';
 
@@ -52,7 +53,7 @@ function fixture(words: number, mesh: number, rounds: number, mode: 'expand' | '
     tokensIn: null, tokensOut: null, raw: {} }));
   const deps: QueryOptimizationDeps = { measureTermDetails: true,
     eutils: { fetch, maxRetries: 0, rateLimiter: { acquire: async () => undefined } },
-    llmFactory: { model: 'fake', forPurpose: (_purpose, onRequestState, attempts) => withRetry({ providerId: 'gemini', model: 'fake', chat }, { ...attempts, onRequestState }) },
+    llmFactory: { model: 'fake', forPurpose: (_purpose, onRequestState, attempts) => withRetry(withSignalDeadline({ providerId: 'gemini', model: 'fake', chat }), { ...attempts, onRequestState }) },
     checkpoint: { read: async () => undefined, write: async () => undefined },
   };
   return { input, deps, queries, chat, atoms, sets };
@@ -87,9 +88,9 @@ test('不変ブロックの単独・累積・MeSH をrun内で再利用し、固
   expect(contributions).toEqual([2, 3]);
   // 別runにはキャッシュを持ち越さない。
   f.input.runId = 'another';
-  await runQueryOptimization(f.input, { ...f.deps, llmFactory: { model: 'fake', forPurpose: (_purpose, onRequestState, attempts) => withRetry({ providerId: 'gemini', model: 'fake',
+  await runQueryOptimization(f.input, { ...f.deps, llmFactory: { model: 'fake', forPurpose: (_purpose, onRequestState, attempts) => withRetry(withSignalDeadline({ providerId: 'gemini', model: 'fake',
     chat: async () => ({ text: JSON.stringify({ target_block_id: '1', proposed_expression: f.input.initialFormula.blocks[0]!.expression,
-      added_terms: [], removed_terms: [], replaced_terms: [], rationale: '', measurement_ids: [], mesh_requests: [] }), tokensIn: null, tokensOut: null, raw: {} }) }, { ...attempts, onRequestState }) } });
+      added_terms: [], removed_terms: [], replaced_terms: [], rationale: '', measurement_ids: [], mesh_requests: [] }), tokensIn: null, tokensOut: null, raw: {} }) }), { ...attempts, onRequestState }) } });
   expect(f.queries.filter((query) => query === '"Mesh2term0"[Mesh]')).toHaveLength(2);
 });
 

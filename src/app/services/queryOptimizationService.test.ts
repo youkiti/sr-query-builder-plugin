@@ -4,7 +4,7 @@ import * as google from '@/lib/google';
 import * as evaluation from './queryEvaluationService';
 import * as skill from '@/features/formula/skills/optimizeQuery';
 import * as checkpoint from './queryOptimizationCheckpointService';
-import { withRetry, LlmProviderError, type LLMProvider } from '@/lib/llm';
+import { withRetry, withSignalDeadline, LlmProviderError, type LLMProvider } from '@/lib/llm';
 import { esearch, sharedEutilsRateLimiters } from '@/lib/ncbi';
 import { validateCombinationExpression } from '@/lib/combination-expression';
 import { samplePmids, diffOptimizationFormula, runQueryOptimization, validateOptimizationCandidate, QueryOptimizationStopError, type QueryOptimizationInput, type QueryOptimizationDeps } from './queryOptimizationService';
@@ -63,7 +63,7 @@ function setup(outcomes: Record<string, Outcome> = { a: { pmids: papers(200, ['1
   }));
   const provider: LLMProvider = { providerId: 'gemini', model: 'test', chat };
   const forPurpose = jest.fn<ReturnType<LlmProviderFactory['forPurpose']>, Parameters<LlmProviderFactory['forPurpose']>>(
-    (_purpose, onRequestState, attempts) => withRetry(provider, { ...attempts, onRequestState }));
+    (_purpose, onRequestState, attempts) => withRetry(withSignalDeadline(provider), { ...attempts, onRequestState }));
   const write = jest.fn().mockResolvedValue(undefined);
   const deps: QueryOptimizationDeps = { eutils: { fetch, maxRetries: 0, rateLimiter: { acquire: async () => undefined } },
     llmFactory: { model: 'test', forPurpose }, checkpoint: { read: async () => undefined, write } };

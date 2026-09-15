@@ -1,5 +1,6 @@
 import { LlmProviderError, type ChatResponse, type LLMProvider } from './LLMProvider';
 import { withRetry, RETRYABLE_STATUSES } from './retry';
+import { withSignalDeadline } from './signalDeadline';
 
 function okResponse(text = 'ok'): ChatResponse {
   return { text, tokensIn: 1, tokensOut: 1, raw: {} };
@@ -151,7 +152,7 @@ test('各試行は hook 完了後に新しい signal を作り、完了後の ab
     return signals[createSignal.mock.calls.length - 1]!;
   });
   const chat = jest.fn().mockRejectedValueOnce(providerError(429)).mockResolvedValue(okResponse());
-  const provider = withRetry({ providerId: 'gemini', model: 'test', chat }, { beforeAttempt, createSignal, sleep: noSleep });
+  const provider = withRetry(withSignalDeadline({ providerId: 'gemini', model: 'test', chat }), { beforeAttempt, createSignal, sleep: noSleep });
   await provider.chat([], { temperature: 0.2 });
   expect(chat.mock.calls.map((call) => call[1])).toEqual(signals.map((signal) => ({ temperature: 0.2, signal })));
   for (const remove of removes) expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));

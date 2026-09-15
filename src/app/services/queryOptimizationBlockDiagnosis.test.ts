@@ -1,4 +1,5 @@
 import { withRetry } from '@/lib/llm/retry';
+import { withSignalDeadline } from '@/lib/llm/signalDeadline';
 import { runQueryOptimization, QueryOptimizationStopError, type QueryOptimizationInput, type QueryOptimizationDeps, type QueryOptimizationProgress } from './queryOptimizationService';
 
 function fixture(proposals = [{ id: '1', expression: 'a[tiab] AND narrow[tiab]' }]) {
@@ -33,7 +34,7 @@ function fixture(proposals = [{ id: '1', expression: 'a[tiab] AND narrow[tiab]' 
   });
   const write = jest.fn(async () => undefined);
   const deps: QueryOptimizationDeps = { eutils: { fetch, maxRetries: 0, rateLimiter: { acquire: async () => undefined } },
-    llmFactory: { model: 'fake', forPurpose: (_purpose, onRequestState, attempts) => withRetry({ providerId: 'gemini', model: 'fake', chat }, { ...attempts, onRequestState }) },
+    llmFactory: { model: 'fake', forPurpose: (_purpose, onRequestState, attempts) => withRetry(withSignalDeadline({ providerId: 'gemini', model: 'fake', chat }), { ...attempts, onRequestState }) },
     checkpoint: { read: async () => undefined, write }, onProgress: (p) => progress.push(p) };
   return { input, deps, fetch, chat, write, events, progress };
 }

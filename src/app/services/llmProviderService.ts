@@ -13,6 +13,7 @@ import {
   DEFAULT_MODEL,
   withLogging,
   withRetry,
+  withSignalDeadline,
   type LLMProvider,
 } from '@/lib/llm';
 
@@ -113,11 +114,12 @@ export async function buildLlmProviderFactory(deps: LlmFactoryDeps): Promise<Llm
   });
   // withLogging を内側にして「再試行 1 回ごとに LLMApiLog へ 1 行」残す
   // （503 等の失敗試行も監査ログに見える状態を保つ）。
+  // 期限の層はログより内側に置き、ログ保存の待ちを期限に含めない。
   return {
     model: selectedModel,
     forPurpose: (purpose, onRequestState, attempts) =>
       withRetry(
-        withLogging(baseProvider, purpose, {
+        withLogging(withSignalDeadline(baseProvider), purpose, {
           uploadJson: async ({ filename, content }) => {
             const file = await uploadTextFile(
               {
