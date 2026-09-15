@@ -258,7 +258,7 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
     if (blockHits.length > 0 || running) {
       container.appendChild(renderLiveBlockHits(doc, ctx.state, blockHits, running));
     }
-    if (!running && run && (run.removedMeshHeadings.length || run.replacedMeshHeadings.length)) {
+    if (!running && run && (run.removedMeshHeadings.length || run.replacedMeshHeadings.length || run.parenthesizedTerms?.length || run.filterNotice)) {
       const notice = doc.createElement('div');
       notice.className = 'draft__mesh-notice';
       notice.setAttribute('role', 'status');
@@ -267,6 +267,8 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
           items: run.replacedMeshHeadings.map((item) => `#${item.blockId} ${item.blockLabel}: ${item.from} → ${item.to.join('、')}`) },
         { message: '⚠ MeSH 辞書に無い見出しを式から外しました（AI が提案した見出しが MeSH に存在しないため）',
           items: run.removedMeshHeadings.map((item) => `#${item.blockId} ${item.blockLabel}: ${item.descriptor}`) },
+        { message: '検索語の中の AND / OR を括弧で囲みました（PubMed は括弧の無い AND / OR を左から順に評価し、意図しない絞り込みになるため）',
+          items: (run.parenthesizedTerms ?? []).map((item) => `#${item.blockId} ${item.blockLabel}: (${item.term})`) },
       ];
       for (const group of groups) {
         if (!group.items.length) continue;
@@ -280,6 +282,11 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
           list.appendChild(li);
         }
         notice.appendChild(list);
+      }
+      if (run.filterNotice) {
+        const message = doc.createElement('p');
+        message.textContent = run.filterNotice;
+        notice.appendChild(message);
       }
       container.appendChild(notice);
     }

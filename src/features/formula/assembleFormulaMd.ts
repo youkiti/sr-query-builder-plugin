@@ -118,6 +118,28 @@ export function buildMeshTag(mesh: Pick<MeshSuggestion, 'descriptor' | 'tagSynta
   return `"${descriptor}"[${tag}]`;
 }
 
+/** 引用符と括弧の外に独立した大文字の論理演算子があるかを判定する。 */
+export function needsParentheses(term: string): boolean {
+  let depth = 0;
+  let quoted = false;
+  for (let i = 0; i < term.length; i += 1) {
+    const char = term[i];
+    if (char === '"') quoted = !quoted;
+    if (quoted) continue;
+    if (char === '(') depth += 1;
+    if (char === ')') depth -= 1;
+    if (depth === 0 && (i === 0 || /\s/.test(term[i - 1] ?? ''))
+      && /^(?:AND|OR|NOT)(?=\s|$)/.test(term.slice(i))) return true;
+  }
+  return false;
+}
+
+/** OR 結合に参加する空でない語の件数。括弧補完の記録にも同じ条件を使う。 */
+export function blockTermCount(block: BlockOutputs): number {
+  return block.mesh.filter((mesh) => buildMeshTag(mesh)).length
+    + block.freewords.filter((freeword) => freeword.query.trim()).length;
+}
+
 /**
  * 1 つの概念ブロック（mesh + freeword）を `(A OR B OR ...)` 形式の式へ組み立てる。
  * assembleFormulaMd と、生成途中のブロック単体ヒット数計測（line_hits）で共有する。
@@ -125,13 +147,14 @@ export function buildMeshTag(mesh: Pick<MeshSuggestion, 'descriptor' | 'tagSynta
  */
 export function buildBlockExpression(block: BlockOutputs): string {
   const terms: string[] = [];
+  const multiple = blockTermCount(block) > 1;
   for (const mesh of block.mesh) {
     const token = buildMeshTag(mesh);
     if (token) terms.push(token);
   }
   for (const freeword of block.freewords) {
     const token = freeword.query.trim();
-    if (token) terms.push(token);
+    if (token) terms.push(multiple && needsParentheses(token) ? `(${token})` : token);
   }
   if (terms.length === 0) {
     // skill が候補を全く返さなかった場合のフォールバック。

@@ -1,6 +1,6 @@
 import type { AppStore, ProtocolDraft, BlocksDraft } from '../store';
 import type { MeshResolution } from '@/lib/ncbi/mesh';
-import { buildMeshTag, meshDescriptor } from '@/features/formula/assembleFormulaMd';
+import { blockTermCount, buildMeshTag, meshDescriptor, needsParentheses } from '@/features/formula/assembleFormulaMd';
 import {
   assembleFormulaMd,
   buildBlockExpression,
@@ -10,7 +10,9 @@ import {
 } from '@/features/formula';
 import {
   designBlock,
-  designDefaultFilters,
+  buildFiltersFromSelection,
+  getDefaultSelectedFilterIds,
+  explainDefaultFilterSelection,
   designFreewords,
   suggestMesh,
   type BlockSkeleton,
@@ -104,6 +106,8 @@ export interface DraftGeneration {
   formula: AssembledFormula['formula'];
   markdown: string;
   filter: FilterDesignerResult;
+  filterNotice: string | null;
+  parenthesizedTerms: { blockIndex: number; blockId: string; blockLabel: string; term: string }[];
   blockSkeletons: BlockSkeleton[];
   meshSuggestions: MeshSuggestion[][];
   removedMeshHeadings: { blockIndex: number; blockId: string; blockLabel: string; descriptor: string }[];
@@ -181,6 +185,9 @@ export async function generateDraft(deps: DraftServiceDeps, options: DraftGenera
           ? `MeSH 辞書に無い見出しを外しました: ${generated.removedMeshHeadings.map((item) => `#${item.blockId} ${item.descriptor}`).join('、')}` : '',
         generated.replacedMeshHeadings.length > 0
           ? `MeSH の同義語を正式な見出しに置き換えました: ${generated.replacedMeshHeadings.map((item) => `#${item.blockId} ${item.from} → ${item.to.join('、')}`).join('、')}` : '',
+        generated.filterNotice,
+        generated.parenthesizedTerms.length > 0
+          ? `検索語の中の AND / OR を括弧で囲みました: ${generated.parenthesizedTerms.map((item) => `#${item.blockId} ${item.blockLabel}: (${item.term})`).join('、')}` : '',
       ].filter(Boolean).join('／') || null,
       model,
     },
@@ -216,6 +223,7 @@ export async function generateDraftFormula(
   const blockHits: DraftBlockHit[] = [];
   const removedMeshHeadings: DraftGeneration['removedMeshHeadings'] = [];
   const replacedMeshHeadings: DraftGeneration['replacedMeshHeadings'] = [];
+  const parenthesizedTerms: DraftGeneration['parenthesizedTerms'] = [];
 
   for (let i = 0; i < blockCount; i += 1) {
     const block = blocks.blocks[i];
@@ -298,6 +306,14 @@ export async function generateDraftFormula(
       deps.llmFactory.forPurpose('expand_freeword')
     );
     freewords.push(fw);
+    if (blockTermCount({ skeleton, mesh, freewords: fw }) > 1) {
+      for (const freeword of fw) {
+        const term = freeword.query.trim();
+        if (needsParentheses(term)) {
+          parenthesizedTerms.push({ blockIndex: i, blockId: String(i + 1), blockLabel: block.blockLabel, term });
+        }
+      }
+    }
 
     // ブロックが出来上がった瞬間に単体ヒット数を計測する（line_hits の前倒し）。
     // countBlockHits が注入されていない（テスト等）場合はスキップする。
@@ -323,7 +339,11 @@ export async function generateDraftFormula(
   }
 
   notifyProgress({ step: 'filter-designer', blockCount });
-  const filter = designDefaultFilters({ studyDesign: protocol.studyDesign });
+  const filter = buildFiltersFromSelection(
+    blocks.selectedFilterIds ?? getDefaultSelectedFilterIds(protocol.studyDesign)
+  );
+  const filterNotice = blocks.selectedFilterIds === undefined
+    ? explainDefaultFilterSelection(protocol.studyDesign).rctSkippedReason : null;
 
   notifyProgress({ step: 'assemble', blockCount });
   // skeletons / meshes / freewords は同ループで同じ順序に push しているので常に同じ長さ
@@ -345,6 +365,8 @@ export async function generateDraftFormula(
     formula: assembled.formula,
     markdown: assembled.markdown,
     filter,
+    filterNotice,
+    parenthesizedTerms,
     blockSkeletons: skeletons,
     meshSuggestions: meshes,
     freewordSuggestions: freewords,

@@ -900,3 +900,21 @@ test.each(['done', 'error', 'running'] as const)('置き換えだけ・除外と
     if (withRemoved) expect(notices[0]!.textContent).toContain('#1 対象: Missing');
   }
 });
+
+test.each(['括弧', 'フィルタ', '両方', 'なし'] as const)('%s の通知を既存の通知枠に表示する', (kind) => {
+  const container = buildContainer();
+  const run: DraftRunState = { ...runningState(), status: 'done',
+    parenthesizedTerms: kind === '括弧' || kind === '両方'
+      ? [{ blockIndex: 0, blockId: '1', blockLabel: '対象', term: 'a AND b' }] : [],
+    filterNotice: kind === 'フィルタ' || kind === '両方' ? '研究デザインに RCT 以外（cohort）が含まれます。' : null,
+  };
+  createDraftView()(container, { state: stateReady({ draftRun: run }), navigate: jest.fn() });
+  const notice = container.querySelector('.draft__mesh-notice');
+  if (kind === 'なし') expect(notice).toBeNull();
+  if (run.parenthesizedTerms!.length) {
+    expect(notice?.textContent).toContain('検索語の中の AND / OR を括弧で囲みました');
+    expect(notice?.querySelector('li')?.textContent).toBe('#1 対象: (a AND b)');
+  }
+  if (run.filterNotice) expect(notice?.textContent).toContain(run.filterNotice);
+  if (kind === 'フィルタ') expect(notice?.querySelector('ul')).toBeNull();
+});

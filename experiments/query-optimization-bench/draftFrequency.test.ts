@@ -14,6 +14,7 @@ const id = 'r1-mindfulness-smoking';
 const baseArgs = ['--case', id, '--variant', 'criteria-only', '--trials', '3'];
 const draft: DraftGeneration = { formula: { blocks: [{ id: '1', expression: 'hello[tiab]', isCombination: false }], combinationExpression: '#1' },
   markdown: '生の検索式', removedMeshHeadings: [], replacedMeshHeadings: [],
+  filterNotice: null, parenthesizedTerms: [],
   filter: { filters: [], appendToCombination: '', excessFilterCandidates: [] },
   blockSkeletons: [], meshSuggestions: [], freewordSuggestions: [],
   blockHits: [{ blockIndex: 0, blockId: '1', blockLabel: '対象', expression: 'hello[tiab]', hitCount: 0, error: '生成時の構文エラー' }] };

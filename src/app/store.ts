@@ -138,6 +138,8 @@ export interface DraftRunState {
   error: string | null;
   /** 生成途中に計測したブロックごとのヒット数（ライブ表示用） */
   blockHits: DraftBlockHit[];
+  filterNotice?: string | null;
+  parenthesizedTerms?: DraftGeneration['parenthesizedTerms'];
   removedMeshHeadings: DraftGeneration['removedMeshHeadings'];
   replacedMeshHeadings: DraftGeneration['replacedMeshHeadings'];
 }

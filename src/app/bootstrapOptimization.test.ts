@@ -254,7 +254,7 @@ test('シードなし・式なしは保存なし生成を経て実行する', as
   const fixture = setup();
   fixture.list.mockResolvedValue([]);
   fixture.store.setState((s) => ({ ...s, currentFormulaMarkdown: null }));
-  const generate = jest.spyOn(draft, 'generateDraftFormula').mockResolvedValue({ formula, markdown: '',
+  const generate = jest.spyOn(draft, 'generateDraftFormula').mockResolvedValue({ formula, markdown: '', filterNotice: null, parenthesizedTerms: [],
     filter: { filters: [], appendToCombination: '', excessFilterCandidates: [] }, blockSkeletons: [], meshSuggestions: [], freewordSuggestions: [], removedMeshHeadings: [], replacedMeshHeadings: [], blockHits: [] });
   await fixture.invoke();
   expect(generate).toHaveBeenCalledTimes(1);
