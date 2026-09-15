@@ -34,6 +34,13 @@ export function buildOptimizationReviewSections(run: QueryOptimizationRunState):
     : `既知シード捕捉は未測定（対象 ${seeds ?? '不明'} 件）`);
   known.lines.push('既知シードの捕捉は、未知の適格研究の網羅性を保証するものではありません。');
   if (seeds === 0) known.lines.push('検証対象シードがないため、捕捉の確認はできていません。');
+  for (const trial of run.trials) {
+    if (trial.kind === 'proposal' && trial.accepted && trial.before?.missedPmids?.length
+      && trial.before.capturedPmids != null && trial.after?.capturedPmids != null
+      && trial.before.capturedPmids.length === trial.after.capturedPmids.length) {
+      known.lines.push(`中間手 ${trial.candidateId}: ${trial.reason}`);
+    }
+  }
   const total = measured?.totalHits;
   hits.lines.push(`目安件数 ${run.maxHits.toLocaleString()} 件に対して実測 ${total == null ? '未測定' : `${total.toLocaleString()} 件`}（${total == null ? '未測定' : total <= run.maxHits ? '目安以下' : '目安超過'}）`);
   if (run.result) {

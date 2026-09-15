@@ -127,7 +127,7 @@ export interface VerifiedOptimizationCandidate {
 export type OptimizationStopReason =
   | 'conditions_met' | 'iteration_limit' | 'repeated_formula' | 'no_improvement'
   | 'request_timeout' | 'user_stop' | 'api_error' | 'api_budget' | 'time_budget' | 'invalid_input'
-  | 'revalidation_failed' | 'diagnosed_block_held';
+  | 'revalidation_failed' | 'diagnosed_block_held' | 'seed_capture_stalled';
 
 /** NCBI の失敗とは区別する、反復サービスの制御用例外。 */
 export class QueryOptimizationStopError extends Error {
@@ -138,6 +138,7 @@ export class QueryOptimizationStopError extends Error {
       diagnosed_block_held: '診断したブロックを狭める案が、既に捕捉している文献を失うため連続して保留になり、終了しました。',
       repeated_formula: '評価済みの同じ式に戻ったため終了しました。',
       no_improvement: '件数を減らしつつ既に捕捉している文献を失わない変更が、連続して見つからなかったため終了しました。',
+      seed_capture_stalled: 'ブロックの捕捉を増やす中間手を承認済みブロック数と同じ回数続けて採用しましたが、最終式の捕捉数が増えなかったため終了しました。',
       user_stop: 'ユーザーの停止要求により処理を停止しました。',
       api_error: 'API エラーにより処理を続けられません。',
       api_budget: '通信回数の予算上限に達したため処理を停止しました。',
@@ -599,30 +600,38 @@ export async function runQueryOptimization(
     };
     return { formula, evaluation, measurement };
   };
-  async function measureSeedCapture(formula: PubmedFormula, seedPmids: string[]): Promise<OptimizationSeedCapture> {
+  async function measureBlockSeedCapture(formula: PubmedFormula, blockId: string,
+    seedPmids: string[]): Promise<OptimizationSeedCapture['rows'][number]> {
     task = null;
     step = 'measuring';
     notify();
+    try {
+      const expression = expandFormula(formula, blockId);
+      const result = await esearch(`(${expression}) AND (${seedPmids.map((pmid) => `${pmid}[uid]`).join(' OR ')})`,
+        eutils, { retmax: seedPmids.length });
+      boundary();
+      return { blockId, capturedPmids: seedPmids.filter((pmid) => result.pmids.includes(pmid)), error: null };
+    } catch (err) {
+      if (err instanceof QueryOptimizationStopError) throw err;
+      boundary();
+      apiEvent('failure');
+      return { blockId, capturedPmids: null, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+  async function measureSeedCapture(formula: PubmedFormula, seedPmids: string[],
+    measuredRows: OptimizationSeedCapture['rows'] = []): Promise<OptimizationSeedCapture> {
     const rows: OptimizationSeedCapture['rows'] = [];
     for (const block of formula.blocks) {
-      try {
-        const expression = expandFormula(formula, block.id);
-        const result = await esearch(`(${expression}) AND (${seedPmids.map((pmid) => `${pmid}[uid]`).join(' OR ')})`,
-          eutils, { retmax: seedPmids.length });
-        boundary();
-        rows.push({ blockId: block.id, capturedPmids: seedPmids.filter((pmid) => result.pmids.includes(pmid)), error: null });
-      } catch (err) {
-        if (err instanceof QueryOptimizationStopError) throw err;
-        boundary();
-        apiEvent('failure');
-        rows.push({ blockId: block.id, capturedPmids: null, error: err instanceof Error ? err.message : String(err) });
-      }
+      // 候補評価で測った対象行は再利用し、採用後だけ残りの行を補う。
+      rows.push(measuredRows.find((row) => row.blockId === block.id)
+        ?? await measureBlockSeedCapture(formula, block.id, seedPmids));
     }
     return { seedPmids: [...seedPmids], rows };
   }
-  async function addSeedCapture(candidate: VerifiedOptimizationCandidate): Promise<VerifiedOptimizationCandidate> {
-    if (!candidate.measurement.missedPmids?.length || candidate.measurement.seedCapture) return candidate;
-    const seedCapture = await measureSeedCapture(candidate.formula, fixed.seedPmids);
+  async function addSeedCapture(candidate: VerifiedOptimizationCandidate,
+    measuredRows: OptimizationSeedCapture['rows'] = []): Promise<VerifiedOptimizationCandidate> {
+    if (!candidate.measurement.missedPmids?.length) return candidate;
+    const seedCapture = await measureSeedCapture(candidate.formula, fixed.seedPmids, measuredRows);
     return { ...candidate, measurement: { ...candidate.measurement, seedCapture } };
   }
   async function fetchMissedSeeds(pmids: string[]): Promise<OptimizationMissedSeed[]> {
@@ -688,6 +697,7 @@ export async function runQueryOptimization(
     terminal = reason;
     runController.abort(new QueryOptimizationStopError(reason));
     const unmetReasons: string[] = [];
+    if (reason === 'seed_capture_stalled') unmetReasons.push(new QueryOptimizationStopError(reason).message);
     const seedDiagnoses: OptimizationSeedDiagnosis[] = (latestMeasurement?.missedPmids ?? []).map((pmid) => {
       const article = missedSeeds.find((item) => item.pmid === pmid);
       const capture = best?.measurement.seedCapture;
@@ -810,6 +820,9 @@ export async function runQueryOptimization(
     await save();
     if (!best) return finish('api_error');
     let noImprovement = 0;
+    let intermediateAcceptances = 0;
+    // 各承認ブロックを一度ずつ直す機会を残す。入力検証済みなので上限は最低 1 回。
+    const maxIntermediateAcceptances = fixed.approvedBlocks.length;
     let measurementFailures = 0;
     const reason: OptimizationStopReason = 'iteration_limit';
     for (let round = 1; round <= maxIterations; round += 1) {
@@ -914,8 +927,15 @@ export async function runQueryOptimization(
           measurementFailures = failed ? measurementFailures + 1 : 0;
           const before = best.measurement;
           const lostSeeds = before.capturedPmids!.filter((pmid) => !measured.measurement.capturedPmids?.includes(pmid));
+          // 対象行は判定と採用後の再利用に使い、完全な表が揃うまで measurement に保存しない。
+          let targetRow: OptimizationSeedCapture['rows'][number] | undefined;
+          if (!failed && lostSeeds.length === 0 && before.missedPmids!.length > 0) {
+            targetRow = await measureBlockSeedCapture(candidate, proposal.targetBlockId, fixed.seedPmids);
+          }
+          const beforeBlock = before.seedCapture?.rows.find((row) => row.blockId === proposal.targetBlockId)?.capturedPmids;
+          const afterBlock = targetRow?.capturedPmids;
           const improved = measured.evaluation.status === 'success' && lostSeeds.length === 0
-            && isImprovement(before, measured.measurement, fixed.maxHits);
+            && isImprovement(before, measured.measurement, fixed.maxHits, beforeBlock?.length, afterBlock?.length);
           const rejection = failed ? describeMeasurementFailure(measured.evaluation)
             : lostSeeds.length > 0 ? `捕捉済みシードを失う: ${lostSeeds.join(', ')}`
               : '局面の指標に改善がありません';
@@ -925,12 +945,17 @@ export async function runQueryOptimization(
             : undefined;
           const accepted = impact?.lostHits === 0 && impact.gainedHits !== null;
           const held = impact !== undefined && !accepted;
+          const intermediate = accepted && before.missedPmids!.length > 0
+            && measured.measurement.capturedPmids!.length === before.capturedPmids!.length;
+          const improvementReason = before.missedPmids!.length && beforeBlock && afterBlock
+            ? `ブロック #${proposal.targetBlockId} のシード捕捉が ${beforeBlock.length} 件から ${afterBlock.length} 件に増えました${intermediate ? '（最終式の捕捉数は変わらない中間手を採用）' : ''}`
+            : '局面の指標が改善しました';
           // 候補または差集合の測定失敗は照合対象にせず、再測定の機会を残す。
           if (!failed && !(held && (impact.lostHits === null || impact.gainedHits === null))) {
             seen.set(measured.evaluation.fingerprint, candidateId);
           }
           const impactReason = impact && (accepted
-            ? `局面の指標が改善しました（失う集合 0 件、増える集合 ${impact.gainedHits} 件）`
+            ? `${improvementReason}（失う集合 0 件、増える集合 ${impact.gainedHits} 件）`
             : impact.lostHits !== null && impact.lostHits > 0
               ? `失う集合 ${impact.lostHits} 件のためレビュー候補に留めました（${impact.sample?.method === 'retrieved_subset' ? `取得できた ${impact.sample.retrievedCount} 件から無作為抽出した書誌` : '無作為抽出した書誌'} ${impact.inspected.length} 件 / 全体 ${impact.lostHits}、増える集合 ${impact.gainedHits ?? '未測定'} 件）`
               : `${impact.lostHits === null ? '失う集合' : '増える集合'}を実測できなかったためレビュー候補に留めました: ${impact.error}`);
@@ -948,7 +973,7 @@ export async function runQueryOptimization(
           if (accepted) {
             best = measured;
             if (!detailStop) {
-              try { best = await addSeedCapture(best); measured.measurement = best.measurement; }
+              try { best = await addSeedCapture(best, targetRow ? [targetRow] : []); measured.measurement = best.measurement; }
               catch (err) { if (err instanceof QueryOptimizationStopError) detailStop = err; else throw err; }
             }
           }
@@ -956,6 +981,7 @@ export async function runQueryOptimization(
             accepted, ...(impact ? { held, impact } : {}), reason: impactReason ?? rejection,
             rationale: proposal.rationale }));
           if (accepted) {
+            intermediateAcceptances = intermediate ? intermediateAcceptances + 1 : 0;
             best = measured;
             await updateDiagnosis(best);
           }
@@ -986,6 +1012,7 @@ export async function runQueryOptimization(
       }
       diagnosedHeldId = diagnosedHeldBlock(trials, blockDiagnosis);
       if (diagnosedHeldId) return finish('diagnosed_block_held');
+      if (intermediateAcceptances >= maxIntermediateAcceptances) return finish('seed_capture_stalled');
       if (noImprovement >= 2) return finish('no_improvement');
     }
     return finish(reason);
@@ -1027,9 +1054,13 @@ function copyMeshNode(node: OptimizationMeshNode): OptimizationMeshNode {
   };
 }
 
-/** 未捕捉時は捕捉数増加だけ、全件捕捉後は上限超過分の減少だけを改善とする。 */
-function isImprovement(before: OptimizationMeasurement, after: OptimizationMeasurement, maxHits: number): boolean {
-  if (before.missedPmids!.length > 0) return after.capturedPmids!.length > before.capturedPmids!.length;
+/** 未捕捉時は対象ブロックの捕捉増加、全件捕捉後は上限超過分の減少だけを改善とする。 */
+export function isImprovement(before: OptimizationMeasurement, after: OptimizationMeasurement, maxHits: number,
+  beforeBlockCaptured: number | undefined, afterBlockCaptured: number | undefined): boolean {
+  if (before.missedPmids!.length > 0) {
+    if (beforeBlockCaptured === undefined || afterBlockCaptured === undefined) return after.capturedPmids!.length > before.capturedPmids!.length;
+    return afterBlockCaptured > beforeBlockCaptured && after.capturedPmids!.length >= before.capturedPmids!.length;
+  }
   return Math.max(0, after.totalHits! - maxHits) < Math.max(0, before.totalHits! - maxHits);
 }
 

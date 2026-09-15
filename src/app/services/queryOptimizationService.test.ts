@@ -33,6 +33,8 @@ function setup(outcomes: Record<string, Outcome> = { a: { pmids: papers(200, ['1
   const sets = createSetSearch((query) => {
     if (query.includes('[uid]')) return undefined;
     if (/^(pediatric|child)\[tiab\]$/.test(query)) return [];
+    // 除外語の OR は個別集合から評価し、初期概念の集合で上書きしない。
+    if (query === 'pediatric[tiab] OR child[tiab]') return undefined;
     const tagged: readonly string[] = query.match(/[A-Za-z0-9]+\[tiab\]/g) ?? [];
     const key = Object.keys(outcomes).find((term) => tagged.includes(`${term}[tiab]`));
     const outcome = outcomes[key ?? 'a']!;
