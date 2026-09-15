@@ -442,6 +442,9 @@ B1 は任意の `fixtures/<id>/b1.json` に `{ "query": "展開済みの PubMed 
 
 ### 有害採用・確認負荷・LLM コストの計測
 
+- **報告単位**: `Metrics.capturedReports` に捕捉した gold PMID を重複なし・数値昇順で保存します。比較の `lostReports` / `gainedReports` も数値昇順です。どちらかの metrics に記録がなければ両方とも `null`（欠測）で、0 件とは区別します。既存 run には記録がないため報告単位は欠測です。`improved` / `outcome` と有害採用の判定は研究単位のままです。
+- **却下・保留候補の直前比**: `rejectedCandidates` は C0 比に加え、`priorId`（その提案より前で最後に採用された提案の候補 ID、無ければ `C0`）と `comparedToPrior` を保存します。採否監査と同じ比較元を使い、既存の候補計測・再利用 metrics から比較するので追加通信はありません。比較元または候補の metrics が無ければ `null` です。模擬レビュアーの各ラウンドにも同じ項目を記録します。
+
 - **有害採用（`adoptionAudit`）**: C0→C1 の間に採用されたすべての候補（`optimization.trials` の `kind: 'proposal'` かつ `accepted: true`）について、**採用直前の基準式**（その候補より前で最後に採用された候補、無ければ C0）と比べて held-out 捕捉を失っていないかを監査する。1 件でも held-out を失った採用を「有害な採用」（`harmfulAdopted`）と数える。C0 の測定・却下候補の既存計測（`rejectedCandidates`）・C1 の測定は再利用し、同じ gold クエリを重複して投げない。`manualReviewPending` のときは採点そのものを保留する（`harmfulAdopted: null`）。比較元または候補自身の metrics が無く比較できなかった採用件数を `unscoredAdopted` に記録し、1 件以上あれば `harmfulAdopted: null`（未採点）とする。候補自身の測定失敗や比較元の欠測は原因を `error` に記録し（手動監査待ちだけの場合を除く）、`lostHeldOut: []` を「0 件確定」とは読まない
 - **確認負荷（`confirmation`）**: 最良式（`best`）があり、自動調整の `status !== 'error'` のとき（`stopped` も含む）、`searchOutsideCandidates`（`#/expand` の margin 探索と同じ処理）で「人が確認すべき候補」の件数だけを数える。`confirmationAudit.ts` は `retrieval` を渡さず製品の既定で測定するため、**issue #154 で既定が per-term（拡張語ごとの margin を件数昇順で均等配分して取得。書誌 200 件）に変わって以降の run は per-term で測定している**（#154 より前の run は関連度順・一括取得 200 件）。頑健性集計や過去 run との比較で `confirmationTotal` を読むときはこの既定変更を考慮すること。**既定（`--oracle-rounds 0`）では候補を自動調整へフィードバックしない**。模擬レビュアーを有効にした場合は、下記の規則で include をシードに加えて再調整する。`existingPmids` には常にシード PMID だけを渡し、gold（held-out を含む）は渡さない。gold への対応付け（`heldOutStudiesAmongCandidates` / `nonGoldCandidates`）は、検索・LLM 呼び出しがすべて終わったあと、この集計のためだけに事後に行う。`total` は outside 候補と、held（レビュー保留）だった候補の `impact.inspected`（シード PMID を除く）を合わせて重複除去した件数。outside check 自体の失敗は `status: 'error'` を記録するだけで run を failed にはしない
 - **LLM 使用量とコスト（`llmUsage`）**: `loggedFactory` の呼び出し 1 回（リトライの各試行を含む）ごとに tokensIn/tokensOut を積算し、`src/lib/llm/pricing.ts` の単価表でコストを概算する。失敗した呼び出しも `calls` に数える（トークンは加算しない）。価格表に無いモデルの呼び出しが 1 回でもあれば `costUsd` は恒久的に `null`（`unpricedCalls` で件数を確認できる）。失敗呼び出し（トークン無し）は 0 円加算として扱い、それだけでは `costUsd` を null にしない。成功しても tokensIn/tokensOut が両方 null なら `untrackedCalls` を増やし、`costUsd` は恒久的に null とする。cost 列は「欠測（価格表外 N 件）」「欠測（トークン不明 N 件）」で原因を区別し、両方あれば併記する。llmUsage の無い古い記録は従来どおり「欠測」
@@ -544,6 +547,16 @@ LCG / Fisher–Yates（`seededShuffle`）で選びます。3 件未満なら基�
 gold の監査とシード凍結を済ませます。検索日は従来どおり `CASES.searchDate` に手で記入します。
 
 ## 再評価の行列実行（`eval:rerun` / `eval:rerun-report`）
+
+`candidateLosses` 表は完了した current run の却下・保留提案を 1 候補 1 行で出します（採用提案と legacy / legacyLive は対象外）。
+`priorId` / `comparedToPrior` による直前の採用済み式との比較を主とし、C0 比も併記します。
+比較元が全提案のうち最後の採用候補なら、採否監査と同じく C1 の測定を優先し、C1 が無い場合は候補の計測・再利用 metrics を使います。
+直前と候補の件数、失った held-out 研究名、gold 報告数（`lostReportsPrior`）、削除影響の件数・標本抽出法を記録します。
+`priorSource` は新しい run では `rejectedCandidates`、`comparedToPrior` がない既存 run では `adoptionAudit` です。
+既存 run は監査の試行列から直前の採用候補をたどり、研究単位の直前比だけを補います。監査行に `error` があれば比較不能です。
+手動監査待ちの run は直前比を欠測とし、既存 run の監査行が `error` なし・`lostHeldOut: []` でも損失ゼロとは扱いません。
+報告単位は今後の run から記録し、既存 run の `lostReportsPrior` は欠測です。損失 0 件の研究名は空文字、比較不能は欠測と表示します。
+保存済み run の書き換えや報告単位の再計測は行いません。
 
 設定は `rerun/config.json`。雛形は開発用 3 件、2 分割、条件ごと 3 枠、draft11 開始です。
 確認用ケースを登録した後、この設定の `cases` にも ID を追加します。

@@ -65,11 +65,14 @@ export interface Metrics {
   hits: number;
   capturedStudies: string[];
   capturedHeldOut: string[];
+  capturedReports?: string[];
   knownIncludedReportShare: number | null;
   recordsPerKnownIncludedStudy: number | null;
 }
 
 export interface Comparison {
+  lostReports: string[] | null;
+  gainedReports: string[] | null;
   lostStudies: string[];
   gainedStudies: string[];
   lostHeldOut: string[];
@@ -212,6 +215,8 @@ export interface RunResult {
     hits: number | null;
     metrics: Metrics | null;
     comparedToC0: Comparison | null;
+    priorId: string;
+    comparedToPrior: Comparison | null;
     error?: string;
   }[];
   comparison?: Comparison | null;

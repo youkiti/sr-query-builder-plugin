@@ -24,6 +24,17 @@ test('C0 が live または sha256 不一致なら比較を拒否する', () => 
   expect(() => renderComparison(a, mismatched)).toThrow('sha256 が一致しません');
 });
 
+test('比較に報告の損失・獲得を表示し、古い指標では欠測とする', () => {
+  const a = withC1(base, ['x'], 100); const b = withC1(base, ['x'], 90);
+  expect(renderComparison(a, b)).toContain('- lostReports: 欠測');
+  expect(renderComparison(a, b)).toContain('- gainedReports: 欠測');
+  a.conditions.C1!.metrics!.capturedReports = ['2', '10'];
+  b.conditions.C1!.metrics!.capturedReports = ['3', '10'];
+  expect(renderComparison(a, b)).toContain('- lostReports: 2');
+  expect(renderComparison(a, b)).toContain('- gainedReports: 3');
+  expect(renderComparison(a, a)).toContain('- lostReports: なし');
+});
+
 test('片方だけ replay、または replay の sha256 が異なる 2 run の比較は拒否する', () => {
   const a = withC1({ ...base, replay: { name: 'pr104-r2', sha256: 'replay-x', responseCount: 3, usedCount: 3, exhausted: true } }, ['x'], 100);
   const freeGeneration = withC1(base, ['x'], 100);

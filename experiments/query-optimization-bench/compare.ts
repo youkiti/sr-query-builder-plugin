@@ -54,6 +54,8 @@ export function renderComparison(a: RunResult, b: RunResult): string {
       `- 得た研究: ${comparison.gainedStudies.join('; ') || 'なし'}`,
       `- 失った held-out 研究: ${comparison.lostHeldOut.join('; ') || 'なし'}`,
       `- 得た held-out 研究: ${comparison.gainedHeldOut.join('; ') || 'なし'}`,
+      `- lostReports: ${comparison.lostReports === null ? '欠測' : comparison.lostReports.join('; ') || 'なし'}`,
+      `- gainedReports: ${comparison.gainedReports === null ? '欠測' : comparison.gainedReports.join('; ') || 'なし'}`,
       `- outcome: ${comparison.outcome}`);
   } else {
     lines.push('指標が欠けているため比較できません（要手動監査または失敗のいずれか）。');
