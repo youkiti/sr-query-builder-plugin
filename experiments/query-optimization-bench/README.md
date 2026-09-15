@@ -242,6 +242,36 @@ npm run eval:optimize -- --case r2-pdr-prognostic --c0 criteria-only-draft2 --se
 - `npm run eval:report` の `summary.csv` は行ごとに `replay` 列（fixture 名。自由生成は `-`）を出す。`summary-aggregate.csv`（頑健性の集計）からは replay run を常に除外し、除外件数を `summary.md` に注記する（固定提案は自由生成のばらつきの一部ではないため）。
 - `npm run eval:compare` は、比較する 2 run の片方だけが replay、または両方 replay でも fixture の内容（sha256）が異なる場合は比較を拒否する（差が自動調整の効果か固定提案の有無・内容の違いかを区別できないため）。
 
+## ブロック診断だけの評価（issue #164）
+
+`src/features/validation/blockDiagnosis.ts` の構造診断（`diagnoseStructure`。AND で結ぶブロック間の MeSH 共有・上位語内包）と件数診断（`diagnoseNarrowing`。ブロックを外した式との削減率が `BLOCK_NARROWING_MIN_REDUCTION`〈既定 0.2〉未満なら「絞り込みに効いていない」）を、LLM を使わず凍結 C0 に対して直接かける評価コマンドです。しきい値 0.2 は「凍結 C0 の分布を見て調整する前提の初期値」（`blockDiagnosis.ts` のコメント）なので、このコマンドの主目的は削減率の分布を取ることそのものです。`eval:optimize`（自動調整の full run）を経由しないため、Gemini API キーは不要で NCBI とだけ通信します。
+
+```powershell
+npm run eval:diagnose -- --dry-run
+npm run eval:diagnose -- --case r1-mindfulness-smoking
+npm run eval:diagnose -- --case r1-mindfulness-smoking --c0 criteria-only-draft11
+npm run eval:diagnose -- --report
+```
+
+`--case` を省略すると全ケース、`--c0`（拡張子抜きの凍結 C0 ファイル名）を省略するとそのケースの `fixtures/<case>/c0/` 配下すべてが対象です。`--c0` は `--case` と併用必須です。`--label` は既存コマンドと同じ英数字・`.`・`_`・`-` の 1〜40 文字（`replay-` 接頭辞・`.`・`..` は不可）で、保存先は `results/block-diagnosis/<label>/<caseId>/<c0名>.json`（1 C0 = 1 ファイル）です。出力ファイルが既に `complete: true` なら通信せずスキップします（再開可能）。
+
+1 C0 につき、結合式まで展開した最終式を ESearch（`retmax: 0`、日付制限つき）で 1 回測り（`finalHits`）、結合式が単純な AND（`diagnosisTargets` が `simple: true` を返す形）なら承認ブロックごとに「そのブロックの参照だけを外した式」を 1 回ずつ測って `diagnoseNarrowing` にかけます。あわせて対象ブロックの非否定 MeSH descriptor を `fetchMeshTreeNumbers` で階層取得し、`diagnoseStructure` にかけます。個々のブロック測定・MeSH 階層取得の失敗はその項目だけ `未判定` にして続行し、C0 全体は捨てません（最終式の測定自体が失敗したときだけ `complete: false` にして再試行対象にします）。**製品側の通信上限 `MAX_DIAGNOSIS_API_CALLS`（30 回）はこのコマンドでは適用しません**（分布を打ち切らずに完全に取るため）。C0 ごとの NCBI 呼び出し回数は `apiCalls`（最終式の実測を含む総数）に記録します。`exceedsProductBudget` は `apiCalls` ではなく `diagnosisApiCalls`（最終式の実測を除いた、ブロックを外した式の esearch と MeSH 階層取得だけの通信数）で判定します。これは `queryOptimizationService.ts` の `updateDiagnosis` が `MAX_DIAGNOSIS_API_CALLS` と比べる範囲と同じ区切りで、最終式の実測は製品側でも `measure()` 側の別カウンタであり診断予算に含まれないためです。保存レコードの `diagnosis.fingerprint` は常に空文字です（`fingerprint` は `queryEvaluationService.formulaFingerprint` というブラウザの `crypto.subtle` に依存する非同期ハッシュで、診断専用コマンドは再現しません。測った式は `finalQuery` に残ります）。
+
+### 既存 full run からの収集（`--harvest`）
+
+R2（`r2-pdr-prognostic`）・c1（`c1-replacing-salt-with`）は `eval:optimize` の full run（ラベル `issue164-current`）が既にあり、その `run.json` の `optimization.blockDiagnosis` に診断結果が入っています。これを**再実行せず**収集するのが `--harvest` です。
+
+```powershell
+npm run eval:diagnose -- --harvest --case r2-pdr-prognostic --results C:\Users\youki\codes\sr-query-builder-plugin\experiments\query-optimization-bench\results
+npm run eval:diagnose -- --harvest --case c1-replacing-salt-with --results C:\Users\youki\codes\sr-query-builder-plugin\experiments\query-optimization-bench\results
+```
+
+`--results <dir>` は full run の結果ルート（既定は自分の `results/`）。worktree で作業していて `results/` が無いときは、本体チェックアウトのパスを渡します。`--run-label <label>`（既定 `issue164-current`）は収集対象の run ラベルです。`<results>/default/<caseId>/<c0名>/<split>+<runLabel>/run.json` を走査し、`optimization.blockDiagnosis` の無い run はその旨を 1 行表示してスキップします（読み取りだけで `<results>` 配下には何も書きません）。同じ C0 が複数 split に現れることがあり（診断は式にしか依存しないため本来は split で変わらないはずですが、実際には最適化ループの途中で測定された候補の診断が split ごとに残るため一致しないことがあります）、**split 名の昇順で先頭を代表**にします（`readdirSync` の列挙順はファイルシステム依存で、順不同のまま採用すると `--report` の集計値が実行環境の順序に依存してしまうため）。代表 split は `representativeSplit` に残し、`runIds` には全 split の runId を split 名の昇順で残します。一致すれば代表の `diagnosis` を 1 本にまとめ、**一致しなければ黙って片方を捨てず** `splitMismatch`（各 split の split 名・runId・finalHits・finalQuery・diagnosis を split 名の昇順で）を全 split ぶん保存します。収集レコードは `source: 'full-run'`、`apiCalls`/`diagnosisApiCalls`/`exceedsProductBudget` はいずれも `null`（full run 本体の通信と混ざるため計上しない）です。
+
+### 集計（`--report`）
+
+`results/block-diagnosis/<label>/` 配下の全レコードを読み、ケース別・全体の集計行と C0 ごとの明細を `summary.md`・`summary.csv`・標準出力に出します。列は C0 数・診断できた数・失敗数、`same`/`ancestor`/`unknown` の重なりを持つ C0 数・重なりなし C0 数、「絞り込みに効いていない」ブロックを含む C0 数と `ineffective` ブロック数/判定済みブロック総数、未判定ブロック数と `note` 別内訳、**削減率の分位点**（判定できた全ブロックの `reduction` の min/p25/中央値/p75/max。線形補間、R の `type=7` / numpy 既定と同じ）、`diagnosis-only`/`full-run` の内訳、split 不一致件数です。閾値 0.2 の校正はこの分位点を見て判断します。
+
 ## 外側の候補の段階別ログ（issue #126）
 
 `eval:freeze-margin` は凍結 C0 から拡張語を一度生成し、拡張式と margin（拡張式 NOT 現式）を固定します。`eval:outside-stages` はその固定拡張語で製品の `searchOutsideCandidates` を実行し、held-out 研究が現式で捕捉済みか、取りこぼしならどの段階まで到達したかを記録します。取得戦略の既定は先頭からの取得のままです。ハーネスの既定は比較のため旧既定（NCBI 既定の並び・取得 50 件／書誌 20 件）のまま、製品の既定は書誌 200 件・取得は per-term（issue #154。拡張語ごとの margin を件数昇順で均等配分して取得。計 200 件）です（#154 より前は関連度順・一括取得 200 件でした）。
