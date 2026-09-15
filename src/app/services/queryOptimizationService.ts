@@ -284,6 +284,7 @@ export async function runQueryOptimization(
   let terminal: OptimizationStopReason | null = null;
   const runController = new AbortController();
   let llmSignal: AbortSignal | undefined;
+  const ncbiRequestTimeoutMs = deps.ncbiRequestTimeoutMs ?? DEFAULT_NCBI_REQUEST_TIMEOUT_MS;
 
   // 一度停止したら callback が false に戻っても再開しない。応答の前後で同じ境界を使う。
   // 通信予算を使い切る最後の応答も破棄する。上限到達後の結果更新を許さないため。
@@ -297,14 +298,15 @@ export async function runQueryOptimization(
       throw error;
     }
   }
-  // 注入した待機や遅い応答にも停止を伝え、完了時には listener を外す。
+  // 注入した待機や遅い応答にも停止を伝える。通信固有の期限切れは呼び出し元で扱う。
   async function abortable<T>(work: Promise<T>, signal = runController.signal): Promise<T> {
     try { return await waitWithSignal(work, signal); }
     catch (err) {
       if (signal.aborted) {
         boundary(false);
-        terminal = 'request_timeout';
-        boundary(false);
+        if (signal.reason instanceof DOMException && signal.reason.name === 'TimeoutError') {
+          throw new DOMException(`NCBI の応答が ${ncbiRequestTimeoutMs / 1000} 秒以内に返りませんでした`, 'TimeoutError');
+        }
       }
       throw err;
     }
@@ -321,6 +323,20 @@ export async function runQueryOptimization(
       boundary(false);
     } finally { if (timer !== undefined) clearTimeout(timer); }
   }
+  const fetchWithDeadline: EutilsDeps['fetch'] = async (resource, init) => {
+    boundary(false);
+    const signal = requestSignal(ncbiRequestTimeoutMs);
+    const response = await abortable(deps.eutils.fetch(resource, { ...init, cache: 'no-store', signal }), signal);
+    boundary();
+    // fetch 完了後も同じ期限を本文の読み取りまで使う。
+    return new Proxy(response, {
+      get(target, key) {
+        if (key === 'json' || key === 'text') return () => abortable(target[key](), signal);
+        const value: unknown = Reflect.get(target, key, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+  };
   const rateLimiter = resolveRateLimiter(deps.eutils);
   const eutils: EutilsDeps = {
     ...deps.eutils,
@@ -349,17 +365,7 @@ export async function runQueryOptimization(
       await persistProgress();
       // この通信の予算は加算前に確認済み。保存待ち中の停止・時間切れは引き続き確認する。
       boundary(false);
-      const signal = requestSignal(deps.ncbiRequestTimeoutMs ?? DEFAULT_NCBI_REQUEST_TIMEOUT_MS);
-      const response = await abortable(deps.eutils.fetch(resource, { ...init, cache: 'no-store', signal }), signal);
-      boundary();
-      // fetch 完了後も同じ期限を本文の読み取りまで使う。
-      return new Proxy(response, {
-        get(target, key) {
-          if (key === 'json' || key === 'text') return () => abortable(target[key](), signal);
-          const value: unknown = Reflect.get(target, key, target);
-          return typeof value === 'function' ? value.bind(target) : value;
-        },
-      });
+      return fetchWithDeadline(resource, init);
     },
   };
   const canMeasureTerm = (): boolean => {
@@ -384,9 +390,10 @@ export async function runQueryOptimization(
     onProgress: (completed: number, total: number) => { task = { kind: 'terms', completed, total }; notify(); },
     onFailure: () => apiEvent('failure'),
   };
-  // MeSH 取得は従来どおり外側で一単位に数える。内部通信は表示だけを観測する。
+  // MeSH 取得は外側で一単位に数える。内部通信にも同じ期限を適用する。
   const meshEutils: EutilsDeps = {
     ...deps.eutils,
+    fetch: fetchWithDeadline,
     rateLimiter: { acquire: async () => {
       await (deps.onProgress ? rateLimiter.acquire(() => apiEvent('rate_limit')) : rateLimiter.acquire());
       apiWaiting = null;
@@ -420,9 +427,7 @@ export async function runQueryOptimization(
         boundary(false);
         try {
           apiSource = 'MeSH';
-          const nodes = await abortable(deps.onProgress
-            ? deps.fetchMeshContext({ ...request }, meshEutils)
-            : deps.fetchMeshContext({ ...request }));
+          const nodes = await abortable(deps.fetchMeshContext({ ...request }, meshEutils));
           boundary();
           // 取得した関係だけを統合する。未取得理由を実在ノードとして捏造しない。
           const merged = new Map((meshContext ?? []).map((node) => [node.id, node]));
@@ -1196,7 +1201,8 @@ async function measureTerms(formula: PubmedFormula, approvedBlocks: readonly App
       try { hits = await count(segment.text); }
       catch (err) {
         check();
-        if (!(err instanceof TermAnalysisBudgetError) && canMeasure()) throw err;
+        if (!(err instanceof TermAnalysisBudgetError)
+          && !(err instanceof DOMException && err.name === 'TimeoutError') && canMeasure()) throw err;
       }
       terms.push({ blockId: block.id, query: segment.text, hits, delta: null,
         ...(finalHits !== undefined ? { finalContribution: contributions.get(block.id)?.get(segment.text.trim()) ?? null } : {}) });
