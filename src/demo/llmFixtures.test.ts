@@ -12,11 +12,22 @@ import {
   suggestMesh,
 } from '@/features/formula/skills';
 import { handleGeminiGenerateContent } from './llmFixtures';
+import { optimizeQuery, type OptimizeQueryInput } from '@/features/formula/skills/optimizeQuery';
+import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
+import { esearch, sharedEutilsRateLimiters } from '@/lib/ncbi';
+import { expandFormula } from '@/features/validation';
+import { runOptimizeQuery, startApp } from '@/app/bootstrap';
+import { adoptQueryOptimization } from '@/app/services/queryOptimizationAdoptionService';
+import type { ChromeRuntimeDeps } from '@/app/services/factories';
+import { demoFetch } from './fetchMock';
+import { applyDemoSeed } from './seeds';
 import {
   BLOCK_DEFS,
   ECMO_MESH_ADDITION,
   RESEARCH_QUESTION,
   buildBlockExpressions,
+  buildFormulaV1,
+  SEED_PMIDS,
   getBlockDef,
 } from './scenario';
 
@@ -304,5 +315,131 @@ describe('プラン判定プローブ（第 2 章の tier バッジ）', () => {
         }),
       })
     ).toThrow(/skill を判定できません/);
+  });
+});
+
+
+describe('optimize-query フィクスチャ', () => {
+  function input(): OptimizeQueryInput {
+    return {
+      formula: parsePubmedFormulaMd(buildFormulaV1().markdown),
+      approvedBlocks: BLOCK_DEFS.map((block, index) => ({
+        id: String(index + 1), approvedBlockId: String(index + 1), label: block.blockLabel,
+      })),
+      criteria: { researchQuestion: RESEARCH_QUESTION, inclusionCriteria: '成人 ARDS、ECMO', exclusionCriteria: '小児' },
+      maxHits: 100,
+      measurement: { id: 'demo-measurement', fingerprint: 'v1', measuredAt: '2026-01-01T00:00:00Z',
+        totalHits: 4, capturedPmids: SEED_PMIDS.slice(0, 4), missedPmids: ['90000005'], blocks: [] },
+    };
+  }
+
+  it('実際の skill のプロンプトを判定し、決定的な MeSH 追加と測定参照を返す', async () => {
+    const before = input();
+    const proposal = await optimizeQuery(before, makeProvider());
+    expect(proposal).toEqual({
+      targetBlockId: '2',
+      proposedExpression: `(${before.formula.blocks[1]!.expression}) OR ${ECMO_MESH_ADDITION.tagSyntax}`,
+      addedTerms: [ECMO_MESH_ADDITION.tagSyntax], removedTerms: [], replacedTerms: [],
+      rationale: expect.stringContaining('成人 ARDS'), measurementIds: ['demo-measurement'], meshRequests: [],
+    });
+    expect(await optimizeQuery(before, makeProvider())).toEqual(proposal);
+    before.formula.blocks[1]!.expression = proposal.proposedExpression;
+    expect(await optimizeQuery(before, makeProvider())).toMatchObject({
+      proposedExpression: proposal.proposedExpression, addedTerms: [], rationale: expect.stringContaining('追加済み'),
+    });
+  });
+
+  it('固定の ID ではなく承認済み ECMO 行を対象にし、未計測時には測定 ID を捏造しない', async () => {
+    const current = input();
+    current.formula.blocks[1]!.id = 'treatment';
+    current.approvedBlocks[1]!.id = 'treatment';
+    current.measurement = undefined;
+    expect(await optimizeQuery(current, makeProvider())).toMatchObject({ targetBlockId: 'treatment', measurementIds: [] });
+    current.approvedBlocks = current.approvedBlocks.filter((block) => block.id !== 'treatment');
+    await expect(optimizeQuery(current, makeProvider())).rejects.toThrow('承認済みの ECMO ブロックがありません');
+  });
+
+  it('デモの AND/OR/NOT と uid 交差で、追加文献・削除ゼロ・シード捕捉表を実測する', async () => {
+    const before = input();
+    const proposal = await optimizeQuery(before, makeProvider());
+    const after = { ...before.formula, blocks: before.formula.blocks.map((block) =>
+      block.id === proposal.targetBlockId ? { ...block, expression: proposal.proposedExpression } : block) };
+    const eutils = { fetch: demoFetch, rateLimiter: { acquire: async () => undefined } };
+    const original = expandFormula(before.formula);
+    const candidate = expandFormula(after);
+    expect(await esearch(original, eutils, { retmax: 20 })).toEqual({ count: 4, pmids: SEED_PMIDS.slice(0, 4) });
+    expect(await esearch(candidate, eutils, { retmax: 20 })).toEqual({ count: 6, pmids: [...SEED_PMIDS, '90000006'] });
+    expect(await esearch(`(${original}) NOT (${candidate})`, eutils, { retmax: 10000 })).toEqual({ count: 0, pmids: [] });
+    expect(await esearch(`(${candidate}) NOT (${original})`, eutils, { retmax: 20 }))
+      .toEqual({ count: 2, pmids: ['90000005', '90000006'] });
+    const seeds = SEED_PMIDS.map((pmid) => `${pmid}[uid]`).join(' OR ');
+    expect(await esearch(`(${before.formula.blocks[1]!.expression}) AND (${seeds})`, eutils, { retmax: 20 }))
+      .toEqual({ count: 4, pmids: SEED_PMIDS.slice(0, 4) });
+    expect(await esearch(`(${proposal.proposedExpression}) AND (${seeds})`, eutils, { retmax: 20 }))
+      .toEqual({ count: 5, pmids: [...SEED_PMIDS] });
+  });
+
+  it('未生成のプリセットから自動調整・最終レビュー・採用保存・作り直しと検証まで完走する', async () => {
+    const originalFetch = globalThis.fetch;
+    const data: Record<string, unknown> = {};
+    jest.spyOn(chrome.storage.local, 'get').mockImplementation(async () => data);
+    jest.spyOn(chrome.storage.local, 'set').mockImplementation(async (items) => { Object.assign(data, items); });
+    // 時間待ちだけを省く。Gemini・Sheets・NCBI の応答はすべて実際のデモ層を通す。
+    jest.spyOn(sharedEutilsRateLimiters.withoutApiKey, 'acquire').mockResolvedValue(undefined);
+    globalThis.fetch = demoFetch;
+    const runtime: ChromeRuntimeDeps = {
+      google: { fetch: demoFetch, getAccessToken: async () => 'demo-access-token' },
+      profile: { getProfileUserInfo: async () => ({ email: 'demo@example.com', id: 'demo' }) },
+      store: { read: async <T>(key: string) => data[key] as T | undefined,
+        write: async (items) => { Object.assign(data, items); } },
+    };
+    const doc = document.implementation.createHTMLDocument('デモの自動調整');
+    doc.body.innerHTML = '<main id="app-content"></main>';
+    let app: ReturnType<typeof startApp> | undefined;
+    let unsubscribe: (() => void) | undefined;
+    const waitUntil = async (ready: () => boolean): Promise<void> => {
+      for (let i = 0; i < 500; i++) {
+        if (ready()) return;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      throw new Error(`デモの処理が完了しません: ${doc.body.textContent}`);
+    };
+    try {
+      await applyDemoSeed('07-draft');
+      app = startApp(doc, { runtime, getHash: () => '#/draft', onHashChange: () => () => undefined, setHash: jest.fn() });
+      const store = app.store;
+      await waitUntil(() => store.getState().queryOptimizationSetup?.status === 'ready');
+      expect(store.getState().currentFormulaMarkdown).toBeNull();
+      expect(doc.querySelector('.draft__actions')).toBeNull();
+      await runOptimizeQuery(store, runtime, { google: runtime.google, store: runtime.store }, { maxHits: 100, maxIterations: 1 });
+      const run = store.getState().queryOptimizationRun!;
+      expect(run.error).toBeNull();
+      expect(run.result).toMatchObject({ status: 'achieved', iterations: 1,
+        best: { measurement: { totalHits: 6, capturedPmids: [...SEED_PMIDS] } } });
+      expect(run.trials.map((trial) => trial.kind)).toEqual(['initial', 'proposal', 'final']);
+      expect(run.trials[1]).toMatchObject({ accepted: true, impact: { lostHits: 0, gainedHits: 2 } });
+      expect(run.outsideCheck?.status).toBe('ready');
+      expect(doc.querySelector('.optimization__review h3')?.textContent).toContain('目安件数と既知シードの捕捉を満たしました');
+      await adoptQueryOptimization({ store, google: runtime.google });
+      expect(store.getState().queryOptimizationRun?.save?.status).toBe('saved');
+      expect(doc.querySelector('.optimization__save-status')?.textContent).toContain('保存しました');
+      const liveHits: number[] = [];
+      unsubscribe = store.subscribe(() => {
+        if (store.getState().draftRun?.blockHits.length === 3) {
+          liveHits.push(doc.querySelectorAll('.draft__block-hit--done').length);
+        }
+      });
+      doc.querySelector<HTMLButtonElement>('.draft__generate')!.click();
+      await waitUntil(() => !!doc.querySelector('.draft__validate-status') || !!store.getState().draftRun?.error);
+      expect(store.getState().draftRun?.error).toBeFalsy();
+      expect(liveHits).toContain(3);
+      expect(doc.querySelector('.draft__validate-status')).not.toBeNull();
+      expect(store.getState().validationResult?.summary.finalQuery).toMatchObject({ totalHits: 4, captureRate: 0.8 });
+    } finally {
+      unsubscribe?.();
+      app?.dispose();
+      globalThis.fetch = originalFetch;
+      jest.restoreAllMocks();
+    }
   });
 });
