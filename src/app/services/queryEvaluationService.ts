@@ -46,6 +46,17 @@ export interface QueryEvaluationDeps {
   now?: () => string;
 }
 
+/** ブロック順・ID・式・結合構造だけから測定と同じ指紋を作る。 */
+export async function formulaFingerprint(formula: PubmedFormula): Promise<string> {
+  const fixedFormula: PubmedFormula = {
+    blocks: formula.blocks.map(({ id, expression, isCombination }) => ({ id, expression, isCombination })),
+    combinationExpression: formula.combinationExpression,
+  };
+  const bytes = new TextEncoder().encode(JSON.stringify(fixedFormula));
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 /**
  * 式と適格判定済みの固定シード PMID を実測する。保存先・store を持たず、結果だけを返す。
  * 既存の行計測・最終式検証に厳密な件数検査を伝播し、測定失敗を実測 0 件と区別する。
@@ -61,9 +72,7 @@ export async function evaluateQuery(
     combinationExpression: formula.combinationExpression,
   };
   const fixedSeeds = [...new Set(seedPmids)];
-  const bytes = new TextEncoder().encode(JSON.stringify(fixedFormula));
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  const fingerprint = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+  const fingerprint = await formulaFingerprint(fixedFormula);
   const eutils = { ...deps.eutils, strictCounts: true };
   const lines = await checkSearchLines(fixedFormula, eutils);
   const lineHits: EvaluatedLine[] = lines.map((line) => line.error === null

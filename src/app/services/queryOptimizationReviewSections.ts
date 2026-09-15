@@ -16,7 +16,7 @@ function decisionState(check: OptimizationOutsideCheckState | undefined, source:
   return candidates.some((candidate) => check?.decisions[candidate.pmid]?.decision === 'maybe') ? 'decided' : 'confirmed';
 }
 
-/** 表示と保存で同じ判定を使う。取得した先頭の書誌と集合全体の件数を区別する。 */
+/** 表示と保存で同じ判定を使う。取得した書誌と集合全体の件数を区別する。 */
 export function buildOptimizationReviewSections(run: QueryOptimizationRunState): {
   sections: [OptimizationReviewSection, OptimizationReviewSection, OptimizationReviewSection, OptimizationReviewSection];
   unconfirmed: string[];
@@ -71,7 +71,13 @@ export function buildOptimizationReviewSections(run: QueryOptimizationRunState):
       for (const trial of held) {
         const count = trial.impact?.inspected.length ?? 0;
         const lostHits = trial.impact?.lostHits;
-        deletion.lines.push(`保留候補 ${trial.candidateId}: 失う集合 ${lostHits ?? '未測定'} 件のうち書誌を確認できたのは先頭 ${count} 件`);
+        const sample = trial.impact?.sample;
+        const prefix = `保留候補 ${trial.candidateId}: 失う集合 ${lostHits ?? '未測定'} 件`;
+        deletion.lines.push(sample?.method === 'all'
+          ? `${prefix}から無作為抽出した ${count} 件の書誌を確認`
+          : sample?.method === 'retrieved_subset'
+            ? `${prefix}のうち取得できた ${sample.retrievedCount} 件から無作為抽出した ${count} 件の書誌を確認（集合全体からの無作為抽出ではありません）`
+            : `${prefix}のうち書誌を確認できたのは先頭 ${count} 件`);
         if (lostHits != null && lostHits > count) deletion.lines.push(`残り ${lostHits - count} 件は未確認`);
         if (trial.impact?.error) deletion.lines.push(trial.impact.error);
       }

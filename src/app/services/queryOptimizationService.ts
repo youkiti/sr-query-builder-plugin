@@ -28,7 +28,7 @@ import type { PubmedFormula } from '@/lib/search-formula-md';
 import { esearch, efetchArticles, type EutilsDeps } from '@/lib/ncbi';
 import { resolveRateLimiter } from '@/lib/ncbi/eutils';
 import type { LlmProviderFactory } from './llmProviderService';
-import { evaluateQuery, type QueryEvaluation } from './queryEvaluationService';
+import { formulaFingerprint, evaluateQuery, type QueryEvaluation } from './queryEvaluationService';
 import { saveQueryOptimizationCheckpoint, type OptimizationBudget } from './queryOptimizationCheckpointService';
 
 export interface QueryOptimizationInput {
@@ -105,6 +105,7 @@ export interface QueryOptimizationDeps {
   fetchMeshContext?: (request: Readonly<OptimizationMeshRequest>, eutils?: EutilsDeps) => Promise<OptimizationMeshNode[]>;
   shouldStop?: () => boolean;
   now?: () => number;
+  random?: () => number;
   maxApiCalls?: number;
   maxElapsedMs?: number;
 }
@@ -258,7 +259,7 @@ export async function runQueryOptimization(
     if (!apiEvents.some((item) => item.status === status && item.source === apiSource)) apiEvents.push(event);
     notify();
   };
-  const seen = new Set<string>();
+  const seen = new Map<string, string>();
   let terminal: OptimizationStopReason | null = null;
 
   // 一度停止したら callback が false に戻っても再開しない。応答の前後で同じ境界を使う。
@@ -511,9 +512,18 @@ export async function runQueryOptimization(
     const candidate = expandFormula(after);
     let pmids: string[] = [];
     try {
-      const lost = await esearch(`(${original}) NOT (${candidate})`, eutils, { retmax: INSPECT_LIMIT });
+      const lost = await esearch(`(${original}) NOT (${candidate})`, eutils, { retmax: 10000 });
       impact.lostHits = lost.count;
-      pmids = lost.pmids.slice(0, INSPECT_LIMIT);
+      if (lost.count > 0) {
+        const retrieved = [...new Set(lost.pmids)];
+        const seed = Math.floor((deps.random ?? Math.random)() * 2 ** 32) >>> 0;
+        pmids = samplePmids(retrieved, INSPECT_LIMIT, seed);
+        impact.sample = {
+          method: lost.count <= 10000 && retrieved.length === lost.count ? 'all' : 'retrieved_subset',
+          seed, populationCount: lost.count, retrievedCount: retrieved.length,
+          pmids, sampledAt: new Date(now()).toISOString(),
+        };
+      }
     } catch (err) { failure(err); }
     try {
       impact.gainedHits = (await esearch(`(${candidate}) NOT (${original})`, eutils, { retmax: 0 })).count;
@@ -628,14 +638,14 @@ export async function runQueryOptimization(
       before: null, after: initial.measurement, accepted: initial.evaluation.status === 'success',
       reason: '初期式の実測', rationale: '' }));
     if (initial.evaluation.status === 'success') best = initial;
-    seen.add(initial.evaluation.fingerprint);
+    seen.set(initial.evaluation.fingerprint, 'initial');
     // 停止しても実測済みの初期試行は履歴に残す。
     if (initialStop) throw initialStop;
     await save();
     if (!best) return finish('api_error');
     let noImprovement = 0;
     let measurementFailures = 0;
-    let reason: OptimizationStopReason = 'iteration_limit';
+    const reason: OptimizationStopReason = 'iteration_limit';
     for (let round = 1; round <= maxIterations; round += 1) {
       boundary();
       apiEvents = [];
@@ -688,31 +698,34 @@ export async function runQueryOptimization(
         continue;
       } else {
         evaluatedTrials += 1;
+        const candidate = applyProposal(best.formula, proposal);
+        const formulaDiff = diffOptimizationFormula(best.formula, candidate);
         const details = {
+          formulaDiff,
           kind: 'proposal' as const,
           ...(pendingInformation ? { informedBy: { ...pendingInformation } } : {}),
           changes: { targetBlockId: proposal.targetBlockId, addedTerms: [...proposal.addedTerms],
             removedTerms: [...proposal.removedTerms], replacedTerms: proposal.replacedTerms.map((term) => ({ ...term })) },
         };
         pendingInformation = undefined;
-        const candidate = applyProposal(best.formula, proposal);
         const removed = proposal.removedTerms.length ? proposal.removedTerms : (() => {
-          const terms = (expression: string) => tokenizeExpression(expression)
-            .filter((segment) => segment.kind === 'mesh' || segment.kind === 'freeword').map((segment) => segment.text.trim());
-          // PubMed の検索語は大文字小文字を区別しないため、表記の揺れを削除と誤判定しない。
-          const normalize = (term: string) => term.trim().toLowerCase().replace(/\s+/g, ' ');
-          const after = new Set(terms(proposal.proposedExpression).map(normalize));
-          const replaced = new Set(proposal.replacedTerms.map((term) => normalize(term.before)));
-          const before = new Map(terms(best.formula.blocks.find((block) => block.id === proposal.targetBlockId)?.expression ?? '')
-            .map((term) => [normalize(term), term]));
-          return [...before].filter(([key]) => !after.has(key) && !replaced.has(key)).map(([, term]) => term);
+          const replaced = new Set(proposal.replacedTerms.map((term) => normalizeOptimizationTerm(term.before)));
+          return formulaDiff.flatMap((block) => block.removed)
+            .filter((term) => !replaced.has(normalizeOptimizationTerm(term)));
         })();
         const invalid = validateOptimizationCandidate(fixed.initialFormula, candidate, fixed.approvedBlocks, proposal)
           ?? (best.measurement.missedPmids?.length && removed.length
             ? `未捕捉シードがある間は削除案を受け付けません（回収を優先: 同義語追加・MeSH 拡張。削除とみなした語: ${removed.join(', ')}）` : null);
+        const duplicateOf = invalid ? undefined : seen.get(await formulaFingerprint(candidate));
         if (invalid) {
           trials.push(makeTrial({ ...details, candidateId, formula: candidate, before: best.measurement,
             after: null, accepted: false, reason: invalid, rationale: proposal.rationale }));
+          noImprovement += 1;
+          await save();
+        } else if (duplicateOf !== undefined) {
+          trials.push(makeTrial({ ...details, candidateId, formula: candidate, before: best.measurement,
+            after: null, accepted: false, duplicateOf,
+            reason: `評価済みの同一式の再提案のため測定せずに却下（${duplicateOf} と同じ式）`, rationale: proposal.rationale }));
           noImprovement += 1;
           await save();
         } else {
@@ -722,26 +735,27 @@ export async function runQueryOptimization(
           const measured = await measure(candidate, candidateId);
           const failed = measured.evaluation.status === 'failure';
           measurementFailures = failed ? measurementFailures + 1 : 0;
-          // 失敗測定は回帰判定の根拠にしない。次の候補で再び測定する機会を残す。
-          const repeated = !failed && seen.has(measured.evaluation.fingerprint);
-          if (!failed) seen.add(measured.evaluation.fingerprint);
           const before = best.measurement;
           const lostSeeds = before.capturedPmids!.filter((pmid) => !measured.measurement.capturedPmids?.includes(pmid));
           const improved = measured.evaluation.status === 'success' && lostSeeds.length === 0
             && isImprovement(before, measured.measurement, fixed.maxHits);
           const rejection = failed ? describeMeasurementFailure(measured.evaluation)
             : lostSeeds.length > 0 ? `捕捉済みシードを失う: ${lostSeeds.join(', ')}`
-              : repeated ? '評価済みの同一式への回帰' : '局面の指標に改善がありません';
+              : '局面の指標に改善がありません';
           // 採否に要る差集合を先に測る。追加詳細（語別計測）の途中で停止しても採否は確定している。
-          const impact: OptimizationImpact | undefined = improved && !repeated
+          const impact: OptimizationImpact | undefined = improved
             ? await measureImpact(best.formula, candidate)
             : undefined;
           const accepted = impact?.lostHits === 0 && impact.gainedHits !== null;
           const held = impact !== undefined && !accepted;
+          // 候補または差集合の測定失敗は照合対象にせず、再測定の機会を残す。
+          if (!failed && !(held && (impact.lostHits === null || impact.gainedHits === null))) {
+            seen.set(measured.evaluation.fingerprint, candidateId);
+          }
           const impactReason = impact && (accepted
             ? `局面の指標が改善しました（失う集合 0 件、増える集合 ${impact.gainedHits} 件）`
             : impact.lostHits !== null && impact.lostHits > 0
-              ? `失う集合 ${impact.lostHits} 件のためレビュー候補に留めました（書誌を確認した件数 ${impact.inspected.length} / 全体 ${impact.lostHits}、増える集合 ${impact.gainedHits ?? '未測定'} 件）`
+              ? `失う集合 ${impact.lostHits} 件のためレビュー候補に留めました（${impact.sample?.method === 'retrieved_subset' ? `取得できた ${impact.sample.retrievedCount} 件から無作為抽出した書誌` : '無作為抽出した書誌'} ${impact.inspected.length} 件 / 全体 ${impact.lostHits}、増える集合 ${impact.gainedHits ?? '未測定'} 件）`
               : `${impact.lostHits === null ? '失う集合' : '増える集合'}を実測できなかったためレビュー候補に留めました: ${impact.error}`);
           let detailStop: QueryOptimizationStopError | null = null;
           if (deps.measureTermDetails && measured.evaluation.status === 'success') {
@@ -770,7 +784,6 @@ export async function runQueryOptimization(
           if (detailStop) throw detailStop;
           await save();
           if (measurementFailures >= MAX_CONSECUTIVE_MEASUREMENT_FAILURES) return finish('api_error');
-          if (repeated) reason = 'repeated_formula';
         }
       }
       boundary();
@@ -791,7 +804,6 @@ export async function runQueryOptimization(
         if (verified.evaluation.status === 'failure') return finish('api_error', verified.measurement);
         return finish(achieved ? 'conditions_met' : 'revalidation_failed', verified.measurement);
       }
-      if (reason === 'repeated_formula') return finish(reason);
       if (noImprovement >= 2) return finish('no_improvement');
     }
     return finish(reason);
@@ -1007,4 +1019,59 @@ async function measureTerms(formula: PubmedFormula, approvedBlocks: readonly App
   }
   // 測定の優先順とは独立に、表示と AI 文脈では元のブロック順・各ブロック内の行順を保つ。
   return blocks.flatMap((block) => terms.filter((term) => term.blockId === block.id));
+}
+
+/** PMID の順に依存しない、種付きの非復元一様抽出。 */
+export function samplePmids(pmids: string[], limit: number, seed: number): string[] {
+  const pool = [...new Set(pmids)].sort((a, b) => Number(a) - Number(b));
+  let state = seed >>> 0;
+  const random = () => {
+    state = (state + 0x6D2B79F5) >>> 0;
+    let value = Math.imul(state ^ (state >>> 15), state | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 2 ** 32;
+  };
+  const size = Math.min(Math.max(0, Math.floor(limit)), pool.length);
+  for (let i = 0; i < size; i += 1) {
+    const j = i + Math.floor(random() * (pool.length - i));
+    [pool[i], pool[j]] = [pool[j]!, pool[i]!];
+  }
+  return pool.slice(0, size).sort((a, b) => Number(a) - Number(b));
+}
+
+function normalizeOptimizationTerm(term: string): string {
+  return term.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/** 実式を比較し、申告に依存せず元の表記で変更語を残す。 */
+export function diffOptimizationFormula(before: PubmedFormula, after: PubmedFormula): NonNullable<OptimizationTrial['formulaDiff']> {
+  const terms = (expression: string) => new Map(tokenizeExpression(expression)
+    .filter((segment) => segment.kind === 'mesh' || segment.kind === 'freeword')
+    .map((segment) => [normalizeOptimizationTerm(segment.text), segment.text.trim()]));
+  const result: NonNullable<OptimizationTrial['formulaDiff']> = [];
+  for (const id of new Set([...before.blocks, ...after.blocks].map((block) => block.id))) {
+    const oldBlock = before.blocks.find((block) => block.id === id);
+    const newBlock = after.blocks.find((block) => block.id === id);
+    const oldExpression = oldBlock?.expression ?? '';
+    const newExpression = newBlock?.expression ?? '';
+    if (oldBlock?.isCombination || newBlock?.isCombination) {
+      if (oldExpression !== newExpression || oldBlock?.isCombination !== newBlock?.isCombination) result.push({ blockId: id,
+        removed: oldExpression ? [oldExpression] : [], added: newExpression ? [newExpression] : [] });
+    } else {
+      const oldTerms = terms(oldExpression);
+      const newTerms = terms(newExpression);
+      const removed = [...oldTerms].filter(([key]) => !newTerms.has(key)).map(([, term]) => term);
+      const added = [...newTerms].filter(([key]) => !oldTerms.has(key)).map(([, term]) => term);
+      if (removed.length || added.length) result.push({ blockId: id, added, removed });
+    }
+  }
+  if (before.combinationExpression !== after.combinationExpression
+    && !result.some((diff) => before.blocks.some((block) => block.id === diff.blockId && block.isCombination)
+      || after.blocks.some((block) => block.id === diff.blockId && block.isCombination))) {
+    result.push({ blockId: after.blocks.filter((block) => block.isCombination).pop()?.id
+      ?? before.blocks.filter((block) => block.isCombination).pop()?.id ?? 'combinationExpression',
+    removed: before.combinationExpression ? [before.combinationExpression] : [],
+    added: after.combinationExpression ? [after.combinationExpression] : [] });
+  }
+  return result;
 }

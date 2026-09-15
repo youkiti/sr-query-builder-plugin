@@ -70,6 +70,9 @@ export function getQueryOptimizationResumeAvailability(
 }
 
 export interface OptimizationTrialSummary {
+  sample?: NonNullable<OptimizationTrial['impact']>['sample'];
+  duplicateOf?: string;
+  formulaDiff?: OptimizationTrial['formulaDiff'];
   candidateId: string;
   formula: PubmedFormula;
   totalHits: number | null;
@@ -136,6 +139,11 @@ export async function saveQueryOptimizationCheckpoint(
     } } : {}),
     trials: trials.map((trial) => ({
       candidateId: trial.candidateId,
+      ...(trial.impact?.sample ? { sample: { ...trial.impact.sample, pmids: [...trial.impact.sample.pmids] } } : {}),
+      ...(trial.duplicateOf ? { duplicateOf: trial.duplicateOf } : {}),
+      ...(trial.formulaDiff ? { formulaDiff: trial.formulaDiff.map((block) => ({
+        ...block, added: [...block.added], removed: [...block.removed],
+      })) } : {}),
       formula: {
         blocks: trial.formula.blocks.map(({ id, expression, isCombination }) => ({ id, expression, isCombination })),
         combinationExpression: trial.formula.combinationExpression,

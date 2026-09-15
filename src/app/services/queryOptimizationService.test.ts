@@ -5,7 +5,7 @@ import * as checkpoint from './queryOptimizationCheckpointService';
 import type { LLMProvider } from '@/lib/llm';
 import { sharedEutilsRateLimiters } from '@/lib/ncbi';
 import { validateCombinationExpression } from '@/lib/combination-expression';
-import { runQueryOptimization, validateOptimizationCandidate, QueryOptimizationStopError, type QueryOptimizationInput, type QueryOptimizationDeps } from './queryOptimizationService';
+import { samplePmids, diffOptimizationFormula, runQueryOptimization, validateOptimizationCandidate, QueryOptimizationStopError, type QueryOptimizationInput, type QueryOptimizationDeps } from './queryOptimizationService';
 
 interface Outcome { hits: number; captured: string[]; blockCapture?: Record<string, string[]>;
   articles?: Record<string, { abstract?: string; mesh?: string[] }>;
@@ -116,8 +116,8 @@ test.each([true, false])('未捕捉 %s のときだけ全ブロックの捕捉�
     for (const text of ['シード × ブロック捕捉表', '#1: 捕捉 [11] / 未捕捉 [22]', '未捕捉シードの書誌',
       '"pmid": "22"', '"hasAbstract": true', '未捕捉の抄録', 'Disease']) expect(prompt).toContain(text);
   } else expect(capture).toBeUndefined();
-  // 同じ式の候補実測と初期実測の 2 回に、未捕捉時だけ全ブロック分を加える。
-  expect(captureQueries(f.fetch)).toHaveLength(2 + (missed ? f.input.initialFormula.blocks.length : 0));
+  // 同一式の候補は測定せず、初期実測の 1 回に、未捕捉時だけ全ブロック分を加える。
+  expect(captureQueries(f.fetch)).toHaveLength(1 + (missed ? f.input.initialFormula.blocks.length : 0));
   expect(f.fetch.mock.calls.filter(([url]) => url.includes('efetch.fcgi'))).toHaveLength(missed ? 1 : 0);
   expect(result.apiCalls).toBe(f.fetch.mock.calls.length + 1);
 });
@@ -323,7 +323,7 @@ test('シードを維持して上限を満たす候補も失う集合があれ�
     ],
   } });
   expect(result.trials[1]?.reason).toContain('失う集合 150 件');
-  expect(result.trials[1]?.reason).toContain('書誌を確認した件数 2 / 全体 150');
+  expect(result.trials[1]?.reason).toContain('取得できた 2 件から無作為抽出した書誌 2 件 / 全体 150');
   expect(result.best?.measurement.totalHits).toBe(200);
   expect(result.status).toBe('needs_review');
   expect(result.unmetReasons).toContain('レビュー候補として保留: candidate-1（失う 150 件・増える 0 件）');
@@ -353,7 +353,7 @@ test.each(['both', 'gained', 'efetch'])('差集合・書誌取得の失敗 %s �
   expect(result.best?.measurement.totalHits).toBe(200);
 });
 
-test('削除影響は run の予算で測り、確認書誌を先頭 20 件に制限する', async () => {
+test('削除影響は run の予算で測り、確認書誌を無作為抽出した 20 件に制限する', async () => {
   const pmids = Array.from({ length: 25 }, (_, index) => String(900 + index));
   const { input, deps, fetch } = setup({ a: { hits: 200, captured: ['11', '22'] },
     b: { hits: 50, captured: ['11', '22'], lost: { hits: 150, pmids } } });
@@ -370,7 +370,7 @@ test('削除影響は run の予算で測り、確認書誌を先頭 20 件に�
   const result = await runQueryOptimization(input, deps);
   expect(result.trials[1]?.impact?.inspected).toHaveLength(20);
   const url = fetch.mock.calls.find(([resource]) => resource.includes('efetch.fcgi'))![0] as string;
-  expect(new URL(url).searchParams.get('id')!.split(',')).toEqual(pmids.slice(0, 20));
+  expect(new URL(url).searchParams.get('id')!.split(',')).toEqual(result.trials[1]!.impact!.sample!.pmids);
   expect(result.apiCalls).toBe(fetch.mock.calls.length + 1);
 });
 
@@ -424,7 +424,7 @@ test.each(['lost', 'gained', 'efetch'])('削除影響の %s 中の停止例外�
   fetch.mockImplementation(async (url: string) => {
     const params = new URL(url).searchParams;
     if ((stage === 'efetch' && url.includes('efetch.fcgi'))
-      || (params.get('term')?.includes(') NOT (') && params.get('retmax') === (stage === 'lost' ? '20' : stage === 'gained' ? '0' : 'unused'))) {
+      || (params.get('term')?.includes(') NOT (') && params.get('retmax') === (stage === 'lost' ? '10000' : stage === 'gained' ? '0' : 'unused'))) {
       throw new QueryOptimizationStopError('user_stop');
     }
     return original(url);
@@ -619,12 +619,12 @@ test('初期式が目標内でも AI を呼び、同じ式をキャッシュな�
   expect(result).toMatchObject({ status: 'achieved', stopReason: 'conditions_met', iterations: 1, unmetReasons: [] });
   expect(chat).toHaveBeenCalledTimes(1);
   expect(forPurpose).toHaveBeenCalledWith('optimize_query');
-  expect(evaluate).toHaveBeenCalledTimes(3);
+  expect(evaluate).toHaveBeenCalledTimes(2);
   expect(result.trials.map((trial) => trial.candidateId)).toEqual(['initial', 'candidate-1', 'final-1']);
   expect(result.trials[1]?.accepted).toBe(false);
   expect(write).toHaveBeenCalledTimes(4);
   // 各区間は10通信未満でも、初期評価・候補評価・最終評価・終了は必ず保存する。
-  expect(write.mock.calls.map(([items]) => items.queryOptimizationCheckpoint.resume.consumed.apiCalls)).toEqual([5, 13, 18, 18]);
+  expect(write.mock.calls.map(([items]) => items.queryOptimizationCheckpoint.resume.consumed.apiCalls)).toEqual([5, 8, 13, 13]);
   expect(result.apiCalls).toBe(fetch.mock.calls.length + 1);
   for (const [, options] of fetch.mock.calls) expect(options).toEqual({ cache: 'no-store' });
   expect(append).not.toHaveBeenCalled();
@@ -688,18 +688,34 @@ test('目標内での件数削減は改善にせず初期式を最終検証す�
   expect(result.trials[1]?.accepted).toBe(false);
 });
 
-test('同一式への回帰を evaluateQuery の fingerprint で判定する', async () => {
+test('fingerprint が初期式と一致する再提案は測定前に却下し、2 回連続で改善なしとして停止する', async () => {
   const { input, deps, chat } = setup({ a: { hits: 200, captured: ['11', '22'] } }, ['a[tiab]']);
   const result = await runQueryOptimization(input, deps);
-  expect(result).toMatchObject({ status: 'needs_review', stopReason: 'repeated_formula', iterations: 1 });
-  expect(result.trials[0]?.after?.fingerprint).toBe(result.trials[1]?.after?.fingerprint);
-  expect(chat).toHaveBeenCalledTimes(1);
+  expect(result).toMatchObject({ status: 'needs_review', stopReason: 'no_improvement', iterations: 2 });
+  expect(result.trials[1]).toMatchObject({ after: null, duplicateOf: 'initial' });
+  expect(result.trials[2]).toMatchObject({ after: null, duplicateOf: 'initial' });
+  expect(await evaluation.formulaFingerprint(result.trials[1]!.formula)).toBe(result.trials[0]?.after?.fingerprint);
+  expect(chat).toHaveBeenCalledTimes(2);
 });
 
-test('却下済みの式への回帰も停止する', async () => {
+test('却下済みの式の再提案は改善なしの 2 回目として停止する', async () => {
   const { input, deps } = setup({ a: { hits: 200, captured: ['11', '22'] }, b: { hits: 300, captured: ['11', '22'] } });
   const result = await runQueryOptimization(input, deps);
-  expect(result.stopReason).toBe('repeated_formula');
+  expect(result).toMatchObject({ stopReason: 'no_improvement', iterations: 2 });
+  expect(result.best?.measurement.totalHits).toBe(200);
+});
+
+test('採用直後の測定前却下が 1 回なら次の反復で AI を呼び出す', async () => {
+  const { input, deps, chat } = setup({ a: { hits: 400, captured: ['11', '22'] },
+    b: { hits: 300, captured: ['11', '22'] }, c: { hits: 200, captured: ['11', '22'] } },
+  ['b[tiab]', 'b[tiab]', 'c[tiab]']);
+  input.maxIterations = 3;
+  const result = await runQueryOptimization(input, deps);
+  expect(result).toMatchObject({ stopReason: 'iteration_limit', iterations: 3 });
+  expect(result.trials[1]).toMatchObject({ accepted: true });
+  expect(result.trials[2]).toMatchObject({ accepted: false, after: null, duplicateOf: 'candidate-1' });
+  expect(result.trials[3]).toMatchObject({ accepted: true });
+  expect(chat).toHaveBeenCalledTimes(3);
   expect(result.best?.measurement.totalHits).toBe(200);
 });
 
@@ -897,7 +913,7 @@ test.each(['initial', 'candidate', 'llm', 'storage'])('継続不能な %s エラ
 test('最終再検証で条件が崩れたら達成にしない', async () => {
   const { input, deps } = setup({ a: { hits: 80, captured: ['11', '22'] } }, ['a[tiab]']);
   const original = evaluation.evaluateQuery;
-  jest.spyOn(evaluation, 'evaluateQuery').mockImplementationOnce(original).mockImplementationOnce(original)
+  jest.spyOn(evaluation, 'evaluateQuery').mockImplementationOnce(original)
     .mockImplementationOnce(async (...args) => {
       const result = await original(...args);
       if (result.finalQuery.status === 'success') result.finalQuery.totalHits = 120;
@@ -913,7 +929,7 @@ test('最終再検証で条件が崩れたら達成にしない', async () => {
 test('最終再検証でシード喪失・API 失敗を検出する', async () => {
   const { input, deps, fetch } = setup({ a: { hits: 80, captured: ['11', '22'] } }, ['a[tiab]']);
   const original = evaluation.evaluateQuery;
-  jest.spyOn(evaluation, 'evaluateQuery').mockImplementationOnce(original).mockImplementationOnce(original)
+  jest.spyOn(evaluation, 'evaluateQuery').mockImplementationOnce(original)
     .mockImplementationOnce(async (...args) => {
       fetch.mockRejectedValue(new Error('再検証不能'));
       return original(...args);
@@ -1014,7 +1030,7 @@ test('最終再検証中の停止は達成状態とチェックポイントを�
   let stop = false;
   deps.shouldStop = () => stop;
   const original = evaluation.evaluateQuery;
-  jest.spyOn(evaluation, 'evaluateQuery').mockImplementationOnce(original).mockImplementationOnce(original)
+  jest.spyOn(evaluation, 'evaluateQuery').mockImplementationOnce(original)
     .mockImplementationOnce(async (...args) => { const result = await original(...args); stop = true; return result; });
   const result = await runQueryOptimization(input, deps);
   expect(result.status).toBe('stopped');
@@ -1044,7 +1060,7 @@ test('書誌・ツリー未指定の単一ブロック式も、欠測を明示�
 test('最終再検証でシードを失ったら要確認へ戻す', async () => {
   const { input, deps } = setup({ a: { hits: 80, captured: ['11', '22'] } }, ['a[tiab]']);
   const original = evaluation.evaluateQuery;
-  jest.spyOn(evaluation, 'evaluateQuery').mockImplementationOnce(original).mockImplementationOnce(original)
+  jest.spyOn(evaluation, 'evaluateQuery').mockImplementationOnce(original)
     .mockImplementationOnce(async (...args) => {
       const result = await original(...args);
       if (result.finalQuery.status === 'success') {
@@ -1085,7 +1101,7 @@ test('初期式が条件達成でも情報要求直後には完了せず、取�
   expect(result.trials.map((trial) => trial.kind)).toEqual(['initial', 'information', 'proposal', 'final']);
   expect(result.trials[1]).toMatchObject({ informationResult: { requested: 1, obtained: 1 } });
   expect(result.trials[2]).toMatchObject({ informedBy: { candidateId: 'candidate-1', requested: 1, obtained: 1 },
-    reason: '評価済みの同一式への回帰' });
+    reason: '評価済みの同一式の再提案のため測定せずに却下（initial と同じ式）' });
   expect(result.trials[3]).not.toHaveProperty('informedBy');
   expect(result.unmetReasons.join()).not.toContain('判断が未了');
   expect(progress).toHaveBeenLastCalledWith(expect.objectContaining({ evaluatedTrials: 1, informationTrials: 1 }));
@@ -1582,4 +1598,125 @@ test.each([false, true])('リミッタ未注入時は API キー有無 %s に応
   expect((await runQueryOptimization(input, deps)).status).toBe('achieved');
   expect(hasKey ? withKey : withoutKey).toHaveBeenCalledTimes(fetch.mock.calls.length);
   expect(hasKey ? withoutKey : withKey).not.toHaveBeenCalled();
+});
+
+
+test('種付き抽出は再現可能で順序に依存せず重複を含まない', () => {
+  const pmids = Array.from({ length: 1000 }, (_, i) => String(i + 1));
+  const sampled = samplePmids(pmids, 20, 123);
+  expect(samplePmids([...pmids].reverse(), 20, 123)).toEqual(sampled);
+  expect(samplePmids([...pmids, ...pmids], 20, 123)).toEqual(sampled);
+  expect(samplePmids(pmids, 20, 124)).not.toEqual(sampled);
+  expect(new Set(sampled).size).toBe(20);
+  expect(sampled).toEqual([...sampled].sort((a, b) => Number(a) - Number(b)));
+  expect(samplePmids(['3', '1', '3'], 20, 123)).toEqual(['1', '3']);
+  expect(samplePmids([], 20, 123)).toEqual([]);
+  expect(samplePmids(pmids, 0, 123)).toEqual([]);
+  const upper = Array.from({ length: 200 }, (_, seed) => samplePmids(pmids, 20, seed))
+    .flat().filter((pmid) => Number(pmid) > 900).length / 4000;
+  expect(upper).toBeGreaterThan(0.05);
+  expect(upper).toBeLessThan(0.15);
+});
+
+test.each([
+  [100, 100, 'all'], [10800, 10000, 'retrieved_subset'], [100, 90, 'retrieved_subset'],
+  [0, 0, undefined],
+] as const)('失う集合 %s 件・取得 %s 件の抽出記録を保持する', async (count, retrieved, method) => {
+  const pmids = Array.from({ length: retrieved }, (_, i) => String(i + 1000));
+  const f = setup({ a: { hits: 200, captured: ['11', '22'] },
+    b: { hits: 50, captured: ['11', '22'], lost: { hits: count, pmids: [...pmids].reverse() } } });
+  f.input.maxIterations = 1;
+  f.deps.random = () => 0.25;
+  f.deps.now = () => 1000;
+  const result = await runQueryOptimization(f.input, f.deps);
+  const impact = result.trials[1]!.impact!;
+  const searches = f.fetch.mock.calls.map(([url]) => new URL(url as string))
+    .filter((url) => url.searchParams.get('term')?.includes(') NOT ('));
+  expect(searches.map((url) => url.searchParams.get('retmax'))).toEqual(['10000', '0']);
+  if (!method) { expect(impact.sample).toBeUndefined(); return; }
+  const expected = samplePmids(pmids, 20, 2 ** 30);
+  expect(impact.sample).toEqual({ method, seed: 2 ** 30, populationCount: count,
+    retrievedCount: retrieved, pmids: expected, sampledAt: '1970-01-01T00:00:01.000Z' });
+  expect(expected).not.toEqual(pmids.slice(0, 20));
+  const fetchCall = f.fetch.mock.calls.find(([url]) => String(url).includes('efetch.fcgi'))!;
+  expect(new URL(fetchCall[0]).searchParams.get('id')!.split(',')).toEqual(expected);
+  expect(impact.inspected.map((article) => article.pmid)).toEqual(expected);
+});
+
+test('書誌取得の失敗後も抽出 PMID を残す', async () => {
+  const f = setup({ a: { hits: 200, captured: ['11', '22'] },
+    b: { hits: 50, captured: ['11', '22'], lost: { hits: 2, pmids: ['902', '901', '901'] } } });
+  f.input.maxIterations = 1;
+  const original = f.fetch.getMockImplementation()!;
+  f.fetch.mockImplementation(async (url: string) => {
+    if (url.includes('efetch.fcgi')) throw new Error('書誌取得失敗');
+    return original(url);
+  });
+  const result = await runQueryOptimization(f.input, f.deps);
+  expect(result.trials[1]!.impact).toMatchObject({ inspected: [],
+    sample: { method: 'all', retrievedCount: 2, pmids: ['901', '902'] } });
+});
+
+test('保留式の再提案は申告が空でも通信せず一致 ID と実差分を記録する', async () => {
+  const f = setup({ a: { hits: 200, captured: ['11', '22'] },
+    b: { hits: 50, captured: ['11', '22'], lost: { hits: 1, pmids: ['901'] } } });
+  const callCounts: number[] = [];
+  f.chat.mockImplementation(async () => {
+    callCounts.push(f.fetch.mock.calls.length);
+    return { text: JSON.stringify({ target_block_id: '1', proposed_expression: 'b[tiab]',
+      added_terms: [], removed_terms: [], replaced_terms: [] }) };
+  });
+  const result = await runQueryOptimization(f.input, f.deps);
+  expect(result).toMatchObject({ stopReason: 'no_improvement', iterations: 2 });
+  expect(f.fetch.mock.calls.length).toBe(callCounts[1]);
+  expect(result.trials[2]).toMatchObject({ duplicateOf: 'candidate-1', after: null, accepted: false,
+    reason: '評価済みの同一式の再提案のため測定せずに却下（candidate-1 と同じ式）',
+    formulaDiff: [{ blockId: '1', removed: ['a[tiab]'], added: ['b[tiab]'] }] });
+});
+
+test.each(['lost', 'gained'] as const)('差集合 %s の測定失敗で保留した式は再測定できる', async (stage) => {
+  const f = setup({ a: { hits: 200, captured: ['11', '22'] },
+    b: { hits: 50, captured: ['11', '22'] } });
+  const original = f.fetch.getMockImplementation()!;
+  let failures = 0;
+  f.fetch.mockImplementation(async (url: string) => {
+    const params = new URL(url).searchParams;
+    if (params.get('term')?.includes(') NOT (') && params.get('retmax') === (stage === 'lost' ? '10000' : '0')
+      && failures++ === 0) throw new Error('一時的な測定失敗');
+    return original(url);
+  });
+  const result = await runQueryOptimization(f.input, f.deps);
+  expect(result.trials[1]).toMatchObject({ held: true, impact: { [stage === 'lost' ? 'lostHits' : 'gainedHits']: null } });
+  expect(result.trials[2]).toMatchObject({ accepted: true, impact: { lostHits: 0, gainedHits: 0 } });
+  expect(result.trials[2]?.duplicateOf).toBeUndefined();
+  expect(failures).toBe(2);
+});
+
+test('追加語だけ違う削除の変種は測定する', async () => {
+  const f = setup({ a: { hits: 200, captured: ['11', '22'] },
+    b: { hits: 50, captured: ['11', '22'], lost: { hits: 1, pmids: ['901'] } },
+    c: { hits: 60, captured: ['11', '22'], lost: { hits: 1, pmids: ['901'] } } }, ['b[tiab]', 'c[tiab]']);
+  const result = await runQueryOptimization(f.input, f.deps);
+  expect(result.stopReason).toBe('no_improvement');
+  expect(result.trials[2]).toMatchObject({ held: true, after: { totalHits: 60 },
+    formulaDiff: [{ blockId: '1', removed: ['a[tiab]'], added: ['c[tiab]'] }] });
+});
+
+test('実式差分は表記揺れを除外しブロック追加削除と結合式も残す', () => {
+  const before = { blocks: [
+    { id: '1', expression: 'A[tiab] OR b[tiab]', isCombination: false },
+    { id: '2', expression: 'c[tiab]', isCombination: false },
+    { id: '4', expression: '#1 AND #2', isCombination: true },
+  ], combinationExpression: '#1 AND #2' };
+  const after = { blocks: [
+    { id: '1', expression: 'a[tiab] OR D[tiab]', isCombination: false },
+    { id: '3', expression: '"Disease"[Mesh]', isCombination: false },
+    { id: '4', expression: '#1 AND #3', isCombination: true },
+  ], combinationExpression: '#1 AND #3' };
+  expect(diffOptimizationFormula(before, after)).toEqual([
+    { blockId: '1', removed: ['b[tiab]'], added: ['D[tiab]'] },
+    { blockId: '2', removed: ['c[tiab]'], added: [] },
+    { blockId: '4', removed: ['#1 AND #2'], added: ['#1 AND #3'] },
+    { blockId: '3', removed: [], added: ['"Disease"[Mesh]'] },
+  ]);
 });

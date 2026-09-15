@@ -44,7 +44,7 @@ async function setup(page: Page, options: { hasSeeds: boolean; holdAi: boolean; 
     }
     if (query.includes(') NOT (')) {
       const lost = options.heldLost !== undefined && query.split(') NOT (')[0]!.includes('broad');
-      return { count: String(lost ? options.heldLost : 0), idlist: lost ? ['30000001'] : [] };
+      return { count: String(lost ? options.heldLost : 0), idlist: lost ? Array.from({ length: Math.min(options.heldLost!, Number(new URL(url).searchParams.get('retmax') ?? '20')) }, (_, index) => String(30000001 + index)) : [] };
     }
     if (options.missedByFilter && query.includes('[uid]')) {
       return query.includes('randomized') ? { count: '0', idlist: [] } : { count: '1', idlist: [PMID] };
@@ -53,7 +53,7 @@ async function setup(page: Page, options: { hasSeeds: boolean; holdAi: boolean; 
       : { count: url.includes('broad') ? '250' : '50', idlist: [] };
   }, efetchXml: (url) => {
     const pmids = new URL(url).searchParams.get('id')?.split(',') ?? [];
-    return `<PubmedArticleSet>${pmids.filter((pmid) => pmid === '30000001' || pmid === OUTSIDE_PMID).map((pmid) =>
+    return `<PubmedArticleSet>${pmids.filter((pmid) => (Number(pmid) >= 30000001 && Number(pmid) <= 30000000 + (options.heldLost ?? 0)) || pmid === OUTSIDE_PMID).map((pmid) =>
       `<PubmedArticle><PMID>${pmid}</PMID><ArticleTitle>${pmid === OUTSIDE_PMID ? '外側の研究' : '確認対象の研究'}</ArticleTitle><PubDate><Year>2024</Year></PubDate><Abstract><AbstractText>確認対象の抄録</AbstractText></Abstract></PubmedArticle>`).join('')}</PubmedArticleSet>`;
   } });
   await registerGeminiStub(page, { responses: { 'optimize-query': {
@@ -168,7 +168,7 @@ test.describe('検索式の自動調整', () => {
     await page.getByText('試行1の変更詳細', { exact: true }).click();
     await expect(page.getByText('失う集合: 150 件 / 増える集合: 0 件', { exact: true })).toBeVisible();
     await expect(page.locator('.optimization__review')).toContainText('保留した候補 1 件');
-    await expect(page.getByRole('article', { name: '判定候補 PMID 30000001', exact: true }))
+    await expect(page.getByRole('article', { name: /^判定候補 PMID 30000/ }).first())
       .toContainText('保留候補 candidate-1 で失う文献');
     await expect(page.locator('.optimization__final-formula')).toContainText('"broad"[tiab]');
     await expect(page.locator('.optimization__review')).toContainText('初期式からの変更はありません');
