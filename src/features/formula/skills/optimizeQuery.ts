@@ -88,13 +88,29 @@ export interface OptimizationImpact {
   lostHits: number | null;
   /** 変更後 NOT 変更前 の実測件数。失敗時は null。 */
   gainedHits: number | null;
-  /** 失う集合のうち書誌を取得した先頭の数件。集合全体を安全と判断する根拠にはしない。 */
+  sample?: {
+    method: 'all' | 'retrieved_subset';
+    /** 抽出に使った乱数の種（32bit 符号なし整数）。 */
+    seed: number;
+    /** 差集合の実測件数（lostHits と同じ値）。 */
+    populationCount: number;
+    /** 取得できた PMID の件数（重複除去後）。 */
+    retrievedCount: number;
+    /** 抽出した PMID（数値昇順）。efetch に失敗しても残す。 */
+    pmids: string[];
+    /** ISO 8601 の抽出時刻。 */
+    sampledAt: string;
+  };
+  /** 抽出した PMID の書誌（sample のない旧データは先頭の数件）。集合全体を安全と判断する根拠にはしない。 */
   inspected: { pmid: string; title: string | null; year: number | null }[];
   /** 実測・書誌取得の失敗理由。成功時は null。 */
   error: string | null;
 }
 
 export interface OptimizationTrial {
+  duplicateOf?: string;
+  /** 提案前の最良式と候補式を、ブロックごとの検索語の集合で比べた差分。 */
+  formulaDiff?: { blockId: string; added: string[]; removed: string[] }[];
   /** 採用判定を通ったが削除影響の確認が必要なため、レビュー候補として保留した試行。 */
   held?: boolean;
   /** 採用判定の直前に実測した差集合。判定前に却下した試行には無い。 */
@@ -192,6 +208,10 @@ export const OPTIMIZE_QUERY_SYSTEM_PROMPT = `
   要求がある回は式を変更せず、追加取得の結果を次の反復で読んでから提案してください。
   取得は 1 反復 3 件までです。未取得・失敗・打ち切りの説明を読み、関係を推測しません。
 - 却下理由と前後の実測を読み、同じ失敗を繰り返しません。
+  「保留・却下した変更の一覧」と同じ式は測定せずに却下されます（差集合の測定失敗時は再測定できます）。
+  一覧の削除を同じ形で出しても、失う集合が残る限り再び保留になります。
+  件数を減らしたいときは、語を削る代わりにブロックの語を特異的な語と AND で組み合わせる、
+  下位の MeSH に置き換える、といった狭める案を検討してください。採否は実測で決まります。
 - rationale は日本語で研究基準との意味的整合性の検討結果を含めます。
   これは AI の判断であって機械的な保証ではありません。
 - 件数の予想は出力しません。measurement_ids には実際に参照した測定 ID だけを返します。
@@ -217,6 +237,8 @@ export const OPTIMIZE_QUERY_USER_PROMPT_TEMPLATE = `
 {{MESH}}
 MeSH 追加取得要求の結果（未取得理由を含む）:
 {{MESH_REQUEST_RESULTS}}
+保留・却下した変更の一覧:
+{{REJECTED_CHANGES}}
 試行履歴（採否・却下理由・前後の実測）:
 {{TRIALS}}
 過去の run の却下記録（未再検証。今回の実測ではなく、同じ失敗を避けるための文脈）:
@@ -278,6 +300,7 @@ export async function optimizeQuery(
     MESH: formatContext(input.meshContext),
     MESH_REQUEST_RESULTS: formatContext(input.meshRequestResults),
     PREVIOUS_REJECTIONS: formatContext(input.previousRejectedTrials ?? []),
+    REJECTED_CHANGES: formatRejectedChanges(input.trials ?? []),
     TRIALS: input.trials?.length ? input.trials.map((trial) => [
       formatContext({ candidateId: trial.candidateId, formula: trial.formula,
         accepted: trial.accepted, reason: trial.reason, rationale: trial.rationale,
@@ -318,4 +341,28 @@ function formatContext(value: unknown): string {
     if (item === '' || (Array.isArray(item) && item.length === 0)) return '(なし)';
     return item;
   }, 2);
+}
+
+/** 保留・却下した実際の変更を、全式の履歴とは別に短く渡す。 */
+export function formatRejectedChanges(trials: OptimizationTrial[]): string {
+  const rejected = trials.filter((trial) => trial.kind === 'proposal' && !trial.accepted);
+  const normalize = (term: string) => term.trim().toLowerCase().replace(/\s+/g, ' ');
+  const signature = (trial: OptimizationTrial, key: 'added' | 'removed') => JSON.stringify(
+    (trial.formulaDiff ?? []).filter((block) => block[key].length)
+      .map((block) => [block.blockId, [...new Set(block[key].map(normalize))].sort()])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0]))));
+  const words = (terms: string[]) => terms.length
+    ? terms.slice(0, 10).join(', ') + (terms.length > 10 ? `、ほか ${terms.length - 10} 語` : '') : 'なし';
+  return rejected.map((trial, index) => {
+    const diff = trial.formulaDiff?.map((block) =>
+      `#${block.blockId} 削除: ${words(block.removed)} / 追加: ${words(block.added)}`).join(' ; ')
+      || (trial.formulaDiff ? '変更なし' : '変更差分の記録なし');
+    if (trial.duplicateOf) return `${trial.candidateId} / ${diff}（${trial.duplicateOf} と同じ式） / 結果: 測定せずに却下`;
+    const variant = signature(trial, 'removed') === '[]' ? undefined : rejected.slice(0, index).find((previous) =>
+      signature(previous, 'removed') === signature(trial, 'removed')
+      && signature(previous, 'added') !== signature(trial, 'added'));
+    const result = trial.held ? `保留（失う ${trial.impact?.lostHits ?? '未測定'} 件・増える ${trial.impact?.gainedHits ?? '未測定'} 件）`
+      : `却下（${trial.reason}）`;
+    return `${trial.candidateId} / ${diff}${variant ? `（${variant.candidateId} と同じ削除の変種）` : ''} / 結果: ${result}`;
+  }).join('\n') || '(なし)';
 }

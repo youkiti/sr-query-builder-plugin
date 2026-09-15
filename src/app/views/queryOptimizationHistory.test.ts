@@ -393,3 +393,15 @@ test.each([150, null, undefined])('復元した削除影響 %s は保留と欠�
   if (lostHits === undefined) expect(restored.textContent).not.toContain('/ 失う');
   else expect(restored.textContent).toContain(`/ 失う ${lostHits ?? '未測定'} 件`);
 });
+
+
+test.each(['all', 'retrieved_subset', undefined] as const)('履歴に抽出方法 %s と種を表示する', (method) => {
+  const f = setup();
+  f.state.queryOptimizationRun!.trials[0]!.impact = { lostHits: 150, gainedHits: 0, inspected: [], error: null,
+    ...(method ? { sample: { method, seed: 123, populationCount: 150, retrievedCount: 100,
+      pmids: ['901'], sampledAt: '2026-09-15T00:00:00Z' } } : {}) };
+  f.render();
+  expect(f.container.textContent).toContain(`抽出方法: ${method ?? '旧データ'}`);
+  expect(f.container.textContent).toContain(`種: ${method ? '123' : '記録なし'}`);
+  if (method === 'retrieved_subset') expect(f.container.textContent).toContain('集合全体からの無作為抽出ではありません');
+});

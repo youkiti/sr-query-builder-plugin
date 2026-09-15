@@ -112,3 +112,50 @@ test('未取得の理由を実在ノードと分けた文脈として渡す', as
   expect((await optimizeQuery(input, provider)).meshRequests).toEqual([]);
   expect(chat.mock.calls[0]![0][1].content).toContain('未取得: callback が未注入です');
 });
+
+
+test('保留・却下・重複の変更一覧と変種の注記を実差分から渡す', async () => {
+  const f = setup();
+  const base = { kind: 'proposal' as const, apiEvents: [], formula: f.input.formula, accepted: false,
+    rationale: '', before: measurement(), after: measurement(), reason: '局面の指標に改善がありません' };
+  f.input.trials = [
+    { ...base, candidateId: 'candidate-1', held: true,
+      impact: { lostHits: 10800, gainedHits: 0, inspected: [], error: null },
+      formulaDiff: [{ blockId: '2', removed: ['"Diabetic Retinopathy"[Mesh]'], added: [] }] },
+    { ...base, candidateId: 'candidate-2',
+      formulaDiff: [{ blockId: '2', removed: ['"Diabetic Retinopathy"[Mesh]'], added: ['b[tiab]'] }] },
+    { ...base, candidateId: 'candidate-3', duplicateOf: 'candidate-1', after: null,
+      formulaDiff: [{ blockId: '2', removed: ['"Diabetic Retinopathy"[Mesh]'], added: [] }] },
+    { ...base, candidateId: 'candidate-4', duplicateOf: 'candidate-1', after: null, formulaDiff: [] },
+    { ...base, candidateId: 'candidate-5', duplicateOf: 'candidate-1', after: null },
+    { ...base, candidateId: 'accepted', accepted: true },
+  ];
+  await optimizeQuery(f.input, f.provider);
+  const prompt = f.chat.mock.calls[0]![0][1].content as string;
+  const list = prompt.split('保留・却下した変更の一覧:\n')[1]!.split('\n試行履歴')[0]!;
+  expect(list.split('\n')).toHaveLength(5);
+  expect(list).toContain('candidate-1 / #2 削除: "Diabetic Retinopathy"[Mesh] / 追加: なし / 結果: 保留（失う 10800 件・増える 0 件）');
+  expect(list).toContain('（candidate-1 と同じ削除の変種） / 結果: 却下（局面の指標に改善がありません）');
+  expect(list).toContain('candidate-3 / #2 削除: "Diabetic Retinopathy"[Mesh] / 追加: なし（candidate-1 と同じ式） / 結果: 測定せずに却下');
+  expect(list).toContain('candidate-4 / 変更なし（candidate-1 と同じ式） / 結果: 測定せずに却下');
+  expect(list).toContain('candidate-5 / 変更差分の記録なし（candidate-1 と同じ式） / 結果: 測定せずに却下');
+  expect(list.split('\n').filter((line) => line.includes('測定せずに却下')).every((line) => !line.includes('同じ削除の変種'))).toBe(true);
+  const system = f.chat.mock.calls[0]![0][0].content as string;
+  for (const text of ['測定せずに却下', '失う集合が残る限り再び保留', '特異的な語と AND', '下位の MeSH', '採否は実測で決まります']) expect(system).toContain(text);
+  expect(prompt).toContain('試行履歴（採否・却下理由・前後の実測）');
+});
+
+test('変更一覧が空ならなし、長い差分はブロックごとに省略する', async () => {
+  const f = setup();
+  await optimizeQuery(f.input, f.provider);
+  expect(f.chat.mock.calls[0]![0][1].content).toContain('保留・却下した変更の一覧:\n(なし)');
+  f.input.trials = [{ kind: 'proposal', apiEvents: [], candidateId: 'long', formula: f.input.formula,
+    accepted: false, before: null, after: null, reason: '構文不正', rationale: '',
+    formulaDiff: [{ blockId: '1', removed: Array.from({ length: 12 }, (_, i) => `word${i}[tiab]`), added: [] },
+      { blockId: '2', removed: [], added: ['new[tiab]'] }] }];
+  await optimizeQuery(f.input, f.provider);
+  const list = (f.chat.mock.calls[1]![0][1].content as string).split('保留・却下した変更の一覧:\n')[1]!.split('\n試行履歴')[0]!;
+  expect(list).toContain('word9[tiab]、ほか 2 語');
+  expect(list).not.toContain('word10');
+  expect(list).toContain(' ; #2 削除: なし / 追加: new[tiab]');
+});

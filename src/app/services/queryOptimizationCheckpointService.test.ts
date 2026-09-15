@@ -194,3 +194,20 @@ test('入力指標は改行・外側の空白・シード集合の順序を正�
   expect(createQueryOptimizationInputIdentity(protocol, blocks, ['11'], 100)).not.toBe(identity);
   expect(createQueryOptimizationInputIdentity(protocol, blocks, ['11', '22'], 101)).not.toBe(identity);
 });
+
+
+test('抽出情報と実差分・重複 ID を複製して要約へ保存する', async () => {
+  const { deps, trial, options } = setup();
+  trial.impact = { lostHits: 1, gainedHits: 0, inspected: [], error: null,
+    sample: { method: 'all', seed: 123, populationCount: 1, retrievedCount: 1,
+      pmids: ['901'], sampledAt: '2026-09-15T00:00:00Z' } };
+  trial.formulaDiff = [{ blockId: '1', added: ['b[tiab]'], removed: ['a[tiab]'] }];
+  trial.duplicateOf = 'candidate-1';
+  const saved = await saveQueryOptimizationCheckpoint(options, deps);
+  expect(saved.trials[0]).toMatchObject({ sample: trial.impact.sample,
+    formulaDiff: trial.formulaDiff, duplicateOf: 'candidate-1' });
+  trial.impact.sample!.pmids.push('902');
+  trial.formulaDiff[0]!.added.push('c[tiab]');
+  expect(saved.trials[0]!.sample!.pmids).toEqual(['901']);
+  expect(saved.trials[0]!.formulaDiff![0]!.added).toEqual(['b[tiab]']);
+});

@@ -206,3 +206,20 @@ test.each(['running', 'skipped', 'error'] as OptimizationOutsideCheckState['stat
   run.outsideCheck!.status = status;
   expect(section(run, 'deletion_impact').state).toBe('confirmed');
 });
+
+
+test.each(['all', 'retrieved_subset', undefined] as const)('抽出方法 %s を表示して未確認件数を維持する', (method) => {
+  const run = fixture();
+  run.trials = [{ kind: 'proposal', candidateId: 'candidate-1', formula: run.result!.best!.formula,
+    before: null, after: null, accepted: false, held: true, rationale: '', reason: '', apiEvents: [],
+    impact: { lostHits: 150, gainedHits: 0, inspected: [{ pmid: '2', title: '研究', year: 2000 }], error: null,
+      ...(method ? { sample: { method, seed: 123, populationCount: 150, retrievedCount: method === 'all' ? 150 : 100,
+        pmids: ['2'], sampledAt: '2026-09-15T00:00:00Z' } } : {}) } }];
+  const review = section(run, 'deletion_impact');
+  const expected = method === 'all' ? '失う集合 150 件から無作為抽出した 1 件の書誌を確認'
+    : method === 'retrieved_subset' ? '失う集合 150 件のうち取得できた 100 件から無作為抽出した 1 件の書誌を確認（集合全体からの無作為抽出ではありません）'
+      : '失う集合 150 件のうち書誌を確認できたのは先頭 1 件';
+  expect(review.lines).toContain(`保留候補 candidate-1: ${expected}`);
+  expect(review.lines).toContain('残り 149 件は未確認');
+  expect(review.state).not.toBe('confirmed');
+});

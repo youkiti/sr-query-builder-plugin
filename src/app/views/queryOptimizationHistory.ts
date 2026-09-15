@@ -187,7 +187,10 @@ function renderDetails(details: HTMLElement, trial: OptimizationTrial, nodes: Op
   if (!impact) paragraph(deletion, '採用判定の前に却下したため、差集合は実測していません');
   else {
     paragraph(deletion, `失う集合: ${impact.lostHits ?? '未測定'} 件 / 増える集合: ${impact.gainedHits ?? '未測定'} 件`);
-    paragraph(deletion, `確認した書誌: ${impact.inspected.length} 件 / 失う集合全体 ${impact.lostHits ?? '未測定'} 件（先頭の数件であり、集合全体の安全性を示すものではありません）`);
+    paragraph(deletion, impact.sample
+      ? `抽出方法: ${impact.sample.method === 'all' ? 'all（全件から無作為抽出）' : `retrieved_subset（取得できた ${impact.sample.retrievedCount} 件から無作為抽出。集合全体からの無作為抽出ではありません）`} / 種: ${impact.sample.seed}`
+      : '抽出方法: 旧データ（先頭の数件） / 種: 記録なし');
+    paragraph(deletion, `確認した書誌: ${impact.inspected.length} 件 / 失う集合全体 ${impact.lostHits ?? '未測定'} 件（${impact.sample ? '抽出した書誌であり' : '先頭の数件であり'}、集合全体の安全性を示すものではありません）`);
     for (const article of impact.inspected) {
       const p = doc.createElement('p');
       const link = doc.createElement('a');

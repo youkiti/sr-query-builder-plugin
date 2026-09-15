@@ -47,8 +47,8 @@ test('段階と確定した各試行を通知し、通知の有無・例外で�
   ]);
   expect(progress.map((p) => p.step)).toEqual(expect.arrayContaining(['measuring', 'adjusting', 'revalidating', 'review']));
   expect(progress.filter((p) => p.trial).map((p) => [p.trial!.candidateId, p.step])).toEqual([
-    ['initial', 'measuring'], ['candidate-1', 'measuring'], ['final-1', 'revalidating'],
-    ['initial', 'measuring'], ['candidate-1', 'measuring'], ['final-1', 'revalidating'],
+    ['initial', 'measuring'], ['candidate-1', 'adjusting'], ['final-1', 'revalidating'],
+    ['initial', 'measuring'], ['candidate-1', 'adjusting'], ['final-1', 'revalidating'],
   ]);
   expect(progress[0]).toMatchObject({ bestTotalHits: null, bestCapturedSeedCount: null });
   expect(progress[progress.length - 1]).toMatchObject({ bestTotalHits: 1, bestCapturedSeedCount: 1, iterations: 1 });
