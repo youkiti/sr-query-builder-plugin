@@ -675,7 +675,9 @@ export async function runQueryOptimization(
       unmetReasons.push(`目安件数 ${fixed.maxHits} 件を超えています（実測 ${latestMeasurement.totalHits} 件）`);
       if (['no_improvement', 'diagnosed_block_held', 'iteration_limit', 'repeated_formula'].includes(reason)) {
         unmetReasons.push('既に捕捉している文献を失わずに件数を減らす変更は見つかりませんでした。件数を減らす候補には未確認の損失があります。これは件数を減らせないことの証明ではありません。検索戦略のレビュー（概念と検索語の対応・AND/OR の論理・フィルタの適用対象）か、目安件数の見直しを検討してください。');
-        const heldCount = trials.filter((trial) => trial.held).length;
+        const heldCount = trials.filter((trial) => trial.held
+          && typeof trial.before?.totalHits === 'number' && typeof trial.after?.totalHits === 'number'
+          && trial.after.totalHits < trial.before.totalHits).length;
         if (heldCount > 0) unmetReasons.push(`件数を減らす候補を ${heldCount} 件保留しました（削除影響の確認を参照）。`);
       }
     }

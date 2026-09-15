@@ -1754,6 +1754,59 @@ test('目安超過で反復上限に達したら保留した試行数を案内�
   expect(result.unmetReasons[index + 1]).toBe('件数を減らす候補を 1 件保留しました（削除影響の確認を参照）。');
 });
 
+test('件数が減る保留と増える保留が混在すると減る候補だけを案内する', async () => {
+  const f = setup({ a: { hits: 200, captured: ['11'] },
+    b: { hits: 150, captured: ['11', '22'], lost: { hits: 50 } },
+    c: { hits: 250, captured: ['11', '22'], lost: { hits: 10 } } }, ['b[tiab]', 'c[tiab]']);
+  // 保留後も採用式は a のため、どちらの提案も a からの置換として返す。
+  for (const expression of ['b[tiab]', 'c[tiab]']) {
+    f.chat.mockResolvedValueOnce({ text: JSON.stringify({ target_block_id: '1', proposed_expression: expression,
+      replaced_terms: [{ before: 'a[tiab]', after: expression }] }) });
+  }
+  const result = await runQueryOptimization(f.input, f.deps);
+  expect(result.stopReason).toBe('no_improvement');
+  expect(result.trials.filter((trial) => trial.held).map((trial) => trial.after?.totalHits)).toEqual([150, 250]);
+  const index = result.unmetReasons.indexOf(hitTargetGuidance);
+  expect(index).toBeGreaterThanOrEqual(0);
+  expect(result.unmetReasons[index + 1]).toBe('件数を減らす候補を 1 件保留しました（削除影響の確認を参照）。');
+});
+
+test.each([200, 250])('保留候補が同数か増加の %s 件だけなら保留件数の行を出さない', async (hits) => {
+  const f = setup({ a: { hits: 200, captured: ['11'] },
+    b: { hits, captured: ['11', '22'], lost: { hits: 10 } } });
+  f.input.maxIterations = 1;
+  const result = await runQueryOptimization(f.input, f.deps);
+  expect(result.stopReason).toBe('iteration_limit');
+  expect(result.trials.filter((trial) => trial.held)).toHaveLength(1);
+  expect(result.unmetReasons).toContain(hitTargetGuidance);
+  expect(result.unmetReasons.some((line) => line.startsWith('件数を減らす候補を'))).toBe(false);
+});
+
+describe.each(['before', 'after'] as const)('%s の実測が欠けた保留候補', (side) => {
+  test.each(['測定全体', '件数'] as const)('%s が欠けていれば保留件数の行を出さない', async (missing) => {
+    const f = setup({ a: { hits: 200, captured: ['11', '22'] },
+      b: { hits: 150, captured: ['11', '22'], lost: { hits: 50 } } });
+    f.input.maxIterations = 1;
+    const save = checkpoint.saveQueryOptimizationCheckpoint;
+    // 通常の実測では作られない欠損を、確定済みの保留試行に注入する。
+    const saveMock = jest.spyOn(checkpoint, 'saveQueryOptimizationCheckpoint').mockImplementation(async (...args) => {
+      for (const trial of args[0].trials.filter((item) => item.held)) {
+        trial[side] = missing === '測定全体' ? null : { ...trial[side]!, totalHits: null };
+      }
+      return save(...args);
+    });
+    try {
+      const result = await runQueryOptimization(f.input, f.deps);
+      expect(result.stopReason).toBe('iteration_limit');
+      expect(result.trials.filter((trial) => trial.held)).toHaveLength(1);
+      expect(result.unmetReasons).toContain(hitTargetGuidance);
+      expect(result.unmetReasons.some((line) => line.startsWith('件数を減らす候補を'))).toBe(false);
+    } finally {
+      saveMock.mockRestore();
+    }
+  });
+});
+
 test('目安件数と既知シードの捕捉を満たした終了には件数削減の案内を出さない', async () => {
   const f = setup({ a: { hits: 80, captured: ['11', '22'] } }, ['a[tiab]']);
   const result = await runQueryOptimization(f.input, f.deps);
