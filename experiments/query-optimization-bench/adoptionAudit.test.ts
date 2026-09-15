@@ -2,6 +2,7 @@
 import { computeAdoptionAudit } from './adoptionAudit';
 import { evaluateSearch } from './ncbiEval';
 import { calculateMetrics } from './metrics';
+import { measureRejectedCandidates } from './run';
 import type { RunResult, StudyGroup } from './types';
 import type { EutilsDeps } from '../../src/lib/ncbi/eutils';
 import type { OptimizationTrial } from '../../src/features/formula/skills/optimizeQuery';
@@ -27,6 +28,51 @@ const trial = (candidateId: string, accepted: boolean, formula: ReturnType<typeo
 });
 
 beforeEach(() => jest.resetAllMocks());
+
+test.each([false, true])('採用→保留→却下の直前比は採否監査と一致し、計測済み候補を再利用する: %s', async (reuse) => {
+  const result = makeResult();
+  result.optimization = { status: 'needs_review', stopReason: 'iteration_limit', best: null, unmetReasons: [], iterations: 3,
+    apiCalls: 0, elapsedMs: 0, trials: [trial('採用', true, formulaFor('accepted')),
+      trial('保留', false, formulaFor('held'), true), trial('却下', false, formulaFor('rejected'))] };
+  const acceptedMetrics = calculateMetrics(groups, heldOut, ['1', '2', '3', '4', '5'], 200);
+  if (reuse) result.rejectedCandidates = [{ candidateId: '採用', accepted: true, changes: null, hits: 200,
+    metrics: acceptedMetrics, priorId: 'C0', comparedToPrior: null, comparedToC0: null }];
+  else jest.mocked(evaluateSearch).mockResolvedValueOnce({ status: 'success', hits: 200, capturedPmids: ['1', '2', '3', '4', '5'] });
+  jest.mocked(evaluateSearch)
+    .mockResolvedValueOnce({ status: 'success', hits: 150, capturedPmids: ['1', '2', '3', '4'] })
+    .mockResolvedValueOnce({ status: 'success', hits: 120, capturedPmids: ['1', '2', '3', '4'] });
+  const measured = await measureRejectedCandidates(result, eutils);
+  expect(evaluateSearch).toHaveBeenCalledTimes(reuse ? 2 : 3);
+  if (!reuse) expect(measured[0]!.priorId).toBe('C0');
+  for (const candidate of measured.filter((item) => !item.accepted)) {
+    expect(candidate.priorId).toBe('採用');
+    expect(candidate.comparedToPrior).toMatchObject({ lostHeldOut: ['e'], lostReports: ['5'], outcome: 'tradeoff' });
+    expect(candidate.comparedToC0).toMatchObject({ lostHeldOut: [], lostReports: [], outcome: 'worse' });
+  }
+  result.rejectedCandidates = [...result.rejectedCandidates ?? [], ...measured];
+  const audit = await computeAdoptionAudit(result, eutils);
+  for (const candidate of measured) {
+    const row = audit.trials.find((item) => item.candidateId === candidate.candidateId)!;
+    const before = candidate.priorId === 'C0' ? result.conditions.C0!.metrics! : acceptedMetrics;
+    expect(row.hitsBefore).toBe(before.hits);
+    expect(row.lostHeldOut).toEqual(candidate.comparedToPrior!.lostHeldOut);
+  }
+  expect(evaluateSearch).toHaveBeenCalledTimes(reuse ? 2 : 3);
+});
+
+test('採用がない場合は全候補が C0 比で、比較元欠測は null になる', async () => {
+  const result = makeResult();
+  result.optimization = { status: 'needs_review', stopReason: 'iteration_limit', best: null, unmetReasons: [], iterations: 2,
+    apiCalls: 0, elapsedMs: 0, trials: [trial('保留', false, formulaFor('held'), true), trial('却下', false, formulaFor('rejected'))] };
+  jest.mocked(evaluateSearch).mockResolvedValue({ status: 'success', hits: 90, capturedPmids: ['4'] });
+  const measured = await measureRejectedCandidates(result, eutils);
+  for (const candidate of measured) {
+    expect(candidate.priorId).toBe('C0');
+    expect(candidate.comparedToPrior).toEqual(candidate.comparedToC0);
+  }
+  result.conditions.C0!.metrics = null;
+  expect((await measureRejectedCandidates(result, eutils))[0]!.comparedToPrior).toBeNull();
+});
 
 test('候補が無ければ 0 件・harmfulAdopted 0（manualReviewPending なら null）で即座に返す', async () => {
   expect(await computeAdoptionAudit(makeResult(), eutils)).toEqual({ adopted: 0, unscoredAdopted: 0, harmfulAdopted: 0, trials: [] });
@@ -60,7 +106,8 @@ test('却下候補は rejectedCandidates の既存計測を再利用し、追加
   result.optimization = { status: 'needs_review', stopReason: 'iteration_limit', best: null, unmetReasons: [], iterations: 1, apiCalls: 0, elapsedMs: 0,
     trials: [trial('candidate-rejected', false, formulaFor('rejected'))] };
   const reusedMetrics = calculateMetrics(groups, heldOut, ['1', '2', '3'], 80); // d, e を失う却下候補
-  result.rejectedCandidates = [{ candidateId: 'candidate-rejected', accepted: false, changes: null, hits: 80, metrics: reusedMetrics, comparedToC0: null }];
+  result.rejectedCandidates = [{ candidateId: 'candidate-rejected', accepted: false, changes: null, hits: 80, metrics: reusedMetrics,
+    comparedToC0: null, priorId: 'C0', comparedToPrior: null }];
 
   const audit = await computeAdoptionAudit(result, eutils);
   expect(evaluateSearch).not.toHaveBeenCalled();

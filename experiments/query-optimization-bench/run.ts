@@ -183,9 +183,14 @@ export async function measureRejectedCandidates(result: RunResult, eutils: Eutil
   const dated = { ...eutils, fetch: createEvalFetch(result.searchDate, eutils.fetch, () => undefined) };
   const c0 = result.conditions.C0?.metrics;
   const candidates: NonNullable<RunResult['rejectedCandidates']> = [];
+  let priorId = 'C0';
+  let priorMetrics = c0;
   for (const trial of proposals) {
     const prior = result.rejectedCandidates?.find((candidate) => candidate.candidateId === trial.candidateId && !candidate.error);
-    if (prior) continue;
+    if (prior) {
+      if (trial.accepted) { priorId = trial.candidateId; priorMetrics = prior.metrics; }
+      continue;
+    }
     let measurement;
     try { measurement = await evaluateSearch(expandFormula(trial.formula), pmids, dated); }
     catch (err) { measurement = { status: 'failure' as const, error: err instanceof Error ? err.message : String(err) }; }
@@ -194,7 +199,9 @@ export async function measureRejectedCandidates(result: RunResult, eutils: Eutil
     candidates.push({ candidateId: trial.candidateId, accepted: trial.accepted, changes: trial.changes ?? null,
       hits: measurement.status === 'success' ? measurement.hits : null, metrics,
       comparedToC0: c0 && metrics ? compareMetrics(c0, metrics) : null,
+      priorId, comparedToPrior: priorMetrics && metrics ? compareMetrics(priorMetrics, metrics) : null,
       ...(measurement.status === 'failure' ? { error: measurement.error } : {}) });
+    if (trial.accepted) { priorId = trial.candidateId; priorMetrics = metrics; }
   }
   return candidates;
 }

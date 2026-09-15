@@ -116,7 +116,7 @@ test('aggregateRows は role・profile・case・C0・分割ごとに min/median/
       C1: { query: 'c1', measurement: { status: 'success', hits: 80, capturedPmids: [] }, metrics: { heldOutRecall: 0.5, allStudyRecall: 0.5,
         hits: 80, capturedStudies: [], capturedHeldOut: [], knownIncludedReportShare: null, recordsPerKnownIncludedStudy: null } },
     },
-    comparison: { lostStudies: [], gainedStudies: [], lostHeldOut: [], gainedHeldOut: [], improved: true, outcome: 'improved' },
+    comparison: { lostStudies: [], gainedStudies: [], lostHeldOut: [], gainedHeldOut: [], lostReports: null, gainedReports: null, improved: true, outcome: 'improved' },
     adoptionAudit: { adopted: 1, unscoredAdopted: 0, harmfulAdopted: 0, trials: [] },
     confirmation: { status: 'ready', reason: null, marginHits: 5, outsidePmids: [], lostInspectedPmids: [], total: 4, heldOutStudiesAmongCandidates: [], nonGoldCandidates: 0 },
   };
@@ -124,7 +124,7 @@ test('aggregateRows は role・profile・case・C0・分割ごとに min/median/
     conditions: { ...base.conditions, C0: { query: 'c0', measurement: { status: 'success', hits: 200, capturedPmids: [] }, metrics: null },
       C1: { query: 'c1', measurement: { status: 'success', hits: 60, capturedPmids: [] }, metrics: { heldOutRecall: 0.7, allStudyRecall: 0.7,
         hits: 60, capturedStudies: [], capturedHeldOut: [], knownIncludedReportShare: null, recordsPerKnownIncludedStudy: null } } },
-    comparison: { lostStudies: [], gainedStudies: [], lostHeldOut: ['d'], gainedHeldOut: [], improved: false, outcome: 'tradeoff' },
+    comparison: { lostStudies: [], gainedStudies: [], lostHeldOut: ['d'], gainedHeldOut: [], lostReports: null, gainedReports: null, improved: false, outcome: 'tradeoff' },
     adoptionAudit: { adopted: 1, unscoredAdopted: 0, harmfulAdopted: 1, trials: [] },
     confirmation: { ...base.confirmation!, total: 8 } };
   const liveRun: RunResult = { ...base, runId: 'r3', c0: { source: 'live' } };

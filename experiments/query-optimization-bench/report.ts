@@ -8,7 +8,7 @@ export function reportRows(results: RunResult[], baselines: Record<string, strin
   const rows = [['profile', 'case', 'condition', 'status', 'hits', 'heldOutRecall', 'allStudyRecall', 'knownIncludedReportShare',
     'recordsPerKnownIncludedStudy', 'lostStudies', 'gainedStudies', 'lostHeldOut', 'gainedHeldOut', 'outcome', 'stopReason', 'iterations', 'apiCalls', 'elapsedMs', 'query',
     'role', 'c0', 'seedSplit', 'maxHits', 'gitCommit', 'label', 'adopted', 'harmfulAdopted', 'confirmationTotal', 'heldOutAmongCandidates',
-    'llmCostUsd', 'llmTokensIn', 'llmTokensOut', 'replay']];
+    'llmCostUsd', 'llmTokensIn', 'llmTokensOut', 'replay', 'lostReports', 'gainedReports']];
   for (const result of results) {
     const c0Label = result.c0 ? `${result.c0.source}${result.c0.id ? `:${result.c0.id}` : ''}` : '欠測';
     for (const condition of ['C0', 'C1', 'B1'] as const) {
@@ -42,7 +42,9 @@ export function reportRows(results: RunResult[], baselines: Record<string, strin
         c1Only ? formatCost(result.llmUsage) : '',
         c1Only ? String(result.llmUsage?.tokensIn ?? '欠測') : '',
         c1Only ? String(result.llmUsage?.tokensOut ?? '欠測') : '',
-        result.replay?.name ?? '-']);
+        result.replay?.name ?? '-',
+        c1Only ? result.comparison?.lostReports?.join('; ') ?? '欠測' : '',
+        c1Only ? result.comparison?.gainedReports?.join('; ') ?? '欠測' : '']);
     }
   }
   return rows;

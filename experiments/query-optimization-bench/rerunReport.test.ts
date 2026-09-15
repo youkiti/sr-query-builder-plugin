@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import * as types from './types';
+import { compareMetrics } from './metrics';
 import { buildReport, csv, distribution, layerC, report, usageFromLogs, type Entry } from './rerunReport';
 import { buildRunJobs, makeSlots, readConfig, slotName, slotsFile, type Job, type RerunConfig } from './rerun';
 import type { AdoptionAudit, ConditionResult, RunResult } from './types';
@@ -30,6 +31,51 @@ function matrix(ids = ['r1-mindfulness-smoking']) {
   return { config, slots, entries };
 }
 const build = (m: ReturnType<typeof matrix>) => buildReport(m.config, m.slots, m.entries);
+
+test('候補損失表は新旧 current の直前比を表示し、採用・旧版・未完了を除外する', () => {
+  const m = matrix();
+  const current = m.entries.filter((entry) => entry.job.arm === 'current');
+  for (const entry of m.entries) {
+    const run = entry.run!;
+    run.optimization!.trials = [
+      { candidateId: '採用', kind: 'proposal', accepted: true },
+      { candidateId: '保留', kind: 'proposal', accepted: false, held: true, impact: { lostHits: 50, sample: { method: 'random' } } },
+      { candidateId: '却下', kind: 'proposal', accepted: false },
+      { candidateId: '情報', kind: 'information', accepted: false },
+    ] as NonNullable<RunResult['optimization']>['trials'];
+    run.adoptionAudit!.trials = [
+      { candidateId: '採用', accepted: true, held: false, hitsBefore: 10, hitsAfter: 200, lostHeldOut: [], gainedHeldOut: ['a', 'b'] },
+      { candidateId: '保留', accepted: false, held: true, hitsBefore: 200, hitsAfter: 150, lostHeldOut: ['a', 'b'], gainedHeldOut: [] },
+      { candidateId: '却下', accepted: false, held: false, hitsBefore: 200, hitsAfter: null, lostHeldOut: [], gainedHeldOut: [], error: '測定失敗' },
+    ];
+  }
+  const fresh = current[0]!;
+  const before = { ...condition(['a', 'b'], 200).metrics!, capturedReports: ['2', '10'] };
+  const after = { ...condition([], 150).metrics!, capturedReports: [] };
+  fresh.run!.rejectedCandidates = [
+    { candidateId: '採用', accepted: true, changes: null, hits: 200, metrics: before, priorId: 'C0', comparedToPrior: null, comparedToC0: null },
+    { candidateId: '保留', accepted: false, changes: null, hits: 150, metrics: after, priorId: '採用',
+      comparedToPrior: compareMetrics(before, after), comparedToC0: compareMetrics(fresh.run!.conditions.C0!.metrics!, after) },
+    { candidateId: '却下', accepted: false, changes: null, hits: null, metrics: null, priorId: '採用', comparedToPrior: null, comparedToC0: null },
+  ];
+  const old = current[1]!;
+  old.run!.rejectedCandidates = [{ candidateId: '保留', hits: 150,
+    comparedToC0: compareMetrics(old.run!.conditions.C0!.metrics!, after) }] as RunResult['rejectedCandidates'];
+  current[2]!.run!.status = 'failed';
+  current[3]!.run = null;
+  const rows = build(m).tables.candidateLosses;
+  expect(rows).toHaveLength(4);
+  expect(rows[0]).toEqual({ id: fresh.job.id, case: fresh.job.caseId, c0: fresh.job.c0, split: fresh.job.split,
+    candidateId: '保留', held: 1, lostHits: 50, sampleMethod: 'random', priorId: '採用', hitsPrior: 200, hitsCandidate: 150,
+    lostHeldOutPrior: 'a; b', lostHeldOutC0: '', lostReportsPrior: 2, priorSource: 'rejectedCandidates' });
+  expect(rows[1]).toMatchObject({ candidateId: '却下', held: 0, lostHits: null, sampleMethod: null,
+    lostHeldOutPrior: null, lostReportsPrior: null, priorSource: 'rejectedCandidates' });
+  expect(rows[2]).toMatchObject({ id: old.job.id, priorId: '採用', hitsPrior: 200, hitsCandidate: 150,
+    lostHeldOutPrior: 'a; b', lostHeldOutC0: '', lostReportsPrior: null, priorSource: 'adoptionAudit' });
+  expect(rows[3]).toMatchObject({ lostHeldOutPrior: null, lostReportsPrior: null, priorSource: 'adoptionAudit' });
+  delete old.run!.adoptionAudit;
+  expect(build(m).tables.candidateLosses[2]).toMatchObject({ priorId: null, lostHeldOutPrior: null, priorSource: null });
+});
 function loggedEntry(arm: Job['arm'], logs: unknown[]) {
   const m = matrix();
   const entry = m.entries.find((e) => e.job.arm === arm)!;

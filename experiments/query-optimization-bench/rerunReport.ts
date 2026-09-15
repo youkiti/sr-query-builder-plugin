@@ -85,6 +85,33 @@ export function layerC(entry: Entry): Row {
 
 export function buildReport(config: RerunConfig, slots: Slot[], entries: Entry[]) {
   const current = entries.filter((entry) => entry.job.arm === 'current');
+  const candidateLosses: Row[] = current.flatMap((entry) => {
+    const run = entry.run;
+    if (!run || run.status !== 'completed') return [];
+    let auditPriorId = 'C0';
+    const auditPriors = new Map<string, string>();
+    for (const trial of run.adoptionAudit?.trials ?? []) {
+      auditPriors.set(trial.candidateId, auditPriorId);
+      if (trial.accepted) auditPriorId = trial.candidateId;
+    }
+    return (run.optimization?.trials ?? []).filter((trial) => trial.kind === 'proposal' && !trial.accepted).map((trial) => {
+      const candidate = run.rejectedCandidates?.find((item) => item.candidateId === trial.candidateId);
+      const trialAudit = run.adoptionAudit?.trials.find((item) => item.candidateId === trial.candidateId);
+      const hasPriorComparison = candidate !== undefined && 'comparedToPrior' in candidate;
+      const priorId = candidate?.priorId ?? auditPriors.get(trial.candidateId) ?? null;
+      const prior = run.rejectedCandidates?.find((item) => item.candidateId === priorId);
+      return { id: entry.job.id, case: entry.job.caseId, c0: entry.job.c0, split: entry.job.split,
+        candidateId: trial.candidateId, held: trial.held ? 1 : 0, lostHits: trial.impact?.lostHits ?? null,
+        sampleMethod: trial.impact?.sample?.method ?? null, priorId,
+        hitsPrior: hasPriorComparison ? priorId === 'C0' ? hits(entry, 'C0') : prior?.hits ?? null : trialAudit?.hitsBefore ?? null,
+        hitsCandidate: candidate?.hits ?? trialAudit?.hitsAfter ?? null,
+        lostHeldOutPrior: names(hasPriorComparison ? candidate.comparedToPrior?.lostHeldOut ?? null
+          : trialAudit && !trialAudit.error ? trialAudit.lostHeldOut : null),
+        lostHeldOutC0: names(candidate?.comparedToC0?.lostHeldOut ?? null),
+        lostReportsPrior: hasPriorComparison ? candidate.comparedToPrior?.lostReports?.length ?? null : null,
+        priorSource: hasPriorComparison ? 'rejectedCandidates' : trialAudit ? 'adoptionAudit' : null };
+    });
+  });
   const aEntries = entries.filter((entry) => entry.job.arm === 'legacyLive' || entry.job.arm === 'current' && entry.job.variant === 'criteria-only');
   const layerARuns: Row[] = aEntries.map((e) => ({ id: e.job.id, case: e.job.caseId, role: role(e.job.caseId), arm: e.job.arm, status: status(e),
     C0Recall: metric(e, 'C0')?.heldOutRecall ?? null, C0Hits: hits(e, 'C0'),
@@ -194,7 +221,7 @@ export function buildReport(config: RerunConfig, slots: Slot[], entries: Entry[]
   const judgments = { S1: `${s1}（新有害採用 ${harmfulCount}、未採点 run ${unscored}）`, S2: s2,
     S3: `${s3}（${wins}/${config.cases.length} ケース、欠測 ${unknown}）`, S4: `${s4}（development: ${roleSuccess[0]} / confirmation: ${roleSuccess[1]}）`, S5: s5Judgment };
   return { judgments, tables: { layerA, layerARuns, layerB, layerC: c, layerCRoles, S1Manual: oldHarmful, S2Causes: s2Rows,
-    S3Cases: caseComparisons, S5: s5, S5Runs: s5Runs, c0Quality: quality, c0QualityRates: qualityRates, costs } };
+    S3Cases: caseComparisons, S5: s5, S5Runs: s5Runs, c0Quality: quality, c0QualityRates: qualityRates, costs, candidateLosses } };
 }
 
 function markdown(rows: Row[]): string {
@@ -219,6 +246,7 @@ export function report(config: RerunConfig, paths: Paths = defaultPaths) {
   const output = join(paths.results, 'rerun');
   mkdirSync(output, { recursive: true });
   const notes = '\nS1 は全 run の有害採用 0 に加え、旧版で有害採用があった C0 の同種候補の保留・却下を人が照合する。S2 の原因は空欄を人が分類し、調整ロジック起因 0 を確認する。\n\n'
+    + 'candidateLosses は直前の採用済み式との比較を主とし、C0 比も併記する。既存 run は研究単位の直前比だけで、報告単位は欠測になる。\n\n'
     + '旧版はハーネスが `llmUsage` を記録しないため、LLM 呼び出しログのトークン数から同じ単価表で算出した。costFromLogs は使用量をログから復元した run 数（価格表外・トークン不明による費用欠測も含む）。ログの欠落・破損は欠測として数える。\n\n'
     + 'S5 は割合の報告であり、合否の数値閾値はない。ハーネスは画面の区分を作らないため、基本 run の確認負荷が ready かつ total=0 を「確認済み」の近似とする。対象 0 件では割合を定義しない。\n\n'
     + '提示負担は基本 run と各ラウンドの確認候補 PMID 数の合計（段階間は重複を数える）。include 数は実行された模擬判定の合計。構文エラー率は失敗理由の「構文 / syntax / phrase not found / invalid query・mesh」による機械分類で、他の失敗理由も枠の表で確認する。費用の合計は観測済み部分のみで、欠測数を併記する。層 A の role 小計は run をプールした参考分布。\n';
