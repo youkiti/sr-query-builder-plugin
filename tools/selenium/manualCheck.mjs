@@ -206,24 +206,91 @@ async function textsOf(driver, selector) {
 }
 
 /**
- * #/draft の生成・検証の完了状態を「1 回の executeScript」で原子的に読む。
- * 生成中は draft ビューが頻繁に再描画（replaceChildren）されるため、
- * findVisible→getText の 2 段構えだと stale element になる。DOM 参照と判定を
- * ブラウザ内の 1 コールに閉じることで stale を回避する。
- * 返り値: 'error' | 'validated' | 'regen' | ''（まだ生成中）
+ * 指定した段階の完了・失敗をブラウザ内の 1 コールで判定し、stale element を避ける。
+ * 自動調整中に残る以前の検証結果や、検証中に残る最終レビューでは完了にしない。
+ * 返り値: 'error' | 'review' | 'saved' | 'validated' | ''（処理中）
  */
-async function draftOutcome(driver) {
-  return driver
-    .executeScript(
-      "const err = document.querySelector('.draft__error');" +
-        "if (err && err.offsetParent !== null && err.textContent.trim() !== '') return 'error';" +
-        "const vs = document.querySelector('.draft__validate-status');" +
-        "if (vs && vs.offsetParent !== null) return 'validated';" +
-        "const btn = document.querySelector('.draft__actions button');" +
-        "if (btn && btn.textContent.indexOf('再生成') >= 0) return 'regen';" +
-        "return '';",
-    )
-    .catch(() => '');
+async function draftOutcome(driver, phase) {
+  return driver.executeScript((expected) => {
+    const visible = (selector) => {
+      const el = document.querySelector(selector);
+      return el && el.offsetParent !== null ? el : null;
+    };
+    if (expected === 'review') {
+      if (visible('.optimization__review')) return 'review';
+      if (visible('.optimization__setup [role="alert"]')?.textContent.trim()) return 'error';
+    } else if (expected === 'saved') {
+      if (visible('.optimization__save-error')?.textContent.trim()) return 'error';
+      if (visible('.optimization__save-status')?.textContent.includes('保存しました')) return 'saved';
+    } else {
+      if (visible('.draft__error')?.textContent.trim()) return 'error';
+      if (visible('.draft__validate-status')) return 'validated';
+    }
+    return '';
+  }, phase);
+}
+
+/** 自動調整 → 最終レビュー → 採用保存 → 検証を、個別シーンと通し確認で共用する。 */
+async function optimizeAndValidateDraft(driver) {
+  const state = await waitForAnyVisible(
+    driver, ['.optimization__start', '.view__placeholder'], 30000, '#/draft が表示されません',
+  );
+  if (state === '.view__placeholder') {
+    throw new Error(`検索式画面がガード状態です: ${await textOf(driver, '.view__placeholder')}（先に blocks を承認）`);
+  }
+  await driver.wait(async () => {
+    const error = await textOf(driver, '.optimization__setup [role="alert"]');
+    if (error) throw new Error(`自動調整の設定エラー: ${error}`);
+    return retryOnStale(async () => driver.findElement(By.css('.optimization__start')).isEnabled());
+  }, 60000, '自動調整の設定を読み込めません');
+
+  // draftView の makeInput は label の直下に input を置く。反復上限は details 内。
+  await retryOnStale(async () => {
+    const details = await driver.findElement(By.css('.optimization__setup details'));
+    if ((await details.getAttribute('open')) === null) {
+      await details.findElement(By.css('summary')).click();
+    }
+  });
+  for (const [label, value] of [['目安件数', '100'], ['反復上限', '1']]) {
+    await retryOnStale(async () => {
+      const input = await driver.findElement(By.xpath(
+        `//section[contains(concat(' ', normalize-space(@class), ' '), ' optimization__setup ')]//label[normalize-space(.)='${label}']/input`,
+      ));
+      await setValue(driver, input, value);
+    });
+  }
+  await retryOnStale(async () => driver.findElement(By.css('.optimization__start')).click());
+  log('  自動調整を実行中（目安100件・反復上限1回。初期式生成・実測・外側の確認で数分かかります）…');
+  const review = await driver.wait(async () => draftOutcome(driver, 'review'), LLM_TIMEOUT, '自動調整が完了しません');
+  if (review === 'error') {
+    throw new Error(`自動調整エラー: ${await textOf(driver, '.optimization__setup [role="alert"]')}`);
+  }
+  ok(`最終レビュー: ${await textOf(driver, '.optimization__review h3')}`);
+  await retryOnStale(async () => {
+    const adopt = await driver.findElement(By.xpath(
+      "//section[contains(concat(' ', normalize-space(@class), ' '), ' optimization__review ')]//button[normalize-space(.)='採用して保存']",
+    ));
+    if (!(await adopt.isEnabled())) {
+      throw new Error(`採用できる候補がありません: ${await textOf(driver, '.optimization__review')}`);
+    }
+    await adopt.click();
+  });
+  const saved = await driver.wait(async () => draftOutcome(driver, 'saved'), 60000, '採用保存が完了しません');
+  if (saved === 'error') {
+    throw new Error(`採用保存エラー: ${await textOf(driver, '.optimization__save-error')}`);
+  }
+
+  // 採用保存の直後に「最初から作り直す」（.draft__generate）で生成（実 Gemini による
+  // ブロック展開）→ 検証まで一気に流し直す。実機でしか確かめられない生成の結合部を
+  // 通し確認の対象に含めるため、LLM を呼ばない「検証のみ再実行」（.draft__revalidate）
+  // ではなくこちらを使う（issue #180）。採用保存は createdBy='auto_optimize' になり
+  // 'user_edit' ではないため、破棄確認パネル（.draft__discard-confirm）は出ない。
+  await retryOnStale(async () => driver.findElement(By.css('.draft__generate')).click());
+  log('  「最初から作り直す」実行中（LLM でブロック展開 → NCBI でヒット数 → 捕捉率検証。数分かかります）…');
+  const validated = await driver.wait(async () => draftOutcome(driver, 'validated'), LLM_TIMEOUT, '生成・検証が完了しません');
+  if (validated === 'error') {
+    throw new Error(`生成・検証エラー: ${await textOf(driver, '.draft__error')}`);
+  }
 }
 
 /**
@@ -643,46 +710,22 @@ async function sceneBlocks(driver) {
 }
 
 async function sceneDraft(driver) {
-  log('\n[draft] 検索式の生成 → 検証');
+  log('\n[draft] 検索式の自動調整 → 採用保存 → 検証');
   await switchToApp(driver, '#/draft');
-  const state = await waitForAnyVisible(
-    driver,
-    ['.draft__actions', '.view__placeholder'],
-    30000,
-    '#/draft が表示されません',
-  );
-  if (state === '.view__placeholder') {
-    ng(`検索式画面がガード状態です: ${await textOf(driver, '.view__placeholder')}（先に blocks を承認）`);
-    throw new Error('draft 失敗');
-  }
-  const generate = await driver.findElement(By.css('.draft__actions button'));
-  await generate.click();
-  log('  「生成して検証する」実行中（LLM でブロック展開 → NCBI でヒット数 → 捕捉率検証。数分かかります）…');
-  // 生成完了 = 検証ステータスが出る or エラー or ボタンが「再生成」に戻る（原子的に判定）
-  await driver.wait(
-    async () => (await draftOutcome(driver)) !== '',
-    LLM_TIMEOUT,
-    '生成・検証が完了しません',
-  );
-  const error = await textOf(driver, '.draft__error');
-  if (error !== '') {
-    ng(`生成・検証エラー: ${error}`);
-    throw new Error('draft 失敗');
-  }
-  const hits = await textsOf(driver, '.draft__block-hits li');
+  await optimizeAndValidateDraft(driver);
+  const hits = await textsOf(driver, '.validate__line-hits li');
   for (const hit of hits) {
     ok(`ヒット数: ${hit.replace(/\s+/g, ' ')}`);
   }
-  // s3: ブロックごとのヒット数が見えている状態（先頭〜.draft__block-hits）
+  // s3: 採用した検索式を検証した後の画面先頭。撮影位置は従来どおり。
   await shot(driver, 's3-draft');
   const summary = await textOf(driver, '.draft__validate-status');
   if (summary !== '') {
     ok(`検証サマリ: ${summary.replace(/\s+/g, ' ')}`);
-    // s4: 捕捉率・MeSH 検証（.draft__validate-status 以下）。ブロックのヒット数より
-    // 下に描画されるため、その位置までスクロールしてから撮る
+    // s4: 捕捉率・MeSH 検証（.draft__validate-status 以下）までスクロールして撮る
     await shot(driver, 's4-validation', '.draft__validate-status');
   }
-  ok('検索式の生成・検証が完了しました');
+  ok('検索式の自動調整・採用保存・検証が完了しました');
 }
 
 /** #/export の Methods 文案（英語）のフルテキストを返す（無ければ空） */
@@ -1002,31 +1045,15 @@ async function sceneFull(driver) {
   }
   ok('ブロック承認完了');
 
-  // --- draft 生成 → 検証 ---
+  // --- draft 自動調整 → 採用保存 → 検証 ---
   await hashGoto(driver, '#/draft');
-  st = await waitForAnyVisible(driver, ['.draft__actions', '.view__placeholder'], 30000, '#/draft が表示されません');
-  if (st === '.view__placeholder') {
-    ng(`検索式画面がガード状態です: ${await textOf(driver, '.view__placeholder')}`);
-    throw new Error('full 失敗');
-  }
-  await driver.findElement(By.css('.draft__actions button')).click();
-  log('  「生成して検証する」実行中（LLM 展開 → NCBI ヒット数 → 捕捉率検証。数分）…');
-  await driver.wait(
-    async () => (await draftOutcome(driver)) !== '',
-    LLM_TIMEOUT,
-    '生成・検証が完了しません',
-  );
-  const derr = await textOf(driver, '.draft__error');
-  if (derr !== '') {
-    ng(`生成・検証エラー: ${derr}`);
-    throw new Error('full 失敗');
-  }
-  for (const hit of await textsOf(driver, '.draft__block-hits li')) {
+  await optimizeAndValidateDraft(driver);
+  for (const hit of await textsOf(driver, '.validate__line-hits li')) {
     ok(`ヒット数: ${hit.replace(/\s+/g, ' ')}`);
   }
   const summary = await textOf(driver, '.draft__validate-status');
   if (summary !== '') ok(`検証サマリ: ${summary.replace(/\s+/g, ' ')}`);
-  ok('検索式の生成・検証 完了（FormulaVersions を Sheets に保存）');
+  ok('検索式の自動調整・採用保存・検証 完了（FormulaVersions を Sheets に保存）');
 
   // --- export（同一文脈で hash 遷移）---
   await hashGoto(driver, '#/export');

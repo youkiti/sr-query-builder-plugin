@@ -11,7 +11,7 @@
  * mesh-suggester / freeword-designer）・MeSH 提案・ブロック改善案
  * （interpret-result の suggested_terms）・境界事例選定（pick-boundary-cases）の
  * 5 用途に加え、edit 画面の improve-block と #/expand の expand-query-for-recall
- * にも対応する（scenario.ts の `BLOCK_DEFS` を単一の情報源として使う）。
+ * と検索式の自動調整にも対応する（scenario.ts の `BLOCK_DEFS` を単一の情報源として使う）。
  */
 
 import {
@@ -24,6 +24,8 @@ import {
   MESH_SUGGESTER_SYSTEM_PROMPT,
   PICK_BOUNDARY_SYSTEM_PROMPT,
 } from '@/features/formula/skills';
+import { OPTIMIZE_QUERY_SYSTEM_PROMPT, type ApprovedOptimizationBlock } from '@/features/formula/skills/optimizeQuery';
+import type { PubmedFormula } from '@/lib/search-formula-md';
 import {
   BLOCK_DEFS,
   COMBINATION_EXPRESSION,
@@ -47,6 +49,7 @@ type SkillId =
   | 'expand_recall'
   | 'pick_boundary'
   | 'improve_block'
+  | 'optimize_query'
   | 'interpret_result';
 
 const SKILL_SYSTEM_PROMPTS: ReadonlyArray<readonly [string, SkillId]> = [
@@ -57,6 +60,7 @@ const SKILL_SYSTEM_PROMPTS: ReadonlyArray<readonly [string, SkillId]> = [
   [EXPAND_RECALL_SYSTEM_PROMPT, 'expand_recall'],
   [PICK_BOUNDARY_SYSTEM_PROMPT, 'pick_boundary'],
   [IMPROVE_BLOCK_SYSTEM_PROMPT, 'improve_block'],
+  [OPTIMIZE_QUERY_SYSTEM_PROMPT, 'optimize_query'],
   [INTERPRET_RESULT_SYSTEM_PROMPT, 'interpret_result'],
 ];
 
@@ -230,6 +234,38 @@ function buildImproveBlockResponse(userText: string): unknown {
   };
 }
 
+/** 承認済み ECMO 行に MeSH を一度だけ追加する。追加済みなら同じ式を返して反復を止める。 */
+function buildOptimizeQueryResponse(userText: string): unknown {
+  const formulaText = /現在の全式（ID・式・結合構造）:\n([\s\S]*?)\n承認済みブロックとの対応/.exec(userText)?.[1];
+  const approvedText = /承認済みブロックとの対応[^\n]*\n([\s\S]*?)\n測定スナップショット/.exec(userText)?.[1];
+  const measurementText = /測定スナップショット[^\n]*\n([\s\S]*?)\nシード書誌:/.exec(userText)?.[1];
+  if (!formulaText || !approvedText || !measurementText) {
+    throw new Error('[demo] optimize-query: 全式・承認済みブロック・測定の入力を読み取れません');
+  }
+  const formula = JSON.parse(formulaText) as PubmedFormula;
+  const approved = JSON.parse(approvedText) as ApprovedOptimizationBlock[];
+  const ecmo = approved.find((block) => detectBlockKey(block.label) === 'ecmo');
+  const block = formula.blocks.find((line) => line.id === ecmo?.id && !line.isCombination);
+  if (!block) {
+    throw new Error('[demo] optimize-query: 承認済みの ECMO ブロックがありません');
+  }
+  const term = ECMO_MESH_ADDITION.tagSyntax;
+  const alreadyAdded = block.expression.toLowerCase().includes(term.toLowerCase());
+  const measurement = measurementText === '(未計測)' ? null : JSON.parse(measurementText) as { id: string };
+  return {
+    target_block_id: block.id,
+    proposed_expression: alreadyAdded ? block.expression : `(${block.expression}) OR ${term}`,
+    added_terms: alreadyAdded ? [] : [term],
+    removed_terms: [],
+    replaced_terms: [],
+    rationale: alreadyAdded
+      ? 'ECMO の MeSH は追加済みです。既に捕捉している文献を失う削減は行わず、現在の式を維持します。'
+      : '成人 ARDS に対する ECMO という研究基準を維持し、本文の表記ゆれで未捕捉の文献を MeSH の追加で回収します。既存語は削除しません。',
+    measurement_ids: measurement ? [measurement.id] : [],
+    mesh_requests: [],
+  };
+}
+
 /* ------------------------------------------------------------------------ */
 /* interpret-result（漏れ PMID の原因分析・改善候補語の提案）                  */
 /* ------------------------------------------------------------------------ */
@@ -335,6 +371,8 @@ function buildResponseObject(skill: SkillId, userText: string): unknown {
       return buildPickBoundaryResponse(userText);
     case 'improve_block':
       return buildImproveBlockResponse(userText);
+    case 'optimize_query':
+      return buildOptimizeQueryResponse(userText);
     case 'interpret_result':
       return buildInterpretResultResponse(userText);
   }
