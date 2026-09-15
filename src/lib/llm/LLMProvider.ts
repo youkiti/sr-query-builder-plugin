@@ -22,6 +22,7 @@ export type ResponseFormat = 'text' | 'json';
 export type JsonSchema = Record<string, unknown>;
 
 export interface ChatOptions {
+  signal?: AbortSignal;
   temperature?: number;
   maxOutputTokens?: number;
   /** `'json'` を指定すると JSON モードを要求する。skill 側で構造化出力にしたいときに使う */

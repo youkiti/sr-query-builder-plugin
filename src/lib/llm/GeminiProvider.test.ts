@@ -262,3 +262,17 @@ describe('toGeminiSchema', () => {
     });
   });
 });
+
+
+test.each(['AbortError', 'TimeoutError'])('fetch とエラー本文の %s を包み直さず、signal を渡す', async (name) => {
+  for (const phase of ['fetch', 'body']) {
+    const controller = new AbortController();
+    const error = new DOMException('中断', name);
+    const abort = () => { controller.abort(error); throw error; };
+    const fetch = jest.fn().mockImplementation(async () => phase === 'fetch' ? abort()
+      : { ok: false, status: 429, text: async () => abort() });
+    const provider = new GeminiProvider({ apiKey: 'test', model: 'test', fetch });
+    await expect(provider.chat([], { signal: controller.signal })).rejects.toBe(error);
+    expect(fetch).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ signal: controller.signal }));
+  }
+});

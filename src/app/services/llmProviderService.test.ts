@@ -201,3 +201,31 @@ describe('buildLlmProviderFactory', () => {
     expect(map['error']).toBe('');
   });
 });
+
+test('optimize_query は送信ごとに hook と新しい signal を使い、ログも試行ごとに残す', async () => {
+  const { store } = memoryStore({ [STORAGE_KEY_GEMINI]: 'test' });
+  let sends = 0;
+  const signals: AbortSignal[] = [];
+  const beforeAttempt = jest.fn().mockResolvedValue(undefined);
+  const fetch = jest.fn().mockImplementation(async (url: string, init: RequestInit) => {
+    if (url.includes('generativelanguage.googleapis.com')) {
+      sends += 1;
+      expect(beforeAttempt).toHaveBeenCalledTimes(sends);
+      signals.push(init.signal as AbortSignal);
+      if (sends === 1) return { ok: false, status: 429, text: async () => '混雑' };
+      return jsonResponse({ candidates: [{ content: { parts: [{ text: 'OK' }] } }] });
+    }
+    expect(init.signal).toBeUndefined();
+    return jsonResponse({ id: 'log', webViewLink: 'https://drive/log' });
+  });
+  const factory = await buildLlmProviderFactory({ store,
+    google: { fetch, getAccessToken: async () => 'test' }, llmLogFolderId: 'folder', spreadsheetId: 'sheet' });
+  const result = await factory.forPurpose('optimize_query', undefined, {
+    beforeAttempt, createSignal: () => new AbortController().signal, sleep: async () => undefined,
+  }).chat([]);
+  expect(result.text).toBe('OK');
+  expect(signals).toHaveLength(2);
+  expect(signals[0]).not.toBe(signals[1]);
+  expect(fetch.mock.calls.filter(([url]) => (url as string).includes('/values/LLMApiLog'))).toHaveLength(2);
+  expect(fetch.mock.calls.filter(([url]) => (url as string).includes('/upload/drive/'))).toHaveLength(4);
+});

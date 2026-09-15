@@ -1,5 +1,5 @@
 import type { LlmApiLogEntry, LlmPurpose } from '@/domain/llmApiLog';
-import type { LlmRequestState } from '@/lib/llm/retry';
+import type { LlmRequestState, RetryOptions } from '@/lib/llm/retry';
 import { SHEET_HEADERS } from '@/domain/sheetsSchema';
 import type { ProjectStoreDeps } from '@/features/project';
 import {
@@ -58,9 +58,12 @@ export interface LlmFactoryDeps {
   onRequestState?: (state: LlmRequestState) => void;
 }
 
+export type LlmAttemptOptions = Pick<RetryOptions, 'beforeAttempt' | 'createSignal' | 'sleep'>;
+
 export interface LlmProviderFactory {
   /** 指定 purpose 用のロガー付きプロバイダを返す */
-  forPurpose: (purpose: LlmPurpose, onRequestState?: (state: LlmRequestState) => void) => LLMProvider;
+  forPurpose: (purpose: LlmPurpose, onRequestState?: (state: LlmRequestState) => void,
+    attempts?: LlmAttemptOptions) => LLMProvider;
   /** このファクトリが解決したモデル ID（FormulaVersions.model への記録用） */
   model: string;
 }
@@ -112,7 +115,7 @@ export async function buildLlmProviderFactory(deps: LlmFactoryDeps): Promise<Llm
   // （503 等の失敗試行も監査ログに見える状態を保つ）。
   return {
     model: selectedModel,
-    forPurpose: (purpose, onRequestState) =>
+    forPurpose: (purpose, onRequestState, attempts) =>
       withRetry(
         withLogging(baseProvider, purpose, {
           uploadJson: async ({ filename, content }) => {
@@ -134,7 +137,7 @@ export async function buildLlmProviderFactory(deps: LlmFactoryDeps): Promise<Llm
             }
           },
         }),
-        { onRequestState: onRequestState ?? deps.onRequestState }
+        { ...attempts, onRequestState: onRequestState ?? deps.onRequestState }
       ),
   };
 }

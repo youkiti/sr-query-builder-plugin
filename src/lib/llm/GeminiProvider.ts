@@ -59,11 +59,15 @@ export class GeminiProvider implements LLMProvider {
     const fetchFn = this.fetchImpl ?? globalThis.fetch;
     const res = await fetchFn(url, {
       method: 'POST',
+      signal: options.signal,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
     if (!res.ok) {
-      const text = await res.text().catch(() => '');
+      const text = await res.text().catch((err: unknown) => {
+        if (options.signal?.aborted) throw err;
+        return '';
+      });
       throw new LlmProviderError(
         `Gemini API failed: HTTP ${res.status}`,
         this.providerId,

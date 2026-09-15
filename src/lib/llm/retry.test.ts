@@ -119,3 +119,40 @@ describe('withRetry', () => {
     expect(calls()).toBe(2);
   });
 });
+
+test.each(['AbortError', 'TimeoutError'])('%s は再試行せず同じ例外を返す', async (name) => {
+  const error = new DOMException('通信中断', name);
+  const chat = jest.fn().mockRejectedValue(error);
+  const sleep = jest.fn();
+  const provider = withRetry({ providerId: 'gemini', model: 'test', chat }, { sleep });
+  await expect(provider.chat([])).rejects.toBe(error);
+  expect(chat).toHaveBeenCalledTimes(1);
+  expect(sleep).not.toHaveBeenCalled();
+});
+
+test('送信前 hook の例外は再試行判定へ渡さず、残予算 1 回で次の送信を止める', async () => {
+  const error = providerError(429);
+  const { provider, calls } = buildProvider([error, okResponse()]);
+  const beforeAttempt = jest.fn().mockResolvedValueOnce(undefined).mockRejectedValue(error);
+  const isRetryable = jest.fn().mockReturnValue(true);
+  const wrapped = withRetry(provider, { beforeAttempt, isRetryable, sleep: noSleep });
+  await expect(wrapped.chat([])).rejects.toBe(error);
+  expect(calls()).toBe(1);
+  expect(beforeAttempt).toHaveBeenCalledTimes(2);
+  expect(isRetryable).toHaveBeenCalledTimes(1);
+});
+
+test('各試行は hook 完了後に新しい signal を作り、完了後の abort listener を外す', async () => {
+  const signals = [new AbortController().signal, new AbortController().signal];
+  const removes = signals.map((signal) => jest.spyOn(signal, 'removeEventListener'));
+  const beforeAttempt = jest.fn().mockResolvedValue(undefined);
+  const createSignal = jest.fn((): AbortSignal => {
+    expect(beforeAttempt).toHaveBeenCalledTimes(createSignal.mock.calls.length);
+    return signals[createSignal.mock.calls.length - 1]!;
+  });
+  const chat = jest.fn().mockRejectedValueOnce(providerError(429)).mockResolvedValue(okResponse());
+  const provider = withRetry({ providerId: 'gemini', model: 'test', chat }, { beforeAttempt, createSignal, sleep: noSleep });
+  await provider.chat([], { temperature: 0.2 });
+  expect(chat.mock.calls.map((call) => call[1])).toEqual(signals.map((signal) => ({ temperature: 0.2, signal })));
+  for (const remove of removes) expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
+});

@@ -1,3 +1,4 @@
+import { waitWithSignal } from '@/utils/abort';
 import {
   LlmProviderError,
   type ChatMessage,
@@ -20,6 +21,10 @@ export const RETRYABLE_STATUSES: ReadonlySet<number> = new Set([429, 500, 502, 5
 export type LlmRequestState = 'retry' | 'failure' | 'idle';
 
 export interface RetryOptions {
+  /** 各送信の直前に呼ぶ。例外は再試行せず、そのまま呼び出し側へ返す。 */
+  beforeAttempt?: () => void | Promise<void>;
+  /** 各試行専用の signal を、送信直前の確認後に生成する。 */
+  createSignal?: () => AbortSignal;
   /** 任意の表示通知。未注入時の再試行回数・待機は変えない。 */
   onRequestState?: (state: LlmRequestState) => void;
   /** 最大試行回数（初回を含む）。既定 3 回 */
@@ -56,8 +61,12 @@ export function withRetry(provider: LLMProvider, options: RetryOptions = {}): LL
     model: provider.model,
     chat: async (messages: readonly ChatMessage[], opts?: ChatOptions): Promise<ChatResponse> => {
       for (let attempt = 1; ; attempt += 1) {
+        if (options.beforeAttempt) await options.beforeAttempt();
+        const signal = options.createSignal?.() ?? opts?.signal;
+        if (signal?.aborted) throw signal.reason;
         try {
-          return await provider.chat(messages, opts);
+          const work = provider.chat(messages, signal ? { ...opts, signal } : opts);
+          return await (signal ? waitWithSignal(work, signal) : work);
         } catch (err) {
           if (attempt >= maxAttempts || !isRetryable(err)) {
             notify('failure');

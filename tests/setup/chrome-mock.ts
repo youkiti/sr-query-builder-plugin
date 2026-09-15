@@ -16,6 +16,33 @@ if (typeof globalThis.crypto === 'undefined') {
   Object.defineProperty(globalThis.crypto, 'subtle', { value: webcrypto.subtle, configurable: true });
 }
 
+// jsdom にない MV3 対象ブラウザの API を、fake timer で制御できる形で補う。
+if (typeof AbortSignal.timeout === 'undefined') {
+  AbortSignal.timeout = (ms) => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(new DOMException('通信の期限切れ', 'TimeoutError')), ms);
+    return controller.signal;
+  };
+}
+if (typeof AbortSignal.any === 'undefined') {
+  AbortSignal.any = (signals) => {
+    const controller = new AbortController();
+    const listeners = new Map<AbortSignal, () => void>();
+    const abort = (signal: AbortSignal) => {
+      controller.abort(signal.reason);
+      for (const [source, listener] of listeners) source.removeEventListener('abort', listener);
+      listeners.clear();
+    };
+    for (const signal of signals) {
+      if (signal.aborted) { abort(signal); break; }
+      const listener = () => abort(signal);
+      listeners.set(signal, listener);
+      signal.addEventListener('abort', listener, { once: true });
+    }
+    return controller.signal;
+  };
+}
+
 const chromeMock: unknown = {
   runtime: {
     getURL: (path: string) => `chrome-extension://test/${path}`,

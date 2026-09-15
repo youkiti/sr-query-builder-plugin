@@ -124,10 +124,13 @@ export class EutilsError extends Error {
 }
 
 /**
- * `retryWithBackoff` の `shouldRetry`: permanent な EutilsError だけリトライ対象から外す。
+ * `retryWithBackoff` の `shouldRetry`: 恒久エラー・通信の中断・最適化の制御例外を再試行しない。
  * meshRdf.ts の SPARQL 呼び出しからも再利用する（issue #52 レビュー指摘）。
  */
 export function shouldRetryEutils(err: unknown): boolean {
+  if (err instanceof DOMException && (err.name === 'AbortError' || err.name === 'TimeoutError')) return false;
+  // アプリ層へ依存せず、停止の制御例外をそのまま伝える。
+  if (err instanceof Error && err.name === 'QueryOptimizationStopError') return false;
   return !(err instanceof EutilsError && err.permanent);
 }
 
@@ -337,7 +340,7 @@ export async function efetchArticles(
       }
       return await res.text();
     },
-    { sleep: deps.sleep, maxRetries: deps.maxRetries ?? EUTILS_DEFAULT_MAX_RETRIES }
+    { sleep: deps.sleep, maxRetries: deps.maxRetries ?? EUTILS_DEFAULT_MAX_RETRIES, shouldRetry: shouldRetryEutils }
   );
 
   return parsePubmedXml(xml);
