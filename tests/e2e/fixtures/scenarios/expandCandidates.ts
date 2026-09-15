@@ -17,20 +17,23 @@ import { fullStateScenario, FULL_APP_STATE } from './fullState';
 
 export const CANDIDATE_PMIDS = ['41000001', '41000002', '41000003', '41000004', '41000005'];
 
-const EFETCH_XML = `<?xml version="1.0"?><PubmedArticleSet>${CANDIDATE_PMIDS.map(
+const efetchXml = (abstract: string): string => `<?xml version="1.0"?><PubmedArticleSet>${CANDIDATE_PMIDS.map(
   (pmid, index) => `<PubmedArticle><MedlineCitation><PMID>${pmid}</PMID>
 <Article><ArticleTitle>ECMO for adult ARDS trial ${index + 1}</ArticleTitle>
 <Journal><JournalIssue><Year>2024</Year></JournalIssue></Journal>
-<Abstract><AbstractText>A randomised trial of ECMO in adults with ARDS.</AbstractText></Abstract>
+<Abstract><AbstractText>${abstract}</AbstractText></Abstract>
 </Article></MedlineCitation></PubmedArticle>`
 ).join('')}</PubmedArticleSet>`;
 
-export async function setupExpandCandidates(page: Page): Promise<void> {
+export async function setupExpandCandidates(
+  page: Page,
+  abstract = 'A randomised trial of ECMO in adults with ARDS.'
+): Promise<void> {
   await registerSheetsStub(page);
   await registerDriveStub(page);
   await registerNcbiStub(page, {
     esearch: () => ({ count: '5', idlist: CANDIDATE_PMIDS }),
-    efetchXml: EFETCH_XML,
+    efetchXml: efetchXml(abstract),
   });
   await registerMeshRdfStub(page);
   await registerGeminiStub(page, {
