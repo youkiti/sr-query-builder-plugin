@@ -1243,15 +1243,21 @@ export async function runOptimizeQuery(
     check();
     const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
     check();
-    const initialFormula = resume?.available ? resume.data.bestFormula!
+    let initialFormula = resume?.available ? resume.data.bestFormula!
       : startingFormula ? startingFormula
       : state.currentFormulaMarkdown ? parsePubmedFormulaMd(state.currentFormulaMarkdown)
-      : (await generateDraftFormula({ protocol: state.protocolDraft, blocks: state.blocksDraft,
+      : null;
+    if (!initialFormula) {
+      const generated = await generateDraftFormula({ protocol: state.protocolDraft, blocks: state.blocksDraft,
         targetHits: fixedSettings.maxHits,
         seedContext: { titles: seeds.flatMap((seed) => seed.title ? [seed.title] : []).slice(0, 30),
           samples: [], meshSummary: { seedCount: 0, concepts: [], checkTags: [] } },
       }, { llmFactory: factory, onProgress: () => check(),
-        resolveMeshDescriptors: (descriptors) => resolveMeshDescriptors(descriptors, eutils) })).formula;
+        resolveMeshDescriptors: (descriptors) => resolveMeshDescriptors(descriptors, eutils) });
+      initialFormula = generated.formula;
+      const { filterNotice, parenthesizedTerms, removedMeshHeadings, replacedMeshHeadings } = generated;
+      update({ generationNotices: { filterNotice, parenthesizedTerms, removedMeshHeadings, replacedMeshHeadings } });
+    }
     check();
     update({ inputSnapshot: { researchQuestion: state.protocolDraft.researchQuestion,
       inclusionCriteria: state.protocolDraft.inclusionCriteria, exclusionCriteria: state.protocolDraft.exclusionCriteria,

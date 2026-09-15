@@ -1,3 +1,4 @@
+import { renderGenerationNotice } from './generationNotice';
 import { renderOptimizationReview } from './queryOptimizationReview';
 import { createQueryOptimizationInputIdentity, getQueryOptimizationResumeAvailability } from '../services/queryOptimizationCheckpointService';
 import { DEFAULT_QUERY_OPTIMIZATION_SETTINGS, type QueryOptimizationSettings } from '../services/queryOptimizationSettingsService';
@@ -258,37 +259,10 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
     if (blockHits.length > 0 || running) {
       container.appendChild(renderLiveBlockHits(doc, ctx.state, blockHits, running));
     }
-    if (!running && run && (run.removedMeshHeadings.length || run.replacedMeshHeadings.length || run.parenthesizedTerms?.length || run.filterNotice)) {
-      const notice = doc.createElement('div');
-      notice.className = 'draft__mesh-notice';
-      notice.setAttribute('role', 'status');
-      const groups = [
-        { message: 'MeSH の同義語を正式な見出しに置き換えました',
-          items: run.replacedMeshHeadings.map((item) => `#${item.blockId} ${item.blockLabel}: ${item.from} → ${item.to.join('、')}`) },
-        { message: '⚠ MeSH 辞書に無い見出しを式から外しました（AI が提案した見出しが MeSH に存在しないため）',
-          items: run.removedMeshHeadings.map((item) => `#${item.blockId} ${item.blockLabel}: ${item.descriptor}`) },
-        { message: '検索語の中の AND / OR を括弧で囲みました（PubMed は括弧の無い AND / OR を左から順に評価し、意図しない絞り込みになるため）',
-          items: (run.parenthesizedTerms ?? []).map((item) => `#${item.blockId} ${item.blockLabel}: (${item.term})`) },
-      ];
-      for (const group of groups) {
-        if (!group.items.length) continue;
-        const message = doc.createElement('p');
-        message.textContent = group.message;
-        notice.appendChild(message);
-        const list = doc.createElement('ul');
-        for (const item of group.items) {
-          const li = doc.createElement('li');
-          li.textContent = item;
-          list.appendChild(li);
-        }
-        notice.appendChild(list);
-      }
-      if (run.filterNotice) {
-        const message = doc.createElement('p');
-        message.textContent = run.filterNotice;
-        notice.appendChild(message);
-      }
-      container.appendChild(notice);
+    if (!running && run) {
+      const notice = renderGenerationNotice(doc, { ...run,
+        filterNotice: run.filterNotice ?? null, parenthesizedTerms: run.parenthesizedTerms ?? [] });
+      if (notice) container.appendChild(notice);
     }
 
     // 検証結果（捕捉率 / MeSH / 階層）。生成完了後に自動実行され store に保存される。

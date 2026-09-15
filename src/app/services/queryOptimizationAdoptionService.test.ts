@@ -227,3 +227,16 @@ test.each(['project', 'version'])('対応しない編集下書きの由来を保
   await saveEditedFormula({ formulaMd: md, note: '' }, { ...f, newUuid: () => 'edited' });
   expect(f.append).toHaveBeenCalledWith('s', expect.objectContaining({ model: 'model', note: null }), f.google);
 });
+
+test.each([true, false])('採用ログは初期生成の通知を保存し、無ければ null にする（存在=%s）', async (present) => {
+  const f = setup();
+  if (present) f.run.generationNotices = {
+    filterNotice: '研究デザインに RCT 以外を含むため RCT フィルタを付けませんでした',
+    parenthesizedTerms: [{ blockIndex: 0, blockId: '1', blockLabel: '疾患', term: 'a AND b' }],
+    removedMeshHeadings: [{ blockIndex: 0, blockId: '1', blockLabel: '疾患', descriptor: 'Unknown' }],
+    replacedMeshHeadings: [{ blockIndex: 0, blockId: '1', blockLabel: '疾患', from: '旧見出し', to: ['正式見出し'] }],
+  };
+  await adoptQueryOptimization(f);
+  const log = JSON.parse(f.upload.mock.calls[0]![0].content);
+  expect(log.generationNotices).toEqual(f.run.generationNotices ?? null);
+});

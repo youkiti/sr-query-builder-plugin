@@ -110,6 +110,7 @@ test('再開は最良式・新 runId・3種類の残予算を使い、初期式�
   expect(f.store.getState().queryOptimizationRun?.maxIterations).toBe(3);
   expect(await getQueryOptimizationSettings('p', f.runtime.store)).toMatchObject({ maxIterations: 5 });
   expect(generate).not.toHaveBeenCalled();
+  expect(f.store.getState().queryOptimizationRun?.generationNotices).toBeUndefined();
   expect(f.data.queryOptimizationCheckpoint).toBe(checkpoint);
 });
 
@@ -178,6 +179,7 @@ test('適格シードの重複・null を除き、現在式・承認ブロック
     initialFormula: formula, approvedBlocks: [{ id: '1', approvedBlockId: '1', label: '疾患' }],
     criteria: { researchQuestion: 'RQ', inclusionCriteria: '組入', exclusionCriteria: '除外' } });
   expect(fixture.store.getState().currentFormulaVersionId).toBe('saved');
+  expect(fixture.store.getState().queryOptimizationRun?.generationNotices).toBeUndefined();
 });
 
 test('二重起動を防ぎ、確定済み試行の重複通知を履歴に重ねない', async () => {
@@ -254,10 +256,17 @@ test('シードなし・式なしは保存なし生成を経て実行する', as
   const fixture = setup();
   fixture.list.mockResolvedValue([]);
   fixture.store.setState((s) => ({ ...s, currentFormulaMarkdown: null }));
-  const generate = jest.spyOn(draft, 'generateDraftFormula').mockResolvedValue({ formula, markdown: '', filterNotice: null, parenthesizedTerms: [],
-    filter: { filters: [], appendToCombination: '', excessFilterCandidates: [] }, blockSkeletons: [], meshSuggestions: [], freewordSuggestions: [], removedMeshHeadings: [], replacedMeshHeadings: [], blockHits: [] });
+  const generationNotices = {
+    filterNotice: '研究デザインに RCT 以外を含むため RCT フィルタを付けませんでした',
+    parenthesizedTerms: [{ blockIndex: 0, blockId: '1', blockLabel: '疾患', term: 'a AND b' }],
+    removedMeshHeadings: [{ blockIndex: 0, blockId: '1', blockLabel: '疾患', descriptor: 'Unknown' }],
+    replacedMeshHeadings: [{ blockIndex: 0, blockId: '1', blockLabel: '疾患', from: '旧見出し', to: ['正式見出し'] }],
+  };
+  const generate = jest.spyOn(draft, 'generateDraftFormula').mockResolvedValue({ formula, markdown: '', ...generationNotices,
+    filter: { filters: [], appendToCombination: '', excessFilterCandidates: [] }, blockSkeletons: [], meshSuggestions: [], freewordSuggestions: [], blockHits: [] });
   await fixture.invoke();
   expect(generate).toHaveBeenCalledTimes(1);
+  expect(fixture.store.getState().queryOptimizationRun?.generationNotices).toEqual(generationNotices);
   const checkMesh = jest.spyOn(mesh, 'resolveMeshDescriptors').mockResolvedValue(new Map([['Term', { status: 'resolved', headings: ['Term'] }]]));
   expect(await generate.mock.calls[0]![1].resolveMeshDescriptors!(['Term'])).toEqual(new Map([['Term', { status: 'resolved', headings: ['Term'] }]]));
   expect(checkMesh).toHaveBeenCalledWith(['Term'], { fetch: fixture.runtime.google.fetch });
@@ -616,4 +625,15 @@ test.each(['email', 'append'] as const)('判定の %s 待ちで run が切り替
   await saving;
   expect(f.store.getState()).toBe(before);
   expect(append).toHaveBeenCalledTimes(phase === 'email' ? 0 : 1);
+});
+
+test('保護再調整の開始式を渡した場合は初期生成の通知を引き継がない', async () => {
+  const f = setup();
+  f.store.setState((s) => ({ ...s, currentFormulaMarkdown: null }));
+  const generate = jest.spyOn(draft, 'generateDraftFormula');
+  await runOptimizeQuery(f.store, f.runtime, { google: f.runtime.google, store: f.runtime.store },
+    { maxHits: 123, maxIterations: 2 }, undefined, formula);
+  expect(generate).not.toHaveBeenCalled();
+  expect(f.run.mock.calls[0]![0].initialFormula).toEqual(formula);
+  expect(f.store.getState().queryOptimizationRun?.generationNotices).toBeUndefined();
 });

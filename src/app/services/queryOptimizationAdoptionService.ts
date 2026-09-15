@@ -42,7 +42,7 @@ export async function adoptQueryOptimization(deps: EditServiceDeps): Promise<voi
         content: JSON.stringify({ runId: run.runId, versionId, parentVersionId: state.currentFormulaVersionId,
           maxHits: run.maxHits, maxIterations: run.maxIterations, input: run.inputSnapshot ?? null,
           result, meshContext: run.meshContext, reviewSections: buildOptimizationReviewSections(run).sections,
-          outsideCheck: run.outsideCheck ?? null }, null, 2),
+          outsideCheck: run.outsideCheck ?? null, generationNotices: run.generationNotices ?? null }, null, 2),
       }, deps.google);
       const detailRef = file.webViewLink ?? `https://drive.google.com/file/d/${file.id}/view`;
       // 検証ログも同じ ID で照会し、版保存だけ失敗した後の再試行で重複させない。
