@@ -1,3 +1,4 @@
+import { measureSet, setImpact } from '../../../../tests/fixtures/pubmedSets';
 import type { LLMProvider } from '@/lib/llm';
 import { optimizeQuery, type OptimizeQueryInput, type OptimizationMeasurement } from './optimizeQuery';
 
@@ -16,10 +17,10 @@ function setup(text = '{}') {
   return { chat, provider, input };
 }
 
-function measurement(): OptimizationMeasurement {
-  return { id: 'run:initial', fingerprint: 'hash', measuredAt: '2026-09-11', totalHits: 0,
-    capturedPmids: [], missedPmids: ['11'], blocks: [{ id: '1', hits: null, error: '取得失敗' }],
-    terms: [{ blockId: '1', query: 'drug$[tiab]', hits: 0, delta: null }] };
+function measurement(pmids: readonly string[] = []): OptimizationMeasurement {
+  const measured = measureSet(pmids, ['11']);
+  return { id: 'run:initial', fingerprint: 'hash', measuredAt: '2026-09-11', ...measured, blocks: [{ id: '1', hits: null, error: '取得失敗' }],
+    terms: [{ blockId: '1', query: 'drug$[tiab]', hits: measured.totalHits, delta: null }] };
 }
 
 test('全式・承認対応・基準・上限をテンプレートへ安全に渡す', async () => {
@@ -122,7 +123,8 @@ test('保留・却下・重複の変更一覧と変種の注記を実差分か�
     rationale: '', before: measurement(), after: measurement(), reason: '局面の指標に改善がありません' };
   f.input.trials = [
     { ...base, candidateId: 'candidate-1', held: true,
-      impact: { lostHits: 10800, gainedHits: 0, inspected: [], error: null },
+      before: measurement(['901', '902', '903']), after: measurement([]),
+      impact: setImpact(['901', '902', '903'], []),
       formulaDiff: [{ blockId: '2', removed: ['"Diabetic Retinopathy"[Mesh]'], added: [] }] },
     { ...base, candidateId: 'candidate-2',
       formulaDiff: [{ blockId: '2', removed: ['"Diabetic Retinopathy"[Mesh]'], added: ['b[tiab]'] }] },
@@ -136,7 +138,7 @@ test('保留・却下・重複の変更一覧と変種の注記を実差分か�
   const prompt = f.chat.mock.calls[0]![0][1].content as string;
   const list = prompt.split('保留・却下した変更の一覧:\n')[1]!.split('\n試行履歴')[0]!;
   expect(list.split('\n')).toHaveLength(5);
-  expect(list).toContain('candidate-1 / #2 削除: "Diabetic Retinopathy"[Mesh] / 追加: なし / 結果: 保留（失う 10800 件・増える 0 件）');
+  expect(list).toContain('candidate-1 / #2 削除: "Diabetic Retinopathy"[Mesh] / 追加: なし / 結果: 保留（失う 3 件・増える 0 件）');
   expect(list).toContain('（candidate-1 と同じ削除の変種） / 結果: 却下（局面の指標に改善がありません）');
   expect(list).toContain('candidate-3 / #2 削除: "Diabetic Retinopathy"[Mesh] / 追加: なし（candidate-1 と同じ式） / 結果: 測定せずに却下');
   expect(list).toContain('candidate-4 / 変更なし（candidate-1 と同じ式） / 結果: 測定せずに却下');

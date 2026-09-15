@@ -1,3 +1,4 @@
+import { papers, measureSet, setImpact, assertSetTransition, createSetSearch } from '../../../tests/fixtures/pubmedSets';
 import * as google from '@/lib/google';
 import * as evaluation from './queryEvaluationService';
 import * as skill from '@/features/formula/skills/optimizeQuery';
@@ -7,11 +8,10 @@ import { sharedEutilsRateLimiters } from '@/lib/ncbi';
 import { validateCombinationExpression } from '@/lib/combination-expression';
 import { samplePmids, diffOptimizationFormula, runQueryOptimization, validateOptimizationCandidate, QueryOptimizationStopError, type QueryOptimizationInput, type QueryOptimizationDeps } from './queryOptimizationService';
 
-interface Outcome { hits: number; captured: string[]; blockCapture?: Record<string, string[]>;
-  articles?: Record<string, { abstract?: string; mesh?: string[] }>;
-  lost?: { hits: number; pmids?: string[] }; gained?: number }
+interface Outcome { pmids: string[]; blockPmids?: Record<string, string[]>;
+  articles?: Record<string, { abstract?: string; mesh?: string[] }> }
 
-function setup(outcomes: Record<string, Outcome> = { a: { hits: 200, captured: ['11', '22'] } }, proposals = ['b[tiab]']) {
+function setup(outcomes: Record<string, Outcome> = { a: { pmids: papers(200, ['11', '22']) } }, proposals = ['b[tiab]']) {
   const input: QueryOptimizationInput = {
     projectId: 'p', runId: 'run', maxHits: 100, seedPmids: ['11', '22'],
     initialFormula: { blocks: [
@@ -25,6 +25,20 @@ function setup(outcomes: Record<string, Outcome> = { a: { hits: 200, captured: [
     seedPapers: [{ pmid: '11', title: '研究1' }, { pmid: '22', title: '研究2' }],
     meshContext: [{ id: 'D001', descriptor: 'Disease', label: 'Disease', treeNumbers: ['C01.100'], parentIds: ['D000'], childIds: [], explode: true, note: '取得済み' }],
   };
+  // テスト用の概念名を含む式にはその集合を対応付ける。固定ブロックは全候補を含む。
+  // ブロック別 fixture も PMID を正典にし、uid での捕捉は共通 API が交差を取る。
+  // 未指定の補助語は初期概念と同じ集合の別名として扱う。
+  const universe = [...new Set([...Object.values(outcomes).flatMap((outcome) => outcome.pmids), ...input.seedPmids])];
+  const sets = createSetSearch((query) => {
+    if (query.includes('[uid]')) return undefined;
+    if (/^(pediatric|child)\[tiab\]$/.test(query)) return [];
+    const tagged: readonly string[] = query.match(/[A-Za-z0-9]+\[tiab\]/g) ?? [];
+    const key = Object.keys(outcomes).find((term) => tagged.includes(`${term}[tiab]`));
+    const outcome = outcomes[key ?? 'a']!;
+    const blockId = key && query.includes('fixed[tiab]') && query.includes('[pt]') ? '3'
+      : key ? '1' : query.includes('fixed[tiab]') ? '2' : query.includes('[pt]') ? 'RCTfilter' : '1';
+    return outcome.blockPmids?.[blockId] ?? (blockId === '2' || blockId === 'RCTfilter' ? universe : outcome.pmids);
+  });
   const fetch = jest.fn().mockImplementation(async (resource: string) => {
     if (resource.includes('efetch.fcgi')) {
       const pmids = new URL(resource).searchParams.get('id')!.split(',');
@@ -35,51 +49,14 @@ function setup(outcomes: Record<string, Outcome> = { a: { hits: 200, captured: [
       return { ok: true, status: 200, text: async () => xml };
     }
     const query = new URL(resource).searchParams.get('term')!;
-    let depth = 0;
-    let marginIndex = -1;
-    for (let index = 0; index < query.length; index += 1) {
-      if (query[index] === '(') depth += 1;
-      if (query[index] === ')') depth -= 1;
-      if (depth === 0 && query.startsWith(') NOT (', index)) { marginIndex = index; break; }
-    }
-    const before = query.slice(0, marginIndex + 1);
-    const after = query.slice(marginIndex + ') NOT '.length);
-    const keyIn = (side: string) => {
-      const tags: readonly string[] = side.match(/[A-Za-z0-9]+\[tiab\]/g) ?? [];
-      return Object.keys(outcomes).find((term) => tags.includes(`${term}[tiab]`));
-    };
-    // 概念式自体の NOT は通常の測定値を返し、前後の候補式が揃う外側の差集合だけを扱う。
-    if (marginIndex >= 0 && keyIn(before) && keyIn(after) && keyIn(before) !== keyIn(after)) {
-      // 確認用 PMID を要求する方向は後半、逆方向は前半が候補式。
-      const lost = new URL(resource).searchParams.get('retmax') !== '0';
-      const side = lost ? after : before;
-      const candidateKey = keyIn(side)!;
-      const candidate = outcomes[candidateKey]!;
-      return { ok: true, status: 200, json: async () => ({ esearchresult: {
-        count: String(lost ? candidate.lost?.hits ?? 0 : candidate.gained ?? 0),
-        idlist: lost ? candidate.lost?.pmids ?? [] : [],
-      } }) };
-    }
-    const tagged: readonly string[] = query.match(/[A-Za-z0-9]+\[tiab\]/g) ?? [];
-    const key = Object.keys(outcomes).find((term) => tagged.includes(`${term}[tiab]`)) ?? 'a';
-    const outcome = outcomes[key]!;
-    const capture = query.includes('[uid]');
-    // uid 句より前の展開済み式で、タグ語の組合せから結合行・概念行・フィルタを特定する。
-    const expression = query.slice(0, query.lastIndexOf(') AND ('));
-    const blockId = expression.includes('fixed[tiab]') && expression.includes('[pt]') ? '3'
-      : expression.includes('fixed[tiab]') ? '2' : expression.includes('[pt]') ? 'RCTfilter'
-        : /\[tiab\]/.test(expression) ? '1' : undefined;
-    const captured = capture && query.includes(') AND (') && blockId
-      ? outcome.blockCapture?.[blockId] ?? outcome.captured : outcome.captured;
-    return { ok: true, status: 200, json: async () => ({ esearchresult: {
-      count: String(capture ? captured.length : outcome.hits), idlist: capture ? captured : [],
-    } }) };
+    return { ok: true, status: 200, json: async () => ({ esearchresult: sets.search(query, Number(new URL(resource).searchParams.get('retmax') ?? 20)) }) };
   });
   let next = 0;
   const chat = jest.fn().mockImplementation(async () => ({
     text: JSON.stringify({ target_block_id: '1', proposed_expression: proposals[Math.min(next++, proposals.length - 1)],
       rationale: '研究基準に沿う変更', added_terms: [], removed_terms: [],
-      replaced_terms: [{ before: next <= 1 ? 'a[tiab]' : proposals[Math.min(next - 2, proposals.length - 1)],
+      replaced_terms: [{ before: write.mock.calls[write.mock.calls.length - 1]?.[0]?.queryOptimizationCheckpoint.resume?.bestFormula?.blocks[0]?.expression
+        ?? input.initialFormula.blocks[0]!.expression,
         after: proposals[Math.min(next - 1, proposals.length - 1)] }], measurement_ids: ['run:initial'] }),
     tokensIn: null, tokensOut: null, raw: {},
   }));
@@ -88,7 +65,7 @@ function setup(outcomes: Record<string, Outcome> = { a: { hits: 200, captured: [
   const write = jest.fn().mockResolvedValue(undefined);
   const deps: QueryOptimizationDeps = { eutils: { fetch, maxRetries: 0, rateLimiter: { acquire: async () => undefined } },
     llmFactory: { model: 'test', forPurpose }, checkpoint: { read: async () => undefined, write } };
-  return { input, deps, fetch, chat, write, forPurpose };
+  return { input, deps, fetch, chat, write, forPurpose, sets };
 }
 
 function deferred<T>() {
@@ -102,8 +79,82 @@ const captureQueries = (fetch: ReturnType<typeof setup>['fetch']) => fetch.mock.
   .map(([url]) => new URL(url as string).searchParams.get('term') ?? '')
   .filter((query) => query.includes('[uid]') && query.includes(') AND ('));
 
+describe('同一スナップショットの PMID 集合 fixture', () => {
+  test.each([
+    ['追加のみ', ['11'], ['11', '22', '901'], 0, 2],
+    ['削除のみ', ['11', '901'], ['11'], 1, 0],
+    ['置換', ['11', '901'], ['11', '902', '903'], 1, 2],
+    ['同一集合', ['11', '901'], ['901', '11', '11'], 0, 0],
+    ['シードの入れ替わり', ['11', '901'], ['22', '901'], 1, 1],
+  ] as const)('%s の件数・捕捉・両方向の差集合を同じ PMID から導く', (_, before, after, lostHits, gainedHits) => {
+    const mapping: Record<string, readonly string[]> = { before, after };
+    const api = createSetSearch((query) => mapping[query]);
+    const beforeHits = Number(api.search('before', 0).count);
+    const afterHits = Number(api.search('after', 0).count);
+    expect(api.search('(before) NOT (after)', 10000)).toEqual({ count: String(lostHits),
+      idlist: before.filter((id) => !after.some((other) => other === id)) });
+    expect(api.search('(after) NOT (before)', 0)).toEqual({ count: String(gainedHits), idlist: [] });
+    // 外側の確認では逆方向にも PMID を要求する。方向は retmax に依存しない。
+    expect(api.search('(after) NOT (before)', 10000).idlist).toHaveLength(gainedHits);
+    expect(afterHits).toBe(beforeHits - lostHits + gainedHits);
+    assertSetTransition(before, after, { beforeHits, afterHits, lostHits, gainedHits });
+    for (const query of ['before', 'after']) {
+      const measured = measureSet(mapping[query]!, ['11', '22']);
+      expect(api.search(`(${query}) AND (11[uid] OR 22[uid])`, 10000).idlist).toEqual(measured.capturedPmids);
+      expect(api.search(query, 1).count).toBe(String(measured.totalHits));
+    }
+    expect(setImpact(before, after)).toMatchObject({ lostHits, gainedHits });
+  });
+
+  test('件数が減ったのに失う集合 0 件と書いた正常系 fixture は作成時に落とす', () => {
+    expect(() => assertSetTransition(['11', '901'], ['11'],
+      { beforeHits: 2, afterHits: 1, lostHits: 0, gainedHits: 0 })).toThrow('集合と不整合: lostHits');
+    expect(() => assertSetTransition(['11'], ['11'],
+      { beforeHits: 2, afterHits: 1, lostHits: 0, gainedHits: 0 })).toThrow('集合と不整合: beforeHits');
+  });
+
+  test.each([[['11']], [['11', '902']]] as const)('現行仕様では件数削減を自動採用できない: 候補 %j', async (after) => {
+    const before = ['11', '901', '903'];
+    const f = setup({ a: { pmids: before }, b: { pmids: [...after] } });
+    f.input.seedPmids = ['11'];
+    f.input.maxHits = 1;
+    f.input.maxIterations = 1;
+    const result = await runQueryOptimization(f.input, f.deps);
+    const impact = setImpact(before, after);
+    // 変更後 = 変更前 - 失う + 増える。削減時は失う > 0 なので、採用条件の lostHits === 0 と両立しない。
+    expect(after.length).toBe(before.length - impact.lostHits + impact.gainedHits);
+    expect(impact.lostHits).toBeGreaterThan(0);
+    expect(result.trials[1]).toMatchObject({ accepted: false, held: true, impact: { lostHits: impact.lostHits, gainedHits: impact.gainedHits } });
+    expect(result.best?.formula.blocks[0]?.expression).toBe('a[tiab]');
+  });
+});
+
+test.each(['lost', 'gained'] as const)('異常系: 差集合 %s の不正な件数を意図的に注入し、保留後に再測定する', async (stage) => {
+  const f = setup({ a: { pmids: ['11'] }, b: { pmids: ['11', '22'] } });
+  const original = f.fetch.getMockImplementation()!;
+  let measurements = 0;
+  f.fetch.mockImplementation(async (url: string) => {
+    const response = await original(url);
+    const params = new URL(url).searchParams;
+    if (params.get('term')?.includes(') NOT (') && params.get('retmax') === (stage === 'lost' ? '10000' : '0')
+      && measurements++ === 0) {
+      const body = await response.json();
+      // 正常系の集合から得た応答をここだけ壊す。不正値を 0 件に置き換えて採用してはいけない。
+      return { ...response, json: async () => ({ esearchresult: { ...body.esearchresult, count: '1x' } }) };
+    }
+    return response;
+  });
+  const result = await runQueryOptimization(f.input, f.deps);
+  expect(result.trials[1]).toMatchObject({ accepted: false, held: true, impact: {
+    [stage === 'lost' ? 'lostHits' : 'gainedHits']: null, error: expect.stringContaining('不正な値'),
+  } });
+  expect(result.trials[2]).toMatchObject({ accepted: true, impact: { lostHits: 0, gainedHits: 1 } });
+  expect(result.trials[2]?.duplicateOf).toBeUndefined();
+  expect(measurements).toBe(2);
+});
+
 test.each([true, false])('未捕捉 %s のときだけ全ブロックの捕捉表と書誌を取得する', async (missed) => {
-  const f = setup({ a: { hits: 200, captured: missed ? ['11'] : ['11', '22'],
+  const f = setup({ a: { pmids: papers(200, missed ? ['11'] : ['11', '22']),
     articles: { '22': { abstract: '未捕捉の抄録', mesh: ['Disease'] } } } }, ['a[tiab]']);
   f.input.maxIterations = 1;
   const result = await runQueryOptimization(f.input, f.deps);
@@ -123,8 +174,8 @@ test.each([true, false])('未捕捉 %s のときだけ全ブロックの捕捉�
 });
 
 test.each(['declared', 'implicit', 'replacement', 'captured'])('削除制御 %s を測定前に適用する', async (kind) => {
-  const f = setup({ a: { hits: 200, captured: kind === 'captured' ? ['11', '22'] : ['11'] },
-    b: { hits: 150, captured: ['11', '22'] } });
+  const f = setup({ a: { pmids: papers(200, kind === 'captured' ? ['11', '22'] : ['11']) },
+    b: { pmids: papers(150, ['11', '22']) } });
   f.input.initialFormula.blocks[0]!.expression = 'a[tiab] OR x[tiab]';
   f.input.maxIterations = 1;
   f.chat.mockResolvedValue({ text: JSON.stringify({ target_block_id: '1', proposed_expression: 'a[tiab] OR b[tiab]',
@@ -146,7 +197,7 @@ test.each([
   ['置換前の表記', 'a[tiab] OR "Acute  respiratory distress"[tiab]', 'a[tiab] OR c[tiab]',
     [{ before: '"acute respiratory distress"[tiab]', after: 'c[tiab]' }]],
 ] as const)('%s の揺れを暗黙の削除として却下しない', async (_, before, after, replaced) => {
-  const f = setup({ a: { hits: 200, captured: ['11'] } });
+  const f = setup({ a: { pmids: papers(200, ['11']) } });
   f.input.initialFormula.blocks[0]!.expression = before;
   f.input.maxIterations = 1;
   f.chat.mockResolvedValue({ text: JSON.stringify({ target_block_id: '1', proposed_expression: after,
@@ -157,7 +208,7 @@ test.each([
 });
 
 test('暗黙の削除の却下理由には元の大文字小文字と空白を残す', async () => {
-  const f = setup({ a: { hits: 200, captured: ['11'] } });
+  const f = setup({ a: { pmids: papers(200, ['11']) } });
   f.input.initialFormula.blocks[0]!.expression = 'a[tiab] OR "Acute  respiratory distress"[tiab]';
   f.input.maxIterations = 1;
   f.chat.mockResolvedValue({ text: JSON.stringify({ target_block_id: '1', proposed_expression: 'a[tiab] OR c[tiab]',
@@ -169,7 +220,7 @@ test('暗黙の削除の却下理由には元の大文字小文字と空白を�
 });
 
 test('捕捉表の最初の通信中に停止しても初期試行と最良候補を保存する', async () => {
-  const f = setup({ a: { hits: 200, captured: ['11'] } });
+  const f = setup({ a: { pmids: papers(200, ['11']) } });
   const original = f.fetch.getMockImplementation()!;
   let stop = false;
   f.deps.shouldStop = () => stop;
@@ -190,8 +241,8 @@ test('捕捉表の最初の通信中に停止しても初期試行と最良候�
 });
 
 test('フィルタ行が未測定なら最終式の未捕捉を結合構造と断定しない', async () => {
-  const f = setup({ a: { hits: 200, captured: ['11'], blockCapture: {
-    '1': ['11', '22'], '2': ['11', '22'], RCTfilter: ['11', '22'], '3': ['11'],
+  const f = setup({ a: { pmids: papers(200, ['11']), blockPmids: {
+    '1': papers(201, ['11', '22']), '2': papers(201, ['11', '22']), RCTfilter: papers(200, ['11']), '3': papers(200, ['11']),
   } } }, ['a[tiab]']);
   const original = f.fetch.getMockImplementation()!;
   f.fetch.mockImplementation(async (url: string) => {
@@ -206,8 +257,8 @@ test('フィルタ行が未測定なら最終式の未捕捉を結合構造と�
 });
 
 test('承認外フィルタと結合行が落とすシードを回収不能と診断する', async () => {
-  const f = setup({ a: { hits: 200, captured: ['11'], blockCapture: {
-    '1': ['11', '22'], '2': ['11', '22'], RCTfilter: ['11'], '3': ['11'],
+  const f = setup({ a: { pmids: papers(200, ['11']), blockPmids: {
+    '1': papers(201, ['11', '22']), '2': papers(201, ['11', '22']), RCTfilter: papers(200, ['11']), '3': papers(200, ['11']),
   }, articles: { '22': { abstract: '抄録', mesh: ['Disease'] } } } }, ['a[tiab]']);
   const result = await runQueryOptimization(f.input, f.deps);
   expect(result.seedDiagnoses).toEqual([expect.objectContaining({ pmid: '22', title: '研究 22', year: 2024,
@@ -218,8 +269,8 @@ test('承認外フィルタと結合行が落とすシードを回収不能と�
 });
 
 test('承認済み概念ブロックだけが落とすシードは、結合行が最終式で落としていても語で回収できると診断する', async () => {
-  const f = setup({ a: { hits: 200, captured: ['11'], blockCapture: {
-    '1': ['11'], '2': ['11', '22'], RCTfilter: ['11', '22'], '3': ['11'],
+  const f = setup({ a: { pmids: papers(200, ['11']), blockPmids: {
+    '1': papers(200, ['11']), '2': papers(201, ['11', '22']), RCTfilter: papers(201, ['11', '22']), '3': papers(200, ['11']),
   } } }, ['a[tiab]']);
   const result = await runQueryOptimization(f.input, f.deps);
   expect(result.seedDiagnoses![0]).toMatchObject({ blockingBlockIds: ['1', '3'], recoverableByTerms: true });
@@ -227,9 +278,9 @@ test('承認済み概念ブロックだけが落とすシードは、結合行�
   expect(result.seedDiagnoses![0]!.note).not.toContain('#3');
 });
 
-test('全概念ブロックが捕捉しているのに最終式で未捕捉なら結合構造と診断する', async () => {
-  const f = setup({ a: { hits: 200, captured: ['11'], blockCapture: {
-    '1': ['11', '22'], '2': ['11', '22'], RCTfilter: ['11', '22'], '3': ['11'],
+test('異常系: ブロック間の不整合を注入し、全概念ブロックが捕捉しているのに最終式で未捕捉なら結合構造と診断する', async () => {
+  const f = setup({ a: { pmids: papers(200, ['11']), blockPmids: {
+    '1': papers(201, ['11', '22']), '2': papers(201, ['11', '22']), RCTfilter: papers(201, ['11', '22']), '3': papers(200, ['11']),
   } } }, ['a[tiab]']);
   const result = await runQueryOptimization(f.input, f.deps);
   expect(result.seedDiagnoses![0]).toMatchObject({ recoverableByTerms: false, blockingBlockIds: ['3'] });
@@ -237,7 +288,7 @@ test('全概念ブロックが捕捉しているのに最終式で未捕捉な�
 });
 
 test.each([false, true])('捕捉表の失敗（全行 %s）を空集合にせず処理を続ける', async (all) => {
-  const f = setup({ a: { hits: 200, captured: ['11'] } }, ['a[tiab]']);
+  const f = setup({ a: { pmids: papers(200, ['11']) } }, ['a[tiab]']);
   const original = f.fetch.getMockImplementation()!;
   let measuringTable = false;
   f.deps.onProgress = (progress) => {
@@ -262,9 +313,9 @@ test.each([false, true])('捕捉表の失敗（全行 %s）を空集合にせず
 });
 
 test.each([false, true])('採用後に未捕捉が残る %s なら捕捉表を更新し書誌を現在分に絞る', async (remaining) => {
-  const f = setup({ a: { hits: 200, captured: ['11'], articles: {
+  const f = setup({ a: { pmids: papers(200, ['11']), articles: {
     '22': { abstract: '回収するシード' }, '33': { abstract: '残るシード' },
-  } }, b: { hits: 300, captured: ['11', '22'] } }, ['b[tiab]', 'b[tiab]']);
+  } }, b: { pmids: papers(300, ['11', '22']) } }, ['b[tiab]', 'b[tiab]']);
   if (remaining) f.input.seedPmids.push('33');
   f.input.maxIterations = 2;
   const result = await runQueryOptimization(f.input, f.deps);
@@ -280,7 +331,7 @@ test.each([false, true])('採用後に未捕捉が残る %s なら捕捉表を�
 });
 
 test.each(['capture', 'bibliography'])('追加取得 %s 中の停止例外を再送出して run を停止する', async (phase) => {
-  const f = setup({ a: { hits: 200, captured: ['11'] } });
+  const f = setup({ a: { pmids: papers(200, ['11']) } });
   const original = f.fetch.getMockImplementation()!;
   f.fetch.mockImplementation(async (url: string) => {
     const query = new URL(url).searchParams.get('term') ?? '';
@@ -294,7 +345,7 @@ test.each(['capture', 'bibliography'])('追加取得 %s 中の停止例外を再
 });
 
 test.each([false, true])('未捕捉書誌の取得失敗 %s と抄録の切り詰めを記録する', async (failure) => {
-  const f = setup({ a: { hits: 200, captured: ['11'], articles: { '22': { abstract: '長'.repeat(1501) } } } }, ['a[tiab]']);
+  const f = setup({ a: { pmids: papers(200, ['11']), articles: { '22': { abstract: '長'.repeat(1501) } } } }, ['a[tiab]']);
   if (failure) {
     const original = f.fetch.getMockImplementation()!;
     f.fetch.mockImplementation(async (url: string) => url.includes('efetch.fcgi') ? { ok: false, status: 414 } : original(url));
@@ -313,27 +364,28 @@ test.each([false, true])('未捕捉書誌の取得失敗 %s と抄録の切り�
 });
 
 test('シードを維持して上限を満たす候補も失う集合があれば保留し書誌を提示する', async () => {
-  const { input, deps, fetch } = setup({ a: { hits: 200, captured: ['11', '22'] },
-    b: { hits: 50, captured: ['11', '22'], lost: { hits: 150, pmids: ['901', '902'] }, gained: 0 } });
+  const { input, deps, fetch } = setup({ a: { pmids: [...papers(50, ['11', '22']), '901', '902'] },
+    b: { pmids: papers(50, ['11', '22']) } });
   input.maxIterations = 1;
+  input.maxHits = 50;
   const result = await runQueryOptimization(input, deps);
   expect(result.trials[1]).toMatchObject({ accepted: false, held: true, impact: {
-    lostHits: 150, gainedHits: 0, error: null, inspected: [
+    lostHits: 2, gainedHits: 0, error: null, inspected: [
       { pmid: '901', title: '研究 901', year: 2024 }, { pmid: '902', title: '研究 902', year: 2024 },
     ],
   } });
-  expect(result.trials[1]?.reason).toContain('失う集合 150 件');
-  expect(result.trials[1]?.reason).toContain('取得できた 2 件から無作為抽出した書誌 2 件 / 全体 150');
-  expect(result.best?.measurement.totalHits).toBe(200);
+  expect(result.trials[1]?.reason).toContain('失う集合 2 件');
+  expect(result.trials[1]?.reason).toContain('無作為抽出した書誌 2 件 / 全体 2');
+  expect(result.best?.measurement.totalHits).toBe(52);
   expect(result.status).toBe('needs_review');
-  expect(result.unmetReasons).toContain('レビュー候補として保留: candidate-1（失う 150 件・増える 0 件）');
+  expect(result.unmetReasons).toContain('レビュー候補として保留: candidate-1（失う 2 件・増える 0 件）');
   expect(fetch.mock.calls.some(([url]) => url.includes('efetch.fcgi') && decodeURIComponent(url).includes('901,902'))).toBe(true);
   expect(result.apiCalls).toBe(fetch.mock.calls.length + 1);
 });
 
 test.each(['both', 'gained', 'efetch'])('差集合・書誌取得の失敗 %s は実測済み件数を保ち保留する', async (failure) => {
-  const { input, deps, fetch } = setup({ a: { hits: 200, captured: ['11', '22'] },
-    b: { hits: 50, captured: ['11', '22'], lost: { hits: failure === 'gained' ? 0 : 150, pmids: ['901'] } } });
+  const { input, deps, fetch } = setup({ a: { pmids: papers(200, failure === 'gained' ? ['11'] : ['11', '22']) },
+    b: { pmids: papers(failure === 'gained' ? 201 : 50, ['11', '22']) } });
   input.maxIterations = 1;
   const original = fetch.getMockImplementation()!;
   fetch.mockImplementation(async (url: string) => {
@@ -354,9 +406,8 @@ test.each(['both', 'gained', 'efetch'])('差集合・書誌取得の失敗 %s �
 });
 
 test('削除影響は run の予算で測り、確認書誌を無作為抽出した 20 件に制限する', async () => {
-  const pmids = Array.from({ length: 25 }, (_, index) => String(900 + index));
-  const { input, deps, fetch } = setup({ a: { hits: 200, captured: ['11', '22'] },
-    b: { hits: 50, captured: ['11', '22'], lost: { hits: 150, pmids } } });
+  const { input, deps, fetch } = setup({ a: { pmids: papers(200, ['11', '22']) },
+    b: { pmids: papers(50, ['11', '22']) } });
   input.maxIterations = 1;
   let latest: Parameters<NonNullable<QueryOptimizationDeps['onProgress']>>[0] | undefined;
   deps.onProgress = (progress) => { latest = progress; };
@@ -375,33 +426,33 @@ test('削除影響は run の予算で測り、確認書誌を無作為抽出し
 });
 
 test('2 回の保留は改善なしで停止し次の AI に理由と件数を渡す', async () => {
-  const { input, deps, chat } = setup({ a: { hits: 200, captured: ['11', '22'] },
-    b: { hits: 50, captured: ['11', '22'], lost: { hits: 5 } },
-    c: { hits: 40, captured: ['11', '22'], lost: { hits: 5 } } }, ['b[tiab]', 'c[tiab]']);
+  const { input, deps, chat } = setup({ a: { pmids: papers(200, ['11', '22']) },
+    b: { pmids: papers(50, ['11', '22']) },
+    c: { pmids: papers(40, ['11', '22']) } }, ['b[tiab]', 'c[tiab]']);
   const result = await runQueryOptimization(input, deps);
   expect(result.stopReason).toBe('no_improvement');
   expect(chat).toHaveBeenCalledTimes(2);
   expect(result.trials.filter((trial) => trial.held)).toHaveLength(2);
   const prompt = chat.mock.calls[1]![0][1].content as string;
-  for (const text of ['"held": true', '"lostHits": 5', '失う集合 5 件']) expect(prompt).toContain(text);
+  for (const text of ['"held": true', '"lostHits": 150', '失う集合 150 件']) expect(prompt).toContain(text);
 });
 
-test('保留の 150 件を次の AI に渡し、その後条件達成しても未達理由には保留を残さない', async () => {
-  const { input, deps, chat } = setup({ a: { hits: 200, captured: ['11', '22'] },
-    b: { hits: 50, captured: ['11', '22'], lost: { hits: 150 } },
-    c: { hits: 90, captured: ['11', '22'] } }, ['b[tiab]', 'c[tiab]']);
+test('保留の 2 件を次の AI に渡し、その後条件達成しても未達理由には保留を残さない', async () => {
+  const { input, deps, chat } = setup({ a: { pmids: ['11', '901', '902'] },
+    b: { pmids: ['11', '22'] },
+    c: { pmids: ['11', '22', '901', '902'] } }, ['b[tiab]', 'c[tiab]']);
   input.maxIterations = 2;
   const result = await runQueryOptimization(input, deps);
   expect(result).toMatchObject({ status: 'achieved', stopReason: 'conditions_met', unmetReasons: [] });
   expect(result.trials[1]?.held).toBe(true);
   expect(chat.mock.calls[1]![0][1].content).toContain('"held": true');
-  expect(chat.mock.calls[1]![0][1].content).toContain('"lostHits": 150');
+  expect(chat.mock.calls[1]![0][1].content).toContain('"lostHits": 2');
 });
 
 test.each(['seed_loss', 'within_target', 'repeated', 'syntax', 'failure'])(
   '採用判定前の却下 %s には差集合を測らない', async (kind) => {
-    const { input, deps, fetch } = setup({ a: { hits: kind === 'within_target' ? 80 : 200, captured: ['11', '22'] },
-      b: { hits: 40, captured: kind === 'seed_loss' ? ['11'] : ['11', '22'], lost: { hits: 3 } } },
+    const { input, deps, fetch } = setup({ a: { pmids: papers(kind === 'within_target' ? 80 : 200, ['11', '22']) },
+      b: { pmids: papers(40, kind === 'seed_loss' ? ['11'] : ['11', '22']) } },
     [kind === 'repeated' ? 'a[tiab]' : kind === 'syntax' ? 'b[tiab] OR' : 'b[tiab]']);
     input.maxIterations = 1;
     if (kind === 'failure') {
@@ -418,8 +469,8 @@ test.each(['seed_loss', 'within_target', 'repeated', 'syntax', 'failure'])(
 );
 
 test.each(['lost', 'gained', 'efetch'])('削除影響の %s 中の停止例外を握りつぶさない', async (stage) => {
-  const { input, deps, fetch } = setup({ a: { hits: 200, captured: ['11', '22'] },
-    b: { hits: 50, captured: ['11', '22'], lost: { hits: 150, pmids: ['901'] } } });
+  const { input, deps, fetch } = setup({ a: { pmids: papers(200, ['11', '22']) },
+    b: { pmids: papers(50, ['11', '22']) } });
   const original = fetch.getMockImplementation()!;
   fetch.mockImplementation(async (url: string) => {
     const params = new URL(url).searchParams;
@@ -437,8 +488,8 @@ test.each(['lost', 'gained', 'efetch'])('削除影響の %s 中の停止例外�
 afterEach(() => jest.restoreAllMocks());
 
 test('過去の却下式・理由・fingerprint は AI 文脈だけへ渡し、同じ候補も新 run で測り直す', async () => {
-  const f = setup({ a: { hits: 300, captured: ['11', '22'] }, b: { hits: 200, captured: ['11', '22'] },
-    c: { hits: 90, captured: ['11', '22'] } }, ['b[tiab]', 'c[tiab]']);
+  const f = setup({ a: { pmids: papers(300, ['11', '22']) }, b: { pmids: papers(200, ['11', '22']) },
+    c: { pmids: papers(90, ['11', '22']) } }, ['b[tiab]', 'c[tiab]']);
   const pastFormula = { ...f.input.initialFormula, blocks: f.input.initialFormula.blocks.map((block) => ({ ...block,
     expression: block.id === '1' ? 'b[tiab]' : block.expression })) };
   const old = await evaluation.evaluateQuery(pastFormula, f.input.seedPmids, { eutils: f.deps.eutils });
@@ -451,9 +502,9 @@ test('過去の却下式・理由・fingerprint は AI 文脈だけへ渡し、�
   const evaluate = jest.spyOn(evaluation, 'evaluateQuery');
   const optimize = jest.spyOn(skill, 'optimizeQuery');
   const result = await runQueryOptimization(f.input, f.deps);
-  expect(result.stopReason).toBe('conditions_met');
-  expect(result.trials[1]).toMatchObject({ accepted: true, after: { id: 'resumed:candidate-1', totalHits: 200 } });
-  expect(evaluate.mock.calls.map(([formula]) => formula.blocks[0]!.expression)).toEqual(['a[tiab]', 'b[tiab]', 'c[tiab]', 'c[tiab]']);
+  expect(result.stopReason).toBe('no_improvement');
+  expect(result.trials[1]).toMatchObject({ accepted: false, held: true, after: { id: 'resumed:candidate-1', totalHits: 200 } });
+  expect(evaluate.mock.calls.map(([formula]) => formula.blocks[0]!.expression)).toEqual(['a[tiab]', 'b[tiab]', 'c[tiab]']);
   expect(optimize.mock.calls[0]![0].trials).toBe(result.trials);
   expect(result.trials.map((trial) => trial.reason)).not.toContain('前回はシードを失った');
   expect(optimize.mock.calls[0]![0].previousRejectedTrials).toEqual(f.input.previousRejectedTrials);
@@ -462,7 +513,7 @@ test('過去の却下式・理由・fingerprint は AI 文脈だけへ渡し、�
 });
 
 test('再開の累積消費量を途中と終了の両方に保存し、再び再開しても元の予算を増やさない', async () => {
-  const f = setup({ a: { hits: 300, captured: ['11', '22'] }, b: { hits: 200, captured: ['11', '22'] } });
+  const f = setup({ a: { pmids: papers(300, ['11', '22']) }, b: { pmids: papers(200, ['11', '22']) } });
   const limits = { apiCalls: 200, elapsedMs: 600000, evaluatedTrials: 5 };
   f.input.maxIterations = 1;
   f.input.inputIdentity = 'fixed-input';
@@ -582,7 +633,7 @@ test('途中保存が遅くても別の並行通信は送信でき、10通信ご
 test('中断と再開を重ねても途中保存の通信・時間・評価試行を累積する', async () => {
   let previous: checkpoint.QueryOptimizationCheckpoint | undefined;
   for (let resumeCount = 0; resumeCount < 3; resumeCount += 1) {
-    const f = setup({ a: { hits: 200, captured: ['11', '22'] }, b: { hits: 300, captured: ['11', '22'] } });
+    const f = setup({ a: { pmids: papers(200, ['11', '22']) }, b: { pmids: papers(300, ['11', '22']) } });
     f.input.inputIdentity = 'same';
     f.input.runId = `run-${resumeCount}`;
     let time = 0;
@@ -610,7 +661,7 @@ test('中断と再開を重ねても途中保存の通信・時間・評価試�
 });
 
 test('初期式が目標内でも AI を呼び、同じ式をキャッシュなしで再検証する。外部保存・store 更新はない', async () => {
-  const { input, deps, fetch, chat, forPurpose, write } = setup({ a: { hits: 80, captured: ['11', '22'] } }, ['a[tiab]']);
+  const { input, deps, fetch, chat, forPurpose, write } = setup({ a: { pmids: papers(80, ['11', '22']) } }, ['a[tiab]']);
   const append = jest.spyOn(google, 'appendRow');
   const upload = jest.spyOn(google, 'uploadTextFile');
   const evaluate = jest.spyOn(evaluation, 'evaluateQuery');
@@ -634,36 +685,40 @@ test('初期式が目標内でも AI を呼び、同じ式をキャッシュな�
   for (const text of ['研究1', 'D001', 'approved-1', '研究課題', '組入', '除外', '100', '"terms"']) expect(prompt).toContain(text);
 });
 
-test('未捕捉時は件数が増えてもシード増加を採用し、全件捕捉後は超過分を減らす', async () => {
-  const { input, deps, chat, fetch } = setup({ a: { hits: 150, captured: ['11'] }, b: { hits: 300, captured: ['11', '22'] },
-    c: { hits: 90, captured: ['11', '22'] } }, ['b[tiab]', 'c[tiab]']);
+test('未捕捉時は件数が増えてもシード増加を採用し、全件捕捉後の件数削減候補は保留する', async () => {
+  const { input, deps, chat, fetch } = setup({ a: { pmids: papers(150, ['11']) }, b: { pmids: papers(300, ['11', '22']) },
+    c: { pmids: papers(90, ['11', '22']) } }, ['b[tiab]', 'c[tiab]']);
+  input.maxIterations = 2;
+  // 同一スナップショットで件数が減れば失う集合は必ず正となり、自動採用の条件を満たさない。
   const result = await runQueryOptimization(input, deps);
-  expect(result.status).toBe('achieved');
+  expect(result.status).toBe('needs_review');
   expect(result.iterations).toBe(2);
-  expect(result.trials.map((trial) => trial.accepted)).toEqual([true, true, true, true]);
-  expect(result.best?.formula.blocks[0]?.expression).toBe('c[tiab]');
+  expect(result.trials.map((trial) => trial.accepted)).toEqual([true, true, false]);
+  expect(result.best?.formula.blocks[0]?.expression).toBe('b[tiab]');
   expect(chat.mock.calls[1]![0][1].content).toContain('"totalHits": 300');
-  expect(result.trials[1]).toMatchObject({ accepted: true, impact: { lostHits: 0, gainedHits: 0 } });
-  expect(result.trials[1]?.reason).toContain('（失う集合 0 件、増える集合 0 件）');
-  expect(fetch.mock.calls.filter(([url]) => url.includes('efetch.fcgi'))).toHaveLength(1);
+  expect(result.trials[1]).toMatchObject({ accepted: true, impact: { lostHits: 0, gainedHits: 150 } });
+  expect(result.trials[1]?.reason).toContain('（失う集合 0 件、増える集合 150 件）');
+  expect(fetch.mock.calls.filter(([url]) => url.includes('efetch.fcgi'))).toHaveLength(2);
+  expect(result.trials[2]).toMatchObject({ accepted: false, held: true, impact: { lostHits: 210, gainedHits: 0 } });
 });
 
 test('上限だけ満たしてシードを失う候補は却下し、次の AI へ前後の実測と理由を返す', async () => {
-  const { input, deps, chat } = setup({ a: { hits: 200, captured: ['11', '22'] }, b: { hits: 50, captured: ['11'] },
-    c: { hits: 150, captured: ['11', '22'] } }, ['b[tiab]', 'c[tiab]']);
+  const { input, deps, chat } = setup({ a: { pmids: papers(200, ['11', '22']) }, b: { pmids: papers(50, ['11']) },
+    c: { pmids: papers(150, ['11', '22']) } }, ['b[tiab]', 'c[tiab]']);
   input.maxIterations = 2;
   const result = await runQueryOptimization(input, deps);
-  expect(result).toMatchObject({ status: 'needs_review', stopReason: 'iteration_limit' });
-  expect(result.best?.measurement.totalHits).toBe(150);
-  expect(result.best?.formula.blocks[0]?.expression).toBe('c[tiab]');
+  expect(result).toMatchObject({ status: 'needs_review', stopReason: 'no_improvement' });
+  expect(result.best?.measurement.totalHits).toBe(200);
+  expect(result.best?.formula.blocks[0]?.expression).toBe('a[tiab]');
   expect(result.unmetReasons.join(' ')).toContain('目安件数 100');
   const prompt = chat.mock.calls[1]![0][1].content as string;
   for (const text of ['捕捉済みシードを失う: 22', '"accepted": false', '"totalHits": 200', '"totalHits": 50']) expect(prompt).toContain(text);
   expect(result.trials[2]?.before?.totalHits).toBe(200);
+  expect(result.trials[2]).toMatchObject({ accepted: false, held: true, impact: { lostHits: 50, gainedHits: 0 } });
 });
 
 test('捕捉数が同じでも捕捉集合を入れ替えた候補は却下する', async () => {
-  const { input, deps } = setup({ a: { hits: 200, captured: ['11'] }, b: { hits: 50, captured: ['22'] } });
+  const { input, deps } = setup({ a: { pmids: papers(200, ['11']) }, b: { pmids: papers(50, ['22']) } });
   input.maxIterations = 1;
   const result = await runQueryOptimization(input, deps);
   expect(result.best?.measurement.capturedPmids).toEqual(['11']);
@@ -671,8 +726,8 @@ test('捕捉数が同じでも捕捉集合を入れ替えた候補は却下す�
 });
 
 test('未捕捉が残る間は件数削減だけを改善とせず、2 回連続で停止する', async () => {
-  const { input, deps, chat } = setup({ a: { hits: 200, captured: ['11'] }, b: { hits: 150, captured: ['11'] },
-    c: { hits: 50, captured: ['11'] } }, ['b[tiab]', 'c[tiab]']);
+  const { input, deps, chat } = setup({ a: { pmids: papers(200, ['11']) }, b: { pmids: papers(150, ['11']) },
+    c: { pmids: papers(50, ['11']) } }, ['b[tiab]', 'c[tiab]']);
   const result = await runQueryOptimization(input, deps);
   expect(result).toMatchObject({ status: 'needs_review', stopReason: 'no_improvement', iterations: 2 });
   expect(chat).toHaveBeenCalledTimes(2);
@@ -681,7 +736,7 @@ test('未捕捉が残る間は件数削減だけを改善とせず、2 回連続
 });
 
 test('目標内での件数削減は改善にせず初期式を最終検証する', async () => {
-  const { input, deps } = setup({ a: { hits: 80, captured: ['11', '22'] }, b: { hits: 40, captured: ['11', '22'] } });
+  const { input, deps } = setup({ a: { pmids: papers(80, ['11', '22']) }, b: { pmids: papers(40, ['11', '22']) } });
   const result = await runQueryOptimization(input, deps);
   expect(result.status).toBe('achieved');
   expect(result.best?.measurement.totalHits).toBe(80);
@@ -689,7 +744,7 @@ test('目標内での件数削減は改善にせず初期式を最終検証す�
 });
 
 test('fingerprint が初期式と一致する再提案は測定前に却下し、2 回連続で改善なしとして停止する', async () => {
-  const { input, deps, chat } = setup({ a: { hits: 200, captured: ['11', '22'] } }, ['a[tiab]']);
+  const { input, deps, chat } = setup({ a: { pmids: papers(200, ['11', '22']) } }, ['a[tiab]']);
   const result = await runQueryOptimization(input, deps);
   expect(result).toMatchObject({ status: 'needs_review', stopReason: 'no_improvement', iterations: 2 });
   expect(result.trials[1]).toMatchObject({ after: null, duplicateOf: 'initial' });
@@ -699,15 +754,15 @@ test('fingerprint が初期式と一致する再提案は測定前に却下し�
 });
 
 test('却下済みの式の再提案は改善なしの 2 回目として停止する', async () => {
-  const { input, deps } = setup({ a: { hits: 200, captured: ['11', '22'] }, b: { hits: 300, captured: ['11', '22'] } });
+  const { input, deps } = setup({ a: { pmids: papers(200, ['11', '22']) }, b: { pmids: papers(300, ['11', '22']) } });
   const result = await runQueryOptimization(input, deps);
   expect(result).toMatchObject({ stopReason: 'no_improvement', iterations: 2 });
   expect(result.best?.measurement.totalHits).toBe(200);
 });
 
 test('採用直後の測定前却下が 1 回なら次の反復で AI を呼び出す', async () => {
-  const { input, deps, chat } = setup({ a: { hits: 400, captured: ['11', '22'] },
-    b: { hits: 300, captured: ['11', '22'] }, c: { hits: 200, captured: ['11', '22'] } },
+  const { input, deps, chat } = setup({ a: { pmids: papers(200, []) },
+    b: { pmids: papers(201, ['11']) }, c: { pmids: papers(202, ['11', '22']) } },
   ['b[tiab]', 'b[tiab]', 'c[tiab]']);
   input.maxIterations = 3;
   const result = await runQueryOptimization(input, deps);
@@ -716,17 +771,18 @@ test('採用直後の測定前却下が 1 回なら次の反復で AI を呼び�
   expect(result.trials[2]).toMatchObject({ accepted: false, after: null, duplicateOf: 'candidate-1' });
   expect(result.trials[3]).toMatchObject({ accepted: true });
   expect(chat).toHaveBeenCalledTimes(3);
-  expect(result.best?.measurement.totalHits).toBe(200);
+  expect(result.best?.measurement.totalHits).toBe(202);
 });
 
 test('既定 5 回に達したら次の AI 呼び出しを開始しない', async () => {
   const outcomes: Record<string, Outcome> = {};
-  ['a', 'b', 'c', 'd', 'e', 'f'].forEach((key, index) => { outcomes[key] = { hits: 1000 - index * 100, captured: ['11', '22'] }; });
+  ['a', 'b', 'c', 'd', 'e', 'f'].forEach((key, index) => { outcomes[key] = { pmids: papers(200 + index, ['11', '22', '33', '44', '55'].slice(0, index)) }; });
   const { input, deps, chat } = setup(outcomes, ['b[tiab]', 'c[tiab]', 'd[tiab]', 'e[tiab]', 'f[tiab]']);
+  input.seedPmids = ['11', '22', '33', '44', '55'];
   const result = await runQueryOptimization(input, deps);
   expect(result).toMatchObject({ stopReason: 'iteration_limit', iterations: 5 });
   expect(chat).toHaveBeenCalledTimes(5);
-  expect(result.best?.measurement.totalHits).toBe(500);
+  expect(result.best?.measurement.totalHits).toBe(205);
 });
 
 test.each([
@@ -748,7 +804,7 @@ test.each([
 });
 
 test('有効な括弧・AND/OR を持つ概念式は評価できる', async () => {
-  const { input, deps } = setup({ a: { hits: 200, captured: ['11', '22'] }, b: { hits: 90, captured: ['11', '22'] } }, ['(b[tiab] OR extra[tiab]) AND more[tiab]']);
+  const { input, deps } = setup({ a: { pmids: papers(40, ['11']) }, b: { pmids: papers(90, ['11', '22']) } }, ['(b[tiab] OR extra[tiab]) AND more[tiab]']);
   expect((await runQueryOptimization(input, deps)).status).toBe('achieved');
 });
 
@@ -777,7 +833,7 @@ test.each([0, -1, 1.5, Number.POSITIVE_INFINITY])('不正な上限 %s を入力�
 });
 
 test('シード数未満の上限を入力エラーにし、シード 0 件では条件達成にしない', async () => {
-  const { input, deps } = setup({ a: { hits: 80, captured: [] } }, ['a[tiab]']);
+  const { input, deps } = setup({ a: { pmids: papers(80, []) } }, ['a[tiab]']);
   input.maxHits = 1;
   expect((await runQueryOptimization(input, deps)).stopReason).toBe('invalid_input');
   input.maxHits = 100;
@@ -880,7 +936,7 @@ test('初期測定完了後の停止は次の AI を呼ばない', async () => {
 });
 
 test('上限終了後に返されたオブジェクトを変更しても終了結果は変わらない', async () => {
-  const { input, deps, chat } = setup({ a: { hits: 200, captured: ['11', '22'] }, b: { hits: 150, captured: ['11', '22'] } });
+  const { input, deps, chat } = setup({ a: { pmids: papers(200, ['11', '22']) }, b: { pmids: papers(150, ['11', '22']) } });
   input.maxIterations = 1;
   const proposal: skill.OptimizeQueryProposal = { targetBlockId: '1', proposedExpression: 'b[tiab]',
     rationale: '', addedTerms: [], removedTerms: [], replacedTerms: [], measurementIds: [], meshRequests: [] };
@@ -910,12 +966,13 @@ test.each(['initial', 'candidate', 'llm', 'storage'])('継続不能な %s エラ
   if (kind === 'candidate') expect(result.trials[1]?.after?.totalHits).toBeNull();
 });
 
-test('最終再検証で条件が崩れたら達成にしない', async () => {
-  const { input, deps } = setup({ a: { hits: 80, captured: ['11', '22'] } }, ['a[tiab]']);
+test('異常系: 索引変動による件数増加を最終再検証へ注入し、達成にしない', async () => {
+  const { input, deps } = setup({ a: { pmids: papers(80, ['11', '22']) } }, ['a[tiab]']);
   const original = evaluation.evaluateQuery;
   jest.spyOn(evaluation, 'evaluateQuery').mockImplementationOnce(original)
     .mockImplementationOnce(async (...args) => {
       const result = await original(...args);
+      // 同一式への件数だけを変えて索引変動を意図的に注入する。
       if (result.finalQuery.status === 'success') result.finalQuery.totalHits = 120;
       return result;
     });
@@ -927,7 +984,7 @@ test('最終再検証で条件が崩れたら達成にしない', async () => {
 });
 
 test('最終再検証でシード喪失・API 失敗を検出する', async () => {
-  const { input, deps, fetch } = setup({ a: { hits: 80, captured: ['11', '22'] } }, ['a[tiab]']);
+  const { input, deps, fetch } = setup({ a: { pmids: papers(80, ['11', '22']) } }, ['a[tiab]']);
   const original = evaluation.evaluateQuery;
   jest.spyOn(evaluation, 'evaluateQuery').mockImplementationOnce(original)
     .mockImplementationOnce(async (...args) => {
@@ -938,7 +995,7 @@ test('最終再検証でシード喪失・API 失敗を検出する', async () =
 });
 
 test('待機中の入力変更に影響されず、シード重複を除去する', async () => {
-  const { input, deps, chat } = setup({ a: { hits: 80, captured: ['11', '22'] } }, ['a[tiab]']);
+  const { input, deps, chat } = setup({ a: { pmids: papers(80, ['11', '22']) } }, ['a[tiab]']);
   input.seedPmids.push('11');
   const pending = runQueryOptimization(input, deps);
   input.maxHits = 1;
@@ -967,7 +1024,7 @@ test.each(['add', 'remove', 'rename', 'combination', 'filter', 'filter_and', 'fl
 );
 
 test('MeSH の原タグ・NoExp・qualifier を保持して計測し、同じ語は分析内で共有する', async () => {
-  const { input, deps, fetch, chat } = setup({ a: { hits: 80, captured: ['11', '22'] } }, ['a[tiab]']);
+  const { input, deps, fetch, chat } = setup({ a: { pmids: papers(80, ['11', '22']) } }, ['a[tiab]']);
   const expression = 'a[tiab] OR "Disease/therapy"[Majr:noexp]';
   input.initialFormula.blocks[0]!.expression = expression;
   input.initialFormula.blocks[1]!.expression = expression;
@@ -978,14 +1035,15 @@ test('MeSH の原タグ・NoExp・qualifier を保持して計測し、同じ語
   expect(chat.mock.calls[0]![0][1].content).toContain('Disease/therapy');
 });
 
-test.each(['failure', 'clamped'])('語の %s を 0 件・寄与なしとして AI に渡さない', async (kind) => {
-  const { input, deps, fetch, chat } = setup({ a: { hits: 200, captured: ['11', '22'] } }, ['a[tiab]']);
+test.each(['failure', 'clamped'])('異常系: 語の %s（通信失敗／不整合な OR 件数の注入）を 0 件・寄与なしとして AI に渡さない', async (kind) => {
+  const { input, deps, fetch, chat } = setup({ a: { pmids: papers(200, ['11', '22']) } }, ['a[tiab]']);
   input.initialFormula.blocks[0]!.expression = 'a[tiab] OR broken[tiab]';
   input.maxIterations = 1;
   const original = fetch.getMockImplementation()!;
   fetch.mockImplementation(async (url: string) => {
     const query = new URL(url).searchParams.get('term');
     if (kind === 'failure' && query === 'broken[tiab]') throw new Error('語の取得失敗');
+    // OR の結果を単独語より小さく偽装し、正常な集合応答を意図的に破る。
     if (kind === 'clamped' && query === '(a[tiab]) OR (broken[tiab])') {
       return { ok: true, json: async () => ({ esearchresult: { count: '1', idlist: [] } }) };
     }
@@ -1026,7 +1084,7 @@ test('停止中に AI が reject してもユーザー停止を優先する', as
 });
 
 test('最終再検証中の停止は達成状態とチェックポイントを更新しない', async () => {
-  const { input, deps, write } = setup({ a: { hits: 80, captured: ['11', '22'] } }, ['a[tiab]']);
+  const { input, deps, write } = setup({ a: { pmids: papers(80, ['11', '22']) } }, ['a[tiab]']);
   let stop = false;
   deps.shouldStop = () => stop;
   const original = evaluation.evaluateQuery;
@@ -1039,15 +1097,15 @@ test('最終再検証中の停止は達成状態とチェックポイントを�
 });
 
 test('途中で改善があれば連続改善なし回数をリセットする', async () => {
-  const { input, deps } = setup({ a: { hits: 300, captured: ['11', '22'] }, b: { hits: 400, captured: ['11', '22'] },
-    c: { hits: 200, captured: ['11', '22'] }, d: { hits: 250, captured: ['11', '22'] }, e: { hits: 90, captured: ['11', '22'] } },
+  const { input, deps } = setup({ a: { pmids: papers(40, []) }, b: { pmids: papers(40, []) },
+    c: { pmids: papers(41, ['11']) }, d: { pmids: papers(41, ['11']) }, e: { pmids: papers(42, ['11', '22']) } },
   ['b[tiab]', 'c[tiab]', 'd[tiab]', 'e[tiab]']);
   const result = await runQueryOptimization(input, deps);
   expect(result).toMatchObject({ status: 'achieved', iterations: 4 });
 });
 
 test('書誌・ツリー未指定の単一ブロック式も、欠測を明示して実行できる', async () => {
-  const { input, deps, chat } = setup({ a: { hits: 80, captured: ['11', '22'] } }, ['a[tiab]']);
+  const { input, deps, chat } = setup({ a: { pmids: papers(80, ['11', '22']) } }, ['a[tiab]']);
   input.initialFormula.blocks = [input.initialFormula.blocks[0]!];
   input.initialFormula.combinationExpression = null;
   input.approvedBlocks = [input.approvedBlocks[0]!];
@@ -1057,13 +1115,14 @@ test('書誌・ツリー未指定の単一ブロック式も、欠測を明示�
   expect(chat.mock.calls[0]![0][1].content).toContain('"title": "(渡されていない)"');
 });
 
-test('最終再検証でシードを失ったら要確認へ戻す', async () => {
-  const { input, deps } = setup({ a: { hits: 80, captured: ['11', '22'] } }, ['a[tiab]']);
+test('異常系: 最終再検証にシード捕捉の変動を注入したら要確認へ戻す', async () => {
+  const { input, deps } = setup({ a: { pmids: papers(80, ['11', '22']) } }, ['a[tiab]']);
   const original = evaluation.evaluateQuery;
   jest.spyOn(evaluation, 'evaluateQuery').mockImplementationOnce(original)
     .mockImplementationOnce(async (...args) => {
       const result = await original(...args);
       if (result.finalQuery.status === 'success') {
+        // 同じ式・同じ件数でも捕捉 PMID が変わる応答を意図的に注入する。
         result.finalQuery.capturedPmids = ['11'];
         result.finalQuery.missedPmids = ['22'];
       }
@@ -1088,7 +1147,7 @@ const childNode: skill.OptimizationMeshNode = { id: 'D002', descriptor: 'Child',
   treeNumbers: ['C01.100.200'], parentIds: ['D001'], childIds: [], explode: true, note: '直下を取得済み' };
 
 test('初期式が条件達成でも情報要求直後には完了せず、取得文脈を読んだ判断を記録する', async () => {
-  const { input, deps, chat } = setup({ a: { hits: 50, captured: ['11', '22'] } }, ['a[tiab]']);
+  const { input, deps, chat } = setup({ a: { pmids: papers(50, ['11', '22']) } }, ['a[tiab]']);
   requestMesh(chat, [meshRequest]);
   deps.fetchMeshContext = jest.fn().mockResolvedValue([childNode]);
   const progress = jest.fn();
@@ -1108,7 +1167,7 @@ test('初期式が条件達成でも情報要求直後には完了せず、取�
 });
 
 test('連続した情報要求が反復上限に達したら最後の要求を判断未了として残す', async () => {
-  const { input, deps, chat } = setup({ a: { hits: 50, captured: ['11', '22'] } });
+  const { input, deps, chat } = setup({ a: { pmids: papers(50, ['11', '22']) } });
   input.maxIterations = 2;
   requestMesh(chat, [meshRequest]);
   requestMesh(chat, [meshRequest, meshRequest]);
@@ -1140,7 +1199,7 @@ test.each(['user_stop', 'api_budget', 'time_budget'] as const)('情報取得途�
 });
 
 test.each(['user_stop', 'time_budget'] as const)('最終 round の情報要求を保存した直後の %s を反復上限に置き換えない', async (reason) => {
-  const { input, deps, chat, write } = setup({ a: { hits: 80, captured: ['11', '22'] } });
+  const { input, deps, chat, write } = setup({ a: { pmids: papers(80, ['11', '22']) } });
   input.maxIterations = 1;
   requestMesh(chat, [meshRequest]);
   let informationSaved = false;
@@ -1166,8 +1225,8 @@ test.each(['user_stop', 'time_budget'] as const)('最終 round の情報要求�
 });
 
 test.each(['accepted', 'invalid'] as const)('連続要求後の %s の判断は最後の情報要求にだけ対応付ける', async (decision) => {
-  const { input, deps, chat } = setup({ a: { hits: 200, captured: ['11', '22'] },
-    b: { hits: 50, captured: ['11', '22'] } }, [decision === 'accepted' ? 'b[tiab]' : '#999']);
+  const { input, deps, chat } = setup({ a: { pmids: papers(40, ['11']) },
+    b: { pmids: papers(50, ['11', '22']) } }, [decision === 'accepted' ? 'b[tiab]' : '#999']);
   input.maxIterations = 3;
   requestMesh(chat, [meshRequest]);
   requestMesh(chat, [meshRequest]);
@@ -1338,9 +1397,9 @@ test('停止が行ごとの測定失敗に変換されても、再試行の待�
 });
 
 test('記録済み試行は後の語別計測で変化せず、同じ最良式の語を再計測しない', async () => {
-  const { input, deps, fetch } = setup({ a: { hits: 300, captured: ['11', '22'] },
-    b: { hits: 400, captured: ['11', '22'] }, c: { hits: 200, captured: ['11', '22'] },
-    d: { hits: 250, captured: ['11', '22'] }, e: { hits: 240, captured: ['11', '22'] } },
+  const { input, deps, fetch } = setup({ a: { pmids: papers(40, []) },
+    b: { pmids: papers(40, []) }, c: { pmids: papers(41, ['11']) },
+    d: { pmids: papers(41, ['11']) }, e: { pmids: papers(41, ['11']) } },
   ['b[tiab]', 'c[tiab]', 'd[tiab]', 'e[tiab]']);
   const recorded: { trial: skill.OptimizationTrial; json: string }[] = [];
   const save = checkpoint.saveQueryOptimizationCheckpoint;
@@ -1406,8 +1465,8 @@ test.each([
   '(asthma[tiab] OR wheeze[tiab]) NOT (pediatric[tiab] OR child[tiab])',
   'asthma[tiab] AND NOT pediatric[tiab]',
 ])('概念式の NOT を検査用にだけ正規化し、原文を実測する: %s', async (expression) => {
-  const { input, deps, fetch } = setup({ a: { hits: 200, captured: ['11', '22'] },
-    asthma: { hits: 90, captured: ['11', '22'] } }, [expression]);
+  const { input, deps, fetch } = setup({ a: { pmids: papers(40, ['11']) },
+    asthma: { pmids: papers(90, ['11', '22']) } }, [expression]);
   const result = await runQueryOptimization(input, deps);
   expect(result.status).toBe('achieved');
   expect(result.best?.formula.blocks[0]!.expression).toBe(expression);
@@ -1429,8 +1488,8 @@ test('二項 NOT の結合行は従来の文法で拒否し、概念式の末尾
 });
 
 test('候補の in-band エラーは却下して実測理由を次の AI へ渡し、最良式から続ける', async () => {
-  const { input, deps, fetch, chat } = setup({ a: { hits: 200, captured: ['11', '22'] },
-    c: { hits: 90, captured: ['11', '22'] } }, ['"Misspelled disease"[Mesh]', 'c[tiab]']);
+  const { input, deps, fetch, chat } = setup({ a: { pmids: papers(40, ['11']) },
+    c: { pmids: papers(90, ['11', '22']) } }, ['"Misspelled disease"[Mesh]', 'c[tiab]']);
   const original = fetch.getMockImplementation()!;
   fetch.mockImplementation(async (url: string) => {
     if (new URL(url).searchParams.get('term')!.includes('Misspelled disease')) {
@@ -1445,7 +1504,7 @@ test('候補の in-band エラーは却下して実測理由を次の AI へ渡�
   expect(result).toMatchObject({ status: 'achieved', iterations: 2 });
   expect(result.trials[1]).toMatchObject({ accepted: false, reason: expect.stringContaining('Misspelled disease') });
   expect(optimize.mock.calls[1]![0].formula.blocks[0]!.expression).toBe('a[tiab]');
-  expect(optimize.mock.calls[1]![0].measurement!.totalHits).toBe(200);
+  expect(optimize.mock.calls[1]![0].measurement!.totalHits).toBe(40);
   expect(chat.mock.calls[1]![0][1].content).toContain('候補の測定に失敗したため却下しました');
   expect(chat.mock.calls[1]![0][1].content).toContain('Misspelled disease');
   expect(result.best?.measurement.totalHits).toBe(90);
@@ -1466,8 +1525,8 @@ test('同じ候補で測定が連続して失敗したら、回帰より API エ
 });
 
 test('成功測定を挟めば連続失敗数をリセットする', async () => {
-  const { input, deps, fetch } = setup({ a: { hits: 400, captured: ['11', '22'] },
-    c: { hits: 200, captured: ['11', '22'] }, e: { hits: 90, captured: ['11', '22'] } },
+  const { input, deps, fetch } = setup({ a: { pmids: papers(40, []) },
+    c: { pmids: papers(41, ['11']) }, e: { pmids: papers(42, ['11', '22']) } },
   ['b[tiab]', 'c[tiab]', 'd[tiab]', 'e[tiab]']);
   const original = fetch.getMockImplementation()!;
   fetch.mockImplementation(async (url: string) => {
@@ -1479,7 +1538,7 @@ test('成功測定を挟めば連続失敗数をリセットする', async () =>
 });
 
 test.each(['achieved', 'needs_review', 'stopped', 'error'] as const)('終了状態 %s の復元は中断ではなく完了済みになる', async (status) => {
-  const { input, deps, chat, write } = setup({ a: { hits: status === 'achieved' ? 80 : 200, captured: ['11', '22'] } }, ['a[tiab]']);
+  const { input, deps, chat, write } = setup({ a: { pmids: papers(status === 'achieved' ? 80 : 200, ['11', '22']) } }, ['a[tiab]']);
   const data: Record<string, unknown> = {};
   let stop = false;
   deps.shouldStop = () => stop;
@@ -1499,7 +1558,7 @@ test.each(['achieved', 'needs_review', 'stopped', 'error'] as const)('終了状�
 });
 
 test('終了状態の保存に失敗しても結果を失わず、その事実を返す', async () => {
-  const { input, deps, write } = setup({ a: { hits: 80, captured: ['11', '22'] } }, ['a[tiab]']);
+  const { input, deps, write } = setup({ a: { pmids: papers(80, ['11', '22']) } }, ['a[tiab]']);
   write.mockImplementation(async (items: Record<string, checkpoint.QueryOptimizationCheckpoint>) => {
     if (Object.values(items)[0]?.completion) throw new Error('容量不足');
   });
@@ -1510,7 +1569,7 @@ test('終了状態の保存に失敗しても結果を失わず、その事実�
 });
 
 test('目標内でも反復上限 1 の情報要求は追加取得を打ち切り、最終再検証せず判断未了で終わる', async () => {
-  const { input, deps, chat } = setup({ a: { hits: 80, captured: ['11', '22'] } });
+  const { input, deps, chat } = setup({ a: { pmids: papers(80, ['11', '22']) } });
   input.maxIterations = 1;
   requestMesh(chat, [meshRequest]);
   const evaluate = jest.spyOn(evaluation, 'evaluateQuery');
@@ -1526,7 +1585,7 @@ test('目標内でも反復上限 1 の情報要求は追加取得を打ち切�
 });
 
 test('目標内で反復上限 5 の情報要求は次 round の AI 応答を評価してから条件達成する', async () => {
-  const { input, deps, chat } = setup({ a: { hits: 80, captured: ['11', '22'] } });
+  const { input, deps, chat } = setup({ a: { pmids: papers(80, ['11', '22']) } });
   input.maxIterations = 5;
   requestMesh(chat, [meshRequest]);
   const optimize = jest.spyOn(skill, 'optimizeQuery');
@@ -1548,7 +1607,7 @@ test('目標内で反復上限 5 の情報要求は次 round の AI 応答を評
 });
 
 test('非承認ブロックと研究デザインフィルタの語別計測をしない', async () => {
-  const { input, deps, fetch } = setup({ a: { hits: 80, captured: ['11', '22'] } }, ['a[tiab]']);
+  const { input, deps, fetch } = setup({ a: { pmids: papers(80, ['11', '22']) } }, ['a[tiab]']);
   input.approvedBlocks = [input.approvedBlocks[0]!];
   input.initialFormula.blocks[1]!.expression = 'unapproved[tiab] OR "Other concept"[Mesh]';
   input.initialFormula.blocks[2]!.expression = 'filterword[tiab] OR "Filter heading"[Mesh]';
@@ -1590,7 +1649,7 @@ test('レート制限待機中に停止した場合も fetch と後続 acquire �
 });
 
 test.each([false, true])('リミッタ未注入時は API キー有無 %s に応じた共有リミッタを維持する', async (hasKey) => {
-  const { input, deps, fetch } = setup({ a: { hits: 80, captured: ['11', '22'] } }, ['a[tiab]']);
+  const { input, deps, fetch } = setup({ a: { pmids: papers(80, ['11', '22']) } }, ['a[tiab]']);
   delete deps.eutils.rateLimiter;
   if (hasKey) deps.eutils.apiKey = 'test-key';
   const withoutKey = jest.spyOn(sharedEutilsRateLimiters.withoutApiKey, 'acquire').mockResolvedValue(undefined);
@@ -1619,13 +1678,26 @@ test('種付き抽出は再現可能で順序に依存せず重複を含まな�
 });
 
 test.each([
-  [100, 100, 'all'], [10800, 10000, 'retrieved_subset'], [100, 90, 'retrieved_subset'],
-  [0, 0, undefined],
-] as const)('失う集合 %s 件・取得 %s 件の抽出記録を保持する', async (count, retrieved, method) => {
+  ['正常系', 100, 100, 'all'], ['正常系: retmax による制限', 10800, 10000, 'retrieved_subset'],
+  ['異常系: PMID 取得不足を意図的に注入', 100, 90, 'retrieved_subset'], ['正常系', 0, 0, undefined],
+] as const)('%s: 失う集合 %s 件・取得 %s 件の抽出記録を保持する', async (_, count, retrieved, method) => {
   const pmids = Array.from({ length: retrieved }, (_, i) => String(i + 1000));
-  const f = setup({ a: { hits: 200, captured: ['11', '22'] },
-    b: { hits: 50, captured: ['11', '22'], lost: { hits: count, pmids: [...pmids].reverse() } } });
+  const f = setup({ a: { pmids: count ? [...papers(50, ['11', '22']), ...Array.from({ length: count }, (_, i) => String(i + 1000))] : papers(49, ['11']) },
+    b: { pmids: papers(50, ['11', '22']) } });
   f.input.maxIterations = 1;
+  const original = f.fetch.getMockImplementation()!;
+  f.fetch.mockImplementation(async (url: string) => {
+    const response = await original(url);
+    const params = new URL(url).searchParams;
+    if (params.get('term')?.includes(') NOT (') && params.get('retmax') === '10000') {
+      const body = await response.json();
+      // 正常系は取得順序だけを変える。取得不足の異常系では PMID を間引き、件数は維持する。
+      return { ...response, json: async () => ({ esearchresult: {
+        ...body.esearchresult, idlist: body.esearchresult.idlist.slice(0, retrieved).reverse(),
+      } }) };
+    }
+    return response;
+  });
   f.deps.random = () => 0.25;
   f.deps.now = () => 1000;
   const result = await runQueryOptimization(f.input, f.deps);
@@ -1643,13 +1715,21 @@ test.each([
   expect(impact.inspected.map((article) => article.pmid)).toEqual(expected);
 });
 
-test('書誌取得の失敗後も抽出 PMID を残す', async () => {
-  const f = setup({ a: { hits: 200, captured: ['11', '22'] },
-    b: { hits: 50, captured: ['11', '22'], lost: { hits: 2, pmids: ['902', '901', '901'] } } });
+test('異常系: 重複 PMID を注入し、書誌取得の失敗後も重複のない抽出 PMID を残す', async () => {
+  const f = setup({ a: { pmids: [...papers(50, ['11', '22']), '902', '901'] },
+    b: { pmids: papers(50, ['11', '22']) } });
   f.input.maxIterations = 1;
+  f.input.maxHits = 50;
   const original = f.fetch.getMockImplementation()!;
   f.fetch.mockImplementation(async (url: string) => {
     if (url.includes('efetch.fcgi')) throw new Error('書誌取得失敗');
+    const params = new URL(url).searchParams;
+    if (params.get('term')?.includes(') NOT (') && params.get('retmax') === '10000') {
+      const response = await original(url);
+      const body = await response.json();
+      // 正常な集合応答にはない重複を、この異常系だけで意図的に追加する。
+      return { ...response, json: async () => ({ esearchresult: { ...body.esearchresult, idlist: ['902', '901', '901'] } }) };
+    }
     return original(url);
   });
   const result = await runQueryOptimization(f.input, f.deps);
@@ -1658,8 +1738,8 @@ test('書誌取得の失敗後も抽出 PMID を残す', async () => {
 });
 
 test('保留式の再提案は申告が空でも通信せず一致 ID と実差分を記録する', async () => {
-  const f = setup({ a: { hits: 200, captured: ['11', '22'] },
-    b: { hits: 50, captured: ['11', '22'], lost: { hits: 1, pmids: ['901'] } } });
+  const f = setup({ a: { pmids: papers(200, ['11', '22']) },
+    b: { pmids: papers(50, ['11', '22']) } });
   const callCounts: number[] = [];
   f.chat.mockImplementation(async () => {
     callCounts.push(f.fetch.mock.calls.length);
@@ -1675,8 +1755,8 @@ test('保留式の再提案は申告が空でも通信せず一致 ID と実差�
 });
 
 test.each(['lost', 'gained'] as const)('差集合 %s の測定失敗で保留した式は再測定できる', async (stage) => {
-  const f = setup({ a: { hits: 200, captured: ['11', '22'] },
-    b: { hits: 50, captured: ['11', '22'] } });
+  const f = setup({ a: { pmids: papers(40, ['11']) },
+    b: { pmids: papers(50, ['11', '22']) } });
   const original = f.fetch.getMockImplementation()!;
   let failures = 0;
   f.fetch.mockImplementation(async (url: string) => {
@@ -1687,15 +1767,15 @@ test.each(['lost', 'gained'] as const)('差集合 %s の測定失敗で保留し
   });
   const result = await runQueryOptimization(f.input, f.deps);
   expect(result.trials[1]).toMatchObject({ held: true, impact: { [stage === 'lost' ? 'lostHits' : 'gainedHits']: null } });
-  expect(result.trials[2]).toMatchObject({ accepted: true, impact: { lostHits: 0, gainedHits: 0 } });
+  expect(result.trials[2]).toMatchObject({ accepted: true, impact: { lostHits: 0, gainedHits: 10 } });
   expect(result.trials[2]?.duplicateOf).toBeUndefined();
   expect(failures).toBe(2);
 });
 
 test('追加語だけ違う削除の変種は測定する', async () => {
-  const f = setup({ a: { hits: 200, captured: ['11', '22'] },
-    b: { hits: 50, captured: ['11', '22'], lost: { hits: 1, pmids: ['901'] } },
-    c: { hits: 60, captured: ['11', '22'], lost: { hits: 1, pmids: ['901'] } } }, ['b[tiab]', 'c[tiab]']);
+  const f = setup({ a: { pmids: papers(200, ['11', '22']) },
+    b: { pmids: papers(50, ['11', '22']) },
+    c: { pmids: papers(60, ['11', '22']) } }, ['b[tiab]', 'c[tiab]']);
   const result = await runQueryOptimization(f.input, f.deps);
   expect(result.stopReason).toBe('no_improvement');
   expect(result.trials[2]).toMatchObject({ held: true, after: { totalHits: 60 },
@@ -1726,7 +1806,7 @@ const hitTargetGuidance = '既に捕捉している文献を失わずに件数�
 describe.each(['no_improvement', 'diagnosed_block_held', 'iteration_limit', 'repeated_formula', 'user_stop', 'api_budget'] as const)(
   '終了理由 %s の件数の案内', (reason) => {
     test.each([80, 100, 200])('最終実測 %s 件が目安を超えた対象の終了理由だけ案内する', async (hits) => {
-      const f = setup({ a: { hits, captured: ['11'] } });
+      const f = setup({ a: { pmids: papers(hits, ['11']) } });
       f.chat.mockRejectedValue(new QueryOptimizationStopError(reason));
       const result = await runQueryOptimization(f.input, f.deps);
       expect(result.stopReason).toBe(reason);
@@ -1743,8 +1823,8 @@ describe.each(['no_improvement', 'diagnosed_block_held', 'iteration_limit', 'rep
 );
 
 test('目安超過で反復上限に達したら保留した試行数を案内する', async () => {
-  const f = setup({ a: { hits: 200, captured: ['11', '22'] },
-    b: { hits: 150, captured: ['11', '22'], lost: { hits: 50 } } });
+  const f = setup({ a: { pmids: papers(200, ['11', '22']) },
+    b: { pmids: papers(150, ['11', '22']) } });
   f.input.maxIterations = 1;
   const result = await runQueryOptimization(f.input, f.deps);
   expect(result.stopReason).toBe('iteration_limit');
@@ -1755,9 +1835,9 @@ test('目安超過で反復上限に達したら保留した試行数を案内�
 });
 
 test('件数が減る保留と増える保留が混在すると減る候補だけを案内する', async () => {
-  const f = setup({ a: { hits: 200, captured: ['11'] },
-    b: { hits: 150, captured: ['11', '22'], lost: { hits: 50 } },
-    c: { hits: 250, captured: ['11', '22'], lost: { hits: 10 } } }, ['b[tiab]', 'c[tiab]']);
+  const f = setup({ a: { pmids: [...papers(190, ['11']), ...Array.from({ length: 10 }, (_, i) => String(900 + i))] },
+    b: { pmids: papers(150, ['11', '22']) },
+    c: { pmids: papers(250, ['11', '22']) } }, ['b[tiab]', 'c[tiab]']);
   // 保留後も採用式は a のため、どちらの提案も a からの置換として返す。
   for (const expression of ['b[tiab]', 'c[tiab]']) {
     f.chat.mockResolvedValueOnce({ text: JSON.stringify({ target_block_id: '1', proposed_expression: expression,
@@ -1772,8 +1852,8 @@ test('件数が減る保留と増える保留が混在すると減る候補だ�
 });
 
 test.each([200, 250])('保留候補が同数か増加の %s 件だけなら保留件数の行を出さない', async (hits) => {
-  const f = setup({ a: { hits: 200, captured: ['11'] },
-    b: { hits, captured: ['11', '22'], lost: { hits: 10 } } });
+  const f = setup({ a: { pmids: [...papers(190, ['11']), ...Array.from({ length: 10 }, (_, i) => String(900 + i))] },
+    b: { pmids: papers(hits, ['11', '22']) } });
   f.input.maxIterations = 1;
   const result = await runQueryOptimization(f.input, f.deps);
   expect(result.stopReason).toBe('iteration_limit');
@@ -1784,8 +1864,8 @@ test.each([200, 250])('保留候補が同数か増加の %s 件だけなら保�
 
 describe.each(['before', 'after'] as const)('%s の実測が欠けた保留候補', (side) => {
   test.each(['測定全体', '件数'] as const)('%s が欠けていれば保留件数の行を出さない', async (missing) => {
-    const f = setup({ a: { hits: 200, captured: ['11', '22'] },
-      b: { hits: 150, captured: ['11', '22'], lost: { hits: 50 } } });
+    const f = setup({ a: { pmids: papers(200, ['11', '22']) },
+      b: { pmids: papers(150, ['11', '22']) } });
     f.input.maxIterations = 1;
     const save = checkpoint.saveQueryOptimizationCheckpoint;
     // 通常の実測では作られない欠損を、確定済みの保留試行に注入する。
@@ -1808,7 +1888,7 @@ describe.each(['before', 'after'] as const)('%s の実測が欠けた保留候�
 });
 
 test('目安件数と既知シードの捕捉を満たした終了には件数削減の案内を出さない', async () => {
-  const f = setup({ a: { hits: 80, captured: ['11', '22'] } }, ['a[tiab]']);
+  const f = setup({ a: { pmids: papers(80, ['11', '22']) } }, ['a[tiab]']);
   const result = await runQueryOptimization(f.input, f.deps);
   expect(result.stopReason).toBe('conditions_met');
   expect(result.unmetReasons).not.toContain(hitTargetGuidance);
