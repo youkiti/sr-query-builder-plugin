@@ -10,6 +10,27 @@
   flex-wrap: wrap;
 }
 
+/* 補助操作行。主操作は自動調整カードの .optimization__start に一本化した
+   ため、「検証のみ再実行」「最初から作り直す」は自動調整カードの直後に控えめに置く。
+   opacity ではなく border-top・小さい font-size・muted な色で弱める（要素は button の
+   まま、opacity は使わない）。ラベルの色は --color-bg（白）に対して実測 5.28:1 で
+   WCAG AA（4.5:1）を満たす。 */
+.draft__actions--secondary {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+  font-size: var(--font-size-sm);
+}
+
+.draft__actions-label {
+  color: var(--color-text-muted);
+}
+
+.draft__actions--secondary button {
+  font-size: var(--font-size-sm);
+  padding: var(--space-1) var(--space-2);
+}
+
 .draft__status {
   margin: var(--space-2) 0 0;
   color: var(--color-text-muted);

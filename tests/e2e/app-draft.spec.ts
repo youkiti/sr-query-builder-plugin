@@ -11,7 +11,7 @@ import { fullStateScenario, FULL_APP_STATE } from './fixtures/scenarios/fullStat
 const APP_URL = '/app/app.html#/draft';
 
 test.describe('app-draft (#/draft)', () => {
-  test('既存 formula 無し相当: 「生成する」ボタンが出る', async ({ page }) => {
+  test('既存 formula 無し: .draft__generate は出ず、主操作は自動調整ボタンのみ', async ({ page }) => {
     await injectAppStub(
       page,
       fullStateScenario({
@@ -25,18 +25,27 @@ test.describe('app-draft (#/draft)', () => {
     await page.goto(APP_URL);
 
     // currentFormulaVersionId が null かつ blocks 承認済みなので /draft は通る
-    const btn = page.locator('.draft__generate');
-    await expect(btn).toHaveText(/生成して検証する/);
+    // 主操作は自動調整カードの .optimization__start に一本化。
+    // 現式が無いので補助操作行（.draft__generate）自体が描画されない。
+    await expect(page.locator('.draft__generate')).toHaveCount(0);
+    await expect(page.locator('.draft__actions--secondary')).toHaveCount(0);
+    const startBtn = page.locator('.optimization__start');
+    await expect(startBtn).toBeVisible();
+    await expect(startBtn).toHaveText('検索式を作成・自動調整する');
     // 既存 formula の <pre> は出ない
     await expect(page.locator('.draft__formula')).toHaveCount(0);
   });
 
-  test('既存 formula 有り: 「再生成して再検証する」ボタンと pre が両方出る', async ({ page }) => {
+  test('既存 formula 有り: 補助操作行の「最初から作り直す」ボタンと pre が両方出る', async ({ page }) => {
     await injectAppStub(page, fullStateScenario());
     await page.goto(APP_URL);
 
     const btn = page.locator('.draft__generate');
-    await expect(btn).toHaveText(/再生成して再検証する/);
+    await expect(btn).toHaveText('最初から作り直す');
+    // 補助操作行は自動調整カード（.optimization__setup）の直後に出る
+    const setup = page.locator('.optimization__setup');
+    await expect(setup).toBeVisible();
+    await expect(page.locator('.draft__actions--secondary')).toBeVisible();
     await expect(page.locator('.draft__formula')).toBeVisible();
     await expect(page.locator('.draft__formula')).toContainText('ARDS');
   });

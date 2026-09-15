@@ -105,7 +105,7 @@ describe('createDraftView', () => {
     expect(container.querySelector('.view__placeholder')?.textContent).toContain('ブロック');
   });
 
-  test('既存の markdown があればブロック単位で表示し、ボタンは「再生成」', () => {
+  test('既存の markdown があればブロック単位で表示し、補助操作行のボタンは「最初から作り直す」', () => {
     const view = createDraftView();
     const container = buildContainer();
     view(container, {
@@ -121,7 +121,9 @@ describe('createDraftView', () => {
     // MeSH 語は専用 span で色分けされる
     expect(container.querySelector('.draft__term--mesh')?.textContent).toBe('x[Mesh]');
     expect(container.querySelector('.draft__info')?.textContent).toContain('v-123');
-    expect(container.querySelector('button')?.textContent).toBe('再生成して再検証する');
+    // 主操作は自動調整カードの .optimization__start に一本化
+    expect(container.querySelector('.optimization__start')?.textContent).toBe('検索式を作成・自動調整する');
+    expect(container.querySelector('.draft__generate')?.textContent).toBe('最初から作り直す');
   });
 
   test('結合行は combination スタイルで描画される', () => {
@@ -153,11 +155,14 @@ describe('createDraftView', () => {
     );
   });
 
-  test('markdown が無ければボタンは「生成する」', () => {
+  test('markdown が無ければ .draft__generate は描画されず、主操作は自動調整ボタンのみ', () => {
     const view = createDraftView();
     const container = buildContainer();
     view(container, { state: stateReady(), navigate: jest.fn() });
-    expect(container.querySelector('button')?.textContent).toBe('生成して検証する');
+    expect(container.querySelector('.draft__generate')).toBeNull();
+    expect(container.querySelector('.draft__actions--secondary')).toBeNull();
+    expect(container.querySelector('button')?.className).toContain('optimization__start');
+    expect(container.querySelector('.optimization__start')?.textContent).toBe('検索式を作成・自動調整する');
     expect(container.querySelector('.draft__formula')).toBeNull();
   });
 
@@ -171,12 +176,17 @@ describe('createDraftView', () => {
     expect(container.querySelector('.draft__info')?.textContent).toContain('(未保存)');
   });
 
-  test('生成クリックで onGenerate が呼ばれる', () => {
+  const EXISTING_MD = '## PubMed/MEDLINE\n\n```\n#1 x\n```\n';
+
+  test('「最初から作り直す」クリックで onGenerate が呼ばれる', () => {
     const onGenerate = jest.fn().mockResolvedValue(undefined);
     const view = createDraftView({ onGenerate });
     const container = buildContainer();
-    view(container, { state: stateReady(), navigate: jest.fn() });
-    container.querySelector('button')!.click();
+    view(container, {
+      state: stateReady({ currentFormulaMarkdown: EXISTING_MD, currentFormulaVersionId: 'v-1' }),
+      navigate: jest.fn(),
+    });
+    container.querySelector<HTMLButtonElement>('.draft__generate')!.click();
     expect(onGenerate).toHaveBeenCalledTimes(1);
   });
 
@@ -184,19 +194,28 @@ describe('createDraftView', () => {
     const onGenerate = jest.fn().mockResolvedValue(undefined);
     const view = createDraftView({ onGenerate });
     const container = buildContainer();
-    view(container, { state: stateReady(), navigate: jest.fn() });
-    const btn = container.querySelector('button') as HTMLButtonElement;
+    view(container, {
+      state: stateReady({ currentFormulaMarkdown: EXISTING_MD, currentFormulaVersionId: 'v-1' }),
+      navigate: jest.fn(),
+    });
+    const btn = container.querySelector<HTMLButtonElement>('.draft__generate')!;
     btn.click();
     expect(btn.disabled).toBe(true);
     btn.click();
     expect(onGenerate).toHaveBeenCalledTimes(1);
   });
 
-  test('draftRun=running 中はボタンが無効で「実行中…」表記、進捗と経過時間を表示', () => {
+  test('draftRun=running 中は .draft__generate が無効で「実行中…」表記、進捗と経過時間を表示', () => {
     const view = createDraftView({ onGenerate: jest.fn() });
     const container = buildContainer();
-    view(container, { state: stateReady({ draftRun: runningState() }), navigate: jest.fn() });
-    const btn = container.querySelector('button') as HTMLButtonElement;
+    view(container, {
+      state: stateReady({
+        currentFormulaMarkdown: EXISTING_MD, currentFormulaVersionId: 'v-1',
+        draftRun: runningState(),
+      }),
+      navigate: jest.fn(),
+    });
+    const btn = container.querySelector<HTMLButtonElement>('.draft__generate')!;
     expect(btn.disabled).toBe(true);
     expect(btn.textContent).toBe('実行中…');
     const statusText = container.querySelector('.draft__status')?.textContent ?? '';
@@ -208,8 +227,14 @@ describe('createDraftView', () => {
     const onGenerate = jest.fn();
     const view = createDraftView({ onGenerate });
     const container = buildContainer();
-    view(container, { state: stateReady({ draftRun: runningState() }), navigate: jest.fn() });
-    container.querySelector('button')!.click();
+    view(container, {
+      state: stateReady({
+        currentFormulaMarkdown: EXISTING_MD, currentFormulaVersionId: 'v-1',
+        draftRun: runningState(),
+      }),
+      navigate: jest.fn(),
+    });
+    container.querySelector<HTMLButtonElement>('.draft__generate')!.click();
     expect(onGenerate).not.toHaveBeenCalled();
   });
 
@@ -232,9 +257,35 @@ describe('createDraftView', () => {
     expect(container.querySelector('.draft__status')?.textContent).toMatch(/経過 \d秒/);
   });
 
-  test('draftRun=error はエラーボックスに表示し、ボタンは再度押せる', () => {
+  test('draftRun=error はエラーボックスに表示し、式があれば「最初から作り直す」で再試行できる', () => {
     const onGenerate = jest.fn().mockResolvedValue(undefined);
     const view = createDraftView({ onGenerate });
+    const container = buildContainer();
+    view(container, {
+      state: stateReady({
+        currentFormulaMarkdown: EXISTING_MD, currentFormulaVersionId: 'v-1',
+        draftRun: {
+          status: 'error',
+          phase: 'generating',
+          progressLabel: '',
+          startedAtMs: Date.now(),
+          error: 'Gemini API failed: HTTP 503',
+          removedMeshHeadings: [], replacedMeshHeadings: [], blockHits: [],
+        },
+      }),
+      navigate: jest.fn(),
+    });
+    const errorText = container.querySelector('.draft__error')?.textContent ?? '';
+    expect(errorText).toContain('生成に失敗しました');
+    expect(errorText).toContain('HTTP 503');
+    const btn = container.querySelector<HTMLButtonElement>('.draft__generate')!;
+    expect(btn.disabled).toBe(false);
+    btn.click();
+    expect(onGenerate).toHaveBeenCalledTimes(1);
+  });
+
+  test('draftRun=error で式が無ければ .draft__generate は無く、自動調整ボタンで再試行する', () => {
+    const view = createDraftView();
     const container = buildContainer();
     view(container, {
       state: stateReady({
@@ -251,11 +302,8 @@ describe('createDraftView', () => {
     });
     const errorText = container.querySelector('.draft__error')?.textContent ?? '';
     expect(errorText).toContain('生成に失敗しました');
-    expect(errorText).toContain('HTTP 503');
-    const btn = container.querySelector('button') as HTMLButtonElement;
-    expect(btn.disabled).toBe(false);
-    btn.click();
-    expect(onGenerate).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('.draft__generate')).toBeNull();
+    expect(container.querySelector('.optimization__start')).not.toBeNull();
   });
 
   test('draftRun=error で error が null でも文言を出す', () => {
@@ -387,11 +435,21 @@ describe('createDraftView', () => {
     expect(container.querySelector('.validate__line-hits')).toBeNull();
   });
 
-  test('onGenerate 未指定でもクリックで例外にならない', () => {
+  test('onGenerate 未指定でもクリックで例外にならない（式が無く .optimization__start のみのとき）', () => {
     const view = createDraftView();
     const container = buildContainer();
     view(container, { state: stateReady(), navigate: jest.fn() });
     expect(() => container.querySelector('button')!.click()).not.toThrow();
+  });
+
+  test('onGenerate 未指定でもクリックで例外にならない（式ありで .draft__generate があるとき）', () => {
+    const view = createDraftView();
+    const container = buildContainer();
+    view(container, {
+      state: stateReady({ currentFormulaMarkdown: EXISTING_MD, currentFormulaVersionId: 'v-1' }),
+      navigate: jest.fn(),
+    });
+    expect(() => container.querySelector<HTMLButtonElement>('.draft__generate')!.click()).not.toThrow();
   });
 });
 
@@ -497,13 +555,78 @@ describe('検証のみ再実行（fix-plan 2-2）', () => {
     expect(container.querySelector('.draft__revalidate')).toBeNull();
   });
 
-  test('生成ボタンと同じ .draft__actions 行に配置される', () => {
+  test('「最初から作り直す」と同じ補助操作行に配置される', () => {
     const view = createDraftView();
     const container = buildContainer();
     view(container, { state: validatingErrorState(), navigate: jest.fn() });
-    const actions = container.querySelector('.draft__actions');
+    const actions = container.querySelector('.draft__actions--secondary');
     expect(actions?.querySelector('.draft__generate')).not.toBeNull();
     expect(actions?.querySelector('.draft__revalidate')).not.toBeNull();
+  });
+
+  test('補助操作行は自動調整カード（.optimization__setup）の直後に置かれる', () => {
+    const view = createDraftView();
+    const container = buildContainer();
+    view(container, { state: validatingErrorState(), navigate: jest.fn() });
+    const setup = container.querySelector('.optimization__setup');
+    const actions = container.querySelector('.draft__actions--secondary');
+    expect(setup).not.toBeNull();
+    expect(actions).not.toBeNull();
+    expect(setup?.nextElementSibling).toBe(actions);
+  });
+
+  function queryOptimizationRunFixture(status: 'ready' | 'running'): NonNullable<AppState['queryOptimizationRun']> {
+    return {
+      status, projectId: 'p', runId: 'r', maxHits: 100, maxIterations: 1, seedCount: 1,
+      startedAtMs: 0, finishedAtMs: status === 'ready' ? 1 : null, stopRequested: false, error: null,
+      meshContext: [], trials: [],
+      progress: { step: 'review', iterations: 1, bestTotalHits: null, bestCapturedSeedCount: null, trial: null },
+      result: status === 'ready' ? { status: 'needs_review', stopReason: 'iteration_limit', best: null, trials: [],
+        unmetReasons: [], iterations: 1, apiCalls: 1, elapsedMs: 1,
+        seedDiagnoses: [{ pmid: '22', title: null, year: null, hasAbstract: false,
+          meshHeadingCount: null, blockingBlockIds: ['3'], recoverableByTerms: false, note: '承認外' }] } : null,
+    };
+  }
+
+  // 自動調整 run が既にある状態（完了済み run / 実行中の run）でも、renderQueryOptimization が
+  // .optimization__status を container.children.item(1) へ挿し込む都合で .optimization__setup の
+  // 相対位置が崩れていないかを確かめる（上のテストは run 無し限定だったため別枠で足す）。
+  test.each([
+    ['完了済み run（status: ready、result あり）', 'ready'],
+    ['実行中の run（status: running）', 'running'],
+  ] as const)('自動調整カードの直後という位置関係は%sでも保たれる', (_label, status) => {
+    const view = createDraftView();
+    const container = buildContainer();
+    view(container, {
+      state: validatingErrorState({ queryOptimizationRun: queryOptimizationRunFixture(status) }),
+      navigate: jest.fn(),
+    });
+    const setup = container.querySelector('.optimization__setup');
+    const actions = container.querySelector('.draft__actions--secondary');
+    expect(setup).not.toBeNull();
+    expect(actions).not.toBeNull();
+    expect(setup?.nextElementSibling).toBe(actions);
+  });
+
+  // renderQueryOptimization は run と同じ runKey を持つ子要素（.optimization__status）だけを
+  // 再描画のたびに保持し、それ以外を一旦 remove してから作り直す（createDraftView 内、
+  // 子要素を runKey で保持するロジック参照）。
+  // 保持された要素が残っていても、再描画のたびに .optimization__setup の直後という位置関係が
+  // 崩れないことを同一 container への 2 回連続描画で確認する。
+  test.each([
+    ['完了済み run（status: ready、result あり）', 'ready'],
+    ['実行中の run（status: running）', 'running'],
+  ] as const)('同じ container へ再描画しても位置関係が保たれる（%s）', (_label, status) => {
+    const view = createDraftView();
+    const container = buildContainer();
+    const state = validatingErrorState({ queryOptimizationRun: queryOptimizationRunFixture(status) });
+    view(container, { state, navigate: jest.fn() });
+    view(container, { state, navigate: jest.fn() });
+    const setup = container.querySelector('.optimization__setup');
+    const actions = container.querySelector('.draft__actions--secondary');
+    expect(setup).not.toBeNull();
+    expect(actions).not.toBeNull();
+    expect(setup?.nextElementSibling).toBe(actions);
   });
 
   test('onRevalidate 未指定でもクリックで例外にならない', () => {
@@ -646,7 +769,12 @@ describe('手編集版の破棄確認（issue #40 症状 B）', () => {
     const onGenerate = jest.fn().mockResolvedValue(undefined);
     const view = createDraftView({ onGenerate });
     const container = buildContainer();
-    view(container, { state: stateReady(), navigate: jest.fn() });
+    // currentFormulaCreatedBy が null でも、.draft__generate 自体は現式がなければ描画され
+    // ないため、確認無し即実行の対象として現式ありの状態を使う。
+    view(container, {
+      state: stateReady({ currentFormulaMarkdown: MD, currentFormulaVersionId: 'fv-1' }),
+      navigate: jest.fn(),
+    });
     container.querySelector<HTMLButtonElement>('.draft__generate')!.click();
     expect(onGenerate).toHaveBeenCalledTimes(1);
   });
