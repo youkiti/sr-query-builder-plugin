@@ -60,6 +60,39 @@ test.each([false, true])('採用→保留→却下の直前比は採否監査と
   expect(evaluateSearch).toHaveBeenCalledTimes(reuse ? 2 : 3);
 });
 
+test.each([
+  [false, false], [false, true], [true, false], [true, true],
+])('最後の採用候補の直前比は C1 を優先し、無ければ候補の測定を使う: C1=%s 再利用=%s', async (hasC1, reuse) => {
+  const result = makeResult();
+  result.optimization = { status: 'needs_review', stopReason: 'iteration_limit', best: null, unmetReasons: [], iterations: 2,
+    apiCalls: 0, elapsedMs: 0, trials: [trial('採用', true, formulaFor('accepted')), trial('保留', false, formulaFor('held'), true)] };
+  const acceptedMetrics = calculateMetrics(groups, heldOut, ['4'], 200);
+  if (hasC1) result.conditions.C1 = { query: 'accepted', formula: formulaFor('accepted'),
+    measurement: { status: 'success', hits: 200, capturedPmids: ['4', '5'] },
+    metrics: calculateMetrics(groups, heldOut, ['4', '5'], 200) };
+  if (reuse) result.rejectedCandidates = [{ candidateId: '採用', accepted: true, changes: null, hits: 200,
+    metrics: acceptedMetrics, priorId: 'C0', comparedToPrior: null, comparedToC0: null }];
+  else jest.mocked(evaluateSearch).mockResolvedValueOnce({ status: 'success', hits: 200, capturedPmids: ['4'] });
+  jest.mocked(evaluateSearch).mockResolvedValueOnce({ status: 'success', hits: 150, capturedPmids: ['4'] });
+  const measured = await measureRejectedCandidates(result, eutils);
+  const held = measured.find((candidate) => candidate.candidateId === '保留')!;
+  expect(held.comparedToPrior!.lostHeldOut).toEqual(hasC1 ? ['e'] : []);
+  result.rejectedCandidates = [...result.rejectedCandidates ?? [], ...measured];
+  const audit = await computeAdoptionAudit(result, eutils);
+  expect(audit.trials.find((candidate) => candidate.candidateId === '保留')!.lostHeldOut).toEqual(held.comparedToPrior!.lostHeldOut);
+  expect(evaluateSearch).toHaveBeenCalledTimes(reuse ? 1 : 2);
+});
+
+test('手動監査待ちの候補は metrics と直前比・C0 比を欠測にする', async () => {
+  const result = makeResult(true);
+  result.optimization = { status: 'needs_review', stopReason: 'iteration_limit', best: null, unmetReasons: [], iterations: 1,
+    apiCalls: 0, elapsedMs: 0, trials: [trial('保留', false, formulaFor('held'), true)] };
+  jest.mocked(evaluateSearch).mockResolvedValue({ status: 'success', hits: 90, capturedPmids: ['4'] });
+  expect(await measureRejectedCandidates(result, eutils)).toEqual([
+    expect.objectContaining({ metrics: null, comparedToPrior: null, comparedToC0: null }),
+  ]);
+});
+
 test('採用がない場合は全候補が C0 比で、比較元欠測は null になる', async () => {
   const result = makeResult();
   result.optimization = { status: 'needs_review', stopReason: 'iteration_limit', best: null, unmetReasons: [], iterations: 2,

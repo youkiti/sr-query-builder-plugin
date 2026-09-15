@@ -182,13 +182,17 @@ export async function measureRejectedCandidates(result: RunResult, eutils: Eutil
   const pmids = [...new Set(groups.flatMap((group) => group.pmids))];
   const dated = { ...eutils, fetch: createEvalFetch(result.searchDate, eutils.fetch, () => undefined) };
   const c0 = result.conditions.C0?.metrics;
+  const lastAcceptedId = [...proposals].reverse().find((trial) => trial.accepted)?.candidateId;
+  // 採否監査と同じく、最後の採用候補を比較元にするときは C1 の測定を優先する。
+  const baselineMetrics = (candidateId: string, metrics: ConditionResult['metrics']) =>
+    candidateId === lastAcceptedId && result.conditions.C1 ? result.conditions.C1.metrics : metrics;
   const candidates: NonNullable<RunResult['rejectedCandidates']> = [];
   let priorId = 'C0';
   let priorMetrics = c0;
   for (const trial of proposals) {
     const prior = result.rejectedCandidates?.find((candidate) => candidate.candidateId === trial.candidateId && !candidate.error);
     if (prior) {
-      if (trial.accepted) { priorId = trial.candidateId; priorMetrics = prior.metrics; }
+      if (trial.accepted) { priorId = trial.candidateId; priorMetrics = baselineMetrics(priorId, prior.metrics); }
       continue;
     }
     let measurement;
@@ -201,7 +205,7 @@ export async function measureRejectedCandidates(result: RunResult, eutils: Eutil
       comparedToC0: c0 && metrics ? compareMetrics(c0, metrics) : null,
       priorId, comparedToPrior: priorMetrics && metrics ? compareMetrics(priorMetrics, metrics) : null,
       ...(measurement.status === 'failure' ? { error: measurement.error } : {}) });
-    if (trial.accepted) { priorId = trial.candidateId; priorMetrics = metrics; }
+    if (trial.accepted) { priorId = trial.candidateId; priorMetrics = baselineMetrics(priorId, metrics); }
   }
   return candidates;
 }

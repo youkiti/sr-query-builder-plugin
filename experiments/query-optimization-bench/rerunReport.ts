@@ -106,7 +106,7 @@ export function buildReport(config: RerunConfig, slots: Slot[], entries: Entry[]
         hitsPrior: hasPriorComparison ? priorId === 'C0' ? hits(entry, 'C0') : prior?.hits ?? null : trialAudit?.hitsBefore ?? null,
         hitsCandidate: candidate?.hits ?? trialAudit?.hitsAfter ?? null,
         lostHeldOutPrior: names(hasPriorComparison ? candidate.comparedToPrior?.lostHeldOut ?? null
-          : trialAudit && !trialAudit.error ? trialAudit.lostHeldOut : null),
+          : trialAudit && !trialAudit.error && !run.denominator?.manualReviewPending ? trialAudit.lostHeldOut : null),
         lostHeldOutC0: names(candidate?.comparedToC0?.lostHeldOut ?? null),
         lostReportsPrior: hasPriorComparison ? candidate.comparedToPrior?.lostReports?.length ?? null : null,
         priorSource: hasPriorComparison ? 'rejectedCandidates' : trialAudit ? 'adoptionAudit' : null };

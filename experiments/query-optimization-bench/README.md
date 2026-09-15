@@ -550,9 +550,11 @@ gold の監査とシード凍結を済ませます。検索日は従来どおり
 
 `candidateLosses` 表は完了した current run の却下・保留提案を 1 候補 1 行で出します（採用提案と legacy / legacyLive は対象外）。
 `priorId` / `comparedToPrior` による直前の採用済み式との比較を主とし、C0 比も併記します。
+比較元が全提案のうち最後の採用候補なら、採否監査と同じく C1 の測定を優先し、C1 が無い場合は候補の計測・再利用 metrics を使います。
 直前と候補の件数、失った held-out 研究名、gold 報告数（`lostReportsPrior`）、削除影響の件数・標本抽出法を記録します。
 `priorSource` は新しい run では `rejectedCandidates`、`comparedToPrior` がない既存 run では `adoptionAudit` です。
 既存 run は監査の試行列から直前の採用候補をたどり、研究単位の直前比だけを補います。監査行に `error` があれば比較不能です。
+手動監査待ちの run は直前比を欠測とし、既存 run の監査行が `error` なし・`lostHeldOut: []` でも損失ゼロとは扱いません。
 報告単位は今後の run から記録し、既存 run の `lostReportsPrior` は欠測です。損失 0 件の研究名は空文字、比較不能は欠測と表示します。
 保存済み run の書き換えや報告単位の再計測は行いません。
 

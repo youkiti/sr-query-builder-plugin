@@ -76,6 +76,24 @@ test('候補損失表は新旧 current の直前比を表示し、採用・旧�
   delete old.run!.adoptionAudit;
   expect(build(m).tables.candidateLosses[2]).toMatchObject({ priorId: null, lostHeldOutPrior: null, priorSource: null });
 });
+test.each([false, true])('既存 run の損失ゼロは手動監査待ちのときだけ欠測にする: %s', (manualReviewPending) => {
+  const m = matrix();
+  const entry = m.entries.find((item) => item.job.arm === 'current')!;
+  const run = entry.run!;
+  run.denominator!.manualReviewPending = manualReviewPending;
+  run.optimization!.trials = [{ candidateId: '保留', kind: 'proposal', accepted: false, held: true }] as NonNullable<RunResult['optimization']>['trials'];
+  run.adoptionAudit = { ...adoption(manualReviewPending ? null : 0), trials: [
+    { candidateId: '保留', accepted: false, held: true, hitsBefore: 10, hitsAfter: 10, lostHeldOut: [], gainedHeldOut: [] },
+  ] };
+  run.rejectedCandidates = [{ candidateId: '保留', hits: 10, comparedToC0: null }] as RunResult['rejectedCandidates'];
+  expect(build(m).tables.candidateLosses[0]).toMatchObject({ priorSource: 'adoptionAudit',
+    lostHeldOutPrior: manualReviewPending ? null : '', lostHeldOutC0: null });
+  run.rejectedCandidates = [{ candidateId: '保留', accepted: false, changes: null, hits: 10, metrics: null,
+    priorId: 'C0', comparedToPrior: null, comparedToC0: null }];
+  expect(build(m).tables.candidateLosses[0]).toMatchObject({ priorSource: 'rejectedCandidates',
+    lostHeldOutPrior: null, lostHeldOutC0: null });
+});
+
 function loggedEntry(arm: Job['arm'], logs: unknown[]) {
   const m = matrix();
   const entry = m.entries.find((e) => e.job.arm === arm)!;
