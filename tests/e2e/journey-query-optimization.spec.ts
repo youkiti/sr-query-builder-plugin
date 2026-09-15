@@ -87,7 +87,7 @@ async function setup(page: Page, options: { hasSeeds: boolean; holdAi: boolean; 
 async function start(page: Page) {
   await page.goto(APP_URL);
   await expect(page.getByRole('button', { name: '検索式を作成・自動調整する' })).toBeEnabled();
-  await page.getByLabel('最大件数', { exact: true }).fill('100');
+  await page.getByLabel('目安件数', { exact: true }).fill('100');
   await page.getByText('詳細設定', { exact: true }).click();
   await page.getByLabel('反復上限').fill('1');
   await page.getByRole('button', { name: '検索式を作成・自動調整する' }).click();
@@ -149,7 +149,7 @@ test.describe('検索式の自動調整', () => {
     const a11y = await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze();
     expect(a11y.violations).toEqual([]);
     await page.locator('.optimization__resume').click();
-    await expectReview(page, '条件達成');
+    await expectReview(page, '目安件数と既知シードの捕捉を満たしました');
     await expect(page.locator('.optimization__history-scroll > ol > li').first()).toContainText('50 件 / シード: 未測定 → 1/1件');
     expect(queries.some((query) => query.includes('[uid]'))).toBe(true);
     expect(queries.some((query) => query.includes('broad'))).toBe(false);
@@ -187,17 +187,17 @@ test.describe('検索式の自動調整', () => {
     await expect.poll(() => fake.tabs['FormulaVersions']!.length).toBe(3);
     expect(fake.tabs['FormulaVersions']![2]![4]).toContain('"broad"[tiab]');
   });
-  test('設定 → 実行 → 履歴増加 → 条件達成 → auto_optimize を一度だけ保存', async ({ page }) => {
+  test('設定 → 実行 → 履歴増加 → 目安件数と既知シードの捕捉を満たしました → auto_optimize を一度だけ保存', async ({ page }) => {
     const { fake, release } = await setup(page, { hasSeeds: true, holdAi: true });
     await start(page);
     await expect(page.locator('.optimization__history-scroll > ol > li')).toHaveCount(1, { timeout: 30_000 });
     await expect(page.locator('.optimization__status')).toContainText('自動調整を実行中');
     release();
-    await expectReview(page, '条件達成');
+    await expectReview(page, '目安件数と既知シードの捕捉を満たしました');
     await expect(page.locator('.optimization__history-scroll > ol > li')).toHaveCount(3);
     await expect(page.locator('.optimization__review')).toContainText('既知シード 1/1 件捕捉');
-    await expect(page.locator('.optimization__review')).toContainText('実測 50 件（上限以下）');
-    await expect(page.locator('.optimization__review')).toContainText('網羅性を保証するものではありません');
+    await expect(page.locator('.optimization__review')).toContainText('実測 50 件（目安以下）');
+    await expect(page.locator('.optimization__review')).toContainText('既知シードを捕捉したことは、未知の適格研究を網羅したことを意味しません。');
     await expect(page.locator('#app-context')).toContainText('累積 $0.1305');
     await page.getByText('試行1の変更詳細', { exact: true }).click();
     await expect(page.getByRole('heading', { name: 'フリーワード', exact: true }).filter({ visible: true })).toBeVisible();
@@ -241,13 +241,13 @@ test.describe('検索式の自動調整', () => {
       const result = await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze();
       expect(result.violations).toEqual([]);
     } finally { release(); }
-    await expectReview(page, '条件達成');
+    await expectReview(page, '目安件数と既知シードの捕捉を満たしました');
   });
 
   test('最終レビュー表示に axe 違反がない', async ({ page }) => {
     await setup(page);
     await start(page);
-    await expectReview(page, '条件達成');
+    await expectReview(page, '目安件数と既知シードの捕捉を満たしました');
     await expect(page.getByRole('article', { name: `判定候補 PMID ${OUTSIDE_PMID}`, exact: true })).toBeVisible();
     const result = await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze();
     expect(result.violations).toEqual([]);
@@ -256,11 +256,11 @@ test.describe('検索式の自動調整', () => {
   test('4 区分を確認して外側の文献を include 保存すると保護再調整を選べる', async ({ page }) => {
     const { fake } = await setup(page);
     await start(page);
-    await expectReview(page, '条件達成');
+    await expectReview(page, '目安件数と既知シードの捕捉を満たしました');
     await expect(page.getByRole('heading', { name: '確認の状況', exact: true })).toBeVisible();
     const sections = page.locator('.optimization__review-section');
     await expect(sections).toHaveCount(4);
-    for (const label of ['既知文献の捕捉', '件数目標', '外側の確認', '削除影響の確認']) {
+    for (const label of ['既知文献の捕捉', '目安件数', '外側の確認', '削除影響の確認']) {
       await expect(sections.getByRole('heading', { name: new RegExp(label) })).toBeVisible();
     }
     const candidate = page.getByRole('article', { name: `判定候補 PMID ${OUTSIDE_PMID}`, exact: true });

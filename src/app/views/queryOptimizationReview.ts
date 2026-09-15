@@ -25,7 +25,7 @@ export function renderOptimizationReview(
   const result = run.result;
   const best = result?.best;
   const heading = doc.createElement('h3');
-  const labels = { achieved: '条件達成', needs_review: '要確認', stopped: '停止', error: 'エラー' };
+  const labels = { achieved: '目安件数と既知シードの捕捉を満たしました', needs_review: '要確認', stopped: '停止', error: 'エラー' };
   heading.textContent = `最終レビュー：${labels[result?.status ?? 'error']}`;
   section.appendChild(heading);
   const paragraph = (text: string): void => {
@@ -33,6 +33,7 @@ export function renderOptimizationReview(
     p.textContent = text;
     section.appendChild(p);
   };
+  if (result?.status === 'achieved') paragraph('既知シードを捕捉したことは、未知の適格研究を網羅したことを意味しません。');
   const subheading = (text: string): void => {
     const h = doc.createElement('h4');
     h.textContent = text;
@@ -69,6 +70,8 @@ export function renderOptimizationReview(
     title.textContent = `${stateLabels[item.state]}：${item.label}`;
     group.appendChild(title);
     for (const line of item.lines) {
+      // 達成時の捕捉の限界は見出し直後に示し、区分内では重複させない。
+      if (result?.status === 'achieved' && item.key === 'known_capture' && line.startsWith('既知シードの捕捉は、')) continue;
       const p = doc.createElement('p');
       p.textContent = line;
       group.appendChild(p);

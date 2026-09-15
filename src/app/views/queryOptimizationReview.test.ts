@@ -27,10 +27,10 @@ test('4区分と未確認事項を文字で表示し、捕捉の限界は1回だ
   renderOptimizationReview(container, run('achieved'), actions);
   expect(container.querySelectorAll('.optimization__review-section')).toHaveLength(4);
   expect(Array.from(container.querySelectorAll('h5')).map((node) => node.textContent)).toEqual([
-    '確認済み：既知文献の捕捉', '確認済み：件数目標', '未確認：外側の確認', '確認済み：削除影響の確認',
+    '確認済み：既知文献の捕捉', '確認済み：目安件数', '未確認：外側の確認', '確認済み：削除影響の確認',
   ]);
   expect(container.textContent).toContain('未確認事項');
-  expect(container.textContent!.match(/既知シードの捕捉は、/g)).toHaveLength(1);
+  expect(container.textContent!.match(/既知シードを捕捉したことは、/g)).toHaveLength(1);
 });
 
 test('保存済み maybe が残る外側の確認は判定済み（残件あり）として未確認事項にも出す', () => {
@@ -176,15 +176,18 @@ test.each(['achieved', 'needs_review', 'stopped', 'error'] as const)('最終状�
   expect(container.textContent).toContain('保留候補 candidate-2: 失う集合 未測定 件のうち書誌を確認できたのは先頭 0 件');
 });
 
-test.each([['achieved', '条件達成'], ['needs_review', '要確認'], ['stopped', '停止'], ['error', 'エラー']] as const)(
+test.each([['achieved', '目安件数と既知シードの捕捉を満たしました'], ['needs_review', '要確認'], ['stopped', '停止'], ['error', 'エラー']] as const)(
   '%s を %s と区別し、最終式・上限・既知シード・正味の変更と懸念を出す', (status, label) => {
     const container = document.createElement('div');
     renderOptimizationReview(container, run(status), actions);
     expect(container.querySelector('h3')?.textContent).toBe(`最終レビュー：${label}`);
     expect(container.querySelector('pre')?.textContent).toContain('#1 a[tiab]');
-    expect(container.textContent).toContain('最大件数 20 件に対して実測 12 件（上限以下）');
+    expect(container.textContent).toContain('目安件数 20 件に対して実測 12 件（目安以下）');
     expect(container.textContent).toContain('既知シード 1/1 件捕捉');
-    expect(container.textContent).toContain('未知の適格研究の網羅性を保証するものではありません');
+    if (status === 'achieved') {
+      expect(container.querySelector('h3')?.nextElementSibling?.textContent).toBe('既知シードを捕捉したことは、未知の適格研究を網羅したことを意味しません。');
+      expect(container.textContent).not.toContain('既知シードの捕捉は、');
+    } else expect(container.textContent).toContain('未知の適格研究の網羅性を保証するものではありません');
     expect(container.textContent).toContain('#1: a[tiab] OR b[tiab] → a[tiab]');
     expect(container.textContent).toContain('残った確認事項');
     expect(container.querySelector('details')).toBeNull();

@@ -19,7 +19,7 @@ const section = (run: QueryOptimizationRunState, key: string) => buildOptimizati
 
 test('4 区分が確認済みなら未確認事項は空で、既知シードの限界は捕捉区分だけに出す', () => {
   const review = buildOptimizationReviewSections(fixture());
-  expect(review.sections.map((item) => item.label)).toEqual(['既知文献の捕捉', '件数目標', '外側の確認', '削除影響の確認']);
+  expect(review.sections.map((item) => item.label)).toEqual(['既知文献の捕捉', '目安件数', '外側の確認', '削除影響の確認']);
   expect(review.sections.every((item) => item.state === 'confirmed')).toBe(true);
   expect(review.unconfirmed).toEqual([]);
   expect(review.sections[0].lines).toContain('既知シード 1/1 件捕捉');
@@ -42,7 +42,8 @@ test.each([null, 21, 20, 0])('総件数 %s と上限を比較する', (totalHits
   run.result!.best!.evaluation.finalQuery.totalHits = totalHits;
   const target = section(run, 'hit_target');
   expect(target.state).toBe(totalHits === null ? 'unconfirmed' : totalHits > 20 ? 'unmet' : 'confirmed');
-  expect(target.lines[0]).toContain(totalHits === null ? '未測定' : `実測 ${totalHits} 件`);
+  expect(target.label).toBe('目安件数');
+  expect(target.lines).toEqual([`目安件数 20 件に対して実測 ${totalHits === null ? '未測定' : `${totalHits} 件`}（${totalHits === null ? '未測定' : totalHits > 20 ? '目安超過' : '目安以下'}）`]);
 });
 
 test.each(['missing', 'running', 'skipped', 'error'] as const)('外側の確認 %s は未確認と理由を表示する', (status) => {

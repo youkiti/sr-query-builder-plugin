@@ -871,7 +871,7 @@ function renderQueryOptimization(container: HTMLElement, state: AppState, callba
     metrics.className = 'optimization__metrics';
     metrics.setAttribute('aria-live', 'off');
     for (const [label, value] of [
-      ['最大件数', `${run.maxHits.toLocaleString()} 件`],
+      ['目安件数', `${run.maxHits.toLocaleString()} 件`],
       ['現在の最良候補の件数', run.progress.bestTotalHits === null ? '未計測' : `${run.progress.bestTotalHits.toLocaleString()} 件`],
       ['既知シード捕捉数', `${run.progress.bestCapturedSeedCount ?? '未計測'} / ${run.seedCount ?? '確認中'}`],
       ['試行回数', `${run.progress.evaluatedTrials ?? run.trials.filter((trial) => trial.kind === 'proposal').length} / 最大 ${run.maxIterations}`],
@@ -1004,9 +1004,14 @@ function renderQueryOptimization(container: HTMLElement, state: AppState, callba
     label.appendChild(input);
     return label;
   };
-  const hitsLabel = makeInput('最大件数', setup?.maxHits ?? String(DEFAULT_QUERY_OPTIMIZATION_SETTINGS.maxHits));
+  const hitsLabel = makeInput('目安件数', setup?.maxHits ?? String(DEFAULT_QUERY_OPTIMIZATION_SETTINGS.maxHits));
   const iterationsLabel = makeInput('反復上限', setup?.maxIterations ?? String(DEFAULT_QUERY_OPTIMIZATION_SETTINGS.maxIterations));
   const hits = hitsLabel.querySelector('input')!;
+  const hitsNote = doc.createElement('p');
+  hitsNote.id = 'optimization-hits-note';
+  hitsNote.className = 'draft__excess-note';
+  hitsNote.textContent = 'スクリーニングする量の目安です。超えても検索式の誤りではなく、適格な文献を落としてまで合わせるものではありません。';
+  hits.setAttribute('aria-describedby', hitsNote.id);
   const iterations = iterationsLabel.querySelector('input')!;
   const details = doc.createElement('details');
   const summary = doc.createElement('summary');
@@ -1030,7 +1035,7 @@ function renderQueryOptimization(container: HTMLElement, state: AppState, callba
     start.disabled = true;
     void callbacks.onOptimize({ maxHits: Number(hits.value), maxIterations: Number(iterations.value) });
   });
-  form.append(hitsLabel, details, start);
+  form.append(hitsLabel, hitsNote, details, start);
   section.appendChild(form);
   const error = run?.error ?? setup?.error;
   if (error) {

@@ -48,7 +48,7 @@ export interface QueryOptimizationInput {
   seedPapers?: { pmid: string; title: string | null }[];
   /** 呼び出し側で取得済みの周辺ツリー。未提供なら未取得として AI に明示する。 */
   meshContext?: OptimizationMeshNode[];
-  /** 固定した研究基準・承認ブロック・シード集合・最大件数の指標。 */
+  /** 固定した研究基準・承認ブロック・シード集合・目安件数の指標。 */
   inputIdentity?: string;
   previousRejectedTrials?: PreviousOptimizationRejection[];
   resumeBudget?: { limits: OptimizationBudget; consumed: OptimizationBudget; runId: string };
@@ -130,11 +130,11 @@ export type OptimizationStopReason =
 export class QueryOptimizationStopError extends Error {
   constructor(readonly stopReason: OptimizationStopReason) {
     const messages: Record<OptimizationStopReason, string> = {
-      conditions_met: '目標条件を達成したため終了しました。',
+      conditions_met: '目安件数と既知シードの捕捉を満たしたため終了しました。',
       iteration_limit: '反復回数の上限に達したため終了しました。',
-      diagnosed_block_held: '診断ブロックを狭める案が連続して保留になったため終了しました。',
+      diagnosed_block_held: '診断したブロックを狭める案が、既に捕捉している文献を失うため連続して保留になり、終了しました。',
       repeated_formula: '評価済みの同じ式に戻ったため終了しました。',
-      no_improvement: '改善が連続して得られなかったため終了しました。',
+      no_improvement: '件数を減らしつつ既に捕捉している文献を失わない変更が、連続して見つからなかったため終了しました。',
       user_stop: 'ユーザーの停止要求により処理を停止しました。',
       api_error: 'API エラーにより処理を続けられません。',
       api_budget: '通信回数の予算上限に達したため処理を停止しました。',
@@ -663,7 +663,7 @@ export async function runQueryOptimization(
     });
     const unrecoverable = seedDiagnoses.filter((seed) => seed.recoverableByTerms === false);
     if (unrecoverable.length) unmetReasons.push(`語の調整では回収できないシードがあります（${unrecoverable.map((seed) => seed.pmid).join(', ')}）。検索概念・フィルタが強すぎる可能性があるため、ブロック承認（#/blocks）で見直してください`);
-    if (diagnosedHeldId) unmetReasons.push(`ブロック #${diagnosedHeldId} を狭める案が 2 回続けて保留になりました（失う集合が残る）。このブロックは上位の MeSH でしか索引されない文献を含む可能性があります。狭めると適格文献を落とすおそれがあるため、件数目標（最大件数）の見直しを検討してください。`);
+    if (diagnosedHeldId) unmetReasons.push(`ブロック #${diagnosedHeldId} を狭める案が 2 回続けて保留になりました（失う集合が残る）。このブロックは上位の MeSH でしか索引されない文献を含む可能性があります。狭めると適格文献を落とすおそれがあるため、目安件数の見直しを検討してください。`);
     if (!best) unmetReasons.push('検証済み候補がありません');
     if (pendingInformation) unmetReasons.push(`情報要求 ${pendingInformation.candidateId} への判断が未了です（文脈へ反映 ${pendingInformation.obtained} / 要求 ${pendingInformation.requested} 件）`);
     if (termBudgetExhausted) unmetReasons.push(`語別計測は ${MAX_TERM_API_CALLS} 通信の上限に達しました。追加取得していない語別件数・固有寄与は未測定です。`);
@@ -672,7 +672,14 @@ export async function runQueryOptimization(
     // 最良候補は保持し、最終再検証で崩れた値だけを未達理由の根拠に切り替える。
     if (latestMeasurement?.missedPmids?.length) unmetReasons.push(`未捕捉シード: ${latestMeasurement.missedPmids.join(', ')}`);
     if (latestMeasurement?.totalHits != null && latestMeasurement.totalHits > fixed.maxHits) {
-      unmetReasons.push(`最大件数 ${fixed.maxHits} 件を超えています（実測 ${latestMeasurement.totalHits} 件）`);
+      unmetReasons.push(`目安件数 ${fixed.maxHits} 件を超えています（実測 ${latestMeasurement.totalHits} 件）`);
+      if (['no_improvement', 'diagnosed_block_held', 'iteration_limit', 'repeated_formula'].includes(reason)) {
+        unmetReasons.push('既に捕捉している文献を失わずに件数を減らす変更は見つかりませんでした。件数を減らす候補には未確認の損失があります。これは件数を減らせないことの証明ではありません。検索戦略のレビュー（概念と検索語の対応・AND/OR の論理・フィルタの適用対象）か、目安件数の見直しを検討してください。');
+        const heldCount = trials.filter((trial) => trial.held
+          && typeof trial.before?.totalHits === 'number' && typeof trial.after?.totalHits === 'number'
+          && trial.after.totalHits < trial.before.totalHits).length;
+        if (heldCount > 0) unmetReasons.push(`件数を減らす候補を ${heldCount} 件保留しました（削除影響の確認を参照）。`);
+      }
     }
     if (reason !== 'conditions_met') unmetReasons.push(`終了理由: ${reason}`);
     if (reason !== 'conditions_met') {
@@ -901,7 +908,7 @@ export async function runQueryOptimization(
         const achieved = meetsTarget(verified);
         trials.push(makeTrial({ kind: 'final', candidateId: `final-${round}`, formula: best.formula,
           before: best.measurement, after: verified.measurement, accepted: achieved,
-          reason: achieved ? '最終再検証で条件達成' : '最終再検証で条件未達', rationale: '' }));
+          reason: achieved ? '最終再検証で目安件数と既知シードの捕捉を満たしました' : '最終再検証で条件未達', rationale: '' }));
         if (achieved) { best = verified; await updateDiagnosis(best); }
         await save();
         if (verified.evaluation.status === 'failure') return finish('api_error', verified.measurement);
@@ -969,7 +976,7 @@ function validateInput(input: QueryOptimizationInput, iterations: number, calls:
   if (![input.maxHits, iterations, calls, elapsed].every((value) => Number.isSafeInteger(value) && value > 0)) {
     return '件数・反復・通信・時間の上限は正の整数で指定してください';
   }
-  if (input.maxHits < input.seedPmids.length) return '最大件数がシード数より少なく、条件を両立できません';
+  if (input.maxHits < input.seedPmids.length) return '目安件数がシード数より少なく、条件を両立できません';
   if (input.approvedBlocks.length === 0 || new Set(input.approvedBlocks.map((block) => block.id)).size !== input.approvedBlocks.length
     || input.approvedBlocks.some((approved) => !input.initialFormula.blocks.some((block) => block.id === approved.id && !block.isCombination))) {
     return '承認済みブロックの対応が不正です';

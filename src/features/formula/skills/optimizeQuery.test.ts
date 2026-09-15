@@ -29,6 +29,8 @@ test('全式・承認対応・基準・上限をテンプレートへ安全に�
   for (const value of ['drug$[tiab]', '#1', 'approved-1', '疾患', '研究 RQ', '成人', '小児', '4321', '(未計測)', '(渡されていない)', '(なし)']) {
     expect(prompt).toContain(value);
   }
+  expect(prompt).toContain('目安件数（最終式の件数の目安。適格文献を落としてまで合わせない）: 4321');
+  expect(chat.mock.calls[0]![0][0].content).toContain('目安件数に近づけることを目指し');
   expect(prompt).not.toMatch(/\{\{[A-Z_]+\}\}/);
   expect(chat.mock.calls[0]![1]).toMatchObject({ responseFormat: 'json', temperature: 0.3,
     responseSchema: { type: 'object', additionalProperties: false } });
