@@ -120,10 +120,10 @@ export function createReplayLlmFactory(
   let calls = 0;
   return {
     model: realFactory.model,
-    forPurpose: (purpose, onRequestState) => {
-      if (purpose !== 'optimize_query') return realFactory.forPurpose(purpose, onRequestState);
+    forPurpose: (purpose, onRequestState, attempts) => {
+      if (purpose !== 'optimize_query') return realFactory.forPurpose(purpose, onRequestState, attempts);
       calls += 1;
-      return replayLogged.forPurpose(purpose, onRequestState);
+      return replayLogged.forPurpose(purpose, onRequestState, attempts);
     },
     calls: () => calls,
     used: () => used,

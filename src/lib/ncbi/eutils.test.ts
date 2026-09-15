@@ -697,3 +697,18 @@ describe('厳密モードの PMID 一覧検査', () => {
       .resolves.toEqual({ count: idlist.length, pmids: idlist });
   });
 });
+
+describe('通信中断の再試行除外', () => {
+  test.each(['AbortError', 'TimeoutError', 'QueryOptimizationStopError'])('%s は検索・書誌取得とも待機せず伝播する', async (name) => {
+    const error = name === 'QueryOptimizationStopError' ? Object.assign(new Error('停止'), { name })
+      : new DOMException('通信中断', name);
+    for (const request of [esearch, efetchArticles]) {
+      const fetch = jest.fn().mockRejectedValue(error);
+      const sleep = jest.fn().mockResolvedValue(undefined);
+      const deps = { fetch, sleep, rateLimiter: { acquire: async () => undefined } };
+      await expect(request === esearch ? esearch('a', deps) : efetchArticles(['11'], deps)).rejects.toBe(error);
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(sleep).not.toHaveBeenCalled();
+    }
+  });
+});

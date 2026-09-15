@@ -1,5 +1,6 @@
 import { runQueryOptimization, type QueryOptimizationDeps, type QueryOptimizationInput, type QueryOptimizationProgress } from './queryOptimizationService';
 import { withRetry } from '@/lib/llm/retry';
+import { withSignalDeadline } from '@/lib/llm/signalDeadline';
 import { LlmProviderError } from '@/lib/llm/LLMProvider';
 import type { OptimizationMeshNode } from '@/features/formula/skills/optimizeQuery';
 
@@ -23,7 +24,7 @@ function fixture() {
   const chat = jest.fn(async () => response());
   const deps: QueryOptimizationDeps = {
     eutils: { fetch, sleep: async () => undefined, maxRetries: 1, rateLimiter: { acquire: async () => undefined } },
-    llmFactory: { model: 'test', forPurpose: () => ({ providerId: 'gemini', model: 'test', chat }) },
+    llmFactory: { model: 'test', forPurpose: (_purpose, onRequestState, attempts) => withRetry(withSignalDeadline({ providerId: 'gemini', model: 'test', chat }), { ...attempts, onRequestState }) },
     checkpoint: { read: async () => undefined, write: async () => undefined }, now: () => 1000,
   };
   return { input, deps, fetch, proposal, chat, response };
@@ -124,8 +125,8 @@ test.each([false, true])('固定作業は確認済みの総数で通知し、最
 test('AI 内部の再試行も取得イベントに記録し、修正案の試行数に加えない', async () => {
   const f = fixture();
   f.chat.mockRejectedValueOnce(new LlmProviderError('再試行', 'gemini', 503, ''));
-  f.deps.llmFactory.forPurpose = (_purpose, onRequestState) => withRetry({ providerId: 'gemini', model: 'test', chat: f.chat },
-    { onRequestState, sleep: async () => undefined });
+  f.deps.llmFactory.forPurpose = (_purpose, onRequestState, attempts) => withRetry(withSignalDeadline({ providerId: 'gemini', model: 'test', chat: f.chat }),
+    { ...attempts, onRequestState, sleep: async () => undefined });
   const progress: QueryOptimizationProgress[] = [];
   const result = await runQueryOptimization(f.input, { ...f.deps, onProgress: (p) => progress.push(p) });
   expect(f.chat).toHaveBeenCalledTimes(3);

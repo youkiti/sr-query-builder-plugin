@@ -1,6 +1,8 @@
 import type { LlmApiLogEntry } from '@/domain/llmApiLog';
 import { LlmProviderError, type ChatResponse, type LLMProvider } from './LLMProvider';
 import { buildPromptSummary, withLogging } from './apiLogger';
+import { withRetry } from './retry';
+import { withSignalDeadline } from './signalDeadline';
 
 function makeProvider(impl: LLMProvider['chat']): LLMProvider {
   return {
@@ -59,6 +61,40 @@ describe('buildPromptSummary', () => {
 });
 
 describe('withLogging', () => {
+  test('ログ保存が期限を超えても、期限内の成功応答を返す', async () => {
+    const response: ChatResponse = { text: 'ok', tokensIn: 1, tokensOut: 1, raw: {} };
+    const chat = jest.fn().mockResolvedValue(response);
+    const { deps, recorded } = makeDeps();
+    const uploadJson = jest.fn(async (params: Parameters<typeof deps.uploadJson>[0]) => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      return deps.uploadJson(params);
+    });
+    const createSignal = jest.fn(() => AbortSignal.timeout(10));
+    const provider = withRetry(withLogging(withSignalDeadline(makeProvider(chat)), 'optimize_query',
+      { ...deps, uploadJson }), { createSignal });
+
+    await expect(provider.chat([])).resolves.toBe(response);
+    expect(createSignal.mock.results[0]!.value.aborted).toBe(true);
+    expect(chat).toHaveBeenCalledTimes(1);
+    expect(uploadJson).toHaveBeenCalledTimes(2);
+    expect(recorded.entries).toHaveLength(1);
+    expect(recorded.entries[0]!.error).toBeNull();
+  });
+
+  test('signal を無視するプロバイダも期限で打ち切り、失敗の監査ログを 1 行残す', async () => {
+    const chat = jest.fn(() => new Promise<ChatResponse>(() => undefined));
+    const { deps, recorded } = makeDeps();
+    const provider = withRetry(withLogging(withSignalDeadline(makeProvider(chat)), 'optimize_query', deps),
+      { createSignal: () => AbortSignal.timeout(10) });
+
+    await expect(provider.chat([])).rejects.toMatchObject({ name: 'TimeoutError' });
+    expect(chat).toHaveBeenCalledTimes(1);
+    expect(recorded.uploads).toHaveLength(2);
+    expect(recorded.entries).toHaveLength(1);
+    expect(recorded.entries[0]!.error).toEqual(expect.any(String));
+    expect(recorded.entries[0]!.tokensIn).toBeNull();
+  });
+
   test('成功時に prompt / response を Drive に保存し、ログ行を追記する', async () => {
     const response: ChatResponse = {
       text: 'ok',

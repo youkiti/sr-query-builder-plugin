@@ -1,3 +1,5 @@
+import { withRetry } from '@/lib/llm/retry';
+import { withSignalDeadline } from '@/lib/llm/signalDeadline';
 import { runQueryOptimization, type QueryOptimizationDeps, type QueryOptimizationProgress } from './queryOptimizationService';
 import type { QueryOptimizationInput } from './queryOptimizationService';
 
@@ -17,7 +19,7 @@ function setup() {
   const write = jest.fn(async () => undefined);
   const deps: QueryOptimizationDeps = {
     eutils: { fetch, maxRetries: 0, rateLimiter: { acquire: async () => undefined } },
-    llmFactory: { model: 'test', forPurpose: () => ({ providerId: 'gemini', model: 'test', chat }) },
+    llmFactory: { model: 'test', forPurpose: (_purpose, onRequestState, attempts) => withRetry(withSignalDeadline({ providerId: 'gemini', model: 'test', chat }), { ...attempts, onRequestState }) },
     checkpoint: { read: async () => undefined, write }, now: () => 1000,
   };
   return { input, deps, fetch, chat, write };

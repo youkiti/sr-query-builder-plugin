@@ -1,3 +1,4 @@
+import { waitWithSignal } from '@/utils/abort';
 import {
   optimizeQuery,
   type ApprovedOptimizationBlock,
@@ -113,6 +114,8 @@ export interface QueryOptimizationDeps {
   random?: () => number;
   maxApiCalls?: number;
   maxElapsedMs?: number;
+  ncbiRequestTimeoutMs?: number;
+  llmRequestTimeoutMs?: number;
 }
 
 export interface VerifiedOptimizationCandidate {
@@ -123,7 +126,7 @@ export interface VerifiedOptimizationCandidate {
 
 export type OptimizationStopReason =
   | 'conditions_met' | 'iteration_limit' | 'repeated_formula' | 'no_improvement'
-  | 'user_stop' | 'api_error' | 'api_budget' | 'time_budget' | 'invalid_input'
+  | 'request_timeout' | 'user_stop' | 'api_error' | 'api_budget' | 'time_budget' | 'invalid_input'
   | 'revalidation_failed' | 'diagnosed_block_held';
 
 /** NCBI の失敗とは区別する、反復サービスの制御用例外。 */
@@ -138,6 +141,7 @@ export class QueryOptimizationStopError extends Error {
       user_stop: 'ユーザーの停止要求により処理を停止しました。',
       api_error: 'API エラーにより処理を続けられません。',
       api_budget: '通信回数の予算上限に達したため処理を停止しました。',
+      request_timeout: '通信の応答待ち時間の上限に達したため処理を停止しました。',
       time_budget: '実行時間の予算上限に達したため処理を停止しました。',
       invalid_input: '入力が不正なため処理を開始できません。',
       revalidation_failed: '最終再検証で条件を満たさなかったため終了しました。',
@@ -164,8 +168,7 @@ export interface QueryOptimizationResult {
 }
 
 // 最大 5 候補＋初期・最終測定と語別分析を収めつつ、暴走を有限にする既定値。
-// NCBI の実 HTTP（リトライ含む）＋ LLM chat ＋ MeSH 追加取得の単位で 200 回、待機込み 10 分。
-// 注入プロバイダ内部の再試行・監査通信は外側から観測できないため chat 1 回に数える。
+// NCBI と optimize_query の実送信（リトライ含む）を数え、監査ログ通信は除く。
 export const DEFAULT_MAX_ITERATIONS = 5;
 export const DEFAULT_MAX_API_CALLS = 200;
 export const MAX_TERM_API_CALLS = 100;
@@ -177,6 +180,10 @@ const INSPECT_LIMIT = 20;
 /** 追加分析の予算切れは、候補評価全体を停止する理由にはしない。 */
 class TermAnalysisBudgetError extends Error {}
 export const DEFAULT_MAX_ELAPSED_MS = 10 * 60 * 1000;
+// NCBI の取得には 1 分、生成待ちを伴う LLM には 2 分を許容する。
+export const DEFAULT_NCBI_REQUEST_TIMEOUT_MS = 60 * 1000;
+export const DEFAULT_LLM_REQUEST_TIMEOUT_MS = 120 * 1000;
+const STOP_POLL_INTERVAL_MS = 100;
 // 一度に全階層を取得せず、優先する少数の枝を調べる。既定 5 反復でも追加取得は最大 15 回。
 const MAX_MESH_REQUESTS_PER_ITERATION = 3;
 // 候補由来の単発失敗は修正機会を残す。改善なしの停止基準と揃え、2 回連続の測定失敗は
@@ -275,6 +282,9 @@ export async function runQueryOptimization(
   };
   const seen = new Map<string, string>();
   let terminal: OptimizationStopReason | null = null;
+  const runController = new AbortController();
+  let llmSignal: AbortSignal | undefined;
+  const ncbiRequestTimeoutMs = deps.ncbiRequestTimeoutMs ?? DEFAULT_NCBI_REQUEST_TIMEOUT_MS;
 
   // 一度停止したら callback が false に戻っても再開しない。応答の前後で同じ境界を使う。
   // 通信予算を使い切る最後の応答も破棄する。上限到達後の結果更新を許さないため。
@@ -282,8 +292,51 @@ export async function runQueryOptimization(
     if (!terminal && deps.shouldStop?.()) terminal = 'user_stop';
     if (!terminal && now() - startedAt >= maxElapsedMs) terminal = 'time_budget';
     if (!terminal && checkApiBudget && apiCalls >= maxApiCalls) terminal = 'api_budget';
-    if (terminal) throw new QueryOptimizationStopError(terminal);
+    if (terminal) {
+      const error = new QueryOptimizationStopError(terminal);
+      runController.abort(error);
+      throw error;
+    }
   }
+  // 注入した待機や遅い応答にも停止を伝える。通信固有の期限切れは呼び出し元で扱う。
+  async function abortable<T>(work: Promise<T>, signal = runController.signal): Promise<T> {
+    try { return await waitWithSignal(work, signal); }
+    catch (err) {
+      if (signal.aborted) {
+        boundary(false);
+        if (signal.reason instanceof DOMException && signal.reason.name === 'TimeoutError') {
+          throw new DOMException(`NCBI の応答が ${ncbiRequestTimeoutMs / 1000} 秒以内に返りませんでした`, 'TimeoutError');
+        }
+      }
+      throw err;
+    }
+  }
+  function requestSignal(timeoutMs: number): AbortSignal {
+    return AbortSignal.any([runController.signal, AbortSignal.timeout(timeoutMs)]);
+  }
+  async function sleep(ms: number): Promise<void> {
+    boundary(false);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await abortable(deps.eutils.sleep ? deps.eutils.sleep(ms)
+        : new Promise<void>((resolve) => { timer = setTimeout(resolve, ms); }));
+      boundary(false);
+    } finally { if (timer !== undefined) clearTimeout(timer); }
+  }
+  const fetchWithDeadline: EutilsDeps['fetch'] = async (resource, init) => {
+    boundary(false);
+    const signal = requestSignal(ncbiRequestTimeoutMs);
+    const response = await abortable(deps.eutils.fetch(resource, { ...init, cache: 'no-store', signal }), signal);
+    boundary();
+    // fetch 完了後も同じ期限を本文の読み取りまで使う。
+    return new Proxy(response, {
+      get(target, key) {
+        if (key === 'json' || key === 'text') return () => abortable(target[key](), signal);
+        const value: unknown = Reflect.get(target, key, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+  };
   const rateLimiter = resolveRateLimiter(deps.eutils);
   const eutils: EutilsDeps = {
     ...deps.eutils,
@@ -291,17 +344,17 @@ export async function runQueryOptimization(
     rateLimiter: {
       acquire: async () => {
         boundary();
-        await (deps.onProgress ? rateLimiter.acquire(() => apiEvent('rate_limit')) : rateLimiter.acquire());
+        await abortable(deps.onProgress ? rateLimiter.acquire(() => apiEvent('rate_limit')) : rateLimiter.acquire());
         apiWaiting = null;
         notify();
         boundary();
       },
     },
-    // 制御用例外は NCBI のリトライ判定を変更しない。待機の境界で停止を再送出する。
+    // バックオフ待機中にも run の停止を伝える。
     sleep: async (ms) => {
       boundary();
       apiEvent('retry');
-      await (deps.eutils.sleep ? deps.eutils.sleep(ms) : new Promise<void>((resolve) => setTimeout(resolve, ms)));
+      await sleep(ms);
       apiWaiting = null;
       notify();
       boundary();
@@ -312,9 +365,7 @@ export async function runQueryOptimization(
       await persistProgress();
       // この通信の予算は加算前に確認済み。保存待ち中の停止・時間切れは引き続き確認する。
       boundary(false);
-      const response = await deps.eutils.fetch(resource, { ...init, cache: 'no-store' });
-      boundary();
-      return response;
+      return fetchWithDeadline(resource, init);
     },
   };
   const canMeasureTerm = (): boolean => {
@@ -339,9 +390,10 @@ export async function runQueryOptimization(
     onProgress: (completed: number, total: number) => { task = { kind: 'terms', completed, total }; notify(); },
     onFailure: () => apiEvent('failure'),
   };
-  // MeSH 取得は従来どおり外側で一単位に数える。内部通信は表示だけを観測する。
+  // MeSH 取得は外側で一単位に数える。内部通信にも同じ期限を適用する。
   const meshEutils: EutilsDeps = {
     ...deps.eutils,
+    fetch: fetchWithDeadline,
     rateLimiter: { acquire: async () => {
       await (deps.onProgress ? rateLimiter.acquire(() => apiEvent('rate_limit')) : rateLimiter.acquire());
       apiWaiting = null;
@@ -375,9 +427,7 @@ export async function runQueryOptimization(
         boundary(false);
         try {
           apiSource = 'MeSH';
-          const nodes = await (deps.onProgress
-            ? deps.fetchMeshContext({ ...request }, meshEutils)
-            : deps.fetchMeshContext({ ...request }));
+          const nodes = await abortable(deps.fetchMeshContext({ ...request }, meshEutils));
           boundary();
           // 取得した関係だけを統合する。未取得理由を実在ノードとして捏造しない。
           const merged = new Map((meshContext ?? []).map((node) => [node.id, node]));
@@ -636,6 +686,7 @@ export async function runQueryOptimization(
   async function finish(reason: OptimizationStopReason,
     latestMeasurement: OptimizationMeasurement | undefined = best?.measurement): Promise<QueryOptimizationResult> {
     terminal = reason;
+    runController.abort(new QueryOptimizationStopError(reason));
     const unmetReasons: string[] = [];
     const seedDiagnoses: OptimizationSeedDiagnosis[] = (latestMeasurement?.missedPmids ?? []).map((pmid) => {
       const article = missedSeeds.find((item) => item.pmid === pmid);
@@ -688,7 +739,7 @@ export async function runQueryOptimization(
       }
     }
     const result: QueryOptimizationResult = {
-      status: reason === 'conditions_met' ? 'achieved' : reason === 'user_stop' ? 'stopped'
+      status: reason === 'conditions_met' ? 'achieved' : reason === 'user_stop' || reason === 'request_timeout' ? 'stopped'
         : reason === 'api_error' || reason === 'invalid_input' ? 'error' : 'needs_review',
       stopReason: reason, best, trials, blockDiagnosis, unmetReasons, seedDiagnoses, iterations, informationTrials, apiCalls, elapsedMs: now() - startedAt,
     };
@@ -713,6 +764,14 @@ export async function runQueryOptimization(
     fixed.seedPmids.length > 0 && candidate.evaluation.status === 'success'
       && candidate.measurement.missedPmids?.length === 0 && candidate.measurement.totalHits! <= fixed.maxHits;
 
+  // shouldStop は通知型ではないため、通信中も短い間隔で確認する。
+  const stopPoll = setInterval(() => {
+    try { boundary(false); } catch { /* abort により待機中の処理へ伝わる。 */ }
+  }, STOP_POLL_INTERVAL_MS);
+  // 実時間の期限でも boundary に判定を委ね、注入された now と食い違わせない。
+  const deadline = setTimeout(() => {
+    try { boundary(false); } catch { /* abort により待機中の処理へ伝わる。 */ }
+  }, Math.max(0, maxElapsedMs));
   try {
     boundary();
     const error = validateInput(fixed, maxIterations, maxApiCalls, maxElapsedMs);
@@ -771,22 +830,33 @@ export async function runQueryOptimization(
       task = null;
       notify();
       boundary();
-      const provider = deps.onProgress ? deps.llmFactory.forPurpose('optimize_query', (state) => {
+      const provider = deps.llmFactory.forPurpose('optimize_query', deps.onProgress ? (state) => {
+        if (terminal) return;
         if (state === 'idle') { apiWaiting = null; notify(); return; }
         apiSource = 'AI';
         apiEvent(state);
         apiSource = 'PubMed';
-      }) : deps.llmFactory.forPurpose('optimize_query');
-      apiCalls += 1;
-      await persistProgress();
-      boundary(false);
-      const proposal = await optimizeQuery({
+      } : undefined, {
+        beforeAttempt: async () => {
+          boundary();
+          apiCalls += 1;
+          await persistProgress();
+          boundary(false);
+        },
+        createSignal: () => {
+          llmSignal = requestSignal(deps.llmRequestTimeoutMs ?? DEFAULT_LLM_REQUEST_TIMEOUT_MS);
+          return llmSignal;
+        },
+        sleep,
+      });
+      const proposal = await abortable(optimizeQuery({
         formula: best.formula, approvedBlocks: fixed.approvedBlocks, criteria: fixed.criteria,
         maxHits: fixed.maxHits, measurement: best.measurement,
         missedSeeds: missedSeeds.filter((seed) => best!.measurement.missedPmids?.includes(seed.pmid)),
         seedPapers: fixed.seedPapers ?? fixed.seedPmids.map((pmid) => ({ pmid, title: null })),
         blockDiagnosis, meshContext, meshRequestResults, trials, previousRejectedTrials: fixed.previousRejectedTrials,
-      }, provider);
+      }, provider));
+      llmSignal = undefined;
       boundary();
       iterations = round;
       const candidateId = `candidate-${round}`;
@@ -921,6 +991,11 @@ export async function runQueryOptimization(
     return finish(reason);
   } catch (err) {
     let failure = err;
+    if (!terminal && llmSignal?.aborted && llmSignal.reason instanceof DOMException
+      && llmSignal.reason.name === 'TimeoutError') {
+      try { boundary(false); } catch { /* run の停止理由を優先する。 */ }
+      terminal ??= 'request_timeout';
+    }
     if (failure instanceof QueryOptimizationStopError) terminal = failure.stopReason;
     // 測定層に例外が変換された場合や、通信失敗と停止が重なった場合も境界で再判定する。
     try { boundary(); } catch (stopped) {
@@ -932,6 +1007,10 @@ export async function runQueryOptimization(
     const result = await finish(terminal ?? 'api_error');
     result.unmetReasons.push(failure instanceof Error ? failure.message : String(failure));
     return result;
+  } finally {
+    clearInterval(stopPoll);
+    clearTimeout(deadline);
+    runController.abort();
   }
 }
 
@@ -1122,7 +1201,8 @@ async function measureTerms(formula: PubmedFormula, approvedBlocks: readonly App
       try { hits = await count(segment.text); }
       catch (err) {
         check();
-        if (!(err instanceof TermAnalysisBudgetError) && canMeasure()) throw err;
+        if (!(err instanceof TermAnalysisBudgetError)
+          && !(err instanceof DOMException && err.name === 'TimeoutError') && canMeasure()) throw err;
       }
       terms.push({ blockId: block.id, query: segment.text, hits, delta: null,
         ...(finalHits !== undefined ? { finalContribution: contributions.get(block.id)?.get(segment.text.trim()) ?? null } : {}) });

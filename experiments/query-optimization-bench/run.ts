@@ -12,6 +12,7 @@ import { extractProtocol } from '../../src/features/formula/skills/extractProtoc
 import { expandFormula } from '../../src/features/validation/expandFormula';
 import { GeminiProvider } from '../../src/lib/llm/GeminiProvider';
 import { withRetry } from '../../src/lib/llm/retry';
+import { withSignalDeadline } from '../../src/lib/llm/signalDeadline';
 import type { LLMProvider } from '../../src/lib/llm/LLMProvider';
 import type { LlmProviderFactory } from '../../src/app/services/llmProviderService';
 import type { PubmedFormula } from '../../src/lib/search-formula-md';
@@ -57,14 +58,15 @@ export function loggedFactory(provider: LLMProvider, write: (path: string, value
   paths: string[], onUsage?: (model: string, tokensIn: number | null, tokensOut: number | null, succeeded: boolean) => void,
   filePrefix = ''): LlmProviderFactory {
   let sequence = 0;
-  return { model: provider.model, forPurpose: (purpose, onRequestState) => withRetry({
+  const boundedProvider = withSignalDeadline(provider);
+  return { model: provider.model, forPurpose: (purpose, onRequestState, attempts) => withRetry({
     providerId: provider.providerId, model: provider.model,
     chat: async (messages, options) => {
       const path = `llm/${filePrefix}${String(++sequence).padStart(4, '0')}_${purpose}.json`;
       const start = Date.now();
       paths.push(path);
       try {
-        const response = await provider.chat(messages, options);
+        const response = await boundedProvider.chat(messages, options);
         write(path, { purpose, model: provider.model, messages, options, response, tokensIn: response.tokensIn,
           tokensOut: response.tokensOut, latencyMs: Date.now() - start });
         onUsage?.(provider.model, response.tokensIn, response.tokensOut, true);
@@ -77,7 +79,7 @@ export function loggedFactory(provider: LLMProvider, write: (path: string, value
         throw err;
       }
     },
-  }, { onRequestState }) };
+  }, { ...attempts, onRequestState }) };
 }
 
 export interface ParsedArgs {

@@ -7,6 +7,7 @@ import { loadC0Artifact } from './c0Artifact';
 import { createReplayLlmFactory, hashReplayFixture, loadReplayFixture, replayFixturePath, type ReplayFixtureContent } from './replay';
 import type { LLMProvider } from '../../src/lib/llm/LLMProvider';
 import type { LlmProviderFactory } from '../../src/app/services/llmProviderService';
+import { loggedFactory } from './run';
 
 const validResponse = (targetBlockId = '1', proposedExpression = 'a[tiab] OR b[tiab]') => JSON.stringify({
   target_block_id: targetBlockId, proposed_expression: proposedExpression, added_terms: [], removed_terms: [],
@@ -100,6 +101,27 @@ function fakeRealFactory(): { factory: LlmProviderFactory; calls: string[] } {
 }
 
 describe('createReplayLlmFactory', () => {
+  test.each(['optimize_query', 'expand_recall'] as const)('%s の委譲先へ試行オプションを伝播する', async (purpose) => {
+    const realChat = jest.fn().mockResolvedValue({ text: 'ok', tokensIn: 1, tokensOut: 1, raw: {} });
+    const realFactory = loggedFactory({ providerId: 'gemini', model: 'test', chat: realChat }, jest.fn(), []);
+    let replayChat!: jest.SpyInstance;
+    const replay = createReplayLlmFactory('stub-fixture', [validResponse()], realFactory, (provider) => {
+      replayChat = jest.spyOn(provider, 'chat');
+      return loggedFactory(provider, jest.fn(), []);
+    });
+    const beforeAttempt = jest.fn();
+    const signal = new AbortController().signal;
+    const createSignal = jest.fn(() => signal);
+
+    await replay.forPurpose(purpose, undefined, { beforeAttempt, createSignal }).chat([]);
+    expect(beforeAttempt).toHaveBeenCalledTimes(1);
+    expect(createSignal).toHaveBeenCalledTimes(1);
+    const chat = purpose === 'optimize_query' ? replayChat : realChat;
+    expect(chat).toHaveBeenCalledTimes(1);
+    expect(chat).toHaveBeenCalledWith([], { signal });
+    expect(purpose === 'optimize_query' ? realChat : replayChat).not.toHaveBeenCalled();
+  });
+
   test('optimize_query だけ固定応答を順に返し、他の purpose は実 factory に届く', async () => {
     const { factory: realFactory, calls: realCalls } = fakeRealFactory();
     const responses = [validResponse('1', 'a[tiab]'), validResponse('1', 'b[tiab]')];

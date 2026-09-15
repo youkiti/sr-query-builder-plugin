@@ -15,6 +15,20 @@ import type { RunResult } from './types';
 // テストでは常に無効化する。
 jest.mock('dotenv', () => ({ config: jest.fn() }));
 
+test('ログ付きファクトリは送信前 hook と試行専用 signal を伝播する', async () => {
+  const chat = jest.fn().mockResolvedValue({ text: 'ok', tokensIn: 1, tokensOut: 1, raw: {} });
+  const factory = loggedFactory({ providerId: 'gemini', model: 'test', chat }, jest.fn(), []);
+  const beforeAttempt = jest.fn();
+  const signal = new AbortController().signal;
+  const createSignal = jest.fn(() => signal);
+
+  await factory.forPurpose('optimize_query', undefined, { beforeAttempt, createSignal }).chat([]);
+  expect(beforeAttempt).toHaveBeenCalledTimes(1);
+  expect(createSignal).toHaveBeenCalledTimes(1);
+  expect(chat).toHaveBeenCalledTimes(1);
+  expect(chat).toHaveBeenCalledWith([], { signal });
+});
+
 describe('CLI のエラー表示', () => {
   const originalExitCode = process.exitCode;
   let stderr: jest.SpyInstance;

@@ -1,10 +1,11 @@
+import type { LlmProviderFactory } from './llmProviderService';
 import { papers, measureSet, setImpact, assertSetTransition, createSetSearch } from '../../../tests/fixtures/pubmedSets';
 import * as google from '@/lib/google';
 import * as evaluation from './queryEvaluationService';
 import * as skill from '@/features/formula/skills/optimizeQuery';
 import * as checkpoint from './queryOptimizationCheckpointService';
-import type { LLMProvider } from '@/lib/llm';
-import { sharedEutilsRateLimiters } from '@/lib/ncbi';
+import { withRetry, withSignalDeadline, LlmProviderError, type LLMProvider } from '@/lib/llm';
+import { esearch, sharedEutilsRateLimiters } from '@/lib/ncbi';
 import { validateCombinationExpression } from '@/lib/combination-expression';
 import { samplePmids, diffOptimizationFormula, runQueryOptimization, validateOptimizationCandidate, QueryOptimizationStopError, type QueryOptimizationInput, type QueryOptimizationDeps } from './queryOptimizationService';
 
@@ -61,7 +62,8 @@ function setup(outcomes: Record<string, Outcome> = { a: { pmids: papers(200, ['1
     tokensIn: null, tokensOut: null, raw: {},
   }));
   const provider: LLMProvider = { providerId: 'gemini', model: 'test', chat };
-  const forPurpose = jest.fn(() => provider);
+  const forPurpose = jest.fn<ReturnType<LlmProviderFactory['forPurpose']>, Parameters<LlmProviderFactory['forPurpose']>>(
+    (_purpose, onRequestState, attempts) => withRetry(withSignalDeadline(provider), { ...attempts, onRequestState }));
   const write = jest.fn().mockResolvedValue(undefined);
   const deps: QueryOptimizationDeps = { eutils: { fetch, maxRetries: 0, rateLimiter: { acquire: async () => undefined } },
     llmFactory: { model: 'test', forPurpose }, checkpoint: { read: async () => undefined, write } };
@@ -669,7 +671,9 @@ test('初期式が目標内でも AI を呼び、同じ式をキャッシュな�
   const result = await runQueryOptimization(input, { ...deps, ...{ store: { setState } } });
   expect(result).toMatchObject({ status: 'achieved', stopReason: 'conditions_met', iterations: 1, unmetReasons: [] });
   expect(chat).toHaveBeenCalledTimes(1);
-  expect(forPurpose).toHaveBeenCalledWith('optimize_query');
+  expect(forPurpose).toHaveBeenCalledWith('optimize_query', undefined, expect.objectContaining({
+    beforeAttempt: expect.any(Function), createSignal: expect.any(Function), sleep: expect.any(Function),
+  }));
   expect(evaluate).toHaveBeenCalledTimes(2);
   expect(result.trials.map((trial) => trial.candidateId)).toEqual(['initial', 'candidate-1', 'final-1']);
   expect(result.trials[1]?.accepted).toBe(false);
@@ -677,7 +681,7 @@ test('初期式が目標内でも AI を呼び、同じ式をキャッシュな�
   // 各区間は10通信未満でも、初期評価・候補評価・最終評価・終了は必ず保存する。
   expect(write.mock.calls.map(([items]) => items.queryOptimizationCheckpoint.resume.consumed.apiCalls)).toEqual([5, 8, 13, 13]);
   expect(result.apiCalls).toBe(fetch.mock.calls.length + 1);
-  for (const [, options] of fetch.mock.calls) expect(options).toEqual({ cache: 'no-store' });
+  for (const [, options] of fetch.mock.calls) expect(options).toEqual({ cache: 'no-store', signal: expect.any(AbortSignal) });
   expect(append).not.toHaveBeenCalled();
   expect(upload).not.toHaveBeenCalled();
   expect(setState).not.toHaveBeenCalled();
@@ -1265,7 +1269,7 @@ test('追加取得した枝を次の AI 文脈へ反映し、情報要求だけ�
   const optimize = jest.spyOn(skill, 'optimizeQuery');
   const evaluate = jest.spyOn(evaluation, 'evaluateQuery');
   const result = await runQueryOptimization(input, deps);
-  expect(fetchMeshContext).toHaveBeenCalledWith(meshRequest);
+  expect(fetchMeshContext).toHaveBeenCalledWith(meshRequest, expect.objectContaining({ fetch: expect.any(Function) }));
   expect(optimize.mock.calls[1]![0].meshContext).toEqual([
     expect.objectContaining({ id: 'D001', treeNumbers: ['C01.100', 'C02.200'], childIds: ['D002'] }), childNode,
   ]);
@@ -1306,7 +1310,7 @@ test('1 反復の追加取得を優先順の 3 件までに制限し、残りの
   deps.fetchMeshContext = fetchMeshContext;
   const optimize = jest.spyOn(skill, 'optimizeQuery');
   await runQueryOptimization(input, deps);
-  expect(fetchMeshContext.mock.calls).toEqual(requests.slice(0, 3).map((request) => [request]));
+  expect(fetchMeshContext.mock.calls.map(([request]) => request)).toEqual(requests.slice(0, 3));
   const notes = optimize.mock.calls[1]![0].meshRequestResults!;
   expect(notes).toHaveLength(5);
   for (const note of notes.slice(3)) expect(note.note).toContain('3 件の追加取得上限で打ち切りました');
@@ -1901,4 +1905,412 @@ test.each([
   ['diagnosed_block_held', '診断したブロックを狭める案が、既に捕捉している文献を失うため連続して保留になり、終了しました。'],
 ] as const)('終了理由 %s は満たした条件や保留の理由を明示する', (reason, message) => {
   expect(new QueryOptimizationStopError(reason).message).toBe(message);
+});
+
+describe('通信中のキャンセルと試行単位の予算', () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  test('注入した now が進まなければ実時間の期限を超えても停止しない', async () => {
+    const f = setup();
+    const started = deferred<AbortSignal>();
+    f.fetch.mockImplementation((_url: string, init: RequestInit) => {
+      started.resolve(init.signal as AbortSignal);
+      return new Promise(() => undefined);
+    });
+    f.deps.now = () => 1000;
+    f.deps.maxElapsedMs = 100;
+    let stop = false;
+    f.deps.shouldStop = () => stop;
+    let finished = false;
+    const pending = runQueryOptimization(f.input, f.deps).then((result) => {
+      finished = true;
+      return result;
+    });
+    const signal = await started.promise;
+    try {
+      await jest.advanceTimersByTimeAsync(500);
+      expect(finished).toBe(false);
+      expect(signal.aborted).toBe(false);
+    } finally {
+      stop = true;
+      await jest.advanceTimersByTimeAsync(100);
+      await pending;
+    }
+    expect((await pending).stopReason).toBe('user_stop');
+  });
+
+  test('未完了の候補 fetch を停止し、遅れた応答で最良候補・終了記録を変えない', async () => {
+    const f = setup({ a: { pmids: papers(200, ['11']) }, b: { pmids: papers(201, ['11', '22']) } });
+    const started = deferred<AbortSignal>();
+    const response = deferred<Response>();
+    const original = f.fetch.getMockImplementation()!;
+    f.fetch.mockImplementation((url: string, init: RequestInit) => {
+      if (new URL(url).searchParams.get('term')?.includes('b[tiab]')) {
+        started.resolve(init.signal as AbortSignal);
+        return response.promise;
+      }
+      return original(url, init);
+    });
+    let stop = false;
+    f.deps.shouldStop = () => stop;
+    const pending = runQueryOptimization(f.input, f.deps);
+    const signal = await started.promise;
+    stop = true;
+    await jest.advanceTimersByTimeAsync(100);
+    const result = await pending;
+    expect(result).toMatchObject({ status: 'stopped', stopReason: 'user_stop' });
+    expect(signal.aborted).toBe(true);
+    expect(result.best?.formula).toEqual(f.input.initialFormula);
+    const saved = f.write.mock.calls[f.write.mock.calls.length - 1]![0].queryOptimizationCheckpoint;
+    expect(saved).toMatchObject({ completion: { stopReason: 'user_stop' }, resume: {
+      bestFormula: f.input.initialFormula, consumed: { apiCalls: result.apiCalls, elapsedMs: result.elapsedMs },
+    } });
+    const before = JSON.stringify(result);
+    const writes = f.write.mock.calls.length;
+    response.resolve({ ok: true, json: async () => ({ esearchresult: { count: '201', idlist: ['11', '22'] } }) } as Response);
+    await jest.advanceTimersByTimeAsync(0);
+    expect(JSON.stringify(result)).toBe(before);
+    expect(f.write).toHaveBeenCalledTimes(writes);
+  });
+
+  test.each(['request', 'run'] as const)('%s の期限で未完了 fetch を中断し、終了理由を区別する', async (kind) => {
+    const f = setup();
+    // 再送の有無を他の行計測と混同しないよう、初期実測を一通信に限定する。
+    const original = evaluation.evaluateQuery;
+    jest.spyOn(evaluation, 'evaluateQuery').mockImplementationOnce(async (formula, seeds, deps) => {
+      await esearch('a[tiab]', deps.eutils);
+      return original(formula, seeds, deps);
+    });
+    f.deps.eutils.maxRetries = 2;
+    const started = deferred<AbortSignal>();
+    f.fetch.mockImplementation((_url: string, init: RequestInit) => {
+      started.resolve(init.signal as AbortSignal);
+      return new Promise(() => undefined);
+    });
+    f.deps.ncbiRequestTimeoutMs = kind === 'request' ? 50 : 500;
+    f.deps.maxElapsedMs = kind === 'run' ? 50 : 500;
+    const pending = runQueryOptimization(f.input, f.deps);
+    const signal = await started.promise;
+    await jest.advanceTimersByTimeAsync(50);
+    const result = await pending;
+    expect(result.stopReason).toBe(kind === 'request' ? 'api_error' : 'time_budget');
+    if (kind === 'request') {
+      expect(result.status).toBe('error');
+      expect(result.unmetReasons).toContain('NCBI の応答が 0.05 秒以内に返りませんでした');
+    }
+    expect(signal.aborted).toBe(true);
+    expect(f.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test('語別件数の一件が期限切れでも未測定として AI 提案へ進む', async () => {
+    const f = setup(undefined, ['a[tiab]']);
+    f.input.maxIterations = 1;
+    f.deps.measureTermDetails = true;
+    f.deps.ncbiRequestTimeoutMs = 50;
+    const started = deferred<AbortSignal>();
+    const original = f.fetch.getMockImplementation()!;
+    let counts = 0;
+    f.fetch.mockImplementation((url: string, init: RequestInit) => {
+      const params = new URL(url).searchParams;
+      const query = params.get('term') ?? '';
+      if (query.includes(') NOT (')) return Promise.resolve({ ok: true,
+        json: async () => ({ esearchresult: { count: '0', idlist: [] } }) });
+      // 初期の行計測後、同じ語の個別件数だけを期限切れにする。
+      if (query === 'a[tiab]' && params.get('retmax') === '0' && ++counts === 2) {
+        started.resolve(init.signal as AbortSignal);
+        return new Promise(() => undefined);
+      }
+      return original(url, init);
+    });
+    const pending = runQueryOptimization(f.input, f.deps);
+    const signal = await started.promise;
+    await jest.advanceTimersByTimeAsync(50);
+    const result = await pending;
+    expect(signal.aborted).toBe(true);
+    expect(result.stopReason).toBe('iteration_limit');
+    expect(f.chat).toHaveBeenCalledTimes(1);
+    expect(result.trials[1]?.before?.terms).toContainEqual(expect.objectContaining({ query: 'a[tiab]', hits: null }));
+  });
+
+  test.each([undefined, true])('MeSH 語別件数の一件が期限切れでも未測定として AI 提案へ進む（詳細計測: %s）', async (measureTermDetails) => {
+    const query = '"Neoplasms"[Mesh]';
+    const f = setup(undefined, [query]);
+    f.input.initialFormula.blocks[0]!.expression = query;
+    f.input.maxIterations = 1;
+    f.deps.measureTermDetails = measureTermDetails;
+    f.deps.ncbiRequestTimeoutMs = 50;
+    const started = deferred<AbortSignal>();
+    const original = f.fetch.getMockImplementation()!;
+    const evaluate = jest.spyOn(evaluation, 'evaluateQuery');
+    let counts = 0;
+    f.fetch.mockImplementation((url: string, init: RequestInit) => {
+      const params = new URL(url).searchParams;
+      const term = params.get('term') ?? '';
+      if (term.includes(') NOT (')) return Promise.resolve({ ok: true,
+        json: async () => ({ esearchresult: { count: '0', idlist: [] } }) });
+      // 初期の行計測を通し、反復冒頭の MeSH 語の個別件数だけを期限切れにする。
+      if (url.includes('esearch.fcgi') && term === query && params.get('retmax') === '0' && ++counts === 2) {
+        started.resolve(init.signal as AbortSignal);
+        return new Promise(() => undefined);
+      }
+      return original(url, init);
+    });
+    const pending = runQueryOptimization(f.input, f.deps);
+    const signal = await started.promise;
+    expect(counts).toBe(2);
+    expect((await evaluate.mock.results[0]!.value).status).toBe('success');
+    expect(f.chat).not.toHaveBeenCalled();
+    expect(signal.aborted).toBe(false);
+    await jest.advanceTimersByTimeAsync(50);
+    const result = await pending;
+    expect(signal.aborted).toBe(true);
+    expect(result.stopReason).toBe('iteration_limit');
+    expect(f.chat).toHaveBeenCalledTimes(1);
+    expect(result.trials[1]?.before?.terms).toContainEqual(expect.objectContaining({ query, hits: null }));
+  });
+
+  test.each([1, 2])('候補の期限切れを測定失敗として却下し、連続 %s 回の終了理由を記録する', async (failures) => {
+    const f = setup();
+    f.input.maxIterations = failures;
+    f.deps.ncbiRequestTimeoutMs = 50;
+    const started = Array.from({ length: failures }, () => deferred<AbortSignal>());
+    let attempts = 0;
+    const original = f.fetch.getMockImplementation()!;
+    f.fetch.mockImplementation((url: string, init: RequestInit) => {
+      const query = new URL(url).searchParams.get('term') ?? '';
+      if (query.includes(') NOT (')) return Promise.resolve({ ok: true,
+        json: async () => ({ esearchresult: { count: '0', idlist: [] } }) });
+      if (query === 'b[tiab]') {
+        started[attempts++]!.resolve(init.signal as AbortSignal);
+        return new Promise(() => undefined);
+      }
+      return original(url, init);
+    });
+    const evaluate = jest.spyOn(evaluation, 'evaluateQuery');
+    const pending = runQueryOptimization(f.input, f.deps);
+    for (const request of started) {
+      await request.promise;
+      await jest.advanceTimersByTimeAsync(50);
+    }
+    const result = await pending;
+    expect((await evaluate.mock.results[1]!.value).status).toBe('failure');
+    expect(result.stopReason).toBe(failures === 1 ? 'iteration_limit' : 'api_error');
+    expect(result.trials[1]).toMatchObject({ accepted: false,
+      reason: expect.stringContaining('NCBI の応答が 0.05 秒以内に返りませんでした') });
+    expect(f.chat).toHaveBeenCalledTimes(failures);
+  });
+
+  test.each(['初期実測', '差集合', 'シード捕捉', 'ブロック診断', '未捕捉書誌'] as const)('%s の期限切れは既存の非停止エラーとして記録する', async (stage) => {
+    const f = setup({ a: { pmids: papers(200, ['11']) }, b: { pmids: papers(201, ['11', '22']) } },
+      stage === '差集合' ? ['b[tiab]'] : ['a[tiab]']);
+    if (stage === 'ブロック診断') {
+      f.input.initialFormula.combinationExpression = '#1 AND #2 AND #RCTfilter';
+      f.input.initialFormula.blocks[3]!.expression = '#1 AND #2 AND #RCTfilter';
+    }
+    f.input.maxIterations = 1;
+    f.deps.ncbiRequestTimeoutMs = 50;
+    const started = deferred<AbortSignal>();
+    const original = f.fetch.getMockImplementation()!;
+    let timedOut = false;
+    f.fetch.mockImplementation((url: string, init: RequestInit) => {
+      const query = new URL(url).searchParams.get('term') ?? '';
+      const difference = query.includes(') NOT (');
+      const selected = difference ? stage === '差集合'
+        : stage === '初期実測' ? query === 'a[tiab]'
+          : stage === 'シード捕捉' ? query === '(fixed[tiab]) AND (11[uid] OR 22[uid])'
+            : stage === '未捕捉書誌' ? url.includes('efetch.fcgi')
+              : stage === 'ブロック診断' && query.includes('fixed[tiab]') && query.includes('[pt]')
+                && !query.includes('a[tiab]') && !query.includes('[uid]');
+      if (selected && !timedOut) {
+        timedOut = true;
+        started.resolve(init.signal as AbortSignal);
+        return new Promise(() => undefined);
+      }
+      if (difference) return Promise.resolve({ ok: true,
+        json: async () => ({ esearchresult: { count: '0', idlist: [] } }) });
+      return original(url, init);
+    });
+    const pending = runQueryOptimization(f.input, f.deps);
+    await started.promise;
+    await jest.advanceTimersByTimeAsync(50);
+    const result = await pending;
+    const message = 'NCBI の応答が 0.05 秒以内に返りませんでした';
+    expect(result.stopReason).toBe(stage === '初期実測' ? 'api_error' : 'iteration_limit');
+    if (stage === '初期実測') {
+      expect(result.best).toBeNull();
+      expect(result.trials[0]?.after?.blocks[0]).toMatchObject({ hits: null, error: message });
+    } else {
+      expect(f.chat).toHaveBeenCalled();
+      if (stage === '差集合') expect(result.trials[1]).toMatchObject({ accepted: false, held: true,
+        impact: { lostHits: null, error: message } });
+      if (stage === 'シード捕捉') expect(result.trials[0]?.after?.seedCapture?.rows)
+        .toContainEqual({ blockId: '2', capturedPmids: null, error: message });
+      if (stage === 'ブロック診断') expect(JSON.stringify(result.blockDiagnosis)).toContain(`未判定: ${message}`);
+      if (stage === '未捕捉書誌') expect(f.chat.mock.calls[0]![0][1].content).toContain(`書誌の取得に失敗: ${message}`);
+    }
+  });
+
+  test.each(['fetch', 'json', 'text'] as const)('進捗通知なしの MeSH %s にも期限を適用し、取得単位で数える', async (stage) => {
+    const f = setup(undefined, ['a[tiab]']);
+    f.input.maxIterations = 2;
+    f.deps.ncbiRequestTimeoutMs = 50;
+    requestMesh(f.chat, [meshRequest]);
+    const started = deferred<AbortSignal>();
+    const original = f.fetch.getMockImplementation()!;
+    f.fetch.mockImplementation((url: string, init: RequestInit) => {
+      if (url !== 'https://mesh.test/timeout') return original(url, init);
+      if (stage === 'fetch') {
+        started.resolve(init.signal as AbortSignal);
+        return new Promise(() => undefined);
+      }
+      return Promise.resolve({ ok: true, [stage]: () => {
+        started.resolve(init.signal as AbortSignal);
+        return new Promise(() => undefined);
+      } });
+    });
+    f.deps.fetchMeshContext = async (_request, eutils) => {
+      const response = await eutils!.fetch('https://mesh.test/timeout');
+      if (stage !== 'fetch') await response[stage]();
+      return [];
+    };
+    const optimize = jest.spyOn(skill, 'optimizeQuery');
+    expect(f.deps.onProgress).toBeUndefined();
+    const pending = runQueryOptimization(f.input, f.deps);
+    const signal = await started.promise;
+    await jest.advanceTimersByTimeAsync(50);
+    const result = await pending;
+    expect(signal.aborted).toBe(true);
+    expect(result.stopReason).toBe('iteration_limit');
+    expect(f.chat).toHaveBeenCalledTimes(2);
+    expect(optimize.mock.calls[1]![0].meshRequestResults![0]!.note)
+      .toBe('未取得: MeSH 取得に失敗しました。理由: NCBI の応答が 0.05 秒以内に返りませんでした');
+    const pubmedCalls = f.fetch.mock.calls.filter(([url]) => url !== 'https://mesh.test/timeout').length;
+    expect(result.apiCalls).toBe(pubmedCalls + f.chat.mock.calls.length + 1);
+  });
+
+  test.each(['json', 'text'] as const)('%s 本文の読み取り中も fetch の signal で停止する', async (body) => {
+    const f = setup({ a: { pmids: papers(200, ['11']) } });
+    const started = deferred<AbortSignal>();
+    const original = f.fetch.getMockImplementation()!;
+    let bodyAborted = false;
+    f.fetch.mockImplementation((url: string, init: RequestInit) => {
+      if (body === 'text' && !url.includes('efetch.fcgi')) return original(url, init);
+      const signal = init.signal as AbortSignal;
+      return Promise.resolve({ ok: true, [body]: () => new Promise((_, reject) => {
+        signal.addEventListener('abort', () => { bodyAborted = true; reject(signal.reason); }, { once: true });
+        started.resolve(signal);
+      }) });
+    });
+    let stop = false;
+    f.deps.shouldStop = () => stop;
+    const pending = runQueryOptimization(f.input, f.deps);
+    await started.promise;
+    stop = true;
+    await jest.advanceTimersByTimeAsync(100);
+    expect((await pending).stopReason).toBe('user_stop');
+    expect(bodyAborted).toBe(true);
+  });
+
+  test.each(['NCBI', 'LLM'])('%s のバックオフ待機中に停止し、次の送信を始めない', async (kind) => {
+    const f = setup();
+    const waiting = deferred<void>();
+    f.deps.eutils.sleep = () => { waiting.resolve(); return new Promise(() => undefined); };
+    if (kind === 'NCBI') {
+      f.deps.eutils.maxRetries = 2;
+      f.fetch.mockResolvedValueOnce({ ok: false, status: 429 });
+    } else f.chat.mockRejectedValueOnce(new LlmProviderError('混雑', 'gemini', 429, ''));
+    let stop = false;
+    f.deps.shouldStop = () => stop;
+    const pending = runQueryOptimization(f.input, f.deps);
+    await waiting.promise;
+    const sends = f.fetch.mock.calls.length + f.chat.mock.calls.length;
+    stop = true;
+    await jest.advanceTimersByTimeAsync(100);
+    expect((await pending).stopReason).toBe('user_stop');
+    expect(f.fetch.mock.calls.length + f.chat.mock.calls.length).toBe(sends);
+  });
+
+  test('LLM の request_timeout は最良候補・消費予算とともにチェックポイントへ残る', async () => {
+    const f = setup();
+    const started = deferred<void>();
+    f.chat.mockImplementation(() => { started.resolve(); return new Promise(() => undefined); });
+    f.deps.llmRequestTimeoutMs = 50;
+    const pending = runQueryOptimization(f.input, f.deps);
+    await started.promise;
+    await jest.advanceTimersByTimeAsync(50);
+    const result = await pending;
+    expect(result).toMatchObject({ status: 'stopped', stopReason: 'request_timeout' });
+    expect(f.chat).toHaveBeenCalledTimes(1);
+    expect(f.write.mock.calls[f.write.mock.calls.length - 1]![0].queryOptimizationCheckpoint).toMatchObject({
+      completion: { status: 'stopped', stopReason: 'request_timeout' },
+      resume: { bestFormula: f.input.initialFormula, consumed: { apiCalls: result.apiCalls, elapsedMs: result.elapsedMs } },
+    });
+  });
+
+  test('LLM が独自に投げた TimeoutError は通信期限と混同しない', async () => {
+    const f = setup();
+    f.chat.mockRejectedValue(new DOMException('プロバイダ独自の失敗', 'TimeoutError'));
+    expect((await runQueryOptimization(f.input, f.deps)).stopReason).toBe('api_error');
+  });
+
+  test('リクエスト期限と停止要求が重なったときはユーザー停止を優先する', async () => {
+    const f = setup();
+    const started = deferred<void>();
+    f.fetch.mockImplementation(() => { started.resolve(); return new Promise(() => undefined); });
+    f.deps.ncbiRequestTimeoutMs = 50;
+    let stop = false;
+    f.deps.shouldStop = () => stop;
+    const pending = runQueryOptimization(f.input, f.deps);
+    await started.promise;
+    stop = true;
+    await jest.advanceTimersByTimeAsync(50);
+    expect((await pending).stopReason).toBe('user_stop');
+  });
+
+  test('完了した LLM 試行の期限切れは、再試行中の新しいリクエストを中断しない', async () => {
+    const f = setup(undefined, ['a[tiab]']);
+    f.input.maxIterations = 1;
+    f.deps.llmRequestTimeoutMs = 100;
+    f.deps.eutils.sleep = () => new Promise((resolve) => setTimeout(resolve, 60));
+    const first = deferred<void>();
+    const second = deferred<void>();
+    const response = deferred<Awaited<ReturnType<LLMProvider['chat']>>>();
+    const original = f.chat.getMockImplementation()!;
+    f.chat.mockImplementationOnce(() => {
+      first.resolve();
+      return Promise.reject(new LlmProviderError('混雑', 'gemini', 429, ''));
+    }).mockImplementationOnce(() => { second.resolve(); return response.promise; });
+    const pending = runQueryOptimization(f.input, f.deps);
+    await first.promise;
+    await jest.advanceTimersByTimeAsync(60);
+    await second.promise;
+    await jest.advanceTimersByTimeAsync(50);
+    const signals = f.chat.mock.calls.map((call) => call[1].signal as AbortSignal);
+    expect(signals[0]!.aborted).toBe(true);
+    expect(signals[1]!.aborted).toBe(false);
+    response.resolve(await original());
+    const result = await pending;
+    expect(result.stopReason).toBe('iteration_limit');
+    expect(signals[1]!.aborted).toBe(true);
+  });
+
+  test('429 の再送信を数え、残予算 1 回なら 2 回目を送らない', async () => {
+    const retry = setup(undefined, ['a[tiab]']);
+    retry.input.maxIterations = 1;
+    retry.deps.eutils.sleep = async () => undefined;
+    retry.chat.mockRejectedValueOnce(new LlmProviderError('混雑', 'gemini', 429, ''));
+    const result = await runQueryOptimization(retry.input, retry.deps);
+    expect(retry.chat).toHaveBeenCalledTimes(2);
+    expect(result.apiCalls).toBe(retry.fetch.mock.calls.length + 2);
+    const limited = setup();
+    // 初期測定後の残りを 1 回にする。予約予算により任意の語別計測は省略される。
+    limited.deps.maxApiCalls = retry.write.mock.calls[0]![0].queryOptimizationCheckpoint.resume.consumed.apiCalls + 1;
+    limited.deps.eutils.sleep = async () => undefined;
+    limited.chat.mockRejectedValue(new LlmProviderError('混雑', 'gemini', 429, ''));
+    const stopped = await runQueryOptimization(limited.input, limited.deps);
+    expect(stopped.stopReason).toBe('api_budget');
+    expect(limited.chat).toHaveBeenCalledTimes(1);
+    expect(stopped.apiCalls).toBe(limited.fetch.mock.calls.length + 1);
+  });
 });

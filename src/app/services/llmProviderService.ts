@@ -1,5 +1,5 @@
 import type { LlmApiLogEntry, LlmPurpose } from '@/domain/llmApiLog';
-import type { LlmRequestState } from '@/lib/llm/retry';
+import type { LlmRequestState, RetryOptions } from '@/lib/llm/retry';
 import { SHEET_HEADERS } from '@/domain/sheetsSchema';
 import type { ProjectStoreDeps } from '@/features/project';
 import {
@@ -13,6 +13,7 @@ import {
   DEFAULT_MODEL,
   withLogging,
   withRetry,
+  withSignalDeadline,
   type LLMProvider,
 } from '@/lib/llm';
 
@@ -58,9 +59,12 @@ export interface LlmFactoryDeps {
   onRequestState?: (state: LlmRequestState) => void;
 }
 
+export type LlmAttemptOptions = Pick<RetryOptions, 'beforeAttempt' | 'createSignal' | 'sleep'>;
+
 export interface LlmProviderFactory {
   /** 指定 purpose 用のロガー付きプロバイダを返す */
-  forPurpose: (purpose: LlmPurpose, onRequestState?: (state: LlmRequestState) => void) => LLMProvider;
+  forPurpose: (purpose: LlmPurpose, onRequestState?: (state: LlmRequestState) => void,
+    attempts?: LlmAttemptOptions) => LLMProvider;
   /** このファクトリが解決したモデル ID（FormulaVersions.model への記録用） */
   model: string;
 }
@@ -110,11 +114,12 @@ export async function buildLlmProviderFactory(deps: LlmFactoryDeps): Promise<Llm
   });
   // withLogging を内側にして「再試行 1 回ごとに LLMApiLog へ 1 行」残す
   // （503 等の失敗試行も監査ログに見える状態を保つ）。
+  // 期限の層はログより内側に置き、ログ保存の待ちを期限に含めない。
   return {
     model: selectedModel,
-    forPurpose: (purpose, onRequestState) =>
+    forPurpose: (purpose, onRequestState, attempts) =>
       withRetry(
-        withLogging(baseProvider, purpose, {
+        withLogging(withSignalDeadline(baseProvider), purpose, {
           uploadJson: async ({ filename, content }) => {
             const file = await uploadTextFile(
               {
@@ -134,7 +139,7 @@ export async function buildLlmProviderFactory(deps: LlmFactoryDeps): Promise<Llm
             }
           },
         }),
-        { onRequestState: onRequestState ?? deps.onRequestState }
+        { ...attempts, onRequestState: onRequestState ?? deps.onRequestState }
       ),
   };
 }
