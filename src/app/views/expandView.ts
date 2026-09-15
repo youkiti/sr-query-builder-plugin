@@ -58,8 +58,8 @@ import type { RenderView } from './types';
  * - `p` / `←`: 前のカードへ移動
  *
  * アクティブ表示（`.expand__candidate--focused`）は DOM フォーカスではなく
- * `focusIndex` と CSS クラスで管理し、キー入力は list 要素の keydown で一括して拾う。
- * このため判定で list から DOM フォーカスが外れない限りキーボード操作が続く。
+ * `focusIndex` と CSS クラスで管理し、キー入力は document で拾う。
+ * 入力欄の操作・修飾キー付きの入力は判定に使わない。
  * マウスで判定ボタンを押した場合は、そのカードへアクティブ表示を同期しつつ list へ
  * フォーカスを戻し、以降もキーボードで操作できるようにする。
  *
@@ -95,10 +95,13 @@ interface CandidateItemHandle {
   isPending: () => boolean;
 }
 
+const candidateShortcutCleanup = new WeakMap<Document, () => void>();
+
 export function createExpandView(callbacks: ExpandViewCallbacks = {}): RenderView {
   return (container, ctx) => {
-    container.innerHTML = '';
     const doc = container.ownerDocument;
+    candidateShortcutCleanup.get(doc)?.();
+    container.innerHTML = '';
     const heading = doc.createElement('h2');
     heading.textContent = ROUTE_LABELS.expand;
     container.appendChild(heading);
@@ -277,7 +280,7 @@ function setupCandidates(
   let focusIndex = -1;
   let roundTriggered = false;
 
-  const setFocus = (index: number): void => {
+  const setFocus = (index: number, scroll = true): void => {
     /* istanbul ignore if -- 呼び出し側で items.length > 0 を保証しているための防御 */
     if (items.length === 0) return;
     const next = clampIndex(index, items.length);
@@ -287,8 +290,8 @@ function setupCandidates(
     }
     const target = items[next]!.element;
     // jsdom には scrollIntoView が無いのでガードして無視する
-    if (typeof target.scrollIntoView === 'function') {
-      target.scrollIntoView({ block: 'nearest' });
+    if (scroll && list.isConnected && typeof target.scrollIntoView === 'function') {
+      target.scrollIntoView({ block: 'start' });
     }
   };
 
@@ -334,8 +337,17 @@ function setupCandidates(
     );
   };
 
-  list.addEventListener('keydown', (event) => {
-    if (items.length === 0) return;
+  const onKeyDown = (event: KeyboardEvent): void => {
+    if (!list.isConnected) {
+      cleanup();
+      return;
+    }
+    if (items.length === 0 || event.defaultPrevented || event.isComposing ||
+        event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
+    const isInput = (target: EventTarget | null): boolean =>
+      target instanceof Element &&
+      target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])') !== null;
+    if (isInput(event.target) || isInput(doc.activeElement)) return;
     const handler = KEY_HANDLERS[event.key];
     if (!handler) return;
     event.preventDefault();
@@ -347,7 +359,19 @@ function setupCandidates(
       focusUp: () => setFocus(focusIndex - 1),
       decide: (d) => decideFocused(items, focusIndex, d),
     });
+  };
+  // 再描画では同期的に置き換え、別ルートによる DOM の破棄でも解除する。
+  const observer = new MutationObserver(() => {
+    if (!list.isConnected) cleanup();
   });
+  const cleanup = (): void => {
+    doc.removeEventListener('keydown', onKeyDown);
+    observer.disconnect();
+    if (candidateShortcutCleanup.get(doc) === cleanup) candidateShortcutCleanup.delete(doc);
+  };
+  candidateShortcutCleanup.set(doc, cleanup);
+  doc.addEventListener('keydown', onKeyDown);
+  observer.observe(doc, { childList: true, subtree: true });
 
   result.candidates.forEach((candidate, index) => {
     const handle = buildCandidateItem(doc, candidate, callbacks.onDecide, {
@@ -363,16 +387,16 @@ function setupCandidates(
       // マウスで判定ボタンを押したらアクティブ表示をそのカードへ同期し、list に
       // フォーカスを戻して以降もキーボードで操作できるようにする。
       onInteract: () => {
-        setFocus(index);
-        list.focus();
+        list.focus({ preventScroll: true });
+        setFocus(index, false);
       },
     });
     list.appendChild(handle.element);
     items.push(handle);
   });
   if (items.length > 0) {
+    list.focus({ preventScroll: true });
     setFocus(0);
-    list.focus();
   }
 }
 

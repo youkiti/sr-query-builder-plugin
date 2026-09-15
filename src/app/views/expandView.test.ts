@@ -844,7 +844,7 @@ describe('createExpandView', () => {
         const view = createExpandView();
         const container = buildContainer();
         view(container, { state: readyState(), navigate: jest.fn() });
-        expect(scrollSpy).toHaveBeenCalledWith({ block: 'nearest' });
+        expect(scrollSpy).toHaveBeenCalledWith({ block: 'start' });
       } finally {
         if (original === undefined) {
           delete proto.scrollIntoView;
@@ -973,6 +973,101 @@ describe('createExpandView', () => {
       expect(items[0]?.classList.contains('expand__candidate--focused')).toBe(true);
       pressKey(list, 'ArrowUp');
       expect(items[0]?.classList.contains('expand__candidate--focused')).toBe(true);
+    });
+
+    test.each(['i', 'e', 'm'])('本文からの %s で判定できる', (key) => {
+      const onDecide = jest.fn().mockResolvedValue({ seed: {} });
+      const container = buildContainer();
+      createExpandView({ onDecide })(container, { state: readyState(), navigate: jest.fn() });
+      pressKey(container.querySelector<HTMLElement>('.expand__candidate-abstract-body')!, key);
+      expect(onDecide).toHaveBeenCalledTimes(1);
+      expect(onDecide).toHaveBeenCalledWith(expect.objectContaining({
+        pmid: '111', decision: { i: 'include', e: 'exclude', m: 'maybe' }[key],
+      }));
+    });
+
+    test.each(['input', 'textarea', 'select', 'editable', 'editable-child'])('入力中は判定も移動もしない: %s', (tag) => {
+      const onDecide = jest.fn();
+      const container = buildContainer();
+      createExpandView({ onDecide })(container, { state: readyState(), navigate: jest.fn() });
+      const doc = container.ownerDocument;
+      const input = doc.createElement(tag.startsWith('editable') ? 'div' : tag);
+      if (tag.startsWith('editable')) input.setAttribute('contenteditable', 'true');
+      if (tag === 'input') input.setAttribute('type', 'checkbox');
+      container.appendChild(input);
+      const target = tag === 'editable-child' ? input.appendChild(doc.createElement('span')) : input;
+      for (const key of ['i', 'e', 'm', 'n', 'p', 'ArrowDown', 'ArrowUp']) pressKey(target, key);
+      expect(onDecide).not.toHaveBeenCalled();
+      expect(container.querySelector('.expand__candidate--focused')?.getAttribute('data-pmid')).toBe('111');
+      // createHTMLDocument には browsing context が無いため activeElement を明示する。
+      const activeElement = jest.spyOn(doc, 'activeElement', 'get').mockReturnValue(input);
+      try {
+        pressKey(doc.body, 'i');
+        expect(onDecide).not.toHaveBeenCalled();
+      } finally {
+        activeElement.mockRestore();
+      }
+    });
+
+    test.each(['ctrlKey', 'altKey', 'metaKey', 'shiftKey', 'isComposing'])('%s 付きのキーは無視する', (modifier) => {
+      const onDecide = jest.fn();
+      const container = buildContainer();
+      createExpandView({ onDecide })(container, { state: readyState(), navigate: jest.fn() });
+      for (const key of ['i', 'n']) {
+        const event = new KeyboardEvent('keydown', { key, [modifier]: true, bubbles: true, cancelable: true });
+        container.ownerDocument.body.dispatchEvent(event);
+        expect(event.defaultPrevented).toBe(false);
+      }
+      expect(onDecide).not.toHaveBeenCalled();
+      expect(container.querySelector('.expand__candidate--focused')?.getAttribute('data-pmid')).toBe('111');
+    });
+
+    test('再描画ではリスナを置換し、ルート離脱で DOM が外れたら解除する', async () => {
+      const onDecide = jest.fn().mockResolvedValue({ seed: {} });
+      const view = createExpandView({ onDecide });
+      const container = buildContainer();
+      const doc = container.ownerDocument;
+      const remove = jest.spyOn(doc, 'removeEventListener');
+      const ctx = { state: readyState(), navigate: jest.fn() };
+      view(container, ctx);
+      view(container, ctx);
+      expect(remove).toHaveBeenCalledWith('keydown', expect.any(Function));
+      pressKey(doc.body, 'n');
+      pressKey(doc.body, 'e');
+      expect(onDecide).toHaveBeenCalledTimes(1);
+      expect(onDecide).toHaveBeenCalledWith(expect.objectContaining({ pmid: '222' }));
+      container.innerHTML = '';
+      await flushAsync();
+      expect(remove.mock.calls.filter(([type]) => type === 'keydown')).toHaveLength(2);
+      pressKey(doc.body, 'i');
+      expect(onDecide).toHaveBeenCalledTimes(1);
+      view(container, ctx);
+      pressKey(doc.body, 'm');
+      expect(onDecide).toHaveBeenCalledTimes(2);
+      view(container, { state: stateReady, navigate: jest.fn() });
+      pressKey(doc.body, 'i');
+      expect(onDecide).toHaveBeenCalledTimes(2);
+    });
+
+    test('DOM フォーカスはスクロールを抑止し、保存後に次のカードの先頭へスクロールする', async () => {
+      const container = buildContainer();
+      const focus = jest.spyOn(HTMLElement.prototype, 'focus');
+      const scroll = jest.fn();
+      const onDecide = jest.fn().mockResolvedValue({ seed: {} });
+      try {
+        createExpandView({ onDecide })(container, { state: readyState(), navigate: jest.fn() });
+        expect(focus).toHaveBeenLastCalledWith({ preventScroll: true });
+        const items = container.querySelectorAll<HTMLElement>('.expand__candidate');
+        items[1]!.scrollIntoView = scroll;
+        items[0]!.querySelector<HTMLButtonElement>('button[data-decision=include]')!.click();
+        expect(focus).toHaveBeenLastCalledWith({ preventScroll: true });
+        expect(scroll).not.toHaveBeenCalled();
+        await flushAsync();
+        expect(scroll).toHaveBeenCalledWith({ block: 'start' });
+        expect(focus.mock.invocationCallOrder[focus.mock.invocationCallOrder.length - 1]).toBeLessThan(scroll.mock.invocationCallOrder[0]!);
+      } finally {
+        focus.mockRestore();
+      }
     });
 
     test('マウスで判定ボタンを押すと、そのカードへアクティブが同期される', async () => {
