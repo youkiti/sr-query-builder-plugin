@@ -452,7 +452,11 @@ export async function runQueryOptimization(
     const changed = blockDiagnosis !== undefined;
     const { formula, measurement } = candidate;
     const { simple, refs, blocks } = diagnosisTargets(formula, fixed.approvedBlocks);
-    for (const node of meshContext ?? []) diagnosisTrees.set(node.descriptor.toLowerCase(), [...node.treeNumbers]);
+    const mergeTrees = (descriptor: string, treeNumbers: readonly string[]) => {
+      const key = descriptor.toLowerCase();
+      diagnosisTrees.set(key, [...new Set([...(diagnosisTrees.get(key) ?? []), ...treeNumbers])]);
+    };
+    for (const node of meshContext ?? []) mergeTrees(node.descriptor, node.treeNumbers);
     const budgetNote = () => diagnosisApiCalls >= MAX_DIAGNOSIS_API_CALLS ? DIAGNOSIS_LIMIT_NOTE
       : maxApiCalls - apiCalls <= reservedApiCalls ? '未判定: 候補評価・差集合・最終再検証の通信予算を確保するため打ち切った' : '';
     const observed: EutilsDeps = { ...eutils, maxRetries: 0, fetch: async (resource, init) => {
@@ -514,7 +518,7 @@ export async function runQueryOptimization(
         try {
           const trees = await (deps.fetchMeshTreeNumbers ?? fetchMeshTreeNumbers)(selected, observed);
           boundary();
-          for (const descriptor of selected) diagnosisTrees.set(descriptor.toLowerCase(), trees.get(descriptor) ?? []);
+          for (const descriptor of selected) mergeTrees(descriptor, trees.get(descriptor) ?? []);
         } catch (err) {
           if (err instanceof QueryOptimizationStopError) throw err;
           boundary();

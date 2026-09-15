@@ -10,6 +10,7 @@ export function diagnosedHeldBlock(trials: readonly OptimizationTrial[], diagnos
   const counts = new Map<string, number>();
   for (const trial of trials) {
     if (trial.kind !== 'proposal' || trial.duplicateOf) continue;
+    if (trial.held && !(trial.impact && trial.impact.lostHits !== null && trial.impact.lostHits >= 1)) continue;
     const diff = trial.formulaDiff?.filter((block) => block.added.length || block.removed.length);
     const id = diff?.length === 1 ? diff[0]!.blockId : trial.changes?.targetBlockId;
     if (!id || !diagnosed.has(id)) continue;

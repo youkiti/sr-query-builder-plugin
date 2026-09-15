@@ -78,6 +78,57 @@ test('MeSH 文脈を優先し、足りない descriptor だけ注入先に渡す
   expect(f.progress.some((p) => p.blockDiagnosis?.overlaps[0]?.kind === 'ancestor')).toBe(true);
   expect(result.blockDiagnosis?.overlaps[0]?.kind).toBe('same');
 });
+test('追加取得した一部の階層で初回診断の内包を消さず、採用後も保持する', async () => {
+  const f = fixture([{ id: '1', expression: 'a[tiab] AND narrow[tiab] OR "Parent"[Mesh]' }]);
+  f.input.maxIterations = 2;
+  f.input.initialFormula.blocks[0]!.expression += ' OR "Parent"[Mesh]';
+  f.input.initialFormula.blocks[1]!.expression += ' OR "Child"[Mesh]';
+  f.deps.fetchMeshTreeNumbers = jest.fn(async () => new Map([['Parent', ['C01', 'D01']], ['Child', ['C01.100']]]));
+  f.chat.mockResolvedValueOnce({ text: JSON.stringify({ target_block_id: '1', proposed_expression: 'a[tiab]',
+    rationale: '階層を確認', mesh_requests: [{ descriptor: 'Parent', tree_number: 'D01' }] }),
+    tokensIn: null, tokensOut: null, raw: {} });
+  f.deps.fetchMeshContext = jest.fn(async () => [{ id: 'p', descriptor: 'parent', label: null,
+    treeNumbers: ['D01'], parentIds: [], childIds: [], explode: true, note: '' }]);
+  const result = await runQueryOptimization(f.input, f.deps);
+  expect(f.deps.fetchMeshTreeNumbers).toHaveBeenCalledWith(['Parent', 'Child'], expect.anything());
+  expect(f.deps.fetchMeshContext).toHaveBeenCalledTimes(1);
+  expect(f.progress.some((p) => p.iterations === 0 && p.blockDiagnosis?.overlaps.some((row) => row.kind === 'ancestor'))).toBe(true);
+  expect(result.trials.some((trial) => trial.kind === 'proposal' && trial.accepted)).toBe(true);
+  expect(result.blockDiagnosis?.overlaps).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'ancestor' })]));
+});
+
+test('同じ descriptor の複数ノードの階層を両方の枝の内包に使う', async () => {
+  const f = fixture();
+  f.input.initialFormula.blocks[0]!.expression += ' OR "Parent"[Mesh]';
+  f.input.initialFormula.blocks[1]!.expression += ' OR "ChildC"[Mesh] OR "ChildD"[Mesh]';
+  f.input.meshContext = ['C01', 'D01'].map((treeNumber, index) => ({ id: String(index),
+    descriptor: index === 0 ? 'Parent' : 'parent', label: null, treeNumbers: [treeNumber],
+    parentIds: [], childIds: [], explode: true, note: '' }));
+  f.deps.fetchMeshTreeNumbers = async () => new Map([['ChildC', ['C01.100']], ['ChildD', ['D01.100']]]);
+  await runQueryOptimization(f.input, f.deps);
+  expect(f.progress.some((p) => p.iterations === 0 && p.blockDiagnosis?.overlaps.filter((row) => row.kind === 'ancestor').length === 2)).toBe(true);
+});
+
+test('差集合の取得が二回失敗しても診断ブロックの保留による停止にしない', async () => {
+  const f = fixture([{ id: '1', expression: 'a[tiab] AND held1[tiab]' }, { id: '1', expression: 'a[tiab] AND held2[tiab]' }]);
+  const original = f.deps.eutils.fetch;
+  let failures = 0;
+  f.deps.eutils.fetch = async (resource, init) => {
+    const url = new URL(String(resource));
+    const params = init?.method === 'POST' ? new URLSearchParams(init.body as string) : url.searchParams;
+    if (url.pathname.includes('esearch') && params.get('term')?.includes(') NOT (') && params.get('retmax') === '10000') {
+      failures += 1;
+      throw new Error('差集合の取得失敗');
+    }
+    return original(resource, init);
+  };
+  const result = await runQueryOptimization(f.input, f.deps);
+  expect(failures).toBe(2);
+  expect(result.trials.filter((trial) => trial.kind === 'proposal').map((trial) => [trial.held, trial.impact?.lostHits])).toEqual([[true, null], [true, null]]);
+  expect(result.stopReason).not.toBe('diagnosed_block_held');
+  expect(result.unmetReasons.join(' ')).not.toContain('ブロック #1 を狭める案が 2 回続けて保留');
+});
+
 test.each([false, true])('階層取得の例外は失敗理由に落とし、停止例外は停止する: %s', async (stop) => {
   const f = fixture();
   f.input.initialFormula.blocks[0]!.expression += ' OR "Parent"[Mesh]';
