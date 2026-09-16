@@ -242,7 +242,7 @@ test('main: LLM のプロンプト/レスポンス全文を run.ts と同じ log
     const llmDir = join(resultsDir, 'freeze-c0', 'r1-mindfulness-smoking', 'criteria-only-draft1', 'llm');
     expect(existsSync(llmDir)).toBe(true);
     const logged = JSON.parse(readFileSync(join(llmDir, '0001_extract_protocol.json'), 'utf8'));
-    expect(logged).toMatchObject({ purpose: 'extract_protocol', model: 'gemini-3.5-flash', tokensIn: 5, tokensOut: 7 });
+    expect(logged).toMatchObject({ purpose: 'extract_protocol', model: 'gemini-3.5-flash-lite', tokensIn: 5, tokensOut: 7 });
   } finally {
     network.mockRestore();
     if (originalKey === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = originalKey;

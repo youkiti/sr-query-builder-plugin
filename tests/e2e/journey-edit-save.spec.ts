@@ -91,7 +91,7 @@ async function setupEditScenario(
   await registerDriveStub(page);
 
   // トークン数は累積コストの変化が目視できる大きさにする
-  // （gemini-3.5-flash: in $1.5 / out $9.0 per 1M → 1000/1000 で +$0.0105）。
+  // （既定モデル gemini-3.5-flash-lite: in $0.3 / out $2.5 per 1M → 1000/1000 で +$0.0028）。
   await registerGeminiStub(page, {
     responses: { 'improve-block': IMPROVE_BLOCK_RESPONSE },
     usage: { promptTokenCount: 1000, candidatesTokenCount: 1000 },
@@ -208,7 +208,7 @@ test.describe('journey-edit-save (J6 / issue #42)', () => {
 
     // 別ブロックで AI 改善 → LLM コスト集計の setState で全ビューが再描画される
     await runBlockImprovement(page, '2');
-    await expect(context).toContainText('累積 $0.1305');
+    await expect(context).toContainText('累積 $0.1228');
 
     // 再描画後もメッセージが同じ内容で残っていること
     await expect(status).toHaveText(savedMessage);

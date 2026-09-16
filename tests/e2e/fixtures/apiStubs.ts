@@ -38,7 +38,7 @@
  *
  * ## 検証テクニック
  * ヘッダ右の `#app-context` に出る `累積 $x.xxxx` の変化で「全ビュー再描画が走ったこと」を
- * 観測できる。`src/lib/llm/pricing.ts` の料金表に `gemini-3.5-flash` が載っているので、
+ * 観測できる。`src/lib/llm/pricing.ts` の料金表に既定モデル `gemini-3.5-flash-lite` が載っているので、
  * スタブの usageMetadata にトークン数を与えれば累積コストが動く。再描画に耐えるかを問う
  * 回帰テストで有効。
  *

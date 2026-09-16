@@ -24,13 +24,14 @@ describe('resolveProviderId', () => {
 });
 
 describe('modelRegistry の定数', () => {
-  test('DEFAULT_MODEL は gemini-3.5-flash', () => {
-    expect(DEFAULT_MODEL).toBe('gemini-3.5-flash');
+  test('DEFAULT_MODEL は gemini-3.5-flash-lite', () => {
+    expect(DEFAULT_MODEL).toBe('gemini-3.5-flash-lite');
   });
 
   test('BUILTIN_MODELS には Gemini モデルと OpenRouter モデルが含まれる', () => {
     expect(BUILTIN_MODELS.some((m) => m.id === 'gemini-2.0-flash')).toBe(true);
     expect(BUILTIN_MODELS.some((m) => m.id === 'gemini-3.5-flash')).toBe(true);
+    expect(BUILTIN_MODELS.some((m) => m.id === 'gemini-3.5-flash-lite')).toBe(true);
     expect(BUILTIN_MODELS.some((m) => m.provider === 'openrouter')).toBe(true);
   });
 

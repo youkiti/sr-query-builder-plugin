@@ -41,9 +41,9 @@ describe('GeminiProvider.chat', () => {
       raw: expect.any(Object),
     });
     expect(provider.providerId).toBe('gemini');
-    expect(provider.model).toBe('gemini-3.5-flash');
+    expect(provider.model).toBe('gemini-3.5-flash-lite');
     const [url, init] = fetch.mock.calls[0];
-    expect(url).toContain('/models/gemini-3.5-flash:generateContent');
+    expect(url).toContain('/models/gemini-3.5-flash-lite:generateContent');
     expect(url).toContain('key=k');
     const body = JSON.parse((init as RequestInit).body as string);
     expect(body.contents).toEqual([{ role: 'user', parts: [{ text: 'hi' }] }]);

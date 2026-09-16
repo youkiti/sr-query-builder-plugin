@@ -268,7 +268,7 @@ test.describe('検索式の自動調整', () => {
     await expect(page.locator('.optimization__review')).toContainText('既知シード 1/1 件捕捉');
     await expect(page.locator('.optimization__review')).toContainText('実測 50 件（目安以下）');
     await expect(page.locator('.optimization__review')).toContainText('既知シードを捕捉したことは、未知の適格研究を網羅したことを意味しません。');
-    await expect(page.locator('#app-context')).toContainText('累積 $0.1305');
+    await expect(page.locator('#app-context')).toContainText('累積 $0.1228');
     await page.getByText('試行1の変更詳細', { exact: true }).click();
     await expect(page.getByRole('heading', { name: 'フリーワード', exact: true }).filter({ visible: true })).toBeVisible();
     const adopt = page.getByRole('button', { name: '採用して保存', exact: true });

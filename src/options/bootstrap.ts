@@ -54,10 +54,11 @@ export const STORAGE_KEY_GEMINI_TIER = 'gemini.detectedTier';
 const BUILTIN_MODELS_DISPLAY = [
   { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash（無料枠対応）', provider: 'gemini' as const },
   { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', provider: 'gemini' as const },
+  { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash Lite', provider: 'gemini' as const },
   { id: 'qwen/qwen3-235b-a22b-2507', label: 'Qwen3 235B Instruct', provider: 'openrouter' as const },
   { id: 'deepseek/deepseek-v4-flash', label: 'DeepSeek V4 Flash', provider: 'openrouter' as const },
 ];
-const DEFAULT_MODEL_ID = 'gemini-3.5-flash';
+const DEFAULT_MODEL_ID = 'gemini-3.5-flash-lite';
 const MAX_CUSTOM_MODELS_LIMIT = 20;
 
 type ModelProvider = 'gemini' | 'openrouter';

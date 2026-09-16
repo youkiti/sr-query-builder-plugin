@@ -24,11 +24,12 @@ export interface CustomModel {
 export const BUILTIN_MODELS: readonly ModelDef[] = [
   { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash（無料枠対応）', provider: 'gemini', freeTier: true },
   { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', provider: 'gemini' },
+  { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash Lite', provider: 'gemini' },
   { id: 'qwen/qwen3-235b-a22b-2507', label: 'Qwen3 235B Instruct', provider: 'openrouter' },
   { id: 'deepseek/deepseek-v4-flash', label: 'DeepSeek V4 Flash', provider: 'openrouter' },
 ] as const;
 
-export const DEFAULT_MODEL = 'gemini-3.5-flash';
+export const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
 
 export const MAX_CUSTOM_MODELS = 20;
 
