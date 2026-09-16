@@ -42,12 +42,16 @@ export interface DiagnoseArgs {
   dryRun: boolean;
 }
 
+/** blockDiagnosis が実際にどの式（凍結 C0 か、自動調整で採用された最良式か）を診断したものか。 */
+export type DiagnosisTarget = 'c0' | 'best';
+
 /** --harvest で split をまたいで収集した診断が一致しなかったときに、代表値と一緒に両方残す。 */
 export interface SplitMismatchEntry {
   split: string;
   runId: string;
   finalHits: number | null;
-  finalQuery: string;
+  finalQuery: string | null;
+  diagnosisTarget: DiagnosisTarget | null;
   diagnosis: BlockDiagnosis;
 }
 
@@ -65,8 +69,19 @@ export interface DiagnosisRecord {
   /** false は通信の一時的な失敗などで再試行したいことを示す（再開時のスキップ判定に使う）。 */
   complete: boolean;
   error: string | null;
-  finalQuery: string;
+  /**
+   * 診断した式（finalHits と対になる）。--harvest で診断対象を C0/C1 のどちらとも件数で
+   * 対応づけられなかったときだけ null（誤った対応づけを保存しないため）。
+   */
+  finalQuery: string | null;
   finalHits: number | null;
+  /**
+   * finalQuery/finalHits がどちらの式のものか。通常モードは常に凍結 C0 そのものを測るので
+   * 'c0' 固定。--harvest は run.json の narrowing[*].finalHits と conditions.C0/C1 の実測件数を
+   * 突き合わせて決める（自動調整で候補が採用されていれば blockDiagnosis は採用後の最良式
+   * （C1）を診断したものになるため、常に C0 とは限らない）。対応づけられなければ null。
+   */
+  diagnosisTarget: DiagnosisTarget | null;
   simple: boolean;
   targetBlockIds: string[];
   diagnosis: BlockDiagnosis;
@@ -248,12 +263,14 @@ async function diagnoseC0(caseId: string, c0Name: string, fixturesDir: string, r
     const diagnosis: BlockDiagnosis = { fingerprint: '', overlaps: structure.overlaps, narrowing, note: structure.note };
     const diagnosisApiCalls = apiCalls - diagnosisStartApiCalls;
     record = { ...base, elapsedMs: Date.now() - startedAt.getTime(), complete: true, error: null,
-      finalQuery, finalHits, simple, targetBlockIds: blocks.map((block) => block.id), diagnosis,
+      finalQuery, finalHits, diagnosisTarget: 'c0', simple, targetBlockIds: blocks.map((block) => block.id), diagnosis,
       apiCalls, diagnosisApiCalls, exceedsProductBudget: diagnosisApiCalls > MAX_DIAGNOSIS_API_CALLS, representativeSplit: null };
   } catch (err) {
     const diagnosisApiCalls = apiCalls - diagnosisStartApiCalls;
+    // 通常モードは常に凍結 C0 そのものを診断対象にしている（採用・不採用の分岐が起きるのは
+    // --harvest が読む full run 側だけ）ので、測定に失敗していても diagnosisTarget は 'c0' で確定する。
     record = { ...base, elapsedMs: Date.now() - startedAt.getTime(), complete: false, error: toErrorMessage(err, secrets),
-      finalQuery, finalHits: null, simple: false, targetBlockIds: [],
+      finalQuery, finalHits: null, diagnosisTarget: 'c0', simple: false, targetBlockIds: [],
       diagnosis: { fingerprint: '', overlaps: [], narrowing: [], note: '' },
       apiCalls, diagnosisApiCalls, exceedsProductBudget: diagnosisApiCalls > MAX_DIAGNOSIS_API_CALLS, representativeSplit: null };
   }
@@ -272,7 +289,8 @@ interface HarvestedSplit {
   split: string;
   runId: string;
   finalHits: number | null;
-  finalQuery: string;
+  finalQuery: string | null;
+  diagnosisTarget: DiagnosisTarget | null;
   diagnosis: BlockDiagnosis;
   gitCommit: string | null;
   startedAt: string;
@@ -281,6 +299,33 @@ interface HarvestedSplit {
 /** diagnoseStructure は「結合式が単純な AND ではない」ときだけこの note を返す。full run の
  * run.json には simple 自体は残っていないため、note の内容からその判定を逆算する。 */
 const NOT_SIMPLE_NOTE = '未判定: 結合式が単純な AND ではない';
+
+/**
+ * blockDiagnosis が実際にどの式を診断したものかを、narrowing の finalHits と
+ * conditions.C0/C1 の実測件数を突き合わせて特定する。
+ *
+ * queryOptimizationService.ts の updateDiagnosis は候補（採用済みなら最良式、未採用ならまだ
+ * C0）を測るたびに呼ばれ、そのときの measurement.totalHits を diagnosis.narrowing[*].finalHits
+ * として保存する。したがって run.json の conditions.C0（常に凍結 C0 の実測）と conditions.C1
+ * （自動調整の最良式。採用が無ければ C0 と同じ式になりうる）のうち、diagnosis の finalHits と
+ * 件数が一致する側が実際に診断された式である。narrowing が空、finalHits がすべて null、
+ * またはどちらの条件とも件数が一致しない場合は対応づけられないため null にする
+ * （誤った式・件数を finalQuery/finalHits に保存しない）。
+ */
+function resolveHarvestTarget(run: RunResult, diagnosis: BlockDiagnosis):
+  { target: DiagnosisTarget | null; finalQuery: string | null; finalHits: number | null } {
+  const diagnosedHits = diagnosis.narrowing.find((row) => row.finalHits !== null)?.finalHits ?? null;
+  if (diagnosedHits === null) return { target: null, finalQuery: null, finalHits: null };
+  const c0 = run.conditions.C0;
+  const c1 = run.conditions.C1;
+  const c0Hits = c0?.measurement.status === 'success' ? c0.measurement.hits : null;
+  const c1Hits = c1?.measurement.status === 'success' ? c1.measurement.hits : null;
+  // 両方の件数が偶然一致する場合は C0（不採用）を優先する。診断は C0→C1 の順で進むため、
+  // 件数が変わらない採用（起こりうるがまれ）ではどちらの式を指しても実害が小さい単純な tie-break。
+  if (c0Hits !== null && c0Hits === diagnosedHits) return { target: 'c0', finalQuery: c0!.query, finalHits: c0Hits };
+  if (c1Hits !== null && c1Hits === diagnosedHits) return { target: 'best', finalQuery: c1!.query, finalHits: c1Hits };
+  return { target: null, finalQuery: null, finalHits: null };
+}
 
 async function harvestC0(caseId: string, c0Name: string, c0ResultDir: string, runLabel: string,
   root: string, fixturesDir: string, secrets: readonly string[]): Promise<void> {
@@ -297,10 +342,12 @@ async function harvestC0(caseId: string, c0Name: string, c0ResultDir: string, ru
       process.stdout.write(`${caseId}/${c0Name}/${split}: optimization.blockDiagnosis がありません（スキップ）\n`);
       continue;
     }
-    const measurement = run.conditions.C0?.measurement;
+    const resolved = resolveHarvestTarget(run, diagnosis);
+    if (resolved.target === null) {
+      process.stdout.write(`${caseId}/${c0Name}/${split}: 診断対象の式を C0/C1 の実測件数から特定できませんでした（finalQuery/finalHits は null で保存）\n`);
+    }
     splits.push({ split, runId: run.runId, gitCommit: run.gitCommit ?? null, startedAt: run.startedAt,
-      finalHits: measurement?.status === 'success' ? measurement.hits : null,
-      finalQuery: run.conditions.C0?.query ?? '', diagnosis });
+      finalHits: resolved.finalHits, finalQuery: resolved.finalQuery, diagnosisTarget: resolved.target, diagnosis });
   }
   if (!splits.length) return;
   let artifact;
@@ -325,24 +372,24 @@ async function harvestC0(caseId: string, c0Name: string, c0ResultDir: string, ru
     // harvest は既存の run.json を読むだけで自分では何も測定しないため、処理時間として意味のある
     // elapsedMs を持たない（0 固定）。
     elapsedMs: 0, gitCommit: representative!.gitCommit, gitDirty: null, complete: true, error: null,
-    finalQuery: representative!.finalQuery, finalHits: representative!.finalHits,
+    finalQuery: representative!.finalQuery, finalHits: representative!.finalHits, diagnosisTarget: representative!.diagnosisTarget,
     simple: representative!.diagnosis.note !== NOT_SIMPLE_NOTE,
     targetBlockIds: representative!.diagnosis.narrowing.map((row) => row.blockId),
     diagnosis: representative!.diagnosis, apiCalls: null, diagnosisApiCalls: null, exceedsProductBudget: null,
     representativeSplit: representative!.split,
     runIds: sortedSplits.map((item) => item.runId),
     ...(mismatched ? { splitMismatch: sortedSplits.map((item): SplitMismatchEntry => ({ split: item.split, runId: item.runId,
-      finalHits: item.finalHits, finalQuery: item.finalQuery, diagnosis: item.diagnosis })) } : {}),
+      finalHits: item.finalHits, finalQuery: item.finalQuery, diagnosisTarget: item.diagnosisTarget, diagnosis: item.diagnosis })) } : {}),
   };
   atomicWrite(outputPath(root, caseId, c0Name), record, secrets);
   const judged = record.diagnosis.narrowing.filter((row) => row.ineffective !== null);
   process.stdout.write(`${caseId}/${c0Name}: overlaps=${record.diagnosis.overlaps.length} `
     + `narrowing判定=${judged.filter((row) => row.ineffective).length}/${judged.length}(全${record.diagnosis.narrowing.length}) `
-    + `splits=${sortedSplits.length}(代表=${representative!.split})${mismatched ? ' splitMismatch' : ''}\n`);
+    + `splits=${sortedSplits.length}(代表=${representative!.split}, target=${representative!.diagnosisTarget ?? '不明'})${mismatched ? ' splitMismatch' : ''}\n`);
 }
 
 async function harvestCase(caseId: string, resultsRoot: string, runLabel: string, root: string,
-  fixturesDir: string, secrets: readonly string[]): Promise<void> {
+  fixturesDir: string, secrets: readonly string[], c0Name?: string): Promise<void> {
   const caseDir = join(resultsRoot, HARVEST_PROFILE_ID, caseId);
   if (!existsSync(caseDir)) {
     process.stdout.write(`${caseId}: full run の結果ディレクトリが見つかりません（スキップ） -> ${caseDir}\n`);
@@ -350,6 +397,9 @@ async function harvestCase(caseId: string, resultsRoot: string, runLabel: string
   }
   for (const entry of readdirSync(caseDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
+    // --c0 は通常モード・dry-run と同じ「対象を 1 本に絞る」意味にする。指定外の C0 に触れない
+    // （既存の収集結果を上書きしない）。
+    if (c0Name !== undefined && entry.name !== c0Name) continue;
     await harvestC0(caseId, entry.name, join(caseDir, entry.name), runLabel, root, fixturesDir, secrets);
   }
 }
@@ -378,6 +428,8 @@ interface GroupSummary {
   overlapAncestor: number;
   overlapUnknown: number;
   overlapNone: number;
+  /** 結合式が単純な AND でなく diagnoseStructure が判定できなかった C0 数（重なりなしとは区別する）。 */
+  structureUndetermined: number;
   ineffectiveC0: number;
   ineffectiveBlocks: number;
   judgedBlocks: number;
@@ -402,7 +454,10 @@ function summarizeGroup(name: string, records: readonly DiagnosisRecord[]): Grou
     overlapSame: diagnosed.filter((r) => r.diagnosis.overlaps.some((o) => o.kind === 'same')).length,
     overlapAncestor: diagnosed.filter((r) => r.diagnosis.overlaps.some((o) => o.kind === 'ancestor')).length,
     overlapUnknown: diagnosed.filter((r) => r.diagnosis.overlaps.some((o) => o.kind === 'unknown')).length,
-    overlapNone: diagnosed.filter((r) => r.diagnosis.overlaps.length === 0).length,
+    // 結合式が単純な AND でない C0 は diagnoseStructure が空の overlaps を返す（未判定であって
+    // 「重なりが無いと確認できた」わけではない）。structureUndetermined 側に数え、ここには含めない。
+    overlapNone: diagnosed.filter((r) => r.simple && r.diagnosis.overlaps.length === 0).length,
+    structureUndetermined: diagnosed.filter((r) => !r.simple).length,
     ineffectiveC0: diagnosed.filter((r) => r.diagnosis.narrowing.some((row) => row.ineffective === true)).length,
     ineffectiveBlocks: judged.filter((row) => row.ineffective).length,
     judgedBlocks: judged.length,
@@ -421,12 +476,12 @@ function formatRate(value: number | null): string {
 }
 
 const SUMMARY_HEADERS = ['ケース', 'C0数', '診断できた数', '失敗数', 'same重なりC0', 'ancestor重なりC0', 'unknown重なりC0', '重なりなしC0',
-  '効いてないブロックを含むC0', '効いてないブロック/判定済み', '未判定ブロック', '未判定内訳(note別)',
+  '構造未判定C0', '効いてないブロックを含むC0', '効いてないブロック/判定済み', '未判定ブロック', '未判定内訳(note別)',
   '削減率min', '削減率p25', '削減率中央値', '削減率p75', '削減率max', 'diagnosis-only件数', 'full-run件数', 'split不一致件数'];
 
 function summaryRow(summary: GroupSummary): (string | number)[] {
   return [summary.name, summary.total, summary.diagnosed, summary.failed,
-    summary.overlapSame, summary.overlapAncestor, summary.overlapUnknown, summary.overlapNone,
+    summary.overlapSame, summary.overlapAncestor, summary.overlapUnknown, summary.overlapNone, summary.structureUndetermined,
     summary.ineffectiveC0, `${summary.ineffectiveBlocks}/${summary.judgedBlocks}`, summary.undeterminedBlocks,
     summary.undeterminedNotes.map(([note, count]) => `${note}: ${count}`).join('; ') || '-',
     formatRate(summary.quantiles.min), formatRate(summary.quantiles.p25), formatRate(summary.quantiles.median),
@@ -458,13 +513,13 @@ export function reportDiagnosis(root: string, label: string): string {
   const summaryTable = [SUMMARY_HEADERS, SUMMARY_HEADERS.map(() => '---'), ...rows]
     .map((cells) => `| ${cells.join(' | ')} |`).join('\n') + '\n';
 
-  const detailHeaders = ['ケース', 'C0', '由来', '完了', 'エラー', 'same/ancestor/unknown', '効いてない/判定済み(全ブロック)', 'split不一致'];
+  const detailHeaders = ['ケース', 'C0', '由来', '完了', 'エラー', '構造', 'same/ancestor/unknown', '効いてない/判定済み(全ブロック)', 'split不一致'];
   const detailRows = [...records].sort((a, b) => a.caseId === b.caseId
     ? a.c0.name.localeCompare(b.c0.name) : a.caseId.localeCompare(b.caseId)).map((r) => {
     const kinds = r.diagnosis.overlaps.map((o) => o.kind);
     const judged = r.diagnosis.narrowing.filter((row) => row.ineffective !== null);
     const ineffective = judged.filter((row) => row.ineffective).length;
-    return [r.caseId, r.c0.name, r.source, r.complete ? '○' : '×', r.error ?? '-',
+    return [r.caseId, r.c0.name, r.source, r.complete ? '○' : '×', r.error ?? '-', r.simple ? '単純' : '未判定',
       `${kinds.filter((k) => k === 'same').length}/${kinds.filter((k) => k === 'ancestor').length}/${kinds.filter((k) => k === 'unknown').length}`,
       `${ineffective}/${judged.length}(${r.diagnosis.narrowing.length})`, r.splitMismatch ? '○' : '-'];
   });
@@ -498,7 +553,7 @@ export async function main(args = process.argv.slice(2), fixturesDir = FIXTURES,
   if (options.harvest) {
     const harvestResultsRoot = options.resultsDir ?? resultsDir;
     const secrets = [...(deps.secrets ?? []), process.env.NCBI_API_KEY ?? ''];
-    for (const caseId of caseIds) await harvestCase(caseId, harvestResultsRoot, options.runLabel, root, fixturesDir, secrets);
+    for (const caseId of caseIds) await harvestCase(caseId, harvestResultsRoot, options.runLabel, root, fixturesDir, secrets, options.c0Name);
     return;
   }
   if (!deps.fetch) config();

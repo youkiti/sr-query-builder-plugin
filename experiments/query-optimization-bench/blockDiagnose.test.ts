@@ -190,7 +190,7 @@ test('既に complete: true の出力ファイルがある C0 はスキップさ
     schemaVersion: 1, source: 'diagnosis-only', caseId: CASE_ID,
     c0: { name: 'skip-c0', sha256: 'sha', variant: 'criteria-only', draftIndex: 1 },
     searchDate: '2021-04-15', startedAt: '2026-09-01T00:00:00.000Z', elapsedMs: 1, gitCommit: null, gitDirty: null,
-    complete: true, error: null, finalQuery: '("X"[tiab])', finalHits: 10, simple: true, targetBlockIds: ['1'],
+    complete: true, error: null, finalQuery: '("X"[tiab])', finalHits: 10, diagnosisTarget: 'c0', simple: true, targetBlockIds: ['1'],
     diagnosis: { fingerprint: '', overlaps: [], narrowing: [], note: '' }, apiCalls: 1, diagnosisApiCalls: 0,
     exceedsProductBudget: false, representativeSplit: null,
   };
@@ -236,6 +236,7 @@ test('--harvest は複数 split の診断を 1 本にまとめ、不一致は sp
   expect(matched.source).toBe('full-run');
   expect(matched.runIds).toEqual(['run-match-1', 'run-match-2']);
   expect(matched.diagnosis).toEqual(diagnosisA);
+  expect(matched.diagnosisTarget).toBe('c0');
   expect(matched.splitMismatch).toBeUndefined();
   expect(matched.apiCalls).toBeNull();
   expect(matched.diagnosisApiCalls).toBeNull();
@@ -245,12 +246,38 @@ test('--harvest は複数 split の診断を 1 本にまとめ、不一致は sp
   expect(mismatched.representativeSplit).toBe('s1');
   expect(mismatched.diagnosis).toEqual(diagnosisA);
   expect(mismatched.splitMismatch).toEqual([
-    { split: 's1', runId: 'run-mismatch-1', finalHits: 100, finalQuery: 'q1', diagnosis: diagnosisA },
-    { split: 's2', runId: 'run-mismatch-2', finalHits: 90, finalQuery: 'q2', diagnosis: diagnosisB },
+    { split: 's1', runId: 'run-mismatch-1', finalHits: 100, finalQuery: 'q1', diagnosisTarget: 'c0', diagnosis: diagnosisA },
+    { split: 's2', runId: 'run-mismatch-2', finalHits: 90, finalQuery: 'q2', diagnosisTarget: 'c0', diagnosis: diagnosisB },
   ]);
 
   expect(existsSync(join(outDir, 'nodiag-c0.json'))).toBe(false);
   expect(output).toHaveBeenCalledWith(expect.stringContaining('optimization.blockDiagnosis がありません'));
+});
+
+test('--harvest は --c0 で指定した C0 だけを収集し、他の C0 の既存結果を上書きしない', async () => {
+  const { resultsRoot, fixturesRoot } = setup();
+  writeC0(fixturesRoot, CASE_ID, 'target-c0', [{ id: '1', expression: 'x[tiab]', label: 'X' }]);
+  writeC0(fixturesRoot, CASE_ID, 'other-c0', [{ id: '1', expression: 'y[tiab]', label: 'Y' }]);
+  const diagnosis: BlockDiagnosis = { fingerprint: 'fp', overlaps: [], narrowing: [
+    { blockId: '1', label: 'X', finalHits: 100, withoutHits: 150, reduction: 1 / 3, ineffective: false, note: '' },
+  ], note: '' };
+  const writeRun = (dir: string, runId: string) => {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'run.json'), JSON.stringify({
+      runId, gitCommit: 'commit-abc', startedAt: '2026-09-15T00:00:00.000Z',
+      conditions: { C0: { query: 'q', measurement: { status: 'success', hits: 100 } } },
+      optimization: { blockDiagnosis: diagnosis },
+    }));
+  };
+  const caseDir = join(resultsRoot, 'default', CASE_ID);
+  writeRun(join(caseDir, 'target-c0', 's1+issue164-current'), 'run-target');
+  writeRun(join(caseDir, 'other-c0', 's1+issue164-current'), 'run-other');
+
+  await main(['--harvest', '--case', CASE_ID, '--c0', 'target-c0'], fixturesRoot, resultsRoot);
+
+  const outDir = join(resultsRoot, 'block-diagnosis', 'default', CASE_ID);
+  expect(existsSync(join(outDir, 'target-c0.json'))).toBe(true);
+  expect(existsSync(join(outDir, 'other-c0.json'))).toBe(false);
 });
 
 test('--harvest の代表 split はディレクトリ列挙順に依存せず split 名の昇順で決まる', async () => {
@@ -285,8 +312,68 @@ test('--harvest の代表 split はディレクトリ列挙順に依存せず sp
   const record = JSON.parse(readFileSync(join(resultsRoot, 'block-diagnosis', 'default', CASE_ID, 'order-c0.json'), 'utf8')) as DiagnosisRecord;
   expect(record.representativeSplit).toBe('aaa');
   expect(record.diagnosis).toEqual(diagnosisA);
+  expect(record.diagnosisTarget).toBe('c0');
   expect(record.runIds).toEqual(['run-a', 'run-m', 'run-z']);
   expect(record.splitMismatch?.map((entry) => entry.split)).toEqual(['aaa', 'mmm', 'zzz']);
+});
+
+test.each([
+  // 採用あり: blockDiagnosis は最良式（C1）を測った後の状態で、narrowing の finalHits は
+  // C1 側の件数と一致する。C0（28 件）ではなく C1（3,155 件）の query/hits を保存すべきケース
+  // （c1-replacing-salt-with/seeded-draft13 の実データで確認済みの構図を再現）。
+  ['採用あり: C1 側の件数と一致すれば diagnosisTarget は best', 3155, 28, 3155, 'best', 'c1-query', 3155],
+  // 採用なし: blockDiagnosis はまだ C0 を測った状態のまま。narrowing の finalHits は C0 側と一致する。
+  ['採用なし: C0 側の件数と一致すれば diagnosisTarget は c0', 28, 28, 3155, 'c0', 'c0-query', 28],
+])('--harvest は診断済みの finalHits を C0/C1 の実測件数と突き合わせて対応する式を保存する: %s',
+  async (_label, diagnosedHits, c0Hits, c1Hits, expectedTarget, expectedQuery, expectedHits) => {
+    const { resultsRoot, fixturesRoot } = setup();
+    writeC0(fixturesRoot, CASE_ID, 'adoption-c0', [{ id: '1', expression: 'x[tiab]', label: 'X' }]);
+    const diagnosis: BlockDiagnosis = { fingerprint: 'fp', overlaps: [], narrowing: [
+      { blockId: '1', label: 'X', finalHits: diagnosedHits, withoutHits: diagnosedHits * 2, reduction: 0.5, ineffective: false, note: '' },
+    ], note: '' };
+    const dir = join(resultsRoot, 'default', CASE_ID, 'adoption-c0', 's1+issue164-current');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'run.json'), JSON.stringify({
+      runId: 'run-adoption', gitCommit: 'commit-abc', startedAt: '2026-09-15T00:00:00.000Z',
+      conditions: {
+        C0: { query: 'c0-query', measurement: { status: 'success', hits: c0Hits } },
+        C1: { query: 'c1-query', measurement: { status: 'success', hits: c1Hits } },
+      },
+      optimization: { blockDiagnosis: diagnosis },
+    }));
+
+    await main(['--harvest', '--case', CASE_ID, '--c0', 'adoption-c0'], fixturesRoot, resultsRoot);
+
+    const record = JSON.parse(readFileSync(join(resultsRoot, 'block-diagnosis', 'default', CASE_ID, 'adoption-c0.json'), 'utf8')) as DiagnosisRecord;
+    expect(record.diagnosisTarget).toBe(expectedTarget);
+    expect(record.finalQuery).toBe(expectedQuery);
+    expect(record.finalHits).toBe(expectedHits);
+  });
+
+test('--harvest は診断済みの finalHits が C0 にも C1 にも一致しなければ finalQuery/finalHits/diagnosisTarget を null にする', async () => {
+  const { resultsRoot, fixturesRoot } = setup();
+  writeC0(fixturesRoot, CASE_ID, 'unresolvable-c0', [{ id: '1', expression: 'x[tiab]', label: 'X' }]);
+  const diagnosis: BlockDiagnosis = { fingerprint: 'fp', overlaps: [], narrowing: [
+    { blockId: '1', label: 'X', finalHits: 500, withoutHits: 1000, reduction: 0.5, ineffective: false, note: '' },
+  ], note: '' };
+  const dir = join(resultsRoot, 'default', CASE_ID, 'unresolvable-c0', 's1+issue164-current');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'run.json'), JSON.stringify({
+    runId: 'run-unresolvable', gitCommit: 'commit-abc', startedAt: '2026-09-15T00:00:00.000Z',
+    conditions: {
+      C0: { query: 'c0-query', measurement: { status: 'success', hits: 100 } },
+      C1: { query: 'c1-query', measurement: { status: 'success', hits: 200 } },
+    },
+    optimization: { blockDiagnosis: diagnosis },
+  }));
+
+  await main(['--harvest', '--case', CASE_ID, '--c0', 'unresolvable-c0'], fixturesRoot, resultsRoot);
+
+  const record = JSON.parse(readFileSync(join(resultsRoot, 'block-diagnosis', 'default', CASE_ID, 'unresolvable-c0.json'), 'utf8')) as DiagnosisRecord;
+  expect(record.diagnosisTarget).toBeNull();
+  expect(record.finalQuery).toBeNull();
+  expect(record.finalHits).toBeNull();
+  expect(output).toHaveBeenCalledWith(expect.stringContaining('診断対象の式を C0/C1 の実測件数から特定できませんでした'));
 });
 
 test('--report は検出 C0 数・ineffective 数・削減率分位点を集計する', () => {
@@ -296,7 +383,7 @@ test('--report は検出 C0 数・ineffective 数・削減率分位点を集計�
     schemaVersion: 1, source: 'diagnosis-only', caseId,
     c0: { name: 'x', sha256: 'sha', variant: 'criteria-only', draftIndex: 1 },
     searchDate: '2021-04-15', startedAt: '2026-09-01T00:00:00.000Z', elapsedMs: 1, gitCommit: null, gitDirty: null,
-    complete: true, error: null, finalQuery: 'q', finalHits: 100, simple: true, targetBlockIds: [],
+    complete: true, error: null, finalQuery: 'q', finalHits: 100, diagnosisTarget: 'c0', simple: true, targetBlockIds: [],
     diagnosis: { fingerprint: '', overlaps: [], narrowing: [], note: '' }, apiCalls: 1, diagnosisApiCalls: 1,
     exceedsProductBudget: false, representativeSplit: null,
     ...overrides,
@@ -325,13 +412,18 @@ test('--report は検出 C0 数・ineffective 数・削減率分位点を集計�
   const r3 = record({ c0: { name: 'r3', sha256: 's', variant: 'criteria-only', draftIndex: 1 },
     diagnosis: { fingerprint: '', overlaps: [], narrowing: [], note: '' } });
   const r4 = record({ complete: false, error: '通信断', c0: { name: 'r4', sha256: 's', variant: 'criteria-only', draftIndex: 1 } });
+  // 結合式が単純な AND でない C0（simple: false）。diagnoseStructure は空の overlaps を返すが、
+  // これは「重なりが無いと確認できた」のではなく「判定できなかった」ので、重なりなしC0 には
+  // 数えず、構造未判定C0 側に計上されることを確認する。
+  const r5 = record({ simple: false, c0: { name: 'r5', sha256: 's', variant: 'criteria-only', draftIndex: 1 },
+    diagnosis: { fingerprint: '', overlaps: [], narrowing: [], note: '未判定: 結合式が単純な AND ではない' } });
   const dir = join(root, caseId);
   mkdirSync(dir, { recursive: true });
-  for (const rec of [r1, r2, r3, r4]) writeFileSync(join(dir, `${rec.c0.name}.json`), JSON.stringify(rec));
+  for (const rec of [r1, r2, r3, r4, r5]) writeFileSync(join(dir, `${rec.c0.name}.json`), JSON.stringify(rec));
 
   const markdown = reportDiagnosis(root, 'default');
   const overall = markdown.split('\n').find((line) => line.startsWith('| 全体 |'));
-  expect(overall).toBe('| 全体 | 4 | 3 | 1 | 1 | 1 | 1 | 1 | 1 | 1/5 | 1 | 未判定: 最終式の件数が不明: 1 | 10.0% | 30.0% | 50.0% | 70.0% | 90.0% | 2 | 1 | 0 |');
+  expect(overall).toBe('| 全体 | 5 | 4 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1/5 | 1 | 未判定: 最終式の件数が不明: 1 | 10.0% | 30.0% | 50.0% | 70.0% | 90.0% | 3 | 1 | 0 |');
   expect(existsSync(join(root, 'summary.csv'))).toBe(true);
   expect(config).not.toHaveBeenCalled();
 });
