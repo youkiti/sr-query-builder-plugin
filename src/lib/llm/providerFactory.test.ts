@@ -36,7 +36,7 @@ describe('createProvider', () => {
     const provider = createProvider({ apiKey: 'k' });
     expect(provider).toBeInstanceOf(GeminiProvider);
     expect(provider.providerId).toBe('gemini');
-    expect(provider.model).toBe('gemini-3.5-flash');
+    expect(provider.model).toBe('gemini-3.5-flash-lite');
   });
 
   test('model / fetch オプションを渡せる', () => {

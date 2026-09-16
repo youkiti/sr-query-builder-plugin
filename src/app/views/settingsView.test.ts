@@ -115,7 +115,7 @@ describe('createSettingsView - Gemini プラン判定', () => {
     await flush();
     const badge = container.querySelector('#settings-gemini-tier-badge');
     expect(badge?.textContent).toBe('有料プラン');
-    expect(store['llm.selectedModel']).toBe('gemini-3.5-flash');
+    expect(store['llm.selectedModel']).toBe('gemini-3.5-flash-lite');
     expect(store['gemini.detectedTier']).toBe('paid');
     expect(container.querySelector('.settings__status')?.textContent).toBe('保存しました。');
   });
@@ -129,7 +129,7 @@ describe('createSettingsView - Gemini プラン判定', () => {
     input.value = 'some-key';
     (container.querySelector('#settings-save') as HTMLButtonElement).click();
     await flush();
-    expect(store['llm.selectedModel']).toBe('gemini-3.5-flash');
+    expect(store['llm.selectedModel']).toBe('gemini-3.5-flash-lite');
     expect(container.querySelector('.settings__status')?.textContent).toContain(
       'Gemini プランを自動判定できませんでした'
     );
@@ -144,7 +144,7 @@ describe('createSettingsView - Gemini プラン判定', () => {
     input.value = 'free-key';
     (container.querySelector('#settings-save') as HTMLButtonElement).click();
     await flush();
-    expect(store['llm.selectedModel']).toBe('gemini-3.5-flash');
+    expect(store['llm.selectedModel']).toBe('gemini-3.5-flash-lite');
     expect(store['gemini.detectedTier']).toBeUndefined();
     expect(container.querySelector('.settings__status')?.textContent).toContain('混雑中');
     expect(container.querySelector('#settings-gemini-tier-badge')?.textContent).toBe('');
@@ -187,5 +187,31 @@ describe('createSettingsView - Gemini プラン判定', () => {
     const select = container.querySelector('#settings-llm-model') as HTMLSelectElement;
     const values = Array.from(select.querySelectorAll('option')).map((o) => o.value);
     expect(values).toContain('gemini-2.0-flash');
+  });
+
+  test('モデルセレクトに gemini-3.5-flash-lite が含まれている', async () => {
+    const container = render(buildDeps({}));
+    await flush();
+    const select = container.querySelector('#settings-llm-model') as HTMLSelectElement;
+    const values = Array.from(select.querySelectorAll('option')).map((o) => o.value);
+    expect(values).toContain('gemini-3.5-flash-lite');
+  });
+
+  test('モデル未保存なら既定で gemini-3.5-flash-lite が選択される', async () => {
+    const container = render(buildDeps({}));
+    await flush();
+    const select = container.querySelector('#settings-llm-model') as HTMLSelectElement;
+    expect(select.value).toBe('gemini-3.5-flash-lite');
+  });
+
+  test('既存モデルとして gemini-3.5-flash が保存済みなら選択値は維持され、保存しても書き換わらない', async () => {
+    const store: Record<string, string> = { 'llm.selectedModel': 'gemini-3.5-flash' };
+    const container = render(buildDeps(store));
+    await flush();
+    const select = container.querySelector('#settings-llm-model') as HTMLSelectElement;
+    expect(select.value).toBe('gemini-3.5-flash');
+    (container.querySelector('#settings-save') as HTMLButtonElement).click();
+    await flush();
+    expect(store['llm.selectedModel']).toBe('gemini-3.5-flash');
   });
 });

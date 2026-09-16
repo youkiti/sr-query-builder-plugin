@@ -86,11 +86,40 @@ describe('startOptions', () => {
     const select = doc.getElementById('llm-model-select') as HTMLSelectElement;
     const optionValues = Array.from(select.querySelectorAll('option')).map((o) => o.value);
     expect(optionValues).toContain('gemini-3.5-flash');
+    expect(optionValues).toContain('gemini-3.5-flash-lite');
     expect(optionValues).toContain('qwen/qwen3-235b-a22b-2507');
     expect(optionValues).toContain('deepseek/deepseek-v4-flash');
     const groups = Array.from(select.querySelectorAll('optgroup')).map((g) => g.label);
     expect(groups).toContain('Gemini');
     expect(groups).toContain('OpenRouter');
+  });
+
+  test('モデル未保存なら既定で gemini-3.5-flash-lite が選択される', async () => {
+    const doc = buildDocument();
+    const deps = readStoredValues({});
+    await startOptions(doc, deps);
+    const select = doc.getElementById('llm-model-select') as HTMLSelectElement;
+    expect(select.value).toBe('gemini-3.5-flash-lite');
+  });
+
+  test('既存モデルとして gemini-3.5-flash が保存済みなら選択値は維持され、保存しても書き換わらない', async () => {
+    const doc = buildDocument();
+    const store: Record<string, string> = { [STORAGE_KEY_LLM_MODEL]: 'gemini-3.5-flash' };
+    const writeKey = jest.fn<Promise<void>, [string, string]>(async (key, value) => {
+      store[key] = value;
+    });
+    const deps: OptionsDeps = {
+      readKey: jest.fn(async (key) => store[key]),
+      writeKey,
+      removeKey: jest.fn(async () => undefined),
+      openAppTab: jest.fn(),
+    };
+    await startOptions(doc, deps);
+    const select = doc.getElementById('llm-model-select') as HTMLSelectElement;
+    expect(select.value).toBe('gemini-3.5-flash');
+    (doc.getElementById('save-keys') as HTMLButtonElement).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(store[STORAGE_KEY_LLM_MODEL]).toBe('gemini-3.5-flash');
   });
 
   test('既定のモデル（Gemini）が選択されていると Gemini カードが active', async () => {
@@ -157,7 +186,7 @@ describe('startOptions', () => {
     expect(writeKey).toHaveBeenCalledWith(STORAGE_KEY_GEMINI, 'g-new');
     expect(writeKey).toHaveBeenCalledWith(STORAGE_KEY_OPENROUTER, 'or-new');
     expect(writeKey).toHaveBeenCalledWith(STORAGE_KEY_NCBI, 'n-new');
-    expect(writeKey).toHaveBeenCalledWith(STORAGE_KEY_LLM_MODEL, 'gemini-3.5-flash');
+    expect(writeKey).toHaveBeenCalledWith(STORAGE_KEY_LLM_MODEL, 'gemini-3.5-flash-lite');
     expect(doc.getElementById('options-status')?.textContent).toBe('保存しました。');
   });
 
@@ -435,7 +464,7 @@ describe('startOptions', () => {
     const badge = doc.getElementById('gemini-tier-badge');
     expect(badge?.textContent).toBe('有料プラン');
     expect(badge?.classList.contains('options__tier-badge--paid')).toBe(true);
-    expect(store[STORAGE_KEY_LLM_MODEL]).toBe('gemini-3.5-flash');
+    expect(store[STORAGE_KEY_LLM_MODEL]).toBe('gemini-3.5-flash-lite');
     expect(doc.getElementById('options-status')?.textContent).toBe('保存しました。');
   });
 
@@ -523,7 +552,7 @@ describe('startOptions', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(store[STORAGE_KEY_LLM_MODEL]).toBe('gemini-3.5-flash');
+    expect(store[STORAGE_KEY_LLM_MODEL]).toBe('gemini-3.5-flash-lite');
     expect(doc.getElementById('options-status')?.textContent).toContain(
       'Gemini プランを自動判定できませんでした'
     );
@@ -546,7 +575,7 @@ describe('startOptions', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(store[STORAGE_KEY_LLM_MODEL]).toBe('gemini-3.5-flash');
+    expect(store[STORAGE_KEY_LLM_MODEL]).toBe('gemini-3.5-flash-lite');
     expect(store['gemini.detectedTier']).toBeUndefined();
     expect(doc.getElementById('options-status')?.textContent).toContain('混雑中');
     expect(doc.getElementById('gemini-tier-badge')?.textContent).toBe('');
