@@ -10,7 +10,7 @@ export async function fetchMeshContext(
   const bounded: EutilsDeps = { ...eutils, maxRetries: 1 };
   check();
   const branches = request.treeNumber ? [request.treeNumber]
-    : (await fetchMeshTreeNumbers([request.descriptor], bounded)).get(request.descriptor) ?? [];
+    : (await fetchMeshTreeNumbers([request.descriptor], bounded)).trees.get(request.descriptor) ?? [];
   check();
   const nodes = new Map<string, OptimizationMeshNode>();
   // 追加取得は最大 3 枝の直下まで。未取得の祖先・子孫を関係として補わない。

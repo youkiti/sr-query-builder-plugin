@@ -156,7 +156,7 @@ export async function runValidation(deps: ValidationServiceDeps): Promise<Valida
         meshFrequency.map((entry) => entry.descriptor),
         deps.eutils
       );
-      meshHierarchy = buildMeshHierarchy(treeMap);
+      meshHierarchy = buildMeshHierarchy(treeMap.trees);
       meshMermaid = toMermaidFlowchart(meshHierarchy);
     } catch (err) {
       meshHierarchyError = formatError(err);
