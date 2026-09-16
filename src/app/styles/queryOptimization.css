@@ -146,3 +146,18 @@
   padding: var(--space-2) var(--space-3);
   white-space: nowrap;
 }
+
+/* 保留候補ごとの 3 操作カード（issue #172）。区分内の他の行と区別できるよう内側に置く。 */
+.optimization__held-candidate {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+}
+
+/* ゲート未達の理由。opacity ではなく明示した文字色で弱めのトーンにする
+   （globals.css 参照。透明度は内側の要素の文字色まで一緒に薄めてしまう）。 */
+.optimization__held-gate-reason {
+  color: var(--color-text-muted);
+}

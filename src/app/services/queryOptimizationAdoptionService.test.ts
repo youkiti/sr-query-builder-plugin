@@ -1,5 +1,5 @@
 import { createStore, INITIAL_STATE, type QueryOptimizationRunState } from '../store';
-import { adoptQueryOptimization, editQueryOptimization } from './queryOptimizationAdoptionService';
+import { adoptHeldOptimizationCandidate, adoptQueryOptimization, editQueryOptimization } from './queryOptimizationAdoptionService';
 import { saveEditedFormula } from './editService';
 import * as formulaRepository from '@/features/formula/formulaRepository';
 import * as validationRepository from '@/features/validation/validationRepository';
@@ -239,4 +239,98 @@ test.each([true, false])('採用ログは初期生成の通知を保存し、無
   await adoptQueryOptimization(f);
   const log = JSON.parse(f.upload.mock.calls[0]![0].content);
   expect(log.generationNotices).toEqual(f.run.generationNotices ?? null);
+});
+
+// --- 保留候補の採用（issue #172）------------------------------------------------------------
+function heldTrial(overrides: Partial<NonNullable<QueryOptimizationRunState['trials']>[number]> = {}) {
+  const heldFormula = parsePubmedFormulaMd('## PubMed/MEDLINE\n\n```\n#1 asthma[tiab] OR wheeze[tiab]\n```\n');
+  return {
+    kind: 'proposal' as const, candidateId: 'candidate-1', formula: heldFormula, accepted: false, held: true,
+    reason: '失う集合のためレビュー候補に留めました', rationale: '同義語で広げる', apiEvents: [],
+    before: null,
+    after: { id: 'candidate-1:after', fingerprint: 'held-fp', measuredAt: '2026-09-12T00:00:00Z',
+      totalHits: 12, capturedPmids: ['1'], missedPmids: [], blocks: [] },
+    impact: { lostHits: 2, gainedHits: 3, error: null,
+      inspected: [{ pmid: '2', title: '研究2', year: 2001 }, { pmid: '3', title: '研究3', year: 2002 }],
+      sample: { method: 'all' as const, seed: 1, populationCount: 2, retrievedCount: 2,
+        pmids: ['2', '3'], sampledAt: '2026-09-12T00:00:00Z' } },
+    ...overrides,
+  };
+}
+function lostCandidates(pmids: readonly string[], decision: 'exclude' | 'maybe' = 'exclude') {
+  return {
+    candidates: pmids.map((pmid) => ({ pmid, title: null, year: null, abstract: null,
+      source: 'lost' as const, heldCandidateId: 'candidate-1', reason: '' })),
+    decisions: Object.fromEntries(pmids.map((pmid) => [pmid, { decision, status: 'saved' as const, error: null }])),
+  };
+}
+
+test('ゲートを満たす保留候補は auto_optimize として保存され、未確認件数が監査記録に残る', async () => {
+  const f = setup();
+  f.run.trials.push(heldTrial());
+  f.run.outsideCheck = { status: 'ready', reason: null, originalHits: 10, marginHits: 0, evaluatedCount: 0,
+    ...lostCandidates(['2', '3']) };
+  await adoptHeldOptimizationCandidate(f, 'candidate-1');
+  expect(f.append).toHaveBeenCalledWith('s', expect.objectContaining({ versionId: 'r', createdBy: 'auto_optimize',
+    formulaMd: expect.stringContaining('wheeze'), note: expect.stringContaining('保留候補 candidate-1') }), f.google);
+  const log = JSON.parse(f.upload.mock.calls[0]![0].content);
+  expect(log.heldAdoption).toEqual({ candidateId: 'candidate-1', lostHits: 2, judgedCount: 2, unconfirmedCount: 0, sampleMethod: 'all' });
+  expect(f.store.getState().queryOptimizationRun?.save).toMatchObject({ status: 'saved',
+    target: { kind: 'held', candidateId: 'candidate-1' } });
+  expect(f.store.getState().currentFormulaVersionId).toBe('r');
+  expect(f.store.getState().currentFormulaCreatedBy).toBe('auto_optimize');
+});
+
+test('未確認件数が残る監査記録も「見たから安全」とは書かない', async () => {
+  const f = setup();
+  f.run.trials.push(heldTrial({ impact: { lostHits: 200, gainedHits: 1, error: null,
+    inspected: [{ pmid: '2', title: null, year: null }, { pmid: '3', title: null, year: null }],
+    sample: { method: 'retrieved_subset', seed: 1, populationCount: 200, retrievedCount: 20,
+      pmids: ['2', '3'], sampledAt: 't' } } }));
+  f.run.outsideCheck = { status: 'ready', reason: null, originalHits: 10, marginHits: 0, evaluatedCount: 0,
+    ...lostCandidates(['2', '3']) };
+  await adoptHeldOptimizationCandidate(f, 'candidate-1');
+  expect(f.append).toHaveBeenCalledTimes(1);
+  const note = f.append.mock.calls[0]![1].note as string;
+  expect(note).toContain('未確認 198 件');
+  expect(note).not.toContain('安全');
+  const log = JSON.parse(f.upload.mock.calls[0]![0].content);
+  expect(log.heldAdoption).toEqual({ candidateId: 'candidate-1', lostHits: 200, judgedCount: 2, unconfirmedCount: 198, sampleMethod: 'retrieved_subset' });
+});
+
+test('ゲート未達の保留候補（失う集合を全件確認していない）は保存しない', async () => {
+  const f = setup();
+  f.run.trials.push(heldTrial({ impact: { lostHits: 50, gainedHits: 1, error: null,
+    inspected: [{ pmid: '2', title: null, year: null }] } }));
+  await adoptHeldOptimizationCandidate(f, 'candidate-1');
+  expect(f.upload).not.toHaveBeenCalled();
+  expect(f.append).not.toHaveBeenCalled();
+  expect(f.store.getState().queryOptimizationRun?.save).toBeUndefined();
+});
+
+test('除外済みの保留候補は、除外を取り消すまで採用できない', async () => {
+  const f = setup();
+  f.run.trials.push(heldTrial());
+  f.run.outsideCheck = { status: 'ready', reason: null, originalHits: 10, marginHits: 0, evaluatedCount: 0,
+    ...lostCandidates(['2', '3']) };
+  f.run.heldRejections = { 'candidate-1': { rejectedAt: '2026-09-12T00:00:00Z' } };
+  await adoptHeldOptimizationCandidate(f, 'candidate-1');
+  expect(f.upload).not.toHaveBeenCalled();
+  delete f.run.heldRejections['candidate-1'];
+  await adoptHeldOptimizationCandidate(f, 'candidate-1');
+  expect(f.upload).toHaveBeenCalledTimes(1);
+});
+
+test('最良候補と保留候補の採用は run につき 1 回で排他になる', async () => {
+  const f = setup();
+  f.run.trials.push(heldTrial());
+  f.run.outsideCheck = { status: 'ready', reason: null, originalHits: 10, marginHits: 0, evaluatedCount: 0,
+    candidates: [], decisions: {} };
+  await adoptQueryOptimization(f);
+  expect(f.store.getState().queryOptimizationRun?.save?.status).toBe('saved');
+  expect(f.store.getState().queryOptimizationRun?.save).not.toHaveProperty('target');
+  await adoptHeldOptimizationCandidate(f, 'candidate-1');
+  expect(f.upload).toHaveBeenCalledTimes(1);
+  expect(f.store.getState().currentFormulaCreatedBy).toBe('auto_optimize');
+  expect(f.store.getState().currentFormulaMarkdown).toBe(md);
 });

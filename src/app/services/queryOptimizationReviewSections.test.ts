@@ -1,4 +1,5 @@
-import { buildOptimizationReviewSections } from './queryOptimizationReviewSections';
+import { buildOptimizationReviewSections, evaluateHeldCandidateAdoptionGate,
+  HELD_CANDIDATE_ADOPTION_LOST_HITS_THRESHOLD } from './queryOptimizationReviewSections';
 import type { OptimizationOutsideCheckState, QueryOptimizationRunState } from '../store';
 
 function fixture(): QueryOptimizationRunState {
@@ -223,6 +224,117 @@ test.each(['all', 'retrieved_subset', undefined] as const)('抽出方法 %s を�
   expect(review.lines).toContain(`保留候補 candidate-1: ${expected}`);
   expect(review.lines).toContain('残り 149 件は未確認');
   expect(review.state).not.toBe('confirmed');
+});
+
+describe('保留候補ごとの採用ゲート（issue #172）', () => {
+  test('既定の閾値は 100 件', () => {
+    expect(HELD_CANDIDATE_ADOPTION_LOST_HITS_THRESHOLD).toBe(100);
+  });
+
+  test('失う集合が閾値以下でも全件確認していなければ押せず、理由に残件数を出す', () => {
+    const run = deletionFixture();
+    const trial = run.trials[0]!;
+    trial.impact!.lostHits = 50; // 取得・判定済みは 2 件のまま。
+    const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions);
+    expect(gate.allowed).toBe(false);
+    expect(gate.reason).toContain('あと 48 件の確認が必要');
+  });
+
+  test('失う集合が閾値以下でも全件取得だけでは押せず、全件 exclude 保存後に押せる', () => {
+    const run = deletionFixture();
+    const trial = run.trials[0]!;
+    trial.impact!.lostHits = 2;
+    const decisions = run.outsideCheck!.decisions;
+    run.outsideCheck!.decisions = {};
+    const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions);
+    expect(gate).toEqual({ allowed: false, judgedCount: 0, sampledCount: 2,
+      reason: expect.stringContaining('あと 2 件の確認が必要') });
+    expect(evaluateHeldCandidateAdoptionGate(trial, { '2': decisions['2']! })).toMatchObject({
+      allowed: false, judgedCount: 1, reason: expect.stringContaining('あと 1 件の確認が必要'),
+    });
+    expect(evaluateHeldCandidateAdoptionGate(trial, decisions)).toEqual({
+      allowed: true, judgedCount: 2, sampledCount: 2, reason: null,
+    });
+  });
+
+  describe.each([2, 100, 101])('失う集合 %i 件での判定内容', (lostHits) => {
+    test.each(['saved', 'saving', 'error'] as const)('include が 1 件でもあれば保存状態 %s によらず採用できず PMID を示す', (status) => {
+      const run = deletionFixture();
+      const trial = run.trials[0]!;
+      trial.impact!.lostHits = lostHits;
+      run.outsideCheck!.decisions['3'] = { decision: 'include', status, error: null };
+      expect(evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions)).toEqual({
+        allowed: false, judgedCount: 1, sampledCount: 2, reason: expect.stringContaining('PMID: 3'),
+      });
+    });
+
+    test('保存済み maybe は未確認として残る', () => {
+      const run = deletionFixture();
+      const trial = run.trials[0]!;
+      trial.impact!.lostHits = lostHits;
+      run.outsideCheck!.decisions['3']!.decision = 'maybe';
+      const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions);
+      expect(gate).toMatchObject({ allowed: false, judgedCount: 1, sampledCount: 2 });
+      expect(gate.reason).toContain(lostHits <= 100 ? `あと ${lostHits - 1} 件の確認が必要` : 'あと 1 件の判定が必要');
+    });
+
+    test.each(['saving', 'error'] as const)('exclude の保存状態 %s は判定済みに数えない', (status) => {
+      const run = deletionFixture();
+      const trial = run.trials[0]!;
+      trial.impact!.lostHits = lostHits;
+      run.outsideCheck!.decisions['3']!.status = status;
+      expect(evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions)).toMatchObject({
+        allowed: false, judgedCount: 1, sampledCount: 2,
+      });
+    });
+  });
+
+  test('失う集合が閾値超過でも、標本を全件判定済みなら押せる（残りは未確認のまま）', () => {
+    const run = deletionFixture();
+    const trial = run.trials[0]!;
+    trial.impact!.lostHits = 200; // 閾値超過。inspected は標本 2 件で全件 exclude 保存済み
+    const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions);
+    expect(gate).toEqual({ allowed: true, judgedCount: 2, sampledCount: 2, reason: null });
+  });
+
+  test('失う集合が閾値超過で標本が未判定なら押せず、判定不足・全体未確認の両方を理由に出す', () => {
+    const run = deletionFixture();
+    const trial = run.trials[0]!;
+    trial.impact!.lostHits = 200;
+    delete run.outsideCheck!.decisions['3'];
+    const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions);
+    expect(gate.allowed).toBe(false);
+    expect(gate.judgedCount).toBe(1);
+    expect(gate.reason).toContain('あと 1 件の判定が必要');
+    expect(gate.reason).toContain('残り 199 件が未確認');
+  });
+
+  test('差集合が未測定・失敗のときは押せない', () => {
+    const run = deletionFixture();
+    const trial = run.trials[0]!;
+    trial.impact!.lostHits = null;
+    expect(evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions).allowed).toBe(false);
+    trial.impact = { lostHits: 5, gainedHits: 0, inspected: [], error: '差集合の測定失敗' };
+    expect(evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions).allowed).toBe(false);
+  });
+
+  test('held でない試行は常に押せない（失う集合が閾値以下で全件確認済みでも）', () => {
+    const run = deletionFixture();
+    const trial = { ...run.trials[0]!, held: false };
+    expect(evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions).allowed).toBe(false);
+  });
+
+  test('既存の deletion.state（4 区分の判定）はゲートの影響を受けない', () => {
+    const run = deletionFixture();
+    // 判定はすべて exclude 保存済みのまま、失う集合だけ標本を超える件数にする。
+    // #165 のロジック（inspected.length >= lostHits を全保留候補で満たすことを要求）が
+    // そのまま働き、ゲート（このテストでは標本を全件判定済みなので押せる）とは独立に
+    // 「decided（残件あり）」になる。
+    run.trials[0]!.impact!.lostHits = 200;
+    const gate = evaluateHeldCandidateAdoptionGate(run.trials[0]!, run.outsideCheck?.decisions);
+    expect(gate.allowed).toBe(true);
+    expect(section(run, 'deletion_impact').state).toBe('decided');
+  });
 });
 
 test.each([false, true])('中間手の採用は既知文献の捕捉区分に残し、最終結果の捕捉状態を維持する: 回収済み=%s', (recovered) => {

@@ -103,6 +103,11 @@ export interface QueryOptimizationCheckpoint {
   resume?: OptimizationResumeData;
   /** 未指定は実行途中（旧形式のチェックポイントも含む）。 */
   completion?: QueryOptimizationCompletion;
+  /**
+   * 最終レビューで人が「除外」を選んだ保留候補（candidateId をキーにする）。
+   * 未指定（旧形式含む）は誰も除外していない状態として扱う。取り消すとキーごと消す。
+   */
+  heldRejections?: Record<string, { rejectedAt: string }>;
 }
 
 export interface InterruptedQueryOptimization extends QueryOptimizationCheckpoint {
@@ -190,4 +195,19 @@ export async function updateQueryOptimizationReviewSections(
   const checkpoint = await deps.read<QueryOptimizationCheckpoint | null>(CHECKPOINT_KEY);
   if (!owns() || !checkpoint?.completion || checkpoint.projectId !== projectId || checkpoint.runId !== runId) return;
   await deps.write({ [CHECKPOINT_KEY]: { ...checkpoint, completion: { ...checkpoint.completion, reviewSections } } });
+}
+
+/**
+ * 保留候補の「除外」判断を同じ実行の終了記録へ追記・取り消す。
+ * 次に同じチェックポイントを再開する run が、この候補を測定前に却下できるようにする。
+ */
+export async function updateQueryOptimizationHeldRejections(
+  projectId: string, runId: string,
+  heldRejections: Record<string, { rejectedAt: string }>,
+  deps: ProjectStoreDeps,
+  owns: () => boolean = () => true
+): Promise<void> {
+  const checkpoint = await deps.read<QueryOptimizationCheckpoint | null>(CHECKPOINT_KEY);
+  if (!owns() || !checkpoint?.completion || checkpoint.projectId !== projectId || checkpoint.runId !== runId) return;
+  await deps.write({ [CHECKPOINT_KEY]: { ...checkpoint, heldRejections } });
 }

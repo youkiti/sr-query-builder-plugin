@@ -1,4 +1,6 @@
-import { runOptimizeQuery, runDecideOutsideCandidate, runReadjustOptimization, startApp } from './bootstrap';
+import { runOptimizeQuery, runDecideOutsideCandidate, runReadjustOptimization,
+  runReadjustFromHeldOptimizationCandidate, rejectHeldOptimizationCandidate,
+  undoHeldOptimizationCandidateRejection, startApp } from './bootstrap';
 import * as expand from './services/expandService';
 import * as checkpointService from './services/queryOptimizationCheckpointService';
 import { buildOptimizationReviewSections } from './services/queryOptimizationReviewSections';
@@ -575,6 +577,94 @@ test('include 保護再調整は最良式・同じ設定・更新シードを使
     maxIterations: old.maxIterations, seedPmids: ['11', '99'] });
   expect(input.runId).not.toBe(old.runId);
   expect(input.resumeBudget).toBeUndefined();
+});
+
+// --- 保留候補の 3 操作（issue #172）--------------------------------------------------------
+function addHeldTrial(f: ReturnType<typeof setupOutside>, candidateId = 'candidate-1') {
+  const heldFormula = { ...formula, blocks: [{ id: '1', expression: 'held[tiab]', isCombination: false }] };
+  f.store.setState((s) => ({ ...s, queryOptimizationRun: { ...s.queryOptimizationRun!,
+    trials: [...s.queryOptimizationRun!.trials, { kind: 'proposal' as const, candidateId, formula: heldFormula,
+      accepted: false, held: true, reason: '保留', rationale: '', before: null, after: null, apiEvents: [],
+      impact: { lostHits: 2, gainedHits: 1, error: null, inspected: [] } }] } }));
+  return heldFormula;
+}
+function seedCompletedCheckpoint(f: ReturnType<typeof setupOutside>, runId: string) {
+  f.data.queryOptimizationCheckpoint = { projectId: 'p', runId, maxHits: 123, savedAt: '', trials: [],
+    completion: { status: 'achieved', stopReason: 'conditions_met', unmetReasons: [] } };
+}
+
+test('保留候補の式を初期式にした再調整が、その候補の式で新しい run を始める', async () => {
+  const f = setupOutside();
+  await f.invoke();
+  const old = f.store.getState().queryOptimizationRun!;
+  const heldFormula = addHeldTrial(f);
+  await runReadjustFromHeldOptimizationCandidate(f.store, f.runtime,
+    { google: f.runtime.google, store: f.runtime.store }, 'candidate-1');
+  expect(f.run).toHaveBeenCalledTimes(2);
+  const input = f.run.mock.calls[1]![0];
+  expect(input.initialFormula).toEqual(heldFormula);
+  expect(input.maxHits).toBe(old.maxHits);
+  expect(input.maxIterations).toBe(old.maxIterations);
+  expect(input.runId).not.toBe(old.runId);
+  // 最良候補の再調整（include 保護）とは別の出口なので、include 保存が無くても始まる。
+  expect(Object.values(old.outsideCheck?.decisions ?? {}).some((item) => item.decision === 'include')).toBe(false);
+});
+
+test('保留でない候補・存在しない候補は再調整を始めない', async () => {
+  const f = setupOutside();
+  await f.invoke();
+  await runReadjustFromHeldOptimizationCandidate(f.store, f.runtime,
+    { google: f.runtime.google, store: f.runtime.store }, 'no-such-candidate');
+  expect(f.run).toHaveBeenCalledTimes(1);
+});
+
+test('保留候補の除外はチェックポイントへ残り、取り消すと記録が消える', async () => {
+  const f = setupOutside();
+  await f.invoke();
+  addHeldTrial(f);
+  const runId = f.store.getState().queryOptimizationRun!.runId;
+  seedCompletedCheckpoint(f, runId);
+  rejectHeldOptimizationCandidate(f.store, f.runtime, 'candidate-1');
+  expect(f.store.getState().queryOptimizationRun?.heldRejections?.['candidate-1']).toMatchObject({ rejectedAt: expect.any(String) });
+  await flush();
+  expect((f.data.queryOptimizationCheckpoint as { heldRejections?: Record<string, { rejectedAt: string }> })
+    .heldRejections).toMatchObject({ 'candidate-1': { rejectedAt: expect.any(String) } });
+  undoHeldOptimizationCandidateRejection(f.store, f.runtime, 'candidate-1');
+  expect(f.store.getState().queryOptimizationRun?.heldRejections?.['candidate-1']).toBeUndefined();
+  await flush();
+  expect((f.data.queryOptimizationCheckpoint as { heldRejections?: Record<string, { rejectedAt: string }> })
+    .heldRejections?.['candidate-1']).toBeUndefined();
+});
+
+test('除外していない候補の取り消しや、保留でない候補の除外は何もしない', async () => {
+  const f = setupOutside();
+  await f.invoke();
+  addHeldTrial(f);
+  const runId = f.store.getState().queryOptimizationRun!.runId;
+  seedCompletedCheckpoint(f, runId);
+  undoHeldOptimizationCandidateRejection(f.store, f.runtime, 'candidate-1');
+  expect(f.store.getState().queryOptimizationRun?.heldRejections).toBeUndefined();
+  rejectHeldOptimizationCandidate(f.store, f.runtime, 'no-such-candidate');
+  expect(f.store.getState().queryOptimizationRun?.heldRejections).toBeUndefined();
+});
+
+test('保留候補を除外したチェックポイントを再開すると、その候補だけ人の判断として渡る', async () => {
+  const f = setup();
+  const { checkpoint, resume } = prepareResume(f);
+  (checkpoint as unknown as { heldRejections: Record<string, { rejectedAt: string }> }).heldRejections =
+    { rejected: { rejectedAt: '2026-09-12T00:00:00Z' } };
+  await resume();
+  const input = f.run.mock.calls[0]![0];
+  expect(input.previousRejectedTrials?.[0]).not.toHaveProperty('rejectedByHuman');
+  expect(input.previousRejectedTrials?.[1]).toMatchObject({ reason: 'シードを失う', rejectedByHuman: true });
+});
+
+test('旧形式のチェックポイント（heldRejections が無い）を再開しても壊れず、rejectedByHuman は false になる', async () => {
+  const f = setup();
+  const { resume } = prepareResume(f);
+  await resume();
+  const input = f.run.mock.calls[0]![0];
+  expect(input.previousRejectedTrials?.[1]).toMatchObject({ reason: 'シードを失う', rejectedByHuman: false });
 });
 
 test.each(['ready', 'error', 'skipped'] as const)('探索終了 %s と判定保存時に4区分を終了記録へ反映する', async (status) => {

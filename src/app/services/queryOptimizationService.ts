@@ -34,6 +34,7 @@ import { resolveRateLimiter } from '@/lib/ncbi/eutils';
 import type { LlmProviderFactory } from './llmProviderService';
 import { formulaFingerprint, evaluateQuery, type QueryEvaluation } from './queryEvaluationService';
 import { saveQueryOptimizationCheckpoint, type OptimizationBudget } from './queryOptimizationCheckpointService';
+import { HELD_CANDIDATE_ADOPTION_LOST_HITS_THRESHOLD } from './queryOptimizationReviewSections';
 
 export interface QueryOptimizationInput {
   projectId: string;
@@ -674,7 +675,8 @@ export async function runQueryOptimization(
       if (lost.count > 0) {
         const retrieved = [...new Set(lost.pmids)];
         const seed = Math.floor((deps.random ?? Math.random)() * 2 ** 32) >>> 0;
-        pmids = samplePmids(retrieved, INSPECT_LIMIT, seed);
+        const inspectLimit = lost.count <= HELD_CANDIDATE_ADOPTION_LOST_HITS_THRESHOLD ? lost.count : INSPECT_LIMIT;
+        pmids = samplePmids(retrieved, inspectLimit, seed);
         impact.sample = {
           method: lost.count <= 10000 && retrieved.length === lost.count ? 'all' : 'retrieved_subset',
           seed, populationCount: lost.count, retrievedCount: retrieved.length,
@@ -906,10 +908,21 @@ export async function runQueryOptimization(
         const invalid = validateOptimizationCandidate(fixed.initialFormula, candidate, fixed.approvedBlocks, proposal)
           ?? (best.measurement.missedPmids?.length && removed.length
             ? `未捕捉シードがある間は削除案を受け付けません（回収を優先: 同義語追加・MeSH 拡張。削除とみなした語: ${removed.join(', ')}）` : null);
-        const duplicateOf = invalid ? undefined : seen.get(await formulaFingerprint(candidate));
+        const candidateFingerprint = invalid ? undefined : await formulaFingerprint(candidate);
+        // 人が最終レビューで「除外」を選んだ変更は、実測前に却下する（評価済み重複と同じ場所・別の理由）。
+        const humanRejection = candidateFingerprint
+          ? fixed.previousRejectedTrials?.find((rejection) => rejection.rejectedByHuman && rejection.fingerprint === candidateFingerprint)
+          : undefined;
+        const duplicateOf = candidateFingerprint && !humanRejection ? seen.get(candidateFingerprint) : undefined;
         if (invalid) {
           trials.push(makeTrial({ ...details, candidateId, formula: candidate, before: best.measurement,
             after: null, accepted: false, reason: invalid, rationale: proposal.rationale }));
+          noImprovement += 1;
+          await save();
+        } else if (humanRejection) {
+          trials.push(makeTrial({ ...details, candidateId, formula: candidate, before: best.measurement,
+            after: null, accepted: false,
+            reason: `人が除外した候補と同じ式のため測定せずに却下（${humanRejection.reason}）`, rationale: proposal.rationale }));
           noImprovement += 1;
           await save();
         } else if (duplicateOf !== undefined) {

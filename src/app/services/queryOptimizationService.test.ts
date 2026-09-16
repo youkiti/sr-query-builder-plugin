@@ -8,6 +8,7 @@ import { withRetry, withSignalDeadline, LlmProviderError, type LLMProvider } fro
 import { esearch, sharedEutilsRateLimiters } from '@/lib/ncbi';
 import { validateCombinationExpression } from '@/lib/combination-expression';
 import { samplePmids, diffOptimizationFormula, runQueryOptimization, validateOptimizationCandidate, QueryOptimizationStopError, type QueryOptimizationInput, type QueryOptimizationDeps } from './queryOptimizationService';
+import { evaluateHeldCandidateAdoptionGate } from './queryOptimizationReviewSections';
 
 interface Outcome { pmids: string[]; blockPmids?: Record<string, string[]>;
   articles?: Record<string, { abstract?: string; mesh?: string[] }> }
@@ -409,7 +410,35 @@ test.each(['both', 'gained', 'efetch'])('差集合・書誌取得の失敗 %s �
   expect(result.best?.measurement.totalHits).toBe(200);
 });
 
-test('削除影響は run の予算で測り、確認書誌を無作為抽出した 20 件に制限する', async () => {
+test.each([20, 21, 50, 100, 101])('失う集合 %i 件は閾値以下なら全件取得し、exclude 保存後に採用ゲートを満たせる', async (lostHits) => {
+  const remaining = papers(50, ['11', '22']);
+  const lost = Array.from({ length: lostHits }, (_, index) => String(900 + index));
+  const { input, deps, fetch } = setup({ a: { pmids: [...remaining, ...lost] }, b: { pmids: remaining } });
+  input.maxIterations = 1;
+  input.maxHits = 50;
+  const result = await runQueryOptimization(input, deps);
+  const trial = result.trials[1]!;
+  const expectedCount = lostHits <= 100 ? lostHits : 20;
+  expect(trial).toMatchObject({ held: true, impact: { lostHits, error: null,
+    sample: { method: 'all', populationCount: lostHits, retrievedCount: lostHits } } });
+  expect(trial.impact!.inspected).toHaveLength(expectedCount);
+  const requests = fetch.mock.calls.map(([url]) => new URL(url as string));
+  const bibliography = requests.filter((url) => url.pathname.endsWith('efetch.fcgi'));
+  expect(bibliography).toHaveLength(1);
+  const pmids = bibliography[0]!.searchParams.get('id')!.split(',');
+  expect(pmids).toEqual(trial.impact!.sample!.pmids);
+  if (lostHits <= 100) expect(pmids).toEqual(lost);
+  expect(requests.filter((url) => url.searchParams.get('term')?.includes(') NOT ('))).toHaveLength(2);
+  expect(evaluateHeldCandidateAdoptionGate(trial, undefined).allowed).toBe(false);
+  const decisions = Object.fromEntries(pmids.map((pmid) => [pmid, {
+    decision: 'exclude' as const, status: 'saved' as const, error: null,
+  }]));
+  expect(evaluateHeldCandidateAdoptionGate(trial, decisions)).toEqual({
+    allowed: true, judgedCount: expectedCount, sampledCount: expectedCount, reason: null,
+  });
+});
+
+test('削除影響は run の予算で測り、閾値超過の確認書誌を無作為抽出した 20 件に制限する', async () => {
   const { input, deps, fetch } = setup({ a: { pmids: papers(200, ['11', '22']) },
     b: { pmids: papers(50, ['11', '22']) } });
   input.maxIterations = 1;
@@ -514,6 +543,23 @@ test('過去の却下式・理由・fingerprint は AI 文脈だけへ渡し、�
   expect(optimize.mock.calls[0]![0].previousRejectedTrials).toEqual(f.input.previousRejectedTrials);
   const prompt = f.chat.mock.calls[0]![0][1].content as string;
   for (const text of ['前回はシードを失った', old.fingerprint, '過去の run の却下記録（未再検証']) expect(prompt).toContain(text);
+});
+
+test('人が「除外」した過去の却下は測定前に却下し、AI 由来の却下・保留とは理由で区別する（issue #172）', async () => {
+  const f = setup({ a: { pmids: papers(300, ['11', '22']) }, b: { pmids: papers(200, ['11', '22']) } });
+  const pastFormula = { ...f.input.initialFormula, blocks: f.input.initialFormula.blocks.map((block) => ({ ...block,
+    expression: block.id === '1' ? 'b[tiab]' : block.expression })) };
+  const rejected = await evaluation.evaluateQuery(pastFormula, f.input.seedPmids, { eutils: f.deps.eutils });
+  f.input.runId = 'resumed';
+  f.input.previousRejectedTrials = [
+    { formula: pastFormula, reason: '前回は保留になった', fingerprint: rejected.fingerprint, rejectedByHuman: true },
+  ];
+  const result = await runQueryOptimization(f.input, f.deps);
+  // 測定していれば after / held が付くが、人の除外は測定前に却下するのでどちらも付かない。
+  expect(result.trials[1]).toMatchObject({ accepted: false, after: null, reason: expect.stringContaining('人が除外した候補と同じ式') });
+  expect(result.trials[1]!.reason).toContain('前回は保留になった');
+  expect(result.trials[1]!.held).toBeFalsy();
+  expect(result.trials[1]!.duplicateOf).toBeUndefined();
 });
 
 test('再開の累積消費量を途中と終了の両方に保存し、再び再開しても元の予算を増やさない', async () => {
@@ -1684,9 +1730,9 @@ test('種付き抽出は再現可能で順序に依存せず重複を含まな�
 });
 
 test.each([
-  ['正常系', 100, 100, 'all'], ['正常系: retmax による制限', 10800, 10000, 'retrieved_subset'],
-  ['異常系: PMID 取得不足を意図的に注入', 100, 90, 'retrieved_subset'], ['正常系', 0, 0, undefined],
-] as const)('%s: 失う集合 %s 件・取得 %s 件の抽出記録を保持する', async (_, count, retrieved, method) => {
+  ['正常系', 100, 100, 'all', 100], ['正常系: retmax による制限', 10800, 10000, 'retrieved_subset', 20],
+  ['異常系: PMID 取得不足を意図的に注入', 100, 90, 'retrieved_subset', 90], ['正常系', 0, 0, undefined, 0],
+] as const)('%s: 失う集合 %s 件・取得 %s 件の抽出記録を保持する', async (_, count, retrieved, method, expectedCount) => {
   const pmids = Array.from({ length: retrieved }, (_, i) => String(i + 1000));
   const f = setup({ a: { pmids: count ? [...papers(50, ['11', '22']), ...Array.from({ length: count }, (_, i) => String(i + 1000))] : papers(49, ['11']) },
     b: { pmids: papers(50, ['11', '22']) } });
@@ -1712,13 +1758,19 @@ test.each([
     .filter((url) => url.searchParams.get('term')?.includes(') NOT ('));
   expect(searches.map((url) => url.searchParams.get('retmax'))).toEqual(['10000', '0']);
   if (!method) { expect(impact.sample).toBeUndefined(); return; }
-  const expected = samplePmids(pmids, 20, 2 ** 30);
+  const expected = samplePmids(pmids, expectedCount, 2 ** 30);
   expect(impact.sample).toEqual({ method, seed: 2 ** 30, populationCount: count,
     retrievedCount: retrieved, pmids: expected, sampledAt: '1970-01-01T00:00:01.000Z' });
   expect(expected).not.toEqual(pmids.slice(0, 20));
   const fetchCall = f.fetch.mock.calls.find(([url]) => String(url).includes('efetch.fcgi'))!;
   expect(new URL(fetchCall[0]).searchParams.get('id')!.split(',')).toEqual(expected);
   expect(impact.inspected.map((article) => article.pmid)).toEqual(expected);
+  if (count === 100) {
+    const decisions = Object.fromEntries(expected.map((pmid) => [pmid, {
+      decision: 'exclude' as const, status: 'saved' as const, error: null,
+    }]));
+    expect(evaluateHeldCandidateAdoptionGate(result.trials[1]!, decisions).allowed).toBe(retrieved === count);
+  }
 });
 
 test('異常系: 重複 PMID を注入し、書誌取得の失敗後も重複のない抽出 PMID を残す', async () => {
