@@ -281,7 +281,7 @@ test('シードなし・式なしは保存なし生成を経て実行する', as
 
 test('MeSH 追加文脈は確認した親子だけを結び、枝数・再試行数を制限する', async () => {
   const fixture = setup();
-  jest.spyOn(mesh, 'fetchMeshTreeNumbers').mockResolvedValue(new Map([['疾患', ['C01', 'C02', 'C03', 'C04']]]));
+  jest.spyOn(mesh, 'fetchMeshTreeNumbers').mockResolvedValue({ trees: new Map([['疾患', ['C01', 'C02', 'C03', 'C04']]]), reasons: new Map() });
   jest.spyOn(meshRdf, 'fetchMeshLabels').mockImplementation(async (branches) => new Map([
     [branches[0]!, { treeNumber: branches[0]!, descriptorUi: 'P', label: '親' }],
   ]));

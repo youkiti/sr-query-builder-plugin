@@ -21,7 +21,10 @@ function fixture(proposals = [{ id: '1', expression: 'a[tiab] AND narrow[tiab]' 
       const lost = params.get('retmax') !== '0' && query.split(') NOT (')[1]?.includes('held');
       count = lost ? 1 : 0;
     } else if (query.includes('[uid]')) count = 1;
-    else if (query.includes('a[tiab]') && query.includes('b[tiab]')) count = query.includes('held') ? 100 : query.includes('narrow') ? 180 : 200;
+    // narrow の 190 は「ブロックを外すと 210 件」との削減率が (210-190)/210≈0.095 となり、採用で式が
+    // 変わった後も閾値 BLOCK_NARROWING_MIN_REDUCTION（0.13）未満に留まる値。診断ブロック扱いが
+    // 採用後も続くことが「保留の連続」のテストの前提になっている。
+    else if (query.includes('a[tiab]') && query.includes('b[tiab]')) count = query.includes('held') ? 100 : query.includes('narrow') ? 190 : 200;
     return { ok: true, status: 200, json: async () => ({ esearchresult: { count: String(count), idlist: query.includes('[uid]') ? ['11'] : [] } }),
       text: async () => '<PubmedArticleSet/>' } as Response;
   });
@@ -49,7 +52,7 @@ test('初期測定後・AI 前に診断し、採用後は変わった Q−i だ�
   expect(f.events.filter((query) => query === without1)).toHaveLength(1);
   expect(f.events).toContain('(a[tiab] AND narrow[tiab]) AND (trial[pt])');
   expect(result.blockDiagnosis?.fingerprint).toBe(result.best?.measurement.fingerprint);
-  expect(result.blockDiagnosis?.narrowing.map((row) => row.finalHits)).toEqual([180, 180]);
+  expect(result.blockDiagnosis?.narrowing.map((row) => row.finalHits)).toEqual([190, 190]);
   expect(f.progress.some((p) => p.blockDiagnosis?.fingerprint === result.blockDiagnosis?.fingerprint)).toBe(true);
   expect(f.write).toHaveBeenLastCalledWith(expect.objectContaining({ queryOptimizationCheckpoint: expect.objectContaining({ blockDiagnosis: result.blockDiagnosis }) }));
 });
@@ -76,7 +79,7 @@ test('MeSH 文脈を優先し、足りない descriptor だけ注入先に渡す
   f.input.initialFormula.blocks[0]!.expression += ' OR "Parent"[Mesh]';
   f.input.initialFormula.blocks[1]!.expression += ' OR "Child"[Mesh]';
   f.input.meshContext = [{ id: 'p', descriptor: 'Parent', label: null, treeNumbers: ['C01'], parentIds: [], childIds: [], explode: true, note: '' }];
-  const fetchTrees = jest.fn(async (_descriptors: readonly string[]) => new Map([['Child', ['C01.1']]]));
+  const fetchTrees = jest.fn(async (_descriptors: readonly string[]) => ({ trees: new Map([['Child', ['C01.1']]]), reasons: new Map() }));
   f.deps.fetchMeshTreeNumbers = fetchTrees;
   const result = await runQueryOptimization(f.input, f.deps);
   expect(fetchTrees).toHaveBeenCalledTimes(1);
@@ -89,7 +92,7 @@ test('追加取得した一部の階層で初回診断の内包を消さず、�
   f.input.maxIterations = 2;
   f.input.initialFormula.blocks[0]!.expression += ' OR "Parent"[Mesh]';
   f.input.initialFormula.blocks[1]!.expression += ' OR "Child"[Mesh]';
-  f.deps.fetchMeshTreeNumbers = jest.fn(async () => new Map([['Parent', ['C01', 'D01']], ['Child', ['C01.100']]]));
+  f.deps.fetchMeshTreeNumbers = jest.fn(async () => ({ trees: new Map([['Parent', ['C01', 'D01']], ['Child', ['C01.100']]]), reasons: new Map() }));
   f.chat.mockResolvedValueOnce({ text: JSON.stringify({ target_block_id: '1', proposed_expression: 'a[tiab]',
     rationale: '階層を確認', mesh_requests: [{ descriptor: 'Parent', tree_number: 'D01' }] }),
     tokensIn: null, tokensOut: null, raw: {} });
@@ -110,7 +113,7 @@ test('同じ descriptor の複数ノードの階層を両方の枝の内包に�
   f.input.meshContext = ['C01', 'D01'].map((treeNumber, index) => ({ id: String(index),
     descriptor: index === 0 ? 'Parent' : 'parent', label: null, treeNumbers: [treeNumber],
     parentIds: [], childIds: [], explode: true, note: '' }));
-  f.deps.fetchMeshTreeNumbers = async () => new Map([['ChildC', ['C01.100']], ['ChildD', ['D01.100']]]);
+  f.deps.fetchMeshTreeNumbers = async () => ({ trees: new Map([['ChildC', ['C01.100']], ['ChildD', ['D01.100']]]), reasons: new Map() });
   await runQueryOptimization(f.input, f.deps);
   expect(f.progress.some((p) => p.iterations === 0 && p.blockDiagnosis?.overlaps.filter((row) => row.kind === 'ancestor').length === 2)).toBe(true);
 });
@@ -152,7 +155,7 @@ test('診断全体を実 HTTP 30 回で打ち切り、残りの階層を未判�
   f.deps.fetchMeshTreeNumbers = async (descriptors, eutils) => {
     for (const descriptor of descriptors) { await eutils.fetch(`https://fake.test/esearch?term=${descriptor}`); meshCalls += 1; }
     await eutils.fetch('https://fake.test/esummary'); meshCalls += 1;
-    return new Map(descriptors.map((descriptor) => [descriptor, ['C01']]));
+    return { trees: new Map(descriptors.map((descriptor) => [descriptor, ['C01']])), reasons: new Map() };
   };
   const result = await runQueryOptimization(f.input, f.deps);
   expect(meshCalls).toBe(28);
@@ -197,10 +200,27 @@ test('注入した階層取得が予定を超えて通信しようとしても30
       await eutils.fetch('https://fake.test/mesh');
       issued += 1;
     }
-    return new Map();
+    return { trees: new Map(), reasons: new Map() };
   };
   const result = await runQueryOptimization(f.input, f.deps);
   expect(issued).toBe(28);
   expect(f.chat).toHaveBeenCalledTimes(1);
   expect(result.blockDiagnosis?.narrowing.find((row) => row.blockId === '2')?.note).toContain('診断の通信上限（30 回）');
+});
+
+test('階層取得で返された未解決理由を descriptor の表記とともに構造診断の note に出す', async () => {
+  const f = fixture();
+  f.input.initialFormula.blocks[0]!.expression += ' OR "Incidence"[Mesh]';
+  f.input.initialFormula.blocks[1]!.expression += ' OR "Hemostatics"[Mesh]';
+  const reason = '候補の descriptor が語と一致しない（Epidemiology）';
+  f.deps.fetchMeshTreeNumbers = async () => ({
+    trees: new Map([['Hemostatics', ['D27.505.954.502.270.463']]]),
+    reasons: new Map([['Incidence', reason]]),
+  });
+  await runQueryOptimization(f.input, f.deps);
+  const initial = f.progress.filter((p) => p.iterations === 0 && p.blockDiagnosis);
+  const note = initial[initial.length - 1]?.blockDiagnosis?.overlaps[0]?.note;
+  expect(note).toContain('未判定: 階層を取得できなかった');
+  expect(note).toContain(`"Incidence"[Mesh]: ${reason}`);
+  expect(note).not.toContain('Hemostatics');
 });

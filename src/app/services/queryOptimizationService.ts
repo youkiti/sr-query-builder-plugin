@@ -573,9 +573,10 @@ export async function runQueryOptimization(
       if (selected.length) {
         apiSource = 'MeSH';
         try {
-          const trees = await (deps.fetchMeshTreeNumbers ?? fetchMeshTreeNumbers)(selected, observed);
+          const { trees, reasons } = await (deps.fetchMeshTreeNumbers ?? fetchMeshTreeNumbers)(selected, observed);
           boundary();
           for (const descriptor of selected) mergeTrees(descriptor, trees.get(descriptor) ?? []);
+          for (const [descriptor, reason] of reasons) diagnosisTreeReasons.set(descriptor.toLowerCase(), reason);
         } catch (err) {
           if (err instanceof QueryOptimizationStopError) throw err;
           boundary();

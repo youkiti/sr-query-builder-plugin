@@ -244,7 +244,7 @@ npm run eval:optimize -- --case r2-pdr-prognostic --c0 criteria-only-draft2 --se
 
 ## ブロック診断だけの評価（issue #164）
 
-`src/features/validation/blockDiagnosis.ts` の構造診断（`diagnoseStructure`。AND で結ぶブロック間の MeSH 共有・上位語内包）と件数診断（`diagnoseNarrowing`。ブロックを外した式との削減率が `BLOCK_NARROWING_MIN_REDUCTION`〈既定 0.2〉未満なら「絞り込みに効いていない」）を、LLM を使わず凍結 C0 に対して直接かける評価コマンドです。しきい値 0.2 は「凍結 C0 の分布を見て調整する前提の初期値」（`blockDiagnosis.ts` のコメント）なので、このコマンドの主目的は削減率の分布を取ることそのものです。`eval:optimize`（自動調整の full run）を経由しないため、Gemini API キーは不要で NCBI とだけ通信します。
+`src/features/validation/blockDiagnosis.ts` の構造診断（`diagnoseStructure`。AND で結ぶブロック間の MeSH 共有・上位語内包）と件数診断（`diagnoseNarrowing`。ブロックを外した式との削減率が `BLOCK_NARROWING_MIN_REDUCTION`〈現在 0.13〉未満なら「絞り込みに効いていない」）を、LLM を使わず凍結 C0 に対して直接かける評価コマンドです。しきい値は下の「閾値の校正」のとおりこのコマンドで取った分布から決めたので、主目的は削減率の分布を取ることそのものです。`eval:optimize`（自動調整の full run）を経由しないため、Gemini API キーは不要で NCBI とだけ通信します。
 
 ```powershell
 npm run eval:diagnose -- --dry-run
@@ -256,6 +256,38 @@ npm run eval:diagnose -- --report
 `--case` を省略すると全ケース、`--c0`（拡張子抜きの凍結 C0 ファイル名）を省略するとそのケースの `fixtures/<case>/c0/` 配下すべてが対象です。`--c0` は `--case` と併用必須です。`--label` は既存コマンドと同じ英数字・`.`・`_`・`-` の 1〜40 文字（`replay-` 接頭辞・`.`・`..` は不可）で、保存先は `results/block-diagnosis/<label>/<caseId>/<c0名>.json`（1 C0 = 1 ファイル）です。出力ファイルが既に `complete: true` なら通信せずスキップします（再開可能）。
 
 1 C0 につき、結合式まで展開した最終式を ESearch（`retmax: 0`、日付制限つき）で 1 回測り（`finalHits`）、結合式が単純な AND（`diagnosisTargets` が `simple: true` を返す形）なら承認ブロックごとに「そのブロックの参照だけを外した式」を 1 回ずつ測って `diagnoseNarrowing` にかけます。あわせて対象ブロックの非否定 MeSH descriptor を `fetchMeshTreeNumbers` で階層取得し、`diagnoseStructure` にかけます。個々のブロック測定・MeSH 階層取得の失敗はその項目だけ `未判定` にして続行し、C0 全体は捨てません（最終式の測定自体が失敗したときだけ `complete: false` にして再試行対象にします）。**製品側の通信上限 `MAX_DIAGNOSIS_API_CALLS`（30 回）はこのコマンドでは適用しません**（分布を打ち切らずに完全に取るため）。C0 ごとの NCBI 呼び出し回数は `apiCalls`（最終式の実測を含む総数）に記録します。`exceedsProductBudget` は `apiCalls` ではなく `diagnosisApiCalls`（最終式の実測を除いた、ブロックを外した式の esearch と MeSH 階層取得だけの通信数）で判定します。これは `queryOptimizationService.ts` の `updateDiagnosis` が `MAX_DIAGNOSIS_API_CALLS` と比べる範囲と同じ区切りで、最終式の実測は製品側でも `measure()` 側の別カウンタであり診断予算に含まれないためです。保存レコードの `diagnosis.fingerprint` は常に空文字です（`fingerprint` は `queryEvaluationService.formulaFingerprint` というブラウザの `crypto.subtle` に依存する非同期ハッシュで、診断専用コマンドは再現しません。測った式は `finalQuery` に残ります）。
+
+### 閾値の校正（2026-09-16）
+
+`BLOCK_NARROWING_MIN_REDUCTION` は初期値 0.2 から **0.13** へ校正しました。材料は `--label issue164-threshold` で凍結 C0 43 本すべてを診断した実測（`diagnosis-only`・NCBI のみ・失敗 0 本・未判定ブロック 0 件・判定できた 100 ブロック）です。`results/` は gitignore なので、決め手になった数字をここに残します。
+
+削減率を昇順に並べると、下側に 1 つだけ際立って広い切れ目があります。
+
+| 隙間 | 幅 | この隙間に閾値を置いたときの検出数 |
+|---|---|---|
+| **9.77% → 16.96%** | **7.2pt** | **10 / 100** |
+| 26.2% → 30.6% | 4.5pt | 23 / 100 |
+| 17.3% → 21.2% | 3.9pt | 14 / 100 |
+
+切れ目の中点は 13.4% で、最も近い丸めが 0.13 です（下へ 3.2pt・上へ 4.0pt の余裕）。初期値 0.2 は切れ目の上側にある密集（16.96 / 17.12 / 17.24 / 17.29%）の中を通っていたため、僅かな件数差で判定が反転していました。0.10〜0.16 のどこに置いても検出数は 10 件で変わりません。
+
+閾値ごとの検出数（ケース別内訳）:
+
+| 閾値 | 検出 | c1 | r1 | r2 | r3 |
+|---|---|---|---|---|---|
+| 5% | 5 | 3 | 0 | 2 | 0 |
+| **13%（採用）** | **10** | **5** | **0** | **5** | **0** |
+| 17% | 11 | 5 | 0 | 6 | 0 |
+| 20%（旧） | 14 | 6 | 0 | 8 | 0 |
+| 30% | 23 | 8 | 0 | 15 | 0 |
+
+- 0.2 → 0.13 で検出から外れる 4 ブロックは、すべて 17.0〜17.3% の密集にあるもの（r2 の `seeded-draft13-s20260915` #2・`criteria-only-draft1` #1・`criteria-only-draft2` #1、c1 の `criteria-only-draft12` #2）です。
+- 0.13 で残る 10 ブロックは issue #164 が名指ししていたものと一致します（r2 #1 Diabetic Retinopathy が 1.0〜9.8% で 5 件、c1 の Salt and Sodium / Population が 0.0〜7.6% で 5 件）。
+- **r1 / r3 は陰性対照として機能します。** r1 の最小が 96.2%、r3 の最小が 46.9% で、閾値を 30% まで上げても 1 件も検出されません。
+
+校正の向きを「下げる」に取ったのは、誤検出と取りこぼしの損失が非対称なためです。誤検出したブロックは `blockDiagnosisLines` 経由で AI に「絞り込みに効いていない」と伝わって実際は効いているブロックを狭めさせ、さらに `diagnosedHeldBlock` 経由で `diagnosed_block_held` の早期停止を招きます。取りこぼしは助言が出ないだけで済みます。
+
+再校正したいときは `npm run eval:diagnose -- --label <新ラベル>` で測り直し、`--report` の削減率分位点と、上と同じ「隣接する値の隙間」を見てください。
 
 ### 既存 full run からの収集（`--harvest`）
 

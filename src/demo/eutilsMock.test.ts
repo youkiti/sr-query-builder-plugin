@@ -82,8 +82,8 @@ describe('db=mesh モック（MeSH 階層）', () => {
       ['Respiratory Distress Syndrome', 'Extracorporeal Membrane Oxygenation'],
       makeDeps()
     );
-    expect(treeMap.get('Respiratory Distress Syndrome')).toEqual(['C08.618.248']);
-    expect(treeMap.get('Extracorporeal Membrane Oxygenation')).toEqual(['E04.100.400']);
+    expect(treeMap.trees.get('Respiratory Distress Syndrome')).toEqual(['C08.618.248']);
+    expect(treeMap.trees.get('Extracorporeal Membrane Oxygenation')).toEqual(['E04.100.400']);
   });
 });
 

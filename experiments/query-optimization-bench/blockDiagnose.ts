@@ -2,8 +2,8 @@
  * 凍結 C0 に対して、LLM を使わずブロック診断（構造診断 diagnoseStructure / 件数診断
  * diagnoseNarrowing）だけを NCBI 通信で実行する評価コマンド（issue #164）。
  *
- * `blockDiagnosis.ts` のコメントどおり、`BLOCK_NARROWING_MIN_REDUCTION`（既定 0.2）は
- * 「凍結 C0 の分布を見て調整する前提の初期値」であり、このコマンドの目的は分布そのものを取ること。
+ * `BLOCK_NARROWING_MIN_REDUCTION`（現在 0.13）は凍結 C0 の削減率分布で校正した値で、このコマンドの
+ * 目的は校正の材料になる分布そのものを取ること（初期値 0.2 からの校正は 2026-09-16 に実施）。
  * `eval:optimize` の full run（LLM を使う自動調整）に依存せず、診断だけを独立して回せるようにする。
  *
  * 既存の full run（`results/default/<caseId>/<c0名>/<split>+<runLabel>/run.json`）から
@@ -242,16 +242,14 @@ async function diagnoseC0(caseId: string, c0Name: string, fixturesDir: string, r
     if (descriptors.length) {
       try {
         const resolved = await (deps.fetchMeshTreeNumbers ?? fetchMeshTreeNumbers)(descriptors, eutils);
-        // fetchMeshTreeNumbers は要求した descriptor の大文字小文字をそのまま key にするが、
-        // diagnoseStructure / diagnoseStructure の trees 引数は小文字 key を前提にする
-        // （queryOptimizationService.ts の mergeTrees と同じ規約。blockDiagnosis.test.ts の
-        // trees フィクスチャも小文字キー）。ここで揃えないと大文字小文字の違いで階層が見つからず、
-        // すべて unknown 扱いになってしまう。
-        trees = new Map([...resolved].map(([descriptor, numbers]) => [descriptor.toLowerCase(), numbers]));
+        // trees / reasons は要求した descriptor の表記をキーにするため、
+        // diagnoseStructure が参照する小文字キーに揃える。
+        // 通信が成功しても解決できなかった語の理由を渡し、診断の note に残す。
+        trees = new Map([...resolved.trees].map(([descriptor, numbers]) => [descriptor.toLowerCase(), numbers]));
+        for (const [descriptor, reason] of resolved.reasons) reasons.set(descriptor.toLowerCase(), reason);
       } catch (err) {
-        // fetchMeshTreeNumbers は 1 descriptor の通信失敗で全体が例外を投げる（queryOptimizationService.ts
-        // の updateDiagnosis と同じ挙動）。個別の原因を切り分けられないため、要求した全 descriptor に
-        // 同じ理由を割り当てる（diagnoseStructure の reasons が無い語は既定で「階層不明」になる）。
+        // 通信失敗では trees / reasons が返らず全体が例外になるため、
+        // 成功時の語ごとの未解決理由とは別に、要求した全 descriptor に同じ通信失敗理由を割り当てる。
         const message = `未判定: 階層を取得できなかった: ${toErrorMessage(err, secrets)}`;
         for (const descriptor of descriptors) reasons.set(descriptor.toLowerCase(), message);
       }
