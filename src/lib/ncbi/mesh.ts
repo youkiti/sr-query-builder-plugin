@@ -5,9 +5,12 @@ import { retryWithBackoff } from './rateLimit';
 /**
  * NCBI `db=mesh` を叩いて、各 MeSH descriptor の tree number を取得する。
  *
- * - `esearch db=mesh&term=<descriptor>[mh]` で UID を 1 件に解決
- * - `esummary db=mesh&id=<UIDs>&retmode=json` をバッチで 1 回だけ呼び、JSON をパース
- * - TreeNumber は 1 descriptor に 0〜複数個。全件を保持する
+ * - `esearch db=mesh&term=<descriptor>[mh]` で候補 UID を最大 20 件取得
+ * - `esummary db=mesh&id=<UIDs>&retmode=json` をバッチで 1 回だけ呼び、種別と語が一致する descriptor を選ぶ
+ * - TreeNumber は 1 descriptor に 0〜複数個。全件を保持し、未解決なら理由を返す
+ *
+ * `[mh]` が限定語に翻訳されることもある（例: Incidence → epidemiology[Subheading]）。
+ * 別の descriptor の階層を採らないよう、entry term を含む語の一致も確認する。
  *
  * PubMed 側の `efetch db=pubmed` の XML は DescriptorName を返すのみで
  * TreeNumber は入っていないため、階層可視化には別途この関数が必要。
@@ -101,14 +104,14 @@ function appendCommonParams(params: URLSearchParams, deps: EutilsDeps): void {
 }
 
 /**
- * 1 descriptor を `db=mesh` で検索して UID を返す。1 件にヒットしなかったら null。
+ * 1 descriptor を `db=mesh` で検索し、候補 UID を返す。該当なしは空配列。
  */
-async function resolveMeshUid(descriptor: string, deps: EutilsDeps): Promise<string | null> {
+async function resolveMeshCandidateUids(descriptor: string, deps: EutilsDeps): Promise<string[]> {
   const params = new URLSearchParams({
     db: 'mesh',
     term: `${descriptor}[mh]`,
     retmode: 'json',
-    retmax: '2',
+    retmax: '20',
   });
   appendCommonParams(params, deps);
   const url = `${BASE_URL}/esearch.fcgi?${params.toString()}`;
@@ -126,44 +129,45 @@ async function resolveMeshUid(descriptor: string, deps: EutilsDeps): Promise<str
     },
     { sleep: deps.sleep, maxRetries: deps.maxRetries ?? 5 }
   );
-  const ids = json.esearchresult?.idlist ?? [];
-  const [first] = ids;
-  if (ids.length === 1 && first !== undefined) {
-    return first;
-  }
-  return null;
+  return json.esearchresult?.idlist ?? [];
+}
+
+export interface MeshTreeLookup {
+  trees: Map<string, string[]>;
+  reasons: Map<string, string>;
 }
 
 /**
- * MeSH descriptor の配列 → Map<descriptor, tree numbers[]> を返す。
- * descriptor が解決できなかった場合はエントリが入らない（Map に存在しない）。
+ * MeSH descriptor ごとに、語が一致する唯一の descriptor の tree number を trees に返す。
+ * 解決できない語は reasons に理由を返す。両 Map のキーは前後空白を除いた元の表記。
+ * 通信失敗は例外として呼び出し側へ伝える。
  *
  * @param descriptors 重複可、空白前後ゆるめ
  */
 export async function fetchMeshTreeNumbers(
   descriptors: readonly string[],
   deps: EutilsDeps
-): Promise<Map<string, string[]>> {
-  const result = new Map<string, string[]>();
+): Promise<MeshTreeLookup> {
+  const result: MeshTreeLookup = { trees: new Map(), reasons: new Map() };
   const unique = Array.from(new Set(descriptors.map((d) => d.trim()).filter((d) => d !== '')));
   if (unique.length === 0) {
     return result;
   }
 
-  const uidToDescriptor = new Map<string, string>();
+  const candidatesByDescriptor = new Map<string, string[]>();
   for (const descriptor of unique) {
-    const uid = await resolveMeshUid(descriptor, deps);
-    if (uid !== null) {
-      uidToDescriptor.set(uid, descriptor);
-    }
+    const uids = [...new Set(await resolveMeshCandidateUids(descriptor, deps))];
+    candidatesByDescriptor.set(descriptor, uids);
+    if (uids.length === 0) result.reasons.set(descriptor, 'db=mesh に該当なし');
   }
-  if (uidToDescriptor.size === 0) {
+  const allUids = [...new Set([...candidatesByDescriptor.values()].flat())];
+  if (allUids.length === 0) {
     return result;
   }
 
   const params = new URLSearchParams({
     db: 'mesh',
-    id: Array.from(uidToDescriptor.keys()).join(','),
+    id: allUids.join(','),
     retmode: 'json',
   });
   appendCommonParams(params, deps);
@@ -181,24 +185,71 @@ export async function fetchMeshTreeNumbers(
     { sleep: deps.sleep, maxRetries: deps.maxRetries ?? 5 }
   );
 
-  // esummary db=mesh の JSON は result[uid].ds_idxlinks[].treenum に tree number を持つ。
-  // uid → descriptor は esearch 時に作った uidToDescriptor で逆引きする（名前マッチ不要）。
+  const records = parseMeshSummaryRecords(json);
   const treeByUid = parseMeshSummaryJson(json);
-  for (const [uid, descriptor] of uidToDescriptor) {
-    const treeNumbers = treeByUid.get(uid);
-    if (treeNumbers !== undefined) {
-      result.set(descriptor, treeNumbers);
+  for (const [descriptor, uids] of candidatesByDescriptor) {
+    if (uids.length === 0) continue;
+    const candidates = uids.flatMap((uid) => {
+      const record = records.get(uid);
+      return record ? [{ uid, record }] : [];
+    });
+    if (candidates.length !== uids.length) {
+      result.reasons.set(descriptor, '候補の要約が返らなかった');
+      continue;
     }
+    const descriptors = candidates.filter(({ record }) => record.ds_recordtype === 'descriptor');
+    if (descriptors.length === 0) {
+      const types = [...new Set(candidates.map(({ record }) => record.ds_recordtype ?? '種別不明'))];
+      result.reasons.set(descriptor, `候補 ${candidates.length} 件に descriptor が無い（${summarizeList(types)}）`);
+      continue;
+    }
+    const matching = descriptors.filter(({ record }) => Array.isArray(record.ds_meshterms)
+      && record.ds_meshterms.some((term) => typeof term === 'string' && term.trim().toLowerCase() === descriptor.toLowerCase()));
+    if (matching.length === 0) {
+      result.reasons.set(descriptor, `候補の descriptor が語と一致しない（${summarizeList(descriptors.map(({ record }) => descriptorName(record)))}）`);
+      continue;
+    }
+    if (matching.length > 1) {
+      result.reasons.set(descriptor, `語に一致する descriptor が複数ある（${summarizeList(matching.map(({ record }) => descriptorName(record)))}）`);
+      continue;
+    }
+    const treeNumbers = treeByUid.get(matching[0]!.uid);
+    if (treeNumbers?.length) result.trees.set(descriptor, treeNumbers);
+    else result.reasons.set(descriptor, 'descriptor に tree number が無い');
   }
   return result;
 }
 
-/** esummary db=mesh&retmode=json のうち、tree number 抽出に使うフィールドだけを表す型。 */
+function summarizeList(values: string[]): string {
+  return values.slice(0, 3).join(', ') + (values.length > 3 ? ', …' : '');
+}
+
+function descriptorName(record: MeshSummaryRecord): string {
+  const name = Array.isArray(record.ds_meshterms) ? record.ds_meshterms[0] : undefined;
+  return typeof name === 'string' && name.trim() ? name.trim() : '名称不明';
+}
+
+interface MeshSummaryRecord {
+  ds_recordtype?: string;
+  ds_meshterms?: unknown[];
+  ds_idxlinks?: Array<{ treenum?: string }>;
+}
+
+/** esummary db=mesh&retmode=json のうち、descriptor の選別と階層取得に使うフィールド。 */
 export interface MeshEsummaryJson {
   result?: {
     uids?: string[];
-    [uid: string]: { ds_idxlinks?: Array<{ treenum?: string }> } | string[] | undefined;
+    [uid: string]: MeshSummaryRecord | string[] | undefined;
   };
+}
+
+function parseMeshSummaryRecords(json: MeshEsummaryJson): Map<string, MeshSummaryRecord> {
+  const records = new Map<string, MeshSummaryRecord>();
+  for (const uid of json.result?.uids ?? []) {
+    const record = json.result?.[uid];
+    if (record && !Array.isArray(record)) records.set(uid, record);
+  }
+  return records;
 }
 
 /**

@@ -206,7 +206,7 @@ describe('runValidation', () => {
       .mockResolvedValueOnce(jsonResponse({ esearchresult: { idlist: ['2001'] } }))
       .mockResolvedValueOnce(
         jsonResponse({
-          result: { uids: ['2001'], '2001': { ds_idxlinks: [{ treenum: 'C18.452.394' }] } },
+          result: { uids: ['2001'], '2001': { ds_recordtype: 'descriptor', ds_meshterms: ['Diabetes Mellitus'], ds_idxlinks: [{ treenum: 'C18.452.394' }] } },
         })
       );
     const summary = await runValidation(deps);
@@ -252,7 +252,7 @@ describe('runValidation', () => {
       .mockResolvedValueOnce(jsonResponse({ esearchresult: { idlist: ['2001'] } }))
       .mockResolvedValueOnce(
         jsonResponse({
-          result: { uids: ['2001'], '2001': { ds_idxlinks: [{ treenum: 'C18.452.394' }] } },
+          result: { uids: ['2001'], '2001': { ds_recordtype: 'descriptor', ds_meshterms: ['Diabetes Mellitus'], ds_idxlinks: [{ treenum: 'C18.452.394' }] } },
         })
       );
     const progress: import('./validationService').ValidationProgress[] = [];

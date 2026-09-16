@@ -33,11 +33,13 @@ function errorResponse(status: number): Response {
  * 実 NCBI `esummary db=mesh&retmode=json` の形状を模したヘルパ。
  * tree number は ds_idxlinks[].treenum に入る（複数 tree number = 複数要素）。
  */
-function meshSummary(records: Array<{ uid: string; treenums: string[] }>): unknown {
+function meshSummary(records: Array<{ uid: string; treenums: string[]; terms?: string[] }>): unknown {
   const result: Record<string, unknown> = { uids: records.map((r) => r.uid) };
   for (const r of records) {
     result[r.uid] = {
       uid: r.uid,
+      ds_recordtype: 'descriptor',
+      ds_meshterms: r.terms ?? [],
       ds_idxlinks: r.treenums.map((t) => ({ treenum: t })),
     };
   }
@@ -46,12 +48,12 @@ function meshSummary(records: Array<{ uid: string; treenums: string[] }>): unkno
 
 // Asthma は実際に 4 本の tree number を持つ（実 API で確認済み）。
 const SUMMARY_ASTHMA = meshSummary([
-  { uid: '1001', treenums: ['C08.127.108', 'C08.381.495.108'] },
+  { uid: '1001', terms: ['Asthma'], treenums: ['C08.127.108', 'C08.381.495.108'] },
 ]);
 
 const SUMMARY_MULTI = meshSummary([
-  { uid: '1001', treenums: ['C08.127.108'] },
-  { uid: '1002', treenums: ['C08.127.108.562'] },
+  { uid: '1001', terms: ['Asthma'], treenums: ['C08.127.108'] },
+  { uid: '1002', terms: ['Bronchitis'], treenums: ['C08.127.108.562'] },
 ]);
 
 describe('parseMeshSummaryJson', () => {
@@ -92,7 +94,8 @@ describe('fetchMeshTreeNumbers', () => {
   test('空配列 → 空 Map、fetch は呼ばれない', async () => {
     const fetch = jest.fn();
     const result = await fetchMeshTreeNumbers([], { fetch });
-    expect(result.size).toBe(0);
+    expect(result.trees.size).toBe(0);
+    expect(result.reasons.size).toBe(0);
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -112,8 +115,8 @@ describe('fetchMeshTreeNumbers', () => {
       throw new Error(`unexpected url: ${url}`);
     });
     const result = await fetchMeshTreeNumbers(['Asthma', 'Bronchitis'], { fetch: fetch as unknown as typeof globalThis.fetch });
-    expect(result.get('Asthma')).toEqual(['C08.127.108']);
-    expect(result.get('Bronchitis')).toEqual(['C08.127.108.562']);
+    expect(result.trees.get('Asthma')).toEqual(['C08.127.108']);
+    expect(result.trees.get('Bronchitis')).toEqual(['C08.127.108.562']);
   });
 
   test('descriptor の前後空白を trim し、重複は除外する', async () => {
@@ -124,7 +127,7 @@ describe('fetchMeshTreeNumbers', () => {
       return jsonResponse(SUMMARY_ASTHMA);
     });
     const result = await fetchMeshTreeNumbers(['  Asthma  ', 'Asthma'], { fetch: fetch as unknown as typeof globalThis.fetch });
-    expect(result.get('Asthma')).toEqual(['C08.127.108', 'C08.381.495.108']);
+    expect(result.trees.get('Asthma')).toEqual(['C08.127.108', 'C08.381.495.108']);
     // esearch は 1 回だけ
     expect((fetch as jest.Mock).mock.calls.filter((c) => (c[0] as string).includes('esearch')).length).toBe(1);
   });
@@ -137,24 +140,105 @@ describe('fetchMeshTreeNumbers', () => {
       return jsonResponse(SUMMARY_ASTHMA);
     });
     const result = await fetchMeshTreeNumbers(['Unknown'], { fetch: fetch as unknown as typeof globalThis.fetch });
-    expect(result.size).toBe(0);
+    expect(result.trees.size).toBe(0);
+    expect(result.reasons.get('Unknown')).toContain('該当なし');
   });
 
-  test('esearch が 2 件以上返した（曖昧）descriptor も Map に入らない', async () => {
-    const fetch = jest.fn(async (url: string) => {
-      if (url.includes('esearch.fcgi')) {
-        return jsonResponse({ esearchresult: { idlist: ['1', '2'] } });
-      }
-      return jsonResponse(SUMMARY_ASTHMA);
+  test('薬理作用レコードと descriptor の 2 件が返ったら descriptor 側の tree number を返す', async () => {
+    const fetch = jest.fn()
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { idlist: ['82006490', '68006490'] } }))
+      .mockResolvedValueOnce(jsonResponse({ result: { uids: ['82006490', '68006490'],
+        '82006490': { ds_recordtype: 'pharmacological-action', ds_meshui: 'D006490',
+          ds_meshterms: ['Hemostatics'], ds_idxlinks: [{ treenum: 'D006490' }] },
+        '68006490': { ds_recordtype: 'descriptor', ds_meshui: 'D006490',
+          ds_meshterms: ['Hemostatics', 'Hemostatic', 'Antihemorrhagics', 'Antihemorrhagic'],
+          ds_idxlinks: [{ treenum: 'D27.505.954.502.270.463' }] },
+      } }));
+    const result = await fetchMeshTreeNumbers(['Hemostatics'], { fetch });
+    expect(result.trees.get('Hemostatics')).toEqual(['D27.505.954.502.270.463']);
+    expect(result.reasons.size).toBe(0);
+  });
+
+  test('限定語に翻訳された語には不一致の descriptor の階層を返さず名前を理由に含める', async () => {
+    const fetch = jest.fn()
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { idlist: ['81000453', '68004813'],
+        querytranslation: '"epidemiology"[Subheading]' } }))
+      .mockResolvedValueOnce(jsonResponse({ result: { uids: ['81000453', '68004813'],
+        '81000453': { ds_recordtype: 'qualifier', ds_meshui: 'Q000453',
+          ds_meshterms: ['epidemiology', 'epidemics', 'incidence'], ds_idxlinks: [{ treenum: 'Y09.010' }] },
+        '68004813': { ds_recordtype: 'descriptor', ds_meshui: 'D004813',
+          ds_meshterms: ['Epidemiology', 'Social Epidemiology'], ds_idxlinks: [{ treenum: 'H02.403.720.500' }] },
+      } }));
+    const result = await fetchMeshTreeNumbers(['Incidence'], { fetch });
+    expect(result.trees.size).toBe(0);
+    expect(result.reasons.get('Incidence')).toBe('候補の descriptor が語と一致しない（Epidemiology）');
+  });
+
+  test('薬理作用だけなら descriptor が無い理由に record type を含める', async () => {
+    const fetch = jest.fn()
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { idlist: ['82006490'] } }))
+      .mockResolvedValueOnce(jsonResponse({ result: { uids: ['82006490'],
+        '82006490': { ds_recordtype: 'pharmacological-action', ds_meshui: 'D006490',
+          ds_meshterms: ['Hemostatics'], ds_idxlinks: [{ treenum: 'D006490' }] },
+      } }));
+    const result = await fetchMeshTreeNumbers(['Hemostatics'], { fetch });
+    expect(result.trees.size).toBe(0);
+    expect(result.reasons.get('Hemostatics')).toBe('候補 1 件に descriptor が無い（pharmacological-action）');
+  });
+
+  test.each([[[]], [['1']]])('候補の要約が全部または一部欠けたら理由を返す: %j', async (uids) => {
+    const fetch = jest.fn()
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { idlist: ['1', '2'] } }))
+      .mockResolvedValueOnce(jsonResponse(meshSummary(uids.map((uid) => ({ uid, terms: ['Term'], treenums: ['C01'] })))));
+    const result = await fetchMeshTreeNumbers(['Term'], { fetch });
+    expect(result.trees.size).toBe(0);
+    expect(result.reasons.get('Term')).toBe('候補の要約が返らなかった');
+  });
+
+  test('語に一致する descriptor が複数なら階層を選ばず、名前を先頭 3 件まで示す', async () => {
+    const fetch = jest.fn()
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { idlist: ['1', '2', '3', '4'] } }))
+      .mockResolvedValueOnce(jsonResponse(meshSummary(['A', 'B', 'C', 'D'].map((name, index) => ({
+        uid: String(index + 1), terms: [name, 'Term'], treenums: ['C01'],
+      })))));
+    const result = await fetchMeshTreeNumbers(['Term'], { fetch });
+    expect(result.trees.size).toBe(0);
+    expect(result.reasons.get('Term')).toBe('語に一致する descriptor が複数ある（A, B, C, …）');
+  });
+
+  test('候補数や共有 UID によらず検索 3 回と要約 1 回で全候補を重複なく取得する', async () => {
+    const fetch = jest.fn()
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { idlist: ['82006490', '68006490', '81000453'] } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { idlist: ['68006490'] } }))
+      .mockResolvedValueOnce(jsonResponse({ esearchresult: { idlist: ['68003930'] } }))
+      .mockResolvedValueOnce(jsonResponse({ result: { uids: ['82006490', '68006490', '81000453', '68003930'],
+        '82006490': { ds_recordtype: 'pharmacological-action', ds_meshterms: ['Hemostatics'], ds_idxlinks: [{ treenum: 'D006490' }] },
+        '68006490': { ds_recordtype: 'descriptor', ds_meshterms: [' Hemostatics ', ' Antihemorrhagics '], ds_idxlinks: [{ treenum: 'D27.505.954.502.270.463' }] },
+        '81000453': { ds_recordtype: 'qualifier', ds_meshterms: ['epidemiology'], ds_idxlinks: [{ treenum: 'Y09.010' }] },
+        '68003930': { ds_recordtype: 'descriptor', ds_meshterms: ['Diabetic Retinopathy'], ds_idxlinks: [{ treenum: 'C11.768.257' }] },
+      } }));
+    const result = await fetchMeshTreeNumbers([' Hemostatics ', 'antihemorrhagics', 'Diabetic Retinopathy', 'Hemostatics'], {
+      fetch, rateLimiter: { acquire: async () => undefined },
     });
-    const result = await fetchMeshTreeNumbers(['Ambiguous'], { fetch: fetch as unknown as typeof globalThis.fetch });
-    expect(result.size).toBe(0);
+    expect(fetch).toHaveBeenCalledTimes(4);
+    const urls = fetch.mock.calls.map(([url]) => new URL(url as string));
+    for (const url of urls.slice(0, 3)) {
+      expect(url.pathname).toContain('esearch.fcgi');
+      expect(url.searchParams.get('retmax')).toBe('20');
+    }
+    expect(urls[3]!.pathname).toContain('esummary.fcgi');
+    expect(urls[3]!.searchParams.get('id')?.split(',')).toEqual(['82006490', '68006490', '81000453', '68003930']);
+    expect([...result.trees]).toEqual([
+      ['Hemostatics', ['D27.505.954.502.270.463']], ['antihemorrhagics', ['D27.505.954.502.270.463']],
+      ['Diabetic Retinopathy', ['C11.768.257']],
+    ]);
+    expect(result.reasons.size).toBe(0);
   });
 
   test('全 descriptor が解決不能なら esummary を呼ばず空 Map', async () => {
     const fetch = jest.fn(async () => jsonResponse({ esearchresult: { idlist: [] } }));
     const result = await fetchMeshTreeNumbers(['X', 'Y'], { fetch: fetch as unknown as typeof globalThis.fetch });
-    expect(result.size).toBe(0);
+    expect(result.trees.size).toBe(0);
     expect((fetch as jest.Mock).mock.calls.some((c) => (c[0] as string).includes('esummary'))).toBe(false);
   });
 
@@ -212,11 +296,12 @@ describe('fetchMeshTreeNumbers', () => {
     const result = await fetchMeshTreeNumbers(['', '   '], {
       fetch: fetch as unknown as typeof globalThis.fetch,
     });
-    expect(result.size).toBe(0);
+    expect(result.trees.size).toBe(0);
+    expect(result.reasons.size).toBe(0);
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  test('esearch レスポンスが esearchresult / idlist を欠いても null 扱いで Map に入らない', async () => {
+  test('esearch レスポンスが esearchresult / idlist を欠いても 該当なし扱いで Map に入らない', async () => {
     const fetch = jest.fn(async (url: string) => {
       if (url.includes('esearch.fcgi')) {
         return jsonResponse({});
@@ -226,7 +311,7 @@ describe('fetchMeshTreeNumbers', () => {
     const result = await fetchMeshTreeNumbers(['X'], {
       fetch: fetch as unknown as typeof globalThis.fetch,
     });
-    expect(result.size).toBe(0);
+    expect(result.trees.size).toBe(0);
   });
 
   test('esearch で UID が解決したが esummary に tree number が無い descriptor は Map に入らない', async () => {
@@ -235,12 +320,13 @@ describe('fetchMeshTreeNumbers', () => {
         return jsonResponse({ esearchresult: { idlist: ['1'] } });
       }
       // ds_idxlinks が空 = tree number 無し（例: 最上位カテゴリや索引リンク未整備）
-      return jsonResponse({ result: { uids: ['1'], '1': { ds_idxlinks: [] } } });
+      return jsonResponse({ result: { uids: ['1'], '1': { ds_recordtype: 'descriptor', ds_meshterms: ['X'], ds_idxlinks: [] } } });
     });
     const result = await fetchMeshTreeNumbers(['X'], {
       fetch: fetch as unknown as typeof globalThis.fetch,
     });
-    expect(result.size).toBe(0);
+    expect(result.trees.size).toBe(0);
+    expect(result.reasons.get('X')).toBe('descriptor に tree number が無い');
   });
 });
 
