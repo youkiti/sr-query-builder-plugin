@@ -60,7 +60,11 @@ async function setup(page: Page, options: { hasSeeds: boolean; holdAi: boolean; 
     return `<PubmedArticleSet>${pmids.filter((pmid) => (Number(pmid) >= 30000001 && Number(pmid) <= 30000000 + (options.heldLost ?? 0)) || pmid === OUTSIDE_PMID).map((pmid) =>
       `<PubmedArticle><PMID>${pmid}</PMID><ArticleTitle>${pmid === OUTSIDE_PMID ? '外側の研究' : '確認対象の研究'}</ArticleTitle><PubDate><Year>2024</Year></PubDate><Abstract><AbstractText>確認対象の抄録</AbstractText></Abstract></PubmedArticle>`).join('')}</PubmedArticleSet>`;
   } });
-  await registerGeminiStub(page, { responses: { 'optimize-query': {
+  await registerGeminiStub(page, { responses: {
+    'annotate-lost-sample': (prompt: string) => ({ items: [...prompt.matchAll(/"pmid"\s*:\s*"(\d+)"/g)].map((match) => ({
+      pmid: match[1], judgement: 'unclear', reason: '人による確認が必要です。',
+    })) }),
+    'optimize-query': {
     target_block_id: '1', proposed_expression: '"ARDS"[tiab]', added_terms: [], removed_terms: ['"broad"[tiab]'],
     replaced_terms: [], rationale: '研究基準に合う ARDS を維持し、広すぎる語を削除しました。', measurement_ids: [], mesh_requests: [],
   }, 'expand-query-for-recall': { blocks: [{ id: '2', additions: [
@@ -68,6 +72,7 @@ async function setup(page: Page, options: { hasSeeds: boolean; holdAi: boolean; 
   ] }] }, 'pick-boundary-cases': { picks: [{ pmid: OUTSIDE_PMID, reason: '介入の適格性を確認する' }] } },
   usage: { promptTokenCount: 1000, candidatesTokenCount: 1000 },
   usageBySkill: {
+    'annotate-lost-sample': { promptTokenCount: 0, candidatesTokenCount: 0 },
     'expand-query-for-recall': { promptTokenCount: 0, candidatesTokenCount: 0 },
     'pick-boundary-cases': { promptTokenCount: 0, candidatesTokenCount: 0 },
   } });
@@ -174,6 +179,8 @@ test.describe('検索式の自動調整', () => {
     await page.getByText('試行1の変更詳細', { exact: true }).click();
     await expect(page.getByText('失う集合: 150 件 / 増える集合: 0 件', { exact: true })).toBeVisible();
     await expect(page.locator('.optimization__review')).toContainText('保留した候補 1 件');
+    await expect(page.locator('.optimization__held-candidate')).toContainText('AI の参考注釈（採否には使いません）');
+    await expect(page.getByRole('article', { name: /^判定候補 PMID 30000/ }).first()).not.toContainText('AI:');
     await expect(page.getByRole('article', { name: /^判定候補 PMID 30000/ }).first())
       .toContainText('保留候補 candidate-1 で失う文献');
     await expect(page.locator('.optimization__final-formula')).toContainText('"broad"[tiab]');

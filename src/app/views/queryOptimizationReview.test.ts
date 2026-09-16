@@ -193,6 +193,33 @@ function heldLostOutsideCheck() {
 }
 
 describe('保留候補の 3 操作（issue #172）', () => {
+  test.each(['success', 'failure', 'absent'] as const)('注釈 %s を保留候補の要約直後だけに添え、人の判定カードには出さない', (status) => {
+    const current = run('needs_review');
+    const trial = heldTrialFixture();
+    if (status !== 'absent') Object.assign(trial.impact, { annotation: {
+      status, annotatedAt: '', requestedPmids: ['2', '3'], error: status === 'failure' ? '期限切れ' : null,
+      items: [{ pmid: '2', judgement: 'likely_eligible', reason: '参考専用の理由。' }],
+    } });
+    current.trials.push(trial);
+    current.outsideCheck = heldLostOutsideCheck();
+    const container = document.createElement('div');
+    renderOptimizationReview(container, current, { ...actions, adoptHeld: jest.fn(async () => {}) });
+    const card = container.querySelector('.optimization__held-candidate')!;
+    const annotation = card.querySelector('.optimization__held-annotation');
+    if (status === 'absent') expect(annotation).toBeNull();
+    else {
+      expect(card.children[1]).toBe(annotation);
+      expect(annotation!.textContent).toBe(status === 'failure'
+        ? 'AI の参考注釈を取得できませんでした（期限切れ）。人の判定には影響しません。'
+        : 'AI の参考注釈（採否には使いません）: 標本 2 件中 適格らしい 1 件・判断不能 0 件・非適格らしい 0 件・未注釈 1 件');
+    }
+    expect(card.querySelector('button')!.disabled).toBe(false);
+    for (const human of container.querySelectorAll('.optimization__candidate')) {
+      expect(human.textContent).not.toContain('参考専用');
+      expect(human.textContent).not.toContain('AI:');
+    }
+  });
+
   test('最良候補が回収したシードを失う候補はボタンを無効化し PMID を表示する', () => {
     const current = run('needs_review');
     current.trials.push(heldTrialFixture());

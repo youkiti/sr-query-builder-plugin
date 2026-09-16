@@ -36,6 +36,29 @@ function setup(callbacks: DraftViewCallbacks = {}) {
 }
 beforeEach(() => jest.useFakeTimers({ now: 1000 }));
 
+test.each(['success', 'failure', 'absent'] as const)('削除影響の書誌リンク後に注釈 %s を表示する', (status) => {
+  const f = setup();
+  const impact: NonNullable<OptimizationTrial['impact']> = { lostHits: 4, gainedHits: 0, error: null,
+    inspected: ['1', '2', '3', '4'].map((pmid) => ({ pmid, title: '書誌', year: 2024 })) };
+  if (status !== 'absent') impact.annotation = { status, annotatedAt: '', requestedPmids: ['1', '2', '3', '4'],
+    error: status === 'failure' ? '期限切れ' : null, items: status === 'failure' ? [] : [
+      { pmid: '1', judgement: 'likely_eligible', reason: '組入基準と一致する。' },
+      { pmid: '2', judgement: 'unclear', reason: '情報が足りない。' },
+      { pmid: '3', judgement: 'likely_ineligible', reason: '<script>除外基準と一致する。</script>' },
+    ] };
+  f.state.queryOptimizationRun!.trials[0]!.impact = impact;
+  f.render();
+  if (status === 'success') {
+    for (const label of ['適格らしい（組入基準と一致する。）', '判断不能（情報が足りない。）', '非適格らしい（<script>除外基準と一致する。</script>）']) {
+      expect(f.container.textContent).toContain(` — AI: ${label}`);
+    }
+    expect(f.container.querySelector('script')).toBeNull();
+    const link = Array.from(f.container.querySelectorAll('a')).find((a) => a.textContent?.startsWith('PMID 1（'))!;
+    expect(link.nextSibling!.textContent).toContain(' — AI:');
+  } else if (status === 'failure') expect(f.container.textContent).toContain('AI の参考注釈を取得できませんでした（期限切れ）');
+  else expect(f.container.textContent).not.toContain('AI:');
+});
+
 test('情報取得の件数と、その文脈を読んだ判断を別の履歴行に表示する', () => {
   const f = setup();
   f.state.queryOptimizationRun!.trials = [

@@ -84,6 +84,24 @@ test('単一キーに要約だけを保存し、復元は中断・要再検証�
   expect(saved.trials[0]!.formula.blocks[0]!.expression).toBe('a[tiab]');
 });
 
+test.each(['success', 'failure'] as const)('注釈 %s は状態と集計だけを保存・復元し、理由・書誌を含めない', async (status) => {
+  const f = setup();
+  f.trial.impact = { lostHits: 4, gainedHits: 0, error: null, inspected: [], annotation: {
+    status, annotatedAt: '2026-09-16T00:00:00Z', requestedPmids: ['1', '2', '3', '4'],
+    error: status === 'failure' ? '通信エラーの詳細' : null,
+    items: [
+      { pmid: '1', judgement: 'likely_eligible', reason: '保存しない注釈理由。' },
+      { pmid: '2', judgement: 'unclear', reason: '保存しない注釈理由。' },
+      { pmid: '3', judgement: 'likely_ineligible', reason: '保存しない注釈理由。' },
+    ],
+  } };
+  const saved = await saveQueryOptimizationCheckpoint(f.options, f.deps);
+  expect(saved.trials[0]!.annotation).toEqual({ status, counts: { likelyEligible: 1, unclear: 1, likelyIneligible: 1, unannotated: 1 } });
+  const restored = await getQueryOptimizationCheckpoint('p', f.deps);
+  expect(restored!.trials[0]!.annotation).toEqual(saved.trials[0]!.annotation);
+  for (const text of ['保存しない注釈理由', '通信エラーの詳細', 'requestedPmids', 'annotatedAt']) expect(JSON.stringify(saved)).not.toContain(text);
+});
+
 test('プロジェクト違い・保存なし・破棄済みを復元しない', async () => {
   const { deps, options } = setup();
   expect(await getQueryOptimizationCheckpoint('p', deps)).toBeNull();

@@ -64,7 +64,7 @@ test('診断ブロックへの保留を改善なしより先に判定する', as
   expect(result.unmetReasons.join(' ')).toContain('目安件数の見直し');
   const index = result.unmetReasons.indexOf('目安件数 50 件を超えています（実測 200 件）');
   expect(index).toBeGreaterThanOrEqual(0);
-  expect(result.unmetReasons[index + 1]).toContain('既に捕捉している文献を失わずに件数を減らす変更は見つかりませんでした。');
+  expect(result.unmetReasons[index + 1]).toContain('件数を減らす候補は見つかりましたが、既に捕捉している文献を失うため自動採用していません。');
   expect(result.unmetReasons[index + 2]).toBe('件数を減らす候補を 2 件保留しました（削除影響の確認を参照）。');
 });
 test('別ブロックの採用で改善なしがゼロに戻っても保留の連続は続く', async () => {

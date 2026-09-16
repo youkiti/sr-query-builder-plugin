@@ -4,7 +4,7 @@ import type { OptimizationTrial } from '@/features/formula/skills/optimizeQuery'
 import { serializePubmedFormulaMd } from '@/lib/search-formula-md';
 import { buildPubmedSearchUrl } from '@/lib/ncbi/pubmedUrl';
 import type { QueryOptimizationRunState } from '../store';
-import { buildOptimizationReviewSections, evaluateHeldCandidateAdoptionGate, type ReviewSectionState } from '../services/queryOptimizationReviewSections';
+import { buildOptimizationReviewSections, evaluateHeldCandidateAdoptionGate, formatLostSampleAnnotation, type ReviewSectionState } from '../services/queryOptimizationReviewSections';
 
 export interface OptimizationReviewActions {
   adopt: (() => Promise<void>) | undefined;
@@ -43,6 +43,12 @@ function renderHeldCandidateCard(
   summary.textContent = `保留候補 ${trial.candidateId}: 失う ${impact?.lostHits ?? '未測定'} 件・増える ${impact?.gainedHits ?? '未測定'} 件・`
     + `判定済み ${gate.judgedCount} 件・未確認 ${unconfirmed ?? '不明'} 件`;
   card.appendChild(summary);
+  if (impact?.annotation) {
+    const annotation = doc.createElement('p');
+    annotation.className = 'optimization__held-annotation';
+    annotation.textContent = formatLostSampleAnnotation(impact.annotation);
+    card.appendChild(annotation);
+  }
   const rejected = run.heldRejections?.[trial.candidateId];
   const savingGlobal = run.save?.status === 'saving';
   const buttons = doc.createElement('div');

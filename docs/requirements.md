@@ -235,7 +235,7 @@ https://www.googleapis.com/auth/drive.file          # Sheets 読み書き + LLM 
 | timestamp | iso8601 | ✓ | |
 | provider | enum | ✓ | `gemini` / `openai` / `anthropic` / `openrouter` |
 | model | string | ✓ | モデル名（例: `gemini-2.5-pro`） |
-| purpose | enum | ✓ | `draft_block` / `suggest_mesh` / `expand_freeword` / `design_filter` / `pick_boundary` / `pick_seed` / `design_specific_query` / `expand_recall` / `interpret_result` / `extract_protocol` / `improve_block` / `other` |
+| purpose | enum | ✓ | `draft_block` / `suggest_mesh` / `expand_freeword` / `design_filter` / `pick_boundary` / `pick_seed` / `design_specific_query` / `expand_recall` / `interpret_result` / `extract_protocol` / `improve_block` / `annotate_lost_sample` / `other` |
 | prompt_ref | string(url) | ✓ | Drive に保存した full prompt JSON の URL |
 | response_ref | string(url) | ✓ | Drive に保存した full response JSON の URL |
 | prompt_summary | string | | 先頭 500 文字の抜粋（セル内表示用） |
@@ -463,7 +463,7 @@ RCT と observational / cohort 等のデザインが混在する場合は RCT �
 - 4 skill の出力を統合して `search_formula.md` **派生フォーマット**（`## PubMed/MEDLINE` セクション、`#N` 数値行＋任意の名前付きブロック、最終行に `Protocol.combination_expression` の内容）に整形。Cochrane RCT フィルタは別ブロック（例: `#RCTfilter`）として挿入し、`combination_expression` に追記する
 - **search_formula.md 互換方針の明示**: 本拡張のフォーマットは上流 `search-formula-developper` の `search_formula.md` を出発点としつつ、`#RCTfilter` のような名前付きブロックを許すよう拡張する。上流 Python スクリプトは `#N` 数値行のみを前提にパースしているため、**完全な逆方向互換は保証しない**。TS へ移植する検証・変換ロジック（`check_search_lines` / `check_final_query` / `generate_all_database_search` 等）は、ブロック識別子を「数値または英字トークン」として扱えるよう要件定義側に寄せて改修する（`ProtocolBlocks` と 1:1 対応するのは `#1`〜`#5` のみで、`#RCTfilter` 等の自動生成ブロックはユーザーブロックの一覧からは独立）
 - `FormulaVersions` に `created_by=ai_draft` で保存
-- 各 skill の LLM 呼び出しは個別に `LLMApiLog` に記録（`purpose` で識別: `draft_block` / `suggest_mesh` / `expand_freeword` / `design_filter`。対話的拡張（§4.5）では `expand_recall` / `pick_boundary`、漏れ分析では `interpret_result`）
+- 各 skill の LLM 呼び出しは個別に `LLMApiLog` に記録（`purpose` で識別: `draft_block` / `suggest_mesh` / `expand_freeword` / `design_filter`。対話的拡張（§4.5）では `expand_recall` / `pick_boundary`、漏れ分析では `interpret_result`、保留候補の参考注釈では `annotate_lost_sample`）
 
 ### 4.5 対話的シード拡張（margin 探索方式）
 

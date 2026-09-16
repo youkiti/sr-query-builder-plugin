@@ -85,6 +85,17 @@ export interface OptimizationMeshRequestResult {
 }
 
 export interface OptimizationImpact {
+  /** 失う集合の標本に対する AI の参考注釈。採否・ゲート・状態区分には使わない。 */
+  annotation?: {
+    status: 'success' | 'failure';
+    /** ISO 8601 */
+    annotatedAt: string;
+    /** 注釈を依頼した PMID（書誌を取得できた標本） */
+    requestedPmids: string[];
+    items: { pmid: string; judgement: 'likely_eligible' | 'likely_ineligible' | 'unclear'; reason: string }[];
+    /** 失敗時の理由。成功時は null */
+    error: string | null;
+  };
   /** 失敗した通信を区別する。未指定の旧記録は error を使って保守的に判定する。 */
   failedMeasurements?: ('lost_search' | 'lost_fetch' | 'gained_search')[];
   /** 変更前 NOT 変更後 の実測件数。失敗時は null（未測定を 0 件として扱わない）。 */
@@ -197,8 +208,10 @@ export const OPTIMIZE_QUERY_SYSTEM_PROMPT = `
 - ID の追加・削除・変更、結合行と研究デザインフィルタの変更は禁止です。
 - proposed_expression はタグ付き検索語と AND/OR/NOT・括弧で構成する単一行です。
   他ブロック参照、PMID 指定、研究基準にない期間・言語・対象集団の制限を追加しません。
-- 捕捉済みシードを維持し、漏れがあれば回収を優先します。全件捕捉後は目安件数に近づけることを目指し、
-  目標内でさらに件数を小さくすること自体を目的にしません。
+- 捕捉済みシードを維持し、漏れがあれば回収を優先します。全件捕捉後に件数を減らす変更は失う集合が出るため自動採用されず、
+  人が判断する保留候補になります（1 run で 3 件そろうと終了）。保留候補は互いに異なる狭め方にし、
+  何を失う見込みかを rationale に書いてください。検索集合を変えない削除（冗長整理）は、
+  差集合で失う 0 件・増える 0 件を実測できたときだけ自動採用されます。
 - 未計測・失敗は不明であり 0 件ではありません。単独件数と累積 OR の純増 Δ は
   最終式での固有寄与とは異なります。少数でも必要な概念やシードを拾う語は保持します。
 - 冗長・低寄与を削除の確証とせず、変更案全体を制御側が再実測します。
@@ -323,7 +336,8 @@ export async function optimizeQuery(
     TRIALS: input.trials?.length ? input.trials.map((trial) => [
       formatContext({ candidateId: trial.candidateId, formula: trial.formula,
         accepted: trial.accepted, reason: trial.reason, rationale: trial.rationale,
-        held: trial.held ?? false, impact: trial.impact ?? null }),
+        held: trial.held ?? false, impact: trial.impact ? Object.fromEntries(Object.entries(trial.impact)
+          .filter(([key]) => key !== 'annotation')) : null }),
       `変更前: ${trial.before ? formatMeasurement(trial.before) : '(未計測)'}`,
       `変更後: ${trial.after ? formatMeasurement(trial.after) : '(未計測)'}`,
     ].join('\n')).join('\n') : '(なし)',

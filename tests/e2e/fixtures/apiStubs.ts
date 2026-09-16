@@ -248,6 +248,7 @@ export type GeminiSkillName =
   | 'mesh-suggester'
   | 'freeword-designer'
   | 'optimize-query'
+  | 'annotate-lost-sample'
   | 'improve-block'
   | 'expand-query-for-recall'
   | 'design-specific-query'
@@ -262,6 +263,7 @@ export type GeminiSkillName =
  * 「seed 側の文言を含まない = boundary 側」に絞り込む。
  */
 const SKILL_MARKERS: ReadonlyArray<[GeminiSkillName, string]> = [
+  ['annotate-lost-sample', 'judgement'],
   ['block-designer', 'concept_summary'],
   ['mesh-suggester', 'tag_syntax'],
   ['freeword-designer', 'freewords'],

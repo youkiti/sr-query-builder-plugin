@@ -4,7 +4,7 @@ import { ensureChildFolder, findChildFile, getSheetValues, uploadTextFile } from
 import { serializePubmedFormulaMd, type PubmedFormula } from '@/lib/search-formula-md';
 import { nowIso } from '@/utils/iso8601';
 import { resolveProtocolContext, type EditServiceDeps } from './editService';
-import { buildOptimizationReviewSections, evaluateHeldCandidateAdoptionGate } from './queryOptimizationReviewSections';
+import { buildOptimizationReviewSections, countLostSampleAnnotations, evaluateHeldCandidateAdoptionGate } from './queryOptimizationReviewSections';
 import type { AppStore, FormulaSaveState, OptimizationSaveTarget } from '../store';
 
 /** 「採用して保存」1 回分の保存内容。最良候補・保留候補のどちらから来たかで note・監査記録だけが変わる。 */
@@ -20,6 +20,7 @@ interface AdoptionSelection {
   noteSuffix: string;
   /** Drive の実行ログ（<versionId>.json）へ残す、保留候補採用時の削除影響の監査記録。 */
   heldAudit: {
+    annotation?: { status: 'success' | 'failure'; counts: ReturnType<typeof countLostSampleAnnotations> };
     candidateId: string; lostHits: number; judgedCount: number; unconfirmedCount: number;
     sampleMethod: 'all' | 'retrieved_subset' | null;
   } | null;
@@ -156,6 +157,9 @@ export async function adoptHeldOptimizationCandidate(deps: EditServiceDeps, cand
   const impact = trial.impact!;
   const lostHits = impact.lostHits ?? 0;
   const unconfirmedCount = lostHits - gate.judgedCount;
+  const annotation = impact.annotation ? { status: impact.annotation.status, counts: countLostSampleAnnotations(impact.annotation) } : undefined;
+  const annotationNote = annotation ? `\nAI の参考注釈（採否には不使用）: 標本 ${new Set(impact.annotation!.requestedPmids).size} 件中 適格らしい ${annotation.counts.likelyEligible} 件・判断不能 ${annotation.counts.unclear} 件・非適格らしい ${annotation.counts.likelyIneligible} 件`
+    + (annotation.counts.unannotated ? `・未注釈 ${annotation.counts.unannotated} 件` : '') : '';
   await performOptimizationAdoption(deps, {
     target: { kind: 'held', candidateId }, formula: trial.formula,
     validationLog: trial.after ? { totalHits: trial.after.totalHits, capturedPmids: trial.after.capturedPmids,
@@ -164,9 +168,9 @@ export async function adoptHeldOptimizationCandidate(deps: EditServiceDeps, cand
     // 「N 件見たから安全」とは書かない（#164: 失う 10,800 件中 9 件が無作為 20 件に入る確率は約 1.7%）。
     // 標本に含まれなかった候補の適格性は確認できていない、という事実だけを残す。
     noteSuffix: `（保留候補 ${candidateId} を採用。失う ${lostHits} 件のうち判定済み ${gate.judgedCount} 件・未確認 ${unconfirmedCount} 件。` +
-      `標本に含まれなかった候補の適格性は確認できていません。抽出方法: ${impact.sample?.method ?? '不明'}）`,
+      `標本に含まれなかった候補の適格性は確認できていません。抽出方法: ${impact.sample?.method ?? '不明'}）` + annotationNote,
     heldAudit: { candidateId, lostHits, judgedCount: gate.judgedCount, unconfirmedCount,
-      sampleMethod: impact.sample?.method ?? null },
+      sampleMethod: impact.sample?.method ?? null, ...(annotation ? { annotation } : {}) },
   });
 }
 

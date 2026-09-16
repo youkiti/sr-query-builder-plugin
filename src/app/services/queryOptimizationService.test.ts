@@ -65,12 +65,14 @@ function setup(outcomes: Record<string, Outcome> = { a: { pmids: papers(200, ['1
     tokensIn: null, tokensOut: null, raw: {},
   }));
   const provider: LLMProvider = { providerId: 'gemini', model: 'test', chat };
+  const annotationChat = jest.fn().mockResolvedValue({ text: '{"items":[]}', tokensIn: null, tokensOut: null, raw: {} });
   const forPurpose = jest.fn<ReturnType<LlmProviderFactory['forPurpose']>, Parameters<LlmProviderFactory['forPurpose']>>(
-    (_purpose, onRequestState, attempts) => withRetry(withSignalDeadline(provider), { ...attempts, onRequestState }));
+    (purpose, onRequestState, attempts) => withRetry(withSignalDeadline(purpose === 'annotate_lost_sample'
+      ? { ...provider, chat: annotationChat } : provider), { ...attempts, onRequestState }));
   const write = jest.fn().mockResolvedValue(undefined);
   const deps: QueryOptimizationDeps = { eutils: { fetch, maxRetries: 0, rateLimiter: { acquire: async () => undefined } },
     llmFactory: { model: 'test', forPurpose }, checkpoint: { read: async () => undefined, write } };
-  return { input, deps, fetch, chat, write, forPurpose, sets };
+  return { input, deps, fetch, chat, annotationChat, write, forPurpose, sets };
 }
 
 function deferred<T>() {
@@ -83,6 +85,283 @@ function deferred<T>() {
 const captureQueries = (fetch: ReturnType<typeof setup>['fetch']) => fetch.mock.calls
   .map(([url]) => new URL(url as string).searchParams.get('term') ?? '')
   .filter((query) => query.includes('[uid]') && query.includes(') AND ('));
+
+describe('保留標本の参考注釈', () => {
+  function fixture() {
+    const remaining = papers(50, ['11', '22']);
+    const f = setup({ a: { pmids: [...remaining, '901', '902'], articles: {
+      '901': { abstract: '参考照合用の抄録', mesh: ['Disease'] },
+    } }, b: { pmids: remaining } }, ['b[tiab]', 'b[tiab]']);
+    f.input.maxIterations = 2;
+    f.input.maxHits = 50;
+    f.annotationChat.mockResolvedValue({ text: JSON.stringify({ items: [
+      { pmid: '901', judgement: 'likely_eligible', reason: '後続の最適化には渡さない参考理由。' },
+    ] }), tokensIn: null, tokensOut: null, raw: {} });
+    return f;
+  }
+
+  test('保留ごとに一度だけ抄録を照合し、通信を数え、次の最適化入力には注釈を渡さない', async () => {
+    const f = fixture();
+    const result = await runQueryOptimization(f.input, f.deps);
+    expect(f.forPurpose.mock.calls.filter(([purpose]) => purpose === 'annotate_lost_sample')).toHaveLength(1);
+    expect(f.annotationChat).toHaveBeenCalledTimes(1);
+    expect(f.annotationChat.mock.calls[0]![0][1].content).toContain('参考照合用の抄録');
+    expect(f.annotationChat.mock.calls[0]![0][1].content).toContain('Disease');
+    expect(result.trials[1]!.impact!.annotation).toMatchObject({ status: 'success', requestedPmids: ['901', '902'], error: null });
+    expect(result.trials[1]!.impact!.inspected[0]).not.toHaveProperty('abstract');
+    expect(result.apiCalls).toBe(f.fetch.mock.calls.length + f.chat.mock.calls.length + 1);
+    expect(f.chat).toHaveBeenCalledTimes(2);
+    expect(f.chat.mock.calls[1]![0][1].content).not.toContain('後続の最適化には渡さない参考理由');
+    expect(f.chat.mock.calls[1]![0][1].content).not.toContain('"annotation"');
+  });
+
+  test.each(['exception', 'json', 'timeout'] as const)('注釈の %s は失敗として残し、同じ run の次の反復へ進む', async (kind) => {
+    const f = fixture();
+    f.deps.llmRequestTimeoutMs = 10;
+    if (kind === 'exception') f.annotationChat.mockRejectedValue(new Error('注釈の通信エラー'));
+    if (kind === 'json') f.annotationChat.mockResolvedValue({ text: '壊れた JSON' });
+    if (kind === 'timeout') f.annotationChat.mockImplementation(() => new Promise(() => {}));
+    const result = await runQueryOptimization(f.input, f.deps);
+    expect(result).toMatchObject({ status: 'needs_review', stopReason: 'iteration_limit', iterations: 2 });
+    expect(f.chat).toHaveBeenCalledTimes(2);
+    const trial = result.trials[1]!;
+    expect(trial.impact!.annotation).toMatchObject({ status: 'failure', items: [] });
+    expect(trial.impact!.annotation!.error).toContain(kind === 'timeout' ? '期限切れ' : kind === 'exception' ? '注釈の通信エラー' : 'annotate-lost-sample');
+    expect(trial.apiEvents).toContainEqual({ source: 'AI', status: 'failure' });
+    expect(result.stopReason).not.toBe('request_timeout');
+  });
+
+  test.each(['user_stop', 'api_budget', 'time_budget'] as const)('注釈中の %s は保留候補を失敗注釈とともに保存して停止する', async (kind) => {
+    const baseline = fixture();
+    baseline.input.maxIterations = 1;
+    const initial = await runQueryOptimization(baseline.input, baseline.deps);
+    const f = fixture();
+    f.deps.eutils.sleep = async () => {};
+    let stopped = false;
+    let time = 0;
+    if (kind === 'api_budget') f.deps.maxApiCalls = initial.apiCalls;
+    if (kind === 'user_stop') f.deps.shouldStop = () => stopped;
+    if (kind === 'time_budget') { f.deps.now = () => time; f.deps.maxElapsedMs = 1000; }
+    f.annotationChat.mockImplementation(async () => {
+      stopped = true;
+      time = 1000;
+      throw new LlmProviderError('retry', 'gemini', 503, '');
+    });
+    const result = await runQueryOptimization(f.input, f.deps);
+    expect(result.stopReason).toBe(kind);
+    expect(result.trials[1]).toMatchObject({ accepted: false, held: true, impact: { annotation: { status: 'failure' } } });
+    expect(f.write.mock.calls.some(([value]) => value.queryOptimizationCheckpoint.trials.some(
+      (trial: checkpoint.OptimizationTrialSummary) => trial.held && trial.annotation?.status === 'failure'))).toBe(true);
+    if (kind === 'api_budget') {
+      expect(f.annotationChat).toHaveBeenCalledTimes(1);
+      expect(result.apiCalls).toBe(initial.apiCalls);
+    }
+  });
+
+  test('全件を適格らしい／非適格らしいに変えても採否・保留数・終了結果は同じ', async () => {
+    const outcomes = [];
+    for (const judgement of ['likely_eligible', 'likely_ineligible']) {
+      const f = fixture();
+      f.annotationChat.mockResolvedValue({ text: JSON.stringify({ items: ['901', '902'].map((pmid) => ({ pmid, judgement, reason: '参考。' })) }) });
+      const result = await runQueryOptimization(f.input, f.deps);
+      outcomes.push({ status: result.status, stopReason: result.stopReason,
+        trials: result.trials.map(({ accepted, held }) => ({ accepted, held })), held: result.trials.filter((trial) => trial.held).length });
+    }
+    expect(outcomes[0]).toEqual(outcomes[1]);
+    expect(outcomes[0]!.held).toBe(1);
+  });
+
+  test.each(['accepted', 'lost_failure', 'fetch_failure'] as const)('注釈対象外の %s では呼ばない', async (kind) => {
+    const f = kind === 'accepted' ? setup({ a: { pmids: ['11'] }, b: { pmids: ['11', '22'] } }) : fixture();
+    f.input.maxIterations = 1;
+    if (kind !== 'accepted') {
+      const original = f.fetch.getMockImplementation()!;
+      f.fetch.mockImplementation(async (url: string) => {
+        const params = new URL(url).searchParams;
+        if (kind === 'fetch_failure' ? url.includes('efetch.fcgi')
+          : params.get('term')?.includes(') NOT (') && params.get('retmax') !== '0') return { ok: false, status: 414 };
+        return original(url);
+      });
+    }
+    const result = await runQueryOptimization(f.input, f.deps);
+    expect(result.trials[1]!.accepted).toBe(kind === 'accepted');
+    expect(f.annotationChat).not.toHaveBeenCalled();
+    expect(f.forPurpose.mock.calls.map(([purpose]) => purpose)).not.toContain('annotate_lost_sample');
+  });
+});
+
+describe('保留の収集と冗長整理', () => {
+  function fixture(proposals: { expression: string; id?: string; added?: string[]; replaced?: { before: string; after: string }[] }[],
+    sets: Record<string, readonly string[]> = {}, diagnosed = false) {
+    const before = ['11', '101', '102', '103'];
+    const mapping: Record<string, readonly string[]> = {
+      'a[tiab]': before, 'spare[tiab]': [], 'fixed[tiab]': diagnosed ? before : papers(20, before),
+      'b[tiab]': ['11', '101'], 'c[tiab]': ['11', '102'], 'd[tiab]': ['11', '103'], ...sets,
+    };
+    const api = createSetSearch((query) => mapping[query]);
+    const f = setup();
+    f.input.initialFormula = { blocks: [
+      { id: '1', expression: 'a[tiab] OR spare[tiab]', isCombination: false },
+      { id: '2', expression: 'fixed[tiab]', isCombination: false },
+      { id: '3', expression: '#1 AND #2', isCombination: true },
+    ], combinationExpression: '#1 AND #2' };
+    f.input.seedPmids = ['11'];
+    f.input.maxHits = 1;
+    f.input.maxIterations = 6;
+    f.fetch.mockImplementation(async (url: string) => {
+      const params = new URL(url).searchParams;
+      if (url.includes('efetch.fcgi')) return { ok: true, status: 200, text: async () => '<PubmedArticleSet/>' };
+      return { ok: true, status: 200, json: async () => ({ esearchresult:
+        api.search(params.get('term')!, Number(params.get('retmax') ?? 20)) }) };
+    });
+    let index = 0;
+    f.chat.mockImplementation(async () => {
+      const proposal = proposals[Math.min(index++, proposals.length - 1)]!;
+      return { text: JSON.stringify({ target_block_id: proposal.id ?? '1', proposed_expression: proposal.expression,
+        rationale: '失う見込みを確認する', added_terms: proposal.added ?? [], replaced_terms: proposal.replaced ?? [] }) };
+    });
+    return { ...f, before };
+  }
+  const differences = (f: ReturnType<typeof fixture>) => f.fetch.mock.calls
+    .filter(([url]) => new URL(url as string).searchParams.get('term')?.includes(') NOT ('));
+
+  test('冗長整理が不成立なら失う書誌を取得しても注釈を呼ばない', async () => {
+    const f = fixture([{ expression: 'a[tiab] OR b[tiab]' }], { 'a[tiab]': ['11', '101'],
+      'b[tiab]': ['11', '102', '999'], 'spare[tiab]': ['101', '102', '103'],
+      'fixed[tiab]': papers(20, ['11', '101', '102', '103', '999']) });
+    f.input.initialFormula.blocks[0]!.expression = '(a[tiab] AND b[tiab]) OR spare[tiab]';
+    f.input.maxIterations = 1;
+    const original = f.fetch.getMockImplementation()!;
+    f.fetch.mockImplementation(async (url: string) => url.includes('efetch.fcgi')
+      ? { ok: true, status: 200, text: async () => '<PubmedArticleSet><PubmedArticle><PMID>103</PMID><ArticleTitle>失う書誌</ArticleTitle></PubmedArticle></PubmedArticleSet>' }
+      : original(url));
+    const result = await runQueryOptimization(f.input, f.deps);
+    expect(result.trials[1]).toMatchObject({ accepted: false, held: false, impact: { lostHits: 1,
+      inspected: [{ pmid: '103' }] } });
+    expect(f.forPurpose.mock.calls.map(([purpose]) => purpose)).not.toContain('annotate_lost_sample');
+  });
+
+  test.each([false, true])('保留 3 件で要確認になり、最良式を変えない（増える集合の失敗 %s）', async (failGained) => {
+    const f = fixture(['b', 'c', 'd'].map((term) => ({ expression: `${term}[tiab]` })));
+    const original = f.fetch.getMockImplementation()!;
+    if (failGained) f.fetch.mockImplementation(async (url: string) => {
+      const params = new URL(url).searchParams;
+      if (params.get('term')?.includes(') NOT (') && params.get('retmax') === '0') throw new Error('増える集合の失敗');
+      return original(url);
+    });
+    const result = await runQueryOptimization(f.input, f.deps);
+    expect(result).toMatchObject({ stopReason: 'held_candidates_collected', status: 'needs_review', iterations: 3 });
+    expect(f.input.maxIterations).toBeGreaterThanOrEqual(5);
+    expect(result.best?.formula).toEqual(f.input.initialFormula);
+    expect(result.trials.filter((trial) => trial.held)).toHaveLength(3);
+    expect(result.unmetReasons).toContain(heldTargetGuidance);
+    expect(result.unmetReasons).toContain('件数を減らす候補を 3 件保留しました（削除影響の確認を参照）。');
+  });
+
+  test.each([false, true])('却下の間の成果ある保留 %s で改善なし回数をリセットする', async (held) => {
+    const f = fixture((held ? ['a[tiab] OR spare[tiab]', 'b[tiab]', 'a[tiab] OR spare[tiab]', 'a[tiab] OR spare[tiab]']
+      : ['a[tiab] OR spare[tiab]', 'a[tiab] OR spare[tiab]']).map((expression) => ({ expression })));
+    const result = await runQueryOptimization(f.input, f.deps);
+    expect(result.stopReason).toBe('no_improvement');
+    expect(f.chat).toHaveBeenCalledTimes(held ? 4 : 2);
+    expect(result.unmetReasons).toContain(held ? heldTargetGuidance : hitTargetGuidance);
+  });
+
+  test.each(['lost', 'gained'] as const)('成果のない差集合 %s の測定失敗は 2 回で改善なしになる', async (stage) => {
+    const f = fixture([{ expression: 'b[tiab]', replaced: [{ before: 'spare[tiab]', after: 'b[tiab]' }] }],
+      stage === 'gained' ? { 'b[tiab]': [...papers(4, ['11']), '22'], 'fixed[tiab]': papers(20, ['11', '101', '102', '103', '22']) } : {});
+    if (stage === 'gained') {
+      f.input.seedPmids.push('22');
+      f.input.maxHits = 2;
+      f.input.initialFormula.blocks[0]!.expression = 'a[tiab]';
+      // 未捕捉シードを回収する追加候補で、失う集合だけは 0 件にする。
+      f.chat.mockResolvedValue({ text: JSON.stringify({ target_block_id: '1', proposed_expression: 'a[tiab] OR b[tiab]', added_terms: ['b[tiab]'] }) });
+    }
+    const original = f.fetch.getMockImplementation()!;
+    f.fetch.mockImplementation(async (url: string) => {
+      const params = new URL(url).searchParams;
+      if (params.get('term')?.includes(') NOT (') && params.get('retmax') === (stage === 'lost' ? '10000' : '0')) throw new Error('差集合の失敗');
+      return original(url);
+    });
+    const result = await runQueryOptimization(f.input, f.deps);
+    expect(result).toMatchObject({ stopReason: 'no_improvement', iterations: 2 });
+    expect(result.trials.filter((trial) => trial.held)).toHaveLength(2);
+  });
+
+  test('検索集合が同じ削除は差集合 2 回で冗長整理として採用する', async () => {
+    const f = fixture([{ expression: 'a[tiab]' }]);
+    f.input.maxIterations = 1;
+    const result = await runQueryOptimization(f.input, f.deps);
+    expect(differences(f)).toHaveLength(2);
+    expect(result.trials[1]).toMatchObject({ accepted: true, held: false, impact: { lostHits: 0, gainedHits: 0 } });
+    expect(result.trials[1]!.reason).toContain('冗長整理');
+    expect(result.best?.formula.blocks[0]!.expression).toBe('a[tiab]');
+    expect(f.fetch.mock.calls.some(([url]) => url.includes('efetch.fcgi'))).toBe(false);
+  });
+
+  test('同件数でも集合が変わる削除は保留せず差集合を残して却下する', async () => {
+    const after = ['11', '101', '102', '999'];
+    const f = fixture([{ expression: 'a[tiab] OR b[tiab]' }], { 'a[tiab]': ['11', '101'],
+      'b[tiab]': ['11', '102', '999'], 'spare[tiab]': ['101', '102', '103'],
+      'fixed[tiab]': papers(20, [...after, '103']) });
+    f.input.initialFormula.blocks[0]!.expression = '(a[tiab] AND b[tiab]) OR spare[tiab]';
+    // 語の差分は削除のみでも、AND/OR の変更を含むため同件数で集合が入れ替わる。
+    assertSetTransition(f.before, after, { beforeHits: 4, afterHits: 4, lostHits: 1, gainedHits: 1 });
+    f.input.maxIterations = 1;
+    const result = await runQueryOptimization(f.input, f.deps);
+    expect(result.trials[1]).toMatchObject({ accepted: false, held: false, impact: { lostHits: 1, gainedHits: 1 } });
+    expect(result.trials[1]!.reason).toContain('増える集合 1 件');
+  });
+
+  test.each(['lost', 'gained'] as const)('冗長整理の差集合 %s が失敗した式は再提案で再測定する', async (stage) => {
+    const f = fixture([{ expression: 'a[tiab]' }]);
+    f.input.maxIterations = 2;
+    const original = f.fetch.getMockImplementation()!;
+    let failed = false;
+    f.fetch.mockImplementation(async (url: string) => {
+      const params = new URL(url).searchParams;
+      if (!failed && params.get('term')?.includes(') NOT (') && params.get('retmax') === (stage === 'lost' ? '10000' : '0')) {
+        failed = true;
+        throw new Error('冗長整理の差集合失敗');
+      }
+      return original(url);
+    });
+    const result = await runQueryOptimization(f.input, f.deps);
+    expect(result.trials[1]).toMatchObject({ accepted: false, held: false, impact: { [stage === 'lost' ? 'lostHits' : 'gainedHits']: null } });
+    expect(result.trials[1]!.reason).toContain('未測定');
+    expect(result.trials[1]!.reason).toContain('冗長整理の差集合失敗');
+    expect(result.trials[2]).toMatchObject({ accepted: true });
+    expect(differences(f)).toHaveLength(4);
+  });
+
+  test.each(['added', 'replaced', 'implicit'] as const)('同件数でも追加・置換 %s は差集合を測らない', async (kind) => {
+    const f = fixture([{ expression: kind === 'implicit' ? 'a[tiab] OR spare[tiab] OR extra[tiab]' : 'a[tiab]',
+      added: kind === 'added' ? ['a[tiab]'] : [],
+      replaced: kind === 'replaced' ? [{ before: 'spare[tiab]', after: 'a[tiab]' }] : [] }], { 'extra[tiab]': [] });
+    f.input.maxIterations = 1;
+    const result = await runQueryOptimization(f.input, f.deps);
+    expect(result.trials[1]).toMatchObject({ accepted: false, after: { totalHits: 4 } });
+    expect(differences(f)).toHaveLength(0);
+  });
+
+  test('未捕捉シードがある同件数の削除は測定前に却下する', async () => {
+    const f = fixture([{ expression: 'a[tiab]' }]);
+    f.input.seedPmids.push('22');
+    f.input.maxHits = 2;
+    f.input.maxIterations = 1;
+    const result = await runQueryOptimization(f.input, f.deps);
+    expect(result.trials[1]).toMatchObject({ accepted: false, after: null });
+    expect(result.trials[1]!.reason).toContain('削除案を受け付けません');
+    expect(differences(f)).toHaveLength(0);
+  });
+
+  test('診断ブロックの連続保留と保留 3 件が同時なら診断を優先する', async () => {
+    const f = fixture([{ expression: 'b[tiab]' }, { id: '2', expression: 'c[tiab]' }, { expression: 'd[tiab]' }], {}, true);
+    const result = await runQueryOptimization(f.input, f.deps);
+    expect(result.trials.filter((trial) => trial.held)).toHaveLength(3);
+    expect(result).toMatchObject({ stopReason: 'diagnosed_block_held', iterations: 3 });
+  });
+});
 
 describe('同一スナップショットの PMID 集合 fixture', () => {
   test.each([
@@ -385,7 +664,7 @@ test('シードを維持して上限を満たす候補も失う集合があれ�
   expect(result.status).toBe('needs_review');
   expect(result.unmetReasons).toContain('レビュー候補として保留: candidate-1（失う 2 件・増える 0 件）');
   expect(fetch.mock.calls.some(([url]) => url.includes('efetch.fcgi') && decodeURIComponent(url).includes('901,902'))).toBe(true);
-  expect(result.apiCalls).toBe(fetch.mock.calls.length + 1);
+  expect(result.apiCalls).toBe(fetch.mock.calls.length + 2);
 });
 
 test.each(['both', 'gained', 'efetch'])('差集合・書誌取得の失敗 %s は実測済み件数を保ち保留する', async (failure) => {
@@ -455,16 +734,16 @@ test('削除影響は run の予算で測り、閾値超過の確認書誌を無
   expect(result.trials[1]?.impact?.inspected).toHaveLength(20);
   const url = fetch.mock.calls.find(([resource]) => resource.includes('efetch.fcgi'))![0] as string;
   expect(new URL(url).searchParams.get('id')!.split(',')).toEqual(result.trials[1]!.impact!.sample!.pmids);
-  expect(result.apiCalls).toBe(fetch.mock.calls.length + 1);
+  expect(result.apiCalls).toBe(fetch.mock.calls.length + 2);
 });
 
-test('2 回の保留は改善なしで停止し次の AI に理由と件数を渡す', async () => {
+test('2 回の保留は次の AI に理由と件数を渡し、その後の同一式却下 2 回で停止する', async () => {
   const { input, deps, chat } = setup({ a: { pmids: papers(200, ['11', '22']) },
     b: { pmids: papers(50, ['11', '22']) },
     c: { pmids: papers(40, ['11', '22']) } }, ['b[tiab]', 'c[tiab]']);
   const result = await runQueryOptimization(input, deps);
   expect(result.stopReason).toBe('no_improvement');
-  expect(chat).toHaveBeenCalledTimes(2);
+  expect(chat).toHaveBeenCalledTimes(4);
   expect(result.trials.filter((trial) => trial.held)).toHaveLength(2);
   const prompt = chat.mock.calls[1]![0][1].content as string;
   for (const text of ['"held": true', '"lostHits": 150', '失う集合 150 件']) expect(prompt).toContain(text);
@@ -754,7 +1033,7 @@ test('上限だけ満たしてシードを失う候補は却下し、次の AI �
     c: { pmids: papers(150, ['11', '22']) } }, ['b[tiab]', 'c[tiab]']);
   input.maxIterations = 2;
   const result = await runQueryOptimization(input, deps);
-  expect(result).toMatchObject({ status: 'needs_review', stopReason: 'no_improvement' });
+  expect(result).toMatchObject({ status: 'needs_review', stopReason: 'iteration_limit' });
   expect(result.best?.measurement.totalHits).toBe(200);
   expect(result.best?.formula.blocks[0]?.expression).toBe('a[tiab]');
   expect(result.unmetReasons.join(' ')).toContain('目安件数 100');
@@ -1800,7 +2079,7 @@ test('保留式の再提案は申告が空でも通信せず一致 ID と実差�
       added_terms: [], removed_terms: [], replaced_terms: [] }) };
   });
   const result = await runQueryOptimization(f.input, f.deps);
-  expect(result).toMatchObject({ stopReason: 'no_improvement', iterations: 2 });
+  expect(result).toMatchObject({ stopReason: 'no_improvement', iterations: 3 });
   expect(f.fetch.mock.calls.length).toBe(callCounts[1]);
   expect(result.trials[2]).toMatchObject({ duplicateOf: 'candidate-1', after: null, accepted: false,
     reason: '評価済みの同一式の再提案のため測定せずに却下（candidate-1 と同じ式）',
@@ -1854,9 +2133,11 @@ test('実式差分は表記揺れを除外しブロック追加削除と結合�
   ]);
 });
 
-const hitTargetGuidance = '既に捕捉している文献を失わずに件数を減らす変更は見つかりませんでした。件数を減らす候補には未確認の損失があります。これは件数を減らせないことの証明ではありません。検索戦略のレビュー（概念と検索語の対応・AND/OR の論理・フィルタの適用対象）か、目安件数の見直しを検討してください。';
+const heldTargetGuidance = '件数を減らす候補は見つかりましたが、既に捕捉している文献を失うため自動採用していません。自動調整は捕捉済みの文献を失わない変更だけを自動採用するので、自動では件数は減りません。件数を減らすには、保留候補を最終レビューで判定して採用するか、検索戦略のレビュー・目安件数の見直しを検討してください。';
 
-describe.each(['no_improvement', 'diagnosed_block_held', 'iteration_limit', 'repeated_formula', 'user_stop', 'api_budget'] as const)(
+const hitTargetGuidance = '件数を減らす変更案は得られませんでした。これは件数を減らせないことの証明ではありません。自動調整は捕捉済みの文献を失わない変更だけを自動採用するので、自動では件数は減りません。検索戦略のレビュー（概念と検索語の対応・AND/OR の論理・フィルタの適用対象）か、目安件数の見直しを検討してください。';
+
+describe.each(['held_candidates_collected', 'no_improvement', 'diagnosed_block_held', 'iteration_limit', 'repeated_formula', 'user_stop', 'api_budget'] as const)(
   '終了理由 %s の件数の案内', (reason) => {
     test.each([80, 100, 200])('最終実測 %s 件が目安を超えた対象の終了理由だけ案内する', async (hits) => {
       const f = setup({ a: { pmids: papers(hits, ['11']) } });
@@ -1882,7 +2163,7 @@ test('目安超過で反復上限に達したら保留した試行数を案内�
   const result = await runQueryOptimization(f.input, f.deps);
   expect(result.stopReason).toBe('iteration_limit');
   expect(result.trials.filter((trial) => trial.held)).toHaveLength(1);
-  const index = result.unmetReasons.indexOf(hitTargetGuidance);
+  const index = result.unmetReasons.indexOf(heldTargetGuidance);
   expect(index).toBeGreaterThanOrEqual(0);
   expect(result.unmetReasons[index + 1]).toBe('件数を減らす候補を 1 件保留しました（削除影響の確認を参照）。');
 });
@@ -1899,7 +2180,7 @@ test('件数が減る保留と増える保留が混在すると減る候補だ�
   const result = await runQueryOptimization(f.input, f.deps);
   expect(result.stopReason).toBe('no_improvement');
   expect(result.trials.filter((trial) => trial.held).map((trial) => trial.after?.totalHits)).toEqual([150, 250]);
-  const index = result.unmetReasons.indexOf(hitTargetGuidance);
+  const index = result.unmetReasons.indexOf(heldTargetGuidance);
   expect(index).toBeGreaterThanOrEqual(0);
   expect(result.unmetReasons[index + 1]).toBe('件数を減らす候補を 1 件保留しました（削除影響の確認を参照）。');
 });
@@ -1950,7 +2231,7 @@ test('目安件数と既知シードの捕捉を満たした終了には件数�
 
 test.each([
   ['conditions_met', '目安件数と既知シードの捕捉を満たしたため終了しました。'],
-  ['no_improvement', '件数を減らしつつ既に捕捉している文献を失わない変更が、連続して見つからなかったため終了しました。'],
+  ['no_improvement', '採用できる変更も、人に判断を求める保留候補も得られない回が 2 回続いたため終了しました。'],
   ['diagnosed_block_held', '診断したブロックを狭める案が、既に捕捉している文献を失うため連続して保留になり、終了しました。'],
 ] as const)('終了理由 %s は満たした条件や保留の理由を明示する', (reason, message) => {
   expect(new QueryOptimizationStopError(reason).message).toBe(message);
