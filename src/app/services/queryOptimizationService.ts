@@ -34,6 +34,7 @@ import { resolveRateLimiter } from '@/lib/ncbi/eutils';
 import type { LlmProviderFactory } from './llmProviderService';
 import { formulaFingerprint, evaluateQuery, type QueryEvaluation } from './queryEvaluationService';
 import { saveQueryOptimizationCheckpoint, type OptimizationBudget } from './queryOptimizationCheckpointService';
+import { HELD_CANDIDATE_ADOPTION_LOST_HITS_THRESHOLD } from './queryOptimizationReviewSections';
 
 export interface QueryOptimizationInput {
   projectId: string;
@@ -240,6 +241,7 @@ export async function runQueryOptimization(
   const diagnosisCounts = new Map<string, number>();
   let apiCalls = 0;
   let lastSavedApiCalls = 0;
+  let progressSave: Promise<void> | undefined;
   let termApiCalls = 0;
   let termBudgetExhausted = false;
   let termBudgetReserved = false;
@@ -476,15 +478,19 @@ export async function runQueryOptimization(
     boundary();
   };
   async function persistProgress(): Promise<void> {
+    // 保存待ちの間も通信を進めると、未記録の通信が間隔の上限を超える。
     // 初回の未検証式しかない通常 run は、初期評価が終わるまで復元対象にしない。
     if (!best && !fixed.resumeBudget) return;
-    if (apiCalls - lastSavedApiCalls < CHECKPOINT_API_CALL_INTERVAL) return;
+    if (apiCalls - lastSavedApiCalls < CHECKPOINT_API_CALL_INTERVAL) return progressSave;
     const options = checkpointOptions();
     // 判定と更新を await 前に済ませ、並行通信の重複保存を防ぐ。
     // 保存失敗は呼び出し側へ伝え、基準は戻さない。次の保存が最大9通信遅れるだけで、累積消費量は変えない。
     lastSavedApiCalls = apiCalls;
-    await saveQueryOptimizationCheckpoint(options, deps.checkpoint);
-    checkpointWritten = true;
+    const saving = saveQueryOptimizationCheckpoint(options, deps.checkpoint)
+      .then(() => { checkpointWritten = true; })
+      .finally(() => { if (progressSave === saving) progressSave = undefined; });
+    progressSave = saving;
+    await saving;
   }
   function checkpointOptions() {
     return { projectId: fixed.projectId, runId: fixed.runId, maxHits: fixed.maxHits, trials, blockDiagnosis,
@@ -658,12 +664,13 @@ export async function runQueryOptimization(
   const measureImpact = async (before: PubmedFormula, after: PubmedFormula): Promise<OptimizationImpact> => {
     task = null;
     notify();
-    const impact: OptimizationImpact = { lostHits: null, gainedHits: null, inspected: [], error: null };
-    const failure = (err: unknown): void => {
+    const impact: OptimizationImpact = { lostHits: null, gainedHits: null, inspected: [], error: null, failedMeasurements: [] };
+    const failure = (err: unknown, measurement: 'lost_search' | 'lost_fetch' | 'gained_search'): void => {
       if (err instanceof QueryOptimizationStopError) throw err;
       boundary();
       apiEvent('failure');
       const message = err instanceof Error ? err.message : String(err);
+      impact.failedMeasurements!.push(measurement);
       impact.error = impact.error ? `${impact.error} / ${message}` : message;
     };
     const original = expandFormula(before);
@@ -675,21 +682,22 @@ export async function runQueryOptimization(
       if (lost.count > 0) {
         const retrieved = [...new Set(lost.pmids)];
         const seed = Math.floor((deps.random ?? Math.random)() * 2 ** 32) >>> 0;
-        pmids = samplePmids(retrieved, INSPECT_LIMIT, seed);
+        const inspectLimit = lost.count <= HELD_CANDIDATE_ADOPTION_LOST_HITS_THRESHOLD ? lost.count : INSPECT_LIMIT;
+        pmids = samplePmids(retrieved, inspectLimit, seed);
         impact.sample = {
           method: lost.count <= 10000 && retrieved.length === lost.count ? 'all' : 'retrieved_subset',
           seed, populationCount: lost.count, retrievedCount: retrieved.length,
           pmids, sampledAt: new Date(now()).toISOString(),
         };
       }
-    } catch (err) { failure(err); }
+    } catch (err) { failure(err, 'lost_search'); }
     try {
       impact.gainedHits = (await esearch(`(${candidate}) NOT (${original})`, eutils, { retmax: 0 })).count;
-    } catch (err) { failure(err); }
+    } catch (err) { failure(err, 'gained_search'); }
     if (impact.lostHits !== null && impact.lostHits > 0) {
       try {
         impact.inspected = (await efetchArticles(pmids, eutils)).map(({ pmid, title, year }) => ({ pmid, title, year }));
-      } catch (err) { failure(err); }
+      } catch (err) { failure(err, 'lost_fetch'); }
     }
     return impact;
   };
@@ -907,10 +915,21 @@ export async function runQueryOptimization(
         const invalid = validateOptimizationCandidate(fixed.initialFormula, candidate, fixed.approvedBlocks, proposal)
           ?? (best.measurement.missedPmids?.length && removed.length
             ? `未捕捉シードがある間は削除案を受け付けません（回収を優先: 同義語追加・MeSH 拡張。削除とみなした語: ${removed.join(', ')}）` : null);
-        const duplicateOf = invalid ? undefined : seen.get(await formulaFingerprint(candidate));
+        const candidateFingerprint = invalid ? undefined : await formulaFingerprint(candidate);
+        // 人が最終レビューで「除外」を選んだ変更は、実測前に却下する（評価済み重複と同じ場所・別の理由）。
+        const humanRejection = candidateFingerprint
+          ? fixed.previousRejectedTrials?.find((rejection) => rejection.rejectedByHuman && rejection.fingerprint === candidateFingerprint)
+          : undefined;
+        const duplicateOf = candidateFingerprint && !humanRejection ? seen.get(candidateFingerprint) : undefined;
         if (invalid) {
           trials.push(makeTrial({ ...details, candidateId, formula: candidate, before: best.measurement,
             after: null, accepted: false, reason: invalid, rationale: proposal.rationale }));
+          noImprovement += 1;
+          await save();
+        } else if (humanRejection) {
+          trials.push(makeTrial({ ...details, candidateId, formula: candidate, before: best.measurement,
+            after: null, accepted: false,
+            reason: `人が除外した候補と同じ式のため測定せずに却下（${humanRejection.reason}）`, rationale: proposal.rationale }));
           noImprovement += 1;
           await save();
         } else if (duplicateOf !== undefined) {

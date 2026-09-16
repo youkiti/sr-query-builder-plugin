@@ -1,9 +1,10 @@
 import { renderGenerationNotice } from './generationNotice';
 import { blockDiagnosisLines } from '@/features/validation/blockDiagnosis';
+import type { OptimizationTrial } from '@/features/formula/skills/optimizeQuery';
 import { serializePubmedFormulaMd } from '@/lib/search-formula-md';
 import { buildPubmedSearchUrl } from '@/lib/ncbi/pubmedUrl';
 import type { QueryOptimizationRunState } from '../store';
-import { buildOptimizationReviewSections, type ReviewSectionState } from '../services/queryOptimizationReviewSections';
+import { buildOptimizationReviewSections, evaluateHeldCandidateAdoptionGate, type ReviewSectionState } from '../services/queryOptimizationReviewSections';
 
 export interface OptimizationReviewActions {
   adopt: (() => Promise<void>) | undefined;
@@ -11,6 +12,95 @@ export interface OptimizationReviewActions {
   blocks: (() => void) | undefined;
   decide?: (pmid: string, decision: 'include' | 'exclude' | 'maybe') => Promise<void>;
   readjust?: () => Promise<void>;
+  /** 保留候補（issue #172）を採用して保存する。ゲート未達・除外済みの判定は呼び出し先が行う。 */
+  adoptHeld?: (candidateId: string) => Promise<void>;
+  /** 保留候補の式を初期式にして再調整を始める。 */
+  readjustHeld?: (candidateId: string) => Promise<void>;
+  /** 保留候補を人が「除外」する。 */
+  rejectHeld?: (candidateId: string) => void;
+  /** 「除外」を取り消す。 */
+  undoRejectHeld?: (candidateId: string) => void;
+}
+
+/**
+ * 保留候補ごとの 3 操作カード（issue #172）。「削除影響の確認」区分の該当行の直後に置く。
+ * 押せる／押せないの判定は evaluateHeldCandidateAdoptionGate だけを根拠にし、view 側で
+ * 別の条件を作らない（採用ゲート・除外の意味を 1 箇所に保つ）。
+ */
+function renderHeldCandidateCard(
+  doc: Document, run: QueryOptimizationRunState, trial: OptimizationTrial, actions: OptimizationReviewActions
+): HTMLElement {
+  const card = doc.createElement('article');
+  card.className = 'optimization__held-candidate';
+  card.setAttribute('aria-label', `保留候補 ${trial.candidateId} の操作`);
+  const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions, {
+    bestCapturedPmids: run.result?.best?.measurement.capturedPmids,
+    unjudgedSeedPmids: run.outsideCheck?.unjudgedSeedPmids,
+  });
+  const impact = trial.impact;
+  const unconfirmed = impact?.lostHits != null ? impact.lostHits - gate.judgedCount : null;
+  const summary = doc.createElement('p');
+  summary.textContent = `保留候補 ${trial.candidateId}: 失う ${impact?.lostHits ?? '未測定'} 件・増える ${impact?.gainedHits ?? '未測定'} 件・`
+    + `判定済み ${gate.judgedCount} 件・未確認 ${unconfirmed ?? '不明'} 件`;
+  card.appendChild(summary);
+  const rejected = run.heldRejections?.[trial.candidateId];
+  const savingGlobal = run.save?.status === 'saving';
+  const buttons = doc.createElement('div');
+  buttons.className = 'optimization__review-actions';
+  const adoptButton = doc.createElement('button');
+  adoptButton.type = 'button';
+  adoptButton.textContent = 'この候補を採用して保存';
+  adoptButton.setAttribute('aria-label', `保留候補 ${trial.candidateId} を採用して保存`);
+  adoptButton.disabled = !actions.adoptHeld || !!rejected || !gate.allowed
+    || run.save?.status === 'saving' || run.save?.status === 'saved';
+  adoptButton.addEventListener('click', () => {
+    if (adoptButton.disabled) return;
+    adoptButton.disabled = true;
+    void actions.adoptHeld?.(trial.candidateId);
+  });
+  const readjustButton = doc.createElement('button');
+  readjustButton.type = 'button';
+  readjustButton.textContent = 'これを初期式に再調整';
+  readjustButton.disabled = !actions.readjustHeld || !!rejected || savingGlobal;
+  readjustButton.addEventListener('click', () => { if (!readjustButton.disabled) void actions.readjustHeld?.(trial.candidateId); });
+  const rejectButton = doc.createElement('button');
+  rejectButton.type = 'button';
+  rejectButton.textContent = rejected ? '除外を取り消す' : '除外';
+  rejectButton.disabled = !!run.heldRejectionSaving || (rejected ? !actions.undoRejectHeld : !actions.rejectHeld);
+  rejectButton.addEventListener('click', () => {
+    if (rejectButton.disabled) return;
+    if (rejected) actions.undoRejectHeld?.(trial.candidateId); else actions.rejectHeld?.(trial.candidateId);
+  });
+  buttons.append(adoptButton, readjustButton, rejectButton);
+  card.appendChild(buttons);
+  if (run.heldRejectionSaving) {
+    const notice = doc.createElement('p');
+    notice.setAttribute('role', 'status');
+    notice.textContent = '除外・取り消しを保存中…';
+    card.appendChild(notice);
+  }
+  if (!gate.allowed && gate.reason) {
+    const reason = doc.createElement('p');
+    reason.className = 'optimization__held-gate-reason';
+    reason.textContent = gate.reason;
+    card.appendChild(reason);
+  }
+  if (rejected) {
+    const notice = doc.createElement('p');
+    notice.textContent = `人がこの変更を除外しました（${rejected.rejectedAt}）。次にこの run を再開すると、この式は測定せずに却下されます。`;
+    card.appendChild(notice);
+  }
+  const saveTarget = run.save?.target;
+  const isThisSave = saveTarget?.kind === 'held' && saveTarget.candidateId === trial.candidateId;
+  if (isThisSave) {
+    const status = doc.createElement('p');
+    status.setAttribute('aria-live', 'polite');
+    status.textContent = run.save?.status === 'saving' ? '保存中…'
+      : run.save?.status === 'saved' ? `保存しました（version_id: ${run.save.formulaVersionId}）`
+        : run.save?.status === 'error' ? `保存エラー：${run.save.error}` : '';
+    card.appendChild(status);
+  }
+  return card;
 }
 
 /** 最終候補と初期式を直接比較する。却下案や途中で戻した変更は最終差分へ混ぜない。 */
@@ -75,6 +165,13 @@ export function renderOptimizationReview(
       const p = doc.createElement('p');
       p.textContent = line;
       group.appendChild(p);
+    }
+    // 保留候補ごとの 3 操作（issue #172）は「削除影響の確認」区分の直後に、
+    // その候補の失う件数・判定状況が見える状態で出す。
+    if (item.key === 'deletion_impact') {
+      for (const trial of run.trials.filter((candidate) => candidate.held)) {
+        group.appendChild(renderHeldCandidateCard(doc, run, trial, actions));
+      }
     }
     section.appendChild(group);
   }
@@ -235,8 +332,10 @@ export function renderOptimizationReview(
   const status = doc.createElement('p');
   status.className = 'optimization__save-status';
   status.setAttribute('aria-live', 'polite');
+  // 保留候補の採用も最良候補の保存も run につき 1 回のため、どちらが保存されたか明示する。
+  const savedLabel = run.save?.target?.kind === 'held' ? `保留候補 ${run.save.target.candidateId} の式` : '最良候補';
   status.textContent = run.save?.status === 'saving' ? '保存中…'
-    : run.save?.status === 'saved' ? `保存しました（version_id: ${run.save.formulaVersionId}）` : '';
+    : run.save?.status === 'saved' ? `${savedLabel}を採用して保存しました（version_id: ${run.save.formulaVersionId}）` : '';
   const error = doc.createElement('p');
   error.className = 'optimization__save-error';
   error.setAttribute('aria-live', 'polite');

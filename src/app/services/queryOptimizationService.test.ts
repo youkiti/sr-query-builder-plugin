@@ -8,6 +8,7 @@ import { withRetry, withSignalDeadline, LlmProviderError, type LLMProvider } fro
 import { esearch, sharedEutilsRateLimiters } from '@/lib/ncbi';
 import { validateCombinationExpression } from '@/lib/combination-expression';
 import { samplePmids, diffOptimizationFormula, runQueryOptimization, validateOptimizationCandidate, QueryOptimizationStopError, type QueryOptimizationInput, type QueryOptimizationDeps } from './queryOptimizationService';
+import { evaluateHeldCandidateAdoptionGate } from './queryOptimizationReviewSections';
 
 interface Outcome { pmids: string[]; blockPmids?: Record<string, string[]>;
   articles?: Record<string, { abstract?: string; mesh?: string[] }> }
@@ -409,7 +410,35 @@ test.each(['both', 'gained', 'efetch'])('差集合・書誌取得の失敗 %s �
   expect(result.best?.measurement.totalHits).toBe(200);
 });
 
-test('削除影響は run の予算で測り、確認書誌を無作為抽出した 20 件に制限する', async () => {
+test.each([20, 21, 50, 100, 101])('失う集合 %i 件は閾値以下なら全件取得し、exclude 保存後に採用ゲートを満たせる', async (lostHits) => {
+  const remaining = papers(50, ['11', '22']);
+  const lost = Array.from({ length: lostHits }, (_, index) => String(900 + index));
+  const { input, deps, fetch } = setup({ a: { pmids: [...remaining, ...lost] }, b: { pmids: remaining } });
+  input.maxIterations = 1;
+  input.maxHits = 50;
+  const result = await runQueryOptimization(input, deps);
+  const trial = result.trials[1]!;
+  const expectedCount = lostHits <= 100 ? lostHits : 20;
+  expect(trial).toMatchObject({ held: true, impact: { lostHits, error: null,
+    sample: { method: 'all', populationCount: lostHits, retrievedCount: lostHits } } });
+  expect(trial.impact!.inspected).toHaveLength(expectedCount);
+  const requests = fetch.mock.calls.map(([url]) => new URL(url as string));
+  const bibliography = requests.filter((url) => url.pathname.endsWith('efetch.fcgi'));
+  expect(bibliography).toHaveLength(1);
+  const pmids = bibliography[0]!.searchParams.get('id')!.split(',');
+  expect(pmids).toEqual(trial.impact!.sample!.pmids);
+  if (lostHits <= 100) expect(pmids).toEqual(lost);
+  expect(requests.filter((url) => url.searchParams.get('term')?.includes(') NOT ('))).toHaveLength(2);
+  expect(evaluateHeldCandidateAdoptionGate(trial, undefined, { bestCapturedPmids: result.best?.measurement.capturedPmids }).allowed).toBe(false);
+  const decisions = Object.fromEntries(pmids.map((pmid) => [pmid, {
+    decision: 'exclude' as const, status: 'saved' as const, error: null,
+  }]));
+  expect(evaluateHeldCandidateAdoptionGate(trial, decisions, { bestCapturedPmids: result.best?.measurement.capturedPmids })).toEqual({
+    allowed: true, judgedCount: expectedCount, sampledCount: expectedCount, reason: null,
+  });
+});
+
+test('削除影響は run の予算で測り、閾値超過の確認書誌を無作為抽出した 20 件に制限する', async () => {
   const { input, deps, fetch } = setup({ a: { pmids: papers(200, ['11', '22']) },
     b: { pmids: papers(50, ['11', '22']) } });
   input.maxIterations = 1;
@@ -516,6 +545,23 @@ test('過去の却下式・理由・fingerprint は AI 文脈だけへ渡し、�
   for (const text of ['前回はシードを失った', old.fingerprint, '過去の run の却下記録（未再検証']) expect(prompt).toContain(text);
 });
 
+test('人が「除外」した過去の却下は測定前に却下し、AI 由来の却下・保留とは理由で区別する（issue #172）', async () => {
+  const f = setup({ a: { pmids: papers(300, ['11', '22']) }, b: { pmids: papers(200, ['11', '22']) } });
+  const pastFormula = { ...f.input.initialFormula, blocks: f.input.initialFormula.blocks.map((block) => ({ ...block,
+    expression: block.id === '1' ? 'b[tiab]' : block.expression })) };
+  const rejected = await evaluation.evaluateQuery(pastFormula, f.input.seedPmids, { eutils: f.deps.eutils });
+  f.input.runId = 'resumed';
+  f.input.previousRejectedTrials = [
+    { formula: pastFormula, reason: '前回は保留になった', fingerprint: rejected.fingerprint, rejectedByHuman: true },
+  ];
+  const result = await runQueryOptimization(f.input, f.deps);
+  // 測定していれば after / held が付くが、人の除外は測定前に却下するのでどちらも付かない。
+  expect(result.trials[1]).toMatchObject({ accepted: false, after: null, reason: expect.stringContaining('人が除外した候補と同じ式') });
+  expect(result.trials[1]!.reason).toContain('前回は保留になった');
+  expect(result.trials[1]!.held).toBeFalsy();
+  expect(result.trials[1]!.duplicateOf).toBeUndefined();
+});
+
 test('再開の累積消費量を途中と終了の両方に保存し、再び再開しても元の予算を増やさない', async () => {
   const f = setup({ a: { pmids: papers(300, ['11', '22']) }, b: { pmids: papers(200, ['11', '22']) } });
   const limits = { apiCalls: 200, elapsedMs: 600000, evaluatedTrials: 5 };
@@ -602,36 +648,31 @@ test.each([false, true])('語別計測中は10通信ごとに保存し、未記�
   expect(availability).toMatchObject({ available: true, remaining: { apiCalls: 200 - consumedBefore - 25 } });
 });
 
-test('途中保存が遅くても別の並行通信は送信でき、10通信ごとの保存を重複させない', async () => {
+test('途中保存が遅い場合は同じキーの次の保存を待機し、10通信ごとの記録を重複させない', async () => {
   const f = setup();
   f.input.maxIterations = 1;
   f.input.initialFormula.blocks[0]!.expression = ['a[tiab]', ...Array.from({ length: 20 }, (_, i) => `word${i}[tiab]`)].join(' OR ');
   const releaseWrite = deferred<void>();
-  const sentWhileSaving = deferred<void>();
-  let saving = false;
+  const writeStarted = deferred<void>();
   f.write.mockImplementation(async (items: Record<string, checkpoint.QueryOptimizationCheckpoint>) => {
     if (items.queryOptimizationCheckpoint?.resume?.consumed.apiCalls === 15) {
-      saving = true;
+      writeStarted.resolve();
       await releaseWrite.promise;
-      saving = false;
     }
-  });
-  const fetch = f.fetch.getMockImplementation()!;
-  f.fetch.mockImplementation(async (url: string) => {
-    if (saving && f.fetch.mock.calls.length > 15) sentWhileSaving.resolve();
-    return fetch(url);
   });
   const running = runQueryOptimization(f.input, f.deps);
   try {
-    await sentWhileSaving.promise;
-    expect(saving).toBe(true);
+    await writeStarted.promise;
+    for (let i = 0; i < 100; i += 1) await Promise.resolve();
     const counts = f.write.mock.calls.map(([items]) => items.queryOptimizationCheckpoint.resume.consumed.apiCalls);
     expect(counts.filter((count) => count === 15)).toHaveLength(1);
-    expect(counts.filter((count) => count === 25)).toHaveLength(1);
+    expect(counts.filter((count) => count === 25)).toHaveLength(0);
   } finally { releaseWrite.resolve(); }
   const result = await running;
   expect(result.apiCalls).toBe(f.fetch.mock.calls.length + f.chat.mock.calls.length);
-  expect(f.write.mock.calls[f.write.mock.calls.length - 1]![0].queryOptimizationCheckpoint.resume.consumed.apiCalls).toBe(result.apiCalls);
+  const counts = f.write.mock.calls.map(([items]) => items.queryOptimizationCheckpoint.resume.consumed.apiCalls);
+  expect(counts.filter((count) => count === 25)).toHaveLength(1);
+  expect(counts[counts.length - 1]).toBe(result.apiCalls);
 });
 
 test('中断と再開を重ねても途中保存の通信・時間・評価試行を累積する', async () => {
@@ -1684,9 +1725,9 @@ test('種付き抽出は再現可能で順序に依存せず重複を含まな�
 });
 
 test.each([
-  ['正常系', 100, 100, 'all'], ['正常系: retmax による制限', 10800, 10000, 'retrieved_subset'],
-  ['異常系: PMID 取得不足を意図的に注入', 100, 90, 'retrieved_subset'], ['正常系', 0, 0, undefined],
-] as const)('%s: 失う集合 %s 件・取得 %s 件の抽出記録を保持する', async (_, count, retrieved, method) => {
+  ['正常系', 100, 100, 'all', 100], ['正常系: retmax による制限', 10800, 10000, 'retrieved_subset', 20],
+  ['異常系: PMID 取得不足を意図的に注入', 100, 90, 'retrieved_subset', 90], ['正常系', 0, 0, undefined, 0],
+] as const)('%s: 失う集合 %s 件・取得 %s 件の抽出記録を保持する', async (_, count, retrieved, method, expectedCount) => {
   const pmids = Array.from({ length: retrieved }, (_, i) => String(i + 1000));
   const f = setup({ a: { pmids: count ? [...papers(50, ['11', '22']), ...Array.from({ length: count }, (_, i) => String(i + 1000))] : papers(49, ['11']) },
     b: { pmids: papers(50, ['11', '22']) } });
@@ -1712,13 +1753,19 @@ test.each([
     .filter((url) => url.searchParams.get('term')?.includes(') NOT ('));
   expect(searches.map((url) => url.searchParams.get('retmax'))).toEqual(['10000', '0']);
   if (!method) { expect(impact.sample).toBeUndefined(); return; }
-  const expected = samplePmids(pmids, 20, 2 ** 30);
+  const expected = samplePmids(pmids, expectedCount, 2 ** 30);
   expect(impact.sample).toEqual({ method, seed: 2 ** 30, populationCount: count,
     retrievedCount: retrieved, pmids: expected, sampledAt: '1970-01-01T00:00:01.000Z' });
   expect(expected).not.toEqual(pmids.slice(0, 20));
   const fetchCall = f.fetch.mock.calls.find(([url]) => String(url).includes('efetch.fcgi'))!;
   expect(new URL(fetchCall[0]).searchParams.get('id')!.split(',')).toEqual(expected);
   expect(impact.inspected.map((article) => article.pmid)).toEqual(expected);
+  if (count === 100) {
+    const decisions = Object.fromEntries(expected.map((pmid) => [pmid, {
+      decision: 'exclude' as const, status: 'saved' as const, error: null,
+    }]));
+    expect(evaluateHeldCandidateAdoptionGate(result.trials[1]!, decisions, { bestCapturedPmids: result.best?.measurement.capturedPmids }).allowed).toBe(retrieved === count);
+  }
 });
 
 test('異常系: 重複 PMID を注入し、書誌取得の失敗後も重複のない抽出 PMID を残す', async () => {
@@ -2315,4 +2362,24 @@ describe('通信中のキャンセルと試行単位の予算', () => {
     expect(limited.chat).toHaveBeenCalledTimes(1);
     expect(stopped.apiCalls).toBe(limited.fetch.mock.calls.length + 1);
   });
+});
+
+
+test('増える集合だけの通信失敗なら失う書誌の exclude 保存後に採用できる', async () => {
+  const remaining = papers(50, ['11', '22']);
+  const { input, deps, fetch } = setup({ a: { pmids: [...remaining, '901'] }, b: { pmids: remaining } });
+  input.maxIterations = 1;
+  input.maxHits = 50;
+  const original = fetch.getMockImplementation()!;
+  fetch.mockImplementation(async (url: string) => {
+    const params = new URL(url).searchParams;
+    if (params.get('term')?.includes(') NOT (') && params.get('retmax') === '0') return { ok: false, status: 414 };
+    return original(url);
+  });
+  const result = await runQueryOptimization(input, deps);
+  const trial = result.trials[1]!;
+  expect(trial).toMatchObject({ accepted: false, held: true, impact: {
+    lostHits: 1, gainedHits: null, failedMeasurements: ['gained_search'], error: expect.stringContaining('414'),
+  } });
+  expect(evaluateHeldCandidateAdoptionGate(trial, { '901': { status: 'saved', decision: 'exclude', error: null } }, { bestCapturedPmids: result.best?.measurement.capturedPmids }).allowed).toBe(true);
 });

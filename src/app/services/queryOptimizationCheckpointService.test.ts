@@ -1,5 +1,5 @@
 import type { ProjectStoreDeps } from '@/features/project';
-import { updateQueryOptimizationReviewSections } from './queryOptimizationCheckpointService';
+import { updateQueryOptimizationReviewSections, updateQueryOptimizationHeldRejections } from './queryOptimizationCheckpointService';
 import type { OptimizationReviewSection } from './queryOptimizationReviewSections';
 import { createStore, INITIAL_STATE, type BlocksDraft, type ProtocolDraft } from '../store';
 import type { OptimizationTrial } from '@/features/formula/skills/optimizeQuery';
@@ -210,4 +210,28 @@ test('抽出情報と実差分・重複 ID を複製して要約へ保存する'
   trial.formulaDiff[0]!.added.push('c[tiab]');
   expect(saved.trials[0]!.sample!.pmids).toEqual(['901']);
   expect(saved.trials[0]!.formulaDiff![0]!.added).toEqual(['b[tiab]']);
+});
+
+
+test('除外・確認状況・取消・次 run の保存は同じキーの read→write を直列化する', async () => {
+  const { deps, options } = setup();
+  await saveQueryOptimizationCheckpoint({ ...options,
+    completion: { status: 'needs_review', stopReason: 'iteration_limit', unmetReasons: [] } }, deps);
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  const original = deps.write;
+  const write = jest.spyOn(deps, 'write').mockImplementationOnce(async (items) => { await pending; await original(items); });
+  const read = jest.spyOn(deps, 'read');
+  const reject = updateQueryOptimizationHeldRejections('p', 'run', { initial: { rejectedAt: 'now' } }, deps);
+  await Promise.resolve(); await Promise.resolve();
+  const review = updateQueryOptimizationReviewSections('p', 'run', [], deps);
+  const undo = updateQueryOptimizationHeldRejections('p', 'run', {}, deps);
+  await Promise.resolve(); await Promise.resolve();
+  expect(read).toHaveBeenCalledTimes(1);
+  expect(write).toHaveBeenCalledTimes(1);
+  release();
+  await Promise.all([reject, review, undo]);
+  expect(await getQueryOptimizationCheckpoint('p', deps)).toMatchObject({ heldRejections: {}, completion: { reviewSections: [] } });
+  await saveQueryOptimizationCheckpoint({ ...options, runId: 'next' }, deps);
+  expect(await getQueryOptimizationCheckpoint('p', deps)).toMatchObject({ inheritedHumanRejections: [] });
 });

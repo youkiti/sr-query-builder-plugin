@@ -152,6 +152,8 @@ export interface GenerationNotices {
 }
 
 export interface OptimizationOutsideCheckState {
+  /** SeedPapers に登録済みだが、人による判定はない保護対象。判定件数には含めない。 */
+  unjudgedSeedPmids?: string[];
   status: 'running' | 'ready' | 'error' | 'skipped';
   reason: string | null;
   originalHits: number | null;
@@ -171,13 +173,26 @@ export interface OptimizationOutsideCheckState {
   }>;
 }
 
+/**
+ * 採用保存が「最良候補」と「保留候補」のどちらから起きたかを区別する。
+ * 未指定（旧データ含む）は最良候補として扱う。
+ */
+export type OptimizationSaveTarget = { kind: 'best' } | { kind: 'held'; candidateId: string };
+
 /** 自動調整の実測候補を、実行終了後もレビュー用に保持する。 */
 export interface QueryOptimizationRunState {
   generationNotices?: GenerationNotices;
   blockDiagnosis?: QueryOptimizationResult['blockDiagnosis'];
   outsideCheck?: OptimizationOutsideCheckState;
-  /** 未指定は人がまだ採用保存を要求していない状態。 */
-  save?: FormulaSaveState;
+  /** 未指定は人がまだ採用保存を要求していない状態。保存は run につき 1 回（最良候補・保留候補のどちらか）。 */
+  save?: FormulaSaveState & { target?: OptimizationSaveTarget };
+  /**
+   * 保留候補ごとの「除外」判断（issue #172）。人が失う集合を見て受け入れないと決めたことを記録し、
+   * 押し間違いを取り消せるようキーを削除するだけで取り消しになる。チェックポイントへも反映する。
+   */
+  heldRejections?: Record<string, { rejectedAt: string }>;
+  /** 除外・取消のチェックポイント保存待ち。全候補の同操作を無効化する。 */
+  heldRejectionSaving?: boolean;
   /** 初期式の準備が完了した時点で固定する。準備前は存在しない。 */
   inputSnapshot?: {
     researchQuestion: string;

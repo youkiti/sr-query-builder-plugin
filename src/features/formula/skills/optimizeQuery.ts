@@ -85,6 +85,8 @@ export interface OptimizationMeshRequestResult {
 }
 
 export interface OptimizationImpact {
+  /** 失敗した通信を区別する。未指定の旧記録は error を使って保守的に判定する。 */
+  failedMeasurements?: ('lost_search' | 'lost_fetch' | 'gained_search')[];
   /** 変更前 NOT 変更後 の実測件数。失敗時は null（未測定を 0 件として扱わない）。 */
   lostHits: number | null;
   /** 変更後 NOT 変更前 の実測件数。失敗時は null。 */
@@ -152,6 +154,11 @@ export interface PreviousOptimizationRejection {
   formula: PubmedFormula;
   reason: string;
   fingerprint: string | null;
+  /**
+   * 最終レビューで人が「除外」を選んだ判断か。true は人が失う集合を見て受け入れないと
+   * 判断したことを示し、未指定（旧形式含む）は AI による却下・保留として扱う。
+   */
+  rejectedByHuman?: boolean;
 }
 
 export interface OptimizeQueryInput {
@@ -218,6 +225,9 @@ export const OPTIMIZE_QUERY_SYSTEM_PROMPT = `
   一覧の削除を同じ形で出しても、失う集合が残る限り再び保留になります。
   件数を減らしたいときは、語を削る代わりにブロックの語を特異的な語と AND で組み合わせる、
   下位の MeSH に置き換える、といった狭める案を検討してください。採否は実測で決まります。
+- 過去の run の却下記録のうち rejectedByHuman が true のものは、人が失う集合を見て
+  明示的に受け入れないと判断した変更です。同じ式を再度提案しても測定せずに却下されるため、
+  別の変更を検討してください。
 - rationale は日本語で研究基準との意味的整合性の検討結果を含めます。
   これは AI の判断であって機械的な保証ではありません。
 - 件数の予想は出力しません。measurement_ids には実際に参照した測定 ID だけを返します。

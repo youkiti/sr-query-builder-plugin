@@ -8,6 +8,21 @@ import type { BlocksDraft, ProtocolDraft } from '../store';
 
 const CHECKPOINT_KEY = 'queryOptimizationCheckpoint';
 
+// 同じ保存キーの読み取りから書き込み完了までを直列化する。失敗しても後続は処理する。
+let checkpointUpdates: Promise<unknown> = Promise.resolve();
+function serializeCheckpointUpdate<T>(update: () => Promise<T>): Promise<T> {
+  const pending = checkpointUpdates.then(update);
+  checkpointUpdates = pending.catch(() => undefined);
+  return pending;
+}
+
+/** 再開予算とは独立して、同じプロジェクトで人が除外した式を引き継ぐ。 */
+export function getHumanRejectedTrials(checkpoint: QueryOptimizationCheckpoint | null | undefined): PreviousOptimizationRejection[] {
+  return [...(checkpoint?.inheritedHumanRejections ?? []), ...(checkpoint?.trials ?? [])
+    .filter((trial) => checkpoint?.heldRejections?.[trial.candidateId])
+    .map(({ formula, reason, fingerprint }) => ({ formula, reason, fingerprint, rejectedByHuman: true }))];
+}
+
 export interface OptimizationBudget {
   apiCalls: number;
   elapsedMs: number;
@@ -103,6 +118,13 @@ export interface QueryOptimizationCheckpoint {
   resume?: OptimizationResumeData;
   /** 未指定は実行途中（旧形式のチェックポイントも含む）。 */
   completion?: QueryOptimizationCompletion;
+  /** 過去の run から引き継いだ人の除外式。現在の run の取消は heldRejections で管理する。 */
+  inheritedHumanRejections?: PreviousOptimizationRejection[];
+  /**
+   * 最終レビューで人が「除外」を選んだ保留候補（candidateId をキーにする）。
+   * 未指定（旧形式含む）は誰も除外していない状態として扱う。取り消すとキーごと消す。
+   */
+  heldRejections?: Record<string, { rejectedAt: string }>;
 }
 
 export interface InterruptedQueryOptimization extends QueryOptimizationCheckpoint {
@@ -132,37 +154,44 @@ export async function saveQueryOptimizationCheckpoint(
   { projectId, runId, maxHits, trials, resume, now = nowIso, completion, blockDiagnosis }: SaveCheckpointOptions,
   deps: ProjectStoreDeps
 ): Promise<QueryOptimizationCheckpoint> {
-  const checkpoint: QueryOptimizationCheckpoint = {
-    projectId, runId, maxHits, savedAt: now(),
-    ...(blockDiagnosis ? { blockDiagnosis: JSON.parse(JSON.stringify(blockDiagnosis)) as NonNullable<QueryOptimizationResult['blockDiagnosis']> } : {}),
-    resume: JSON.parse(JSON.stringify(resume)) as OptimizationResumeData,
-    ...(completion ? { completion: {
-      status: completion.status, stopReason: completion.stopReason, unmetReasons: [...completion.unmetReasons],
-      ...(completion.reviewSections ? { reviewSections: completion.reviewSections.map((section) => ({ ...section, lines: [...section.lines] })) } : {}),
-    } } : {}),
-    trials: trials.map((trial) => ({
-      candidateId: trial.candidateId,
-      ...(trial.impact?.sample ? { sample: { ...trial.impact.sample, pmids: [...trial.impact.sample.pmids] } } : {}),
-      ...(trial.duplicateOf ? { duplicateOf: trial.duplicateOf } : {}),
-      ...(trial.formulaDiff ? { formulaDiff: trial.formulaDiff.map((block) => ({
-        ...block, added: [...block.added], removed: [...block.removed],
-      })) } : {}),
-      formula: {
-        blocks: trial.formula.blocks.map(({ id, expression, isCombination }) => ({ id, expression, isCombination })),
-        combinationExpression: trial.formula.combinationExpression,
-      },
-      totalHits: trial.after?.totalHits ?? null,
-      capturedSeedCount: trial.after?.capturedPmids?.length ?? null,
-      accepted: trial.accepted,
-      held: trial.held ?? false,
-      lostHits: trial.impact?.lostHits ?? null,
-      gainedHits: trial.impact?.gainedHits ?? null,
-      reason: trial.reason,
-      fingerprint: trial.after?.fingerprint ?? null,
-    })),
-  };
-  await deps.write({ [CHECKPOINT_KEY]: checkpoint });
-  return checkpoint;
+  return serializeCheckpointUpdate(async () => {
+    const previous = await deps.read<QueryOptimizationCheckpoint | null>(CHECKPOINT_KEY);
+    const checkpoint: QueryOptimizationCheckpoint = {
+      ...(previous?.projectId === projectId ? {
+        inheritedHumanRejections: previous.runId === runId ? previous.inheritedHumanRejections ?? [] : getHumanRejectedTrials(previous),
+        ...(previous.runId === runId && previous.heldRejections ? { heldRejections: previous.heldRejections } : {}),
+      } : {}),
+      projectId, runId, maxHits, savedAt: now(),
+      ...(blockDiagnosis ? { blockDiagnosis: JSON.parse(JSON.stringify(blockDiagnosis)) as NonNullable<QueryOptimizationResult['blockDiagnosis']> } : {}),
+      resume: JSON.parse(JSON.stringify(resume)) as OptimizationResumeData,
+      ...(completion ? { completion: {
+        status: completion.status, stopReason: completion.stopReason, unmetReasons: [...completion.unmetReasons],
+        ...(completion.reviewSections ? { reviewSections: completion.reviewSections.map((section) => ({ ...section, lines: [...section.lines] })) } : {}),
+      } } : {}),
+      trials: trials.map((trial) => ({
+        candidateId: trial.candidateId,
+        ...(trial.impact?.sample ? { sample: { ...trial.impact.sample, pmids: [...trial.impact.sample.pmids] } } : {}),
+        ...(trial.duplicateOf ? { duplicateOf: trial.duplicateOf } : {}),
+        ...(trial.formulaDiff ? { formulaDiff: trial.formulaDiff.map((block) => ({
+          ...block, added: [...block.added], removed: [...block.removed],
+        })) } : {}),
+        formula: {
+          blocks: trial.formula.blocks.map(({ id, expression, isCombination }) => ({ id, expression, isCombination })),
+          combinationExpression: trial.formula.combinationExpression,
+        },
+        totalHits: trial.after?.totalHits ?? null,
+        capturedSeedCount: trial.after?.capturedPmids?.length ?? null,
+        accepted: trial.accepted,
+        held: trial.held ?? false,
+        lostHits: trial.impact?.lostHits ?? null,
+        gainedHits: trial.impact?.gainedHits ?? null,
+        reason: trial.reason,
+        fingerprint: trial.after?.fingerprint ?? null,
+      })),
+    };
+    await deps.write({ [CHECKPOINT_KEY]: checkpoint });
+    return checkpoint;
+  });
 }
 
 /** 終了記録がない run だけを中断として復元する。完了済みでも新しい測定は必要。 */
@@ -170,6 +199,7 @@ export async function getQueryOptimizationCheckpoint(
   projectId: string,
   deps: ProjectStoreDeps
 ): Promise<InterruptedQueryOptimization | CompletedQueryOptimization | null> {
+  await checkpointUpdates;
   const checkpoint = await deps.read<QueryOptimizationCheckpoint | null>(CHECKPOINT_KEY);
   if (!checkpoint || checkpoint.projectId !== projectId) return null;
   if (checkpoint.completion) return { ...checkpoint, completion: checkpoint.completion, status: 'completed', needsRevalidation: true };
@@ -177,7 +207,7 @@ export async function getQueryOptimizationCheckpoint(
 }
 
 export async function clearQueryOptimizationCheckpoint(deps: ProjectStoreDeps): Promise<void> {
-  await deps.write({ [CHECKPOINT_KEY]: null });
+  await serializeCheckpointUpdate(() => deps.write({ [CHECKPOINT_KEY]: null }));
 }
 
 /** 同じ実行の終了記録だけに、人の判定を反映した確認状況を追記する。 */
@@ -187,7 +217,26 @@ export async function updateQueryOptimizationReviewSections(
   deps: ProjectStoreDeps,
   owns: () => boolean = () => true
 ): Promise<void> {
-  const checkpoint = await deps.read<QueryOptimizationCheckpoint | null>(CHECKPOINT_KEY);
-  if (!owns() || !checkpoint?.completion || checkpoint.projectId !== projectId || checkpoint.runId !== runId) return;
-  await deps.write({ [CHECKPOINT_KEY]: { ...checkpoint, completion: { ...checkpoint.completion, reviewSections } } });
+  await serializeCheckpointUpdate(async () => {
+    const checkpoint = await deps.read<QueryOptimizationCheckpoint | null>(CHECKPOINT_KEY);
+    if (!owns() || !checkpoint?.completion || checkpoint.projectId !== projectId || checkpoint.runId !== runId) return;
+    await deps.write({ [CHECKPOINT_KEY]: { ...checkpoint, completion: { ...checkpoint.completion, reviewSections } } });
+  });
+}
+
+/**
+ * 保留候補の「除外」判断を同じ実行の終了記録へ追記・取り消す。
+ * 同じプロジェクトの次の run が、この候補を測定前に却下できるようにする。
+ */
+export async function updateQueryOptimizationHeldRejections(
+  projectId: string, runId: string,
+  heldRejections: Record<string, { rejectedAt: string }>,
+  deps: ProjectStoreDeps,
+  owns: () => boolean = () => true
+): Promise<void> {
+  await serializeCheckpointUpdate(async () => {
+    const checkpoint = await deps.read<QueryOptimizationCheckpoint | null>(CHECKPOINT_KEY);
+    if (!owns() || !checkpoint?.completion || checkpoint.projectId !== projectId || checkpoint.runId !== runId) return;
+    await deps.write({ [CHECKPOINT_KEY]: { ...checkpoint, heldRejections } });
+  });
 }

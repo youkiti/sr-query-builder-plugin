@@ -187,6 +187,69 @@ test.describe('検索式の自動調整', () => {
     await expect.poll(() => fake.tabs['FormulaVersions']!.length).toBe(3);
     expect(fake.tabs['FormulaVersions']![2]![4]).toContain('"broad"[tiab]');
   });
+
+  test('保留候補の 3 操作が出て、標本を判定するまで採用できない（issue #172）', async ({ page }) => {
+    const { fake } = await setup(page, { hasSeeds: true, holdAi: false, heldLost: 150 });
+    await start(page);
+    await expectReview(page, '要確認');
+    const card = page.getByRole('article', { name: '保留候補 candidate-1 の操作', exact: true });
+    await expect(card).toBeVisible();
+    const heldAdopt = card.getByRole('button', { name: '保留候補 candidate-1 を採用して保存', exact: true });
+    await expect(heldAdopt).toHaveText('この候補を採用して保存');
+    const bestAdopt = page.getByRole('button', { name: '採用して保存', exact: true });
+    await expect(bestAdopt).toHaveCount(1);
+    await expect(bestAdopt).toHaveText('採用して保存');
+    const readjust = card.getByRole('button', { name: 'これを初期式に再調整', exact: true });
+    const reject = card.getByRole('button', { name: '除外', exact: true });
+    // 失う集合 150 件は既定の閾値（100 件）を超えるため、標本を全件判定するまで押せない。
+    await expect(heldAdopt).toBeDisabled();
+    await expect(card).toContainText('件の判定が必要です');
+    await expect(readjust).toBeEnabled();
+    await expect(reject).toBeEnabled();
+    const a11y = await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze();
+    expect(a11y.violations).toEqual([]);
+
+    // 標本の全件を exclude 判定するとゲートが通る。
+    const candidates = page.getByRole('article', { name: /^判定候補 PMID 30000/ });
+    const sampleCount = await candidates.count();
+    for (let index = 0; index < sampleCount; index += 1) {
+      await candidates.nth(index).getByRole('button', { name: 'exclude', exact: true }).click();
+      await expect(candidates.nth(index)).toContainText('exclude：保存済み');
+    }
+    await expect(heldAdopt).toBeEnabled();
+    await expect(card).not.toContainText('件の判定が必要です');
+
+    // 保留候補の採用は最良候補の保存と排他（run につき 1 回）。
+    await heldAdopt.click();
+    await expect(page.locator('.optimization__save-status'))
+      .toContainText('保留候補 candidate-1 の式を採用して保存しました', { timeout: 15_000 });
+    await expect(bestAdopt).toBeDisabled();
+    await expect.poll(() => fake.tabs['FormulaVersions']!.length).toBe(3);
+    expect(fake.tabs['FormulaVersions']![2]![4]).toContain('"ARDS"[tiab]');
+    expect(fake.tabs['FormulaVersions']![2]![4]).not.toContain('"broad"[tiab]');
+  });
+
+  test('保留候補の除外は取り消せ、再調整はその候補の式で新しい run を始める（issue #172）', async ({ page }) => {
+    await setup(page, { hasSeeds: true, holdAi: false, heldLost: 150 });
+    await start(page);
+    await expectReview(page, '要確認');
+    const card = page.getByRole('article', { name: '保留候補 candidate-1 の操作', exact: true });
+    const heldAdopt = card.getByRole('button', { name: '保留候補 candidate-1 を採用して保存', exact: true });
+    const reject = card.getByRole('button', { name: '除外', exact: true });
+    await reject.click();
+    const undo = card.getByRole('button', { name: '除外を取り消す', exact: true });
+    await expect(undo).toBeVisible();
+    await expect(card).toContainText('人がこの変更を除外しました');
+    await expect(heldAdopt).toBeDisabled();
+    await undo.click();
+    await expect(reject).toBeVisible();
+    await expect(card).not.toContainText('人がこの変更を除外しました');
+
+    const readjust = card.getByRole('button', { name: 'これを初期式に再調整', exact: true });
+    await readjust.click();
+    await expect(page.locator('.optimization__status')).toContainText('自動調整を実行中');
+  });
+
   test('設定 → 実行 → 履歴増加 → 目安件数と既知シードの捕捉を満たしました → auto_optimize を一度だけ保存', async ({ page }) => {
     const { fake, release } = await setup(page, { hasSeeds: true, holdAi: true });
     await start(page);

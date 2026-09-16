@@ -9,7 +9,7 @@ declare const __BUILD_DATE__: string;
  */
 
 import { resolveMeshDescriptors } from '@/lib/ncbi/mesh';
-import { adoptQueryOptimization, editQueryOptimization } from './services/queryOptimizationAdoptionService';
+import { adoptHeldOptimizationCandidate, adoptQueryOptimization, editQueryOptimization } from './services/queryOptimizationAdoptionService';
 import { createOptimizationProgressPublisher } from './services/queryOptimizationProgressPublisher';
 import { searchOutsideCandidates } from './services/expandService';
 import { buildOptimizationReviewSections } from './services/queryOptimizationReviewSections';
@@ -76,7 +76,9 @@ import { parsePubmedFormulaMd, type PubmedFormula } from '@/lib/search-formula-m
 import { newUuid } from '@/utils/uuid';
 import { fetchMeshContext } from './services/meshContextService';
 import { createQueryOptimizationInputIdentity, getQueryOptimizationCheckpoint,
-  getQueryOptimizationResumeAvailability, updateQueryOptimizationReviewSections } from './services/queryOptimizationCheckpointService';
+  getQueryOptimizationResumeAvailability, updateQueryOptimizationHeldRejections,
+  getHumanRejectedTrials, updateQueryOptimizationReviewSections } from './services/queryOptimizationCheckpointService';
+import { nowIso } from '@/utils/iso8601';
 import {
   efetchArticles,
   esearch,
@@ -445,6 +447,12 @@ function buildDefaultViewOptions(
       onBlocksFromOptimization: () => navigate('blocks'),
       onDecideOutsideCandidate: (pmid, decision) => runDecideOutsideCandidate(store, runtime, pmid, decision),
       onReadjustOptimization: () => runReadjustOptimization(store, runtime, llmFactoryDepsBase()),
+      // 保留候補（issue #172）の 3 つの出口。ゲート・除外済みの判定はサービス側で行う。
+      onAdoptHeldOptimizationCandidate: (candidateId) => adoptHeldOptimizationCandidate({ store, google: runtime.google }, candidateId),
+      onReadjustHeldOptimizationCandidate: (candidateId) =>
+        runReadjustFromHeldOptimizationCandidate(store, runtime, llmFactoryDepsBase(), candidateId),
+      onRejectHeldOptimizationCandidate: (candidateId) => rejectHeldOptimizationCandidate(store, runtime, candidateId),
+      onUndoRejectHeldOptimizationCandidate: (candidateId) => undoHeldOptimizationCandidateRejection(store, runtime, candidateId),
       onStopOptimization: () => {
         store.setState((s) => s.queryOptimizationRun?.status !== 'running' ? s : {
           ...s, queryOptimizationRun: { ...s.queryOptimizationRun, stopRequested: true },
@@ -1153,6 +1161,7 @@ export async function runOptimizeQuery(
   resumeRunId?: string,
   startingFormula?: PubmedFormula
 ): Promise<void> {
+  if (heldRejectionWrites.has(store)) await heldRejectionWrites.get(store);
   const state = store.getState();
   if (state.queryOptimizationRun?.status === 'running' || state.queryOptimizationRun?.save?.status === 'saving'
     || state.draftRun?.status === 'running') return;
@@ -1204,6 +1213,8 @@ export async function runOptimizeQuery(
     if (!state.protocolDraft || !state.blocksDraft?.blocks.length || !state.protocolDraftPersisted) {
       throw new Error('プロトコルとブロックを承認してください。');
     }
+    const rejectionCheckpoint = await getQueryOptimizationCheckpoint(projectId, runtime.store);
+    check();
     const allSeeds = await listSeedPapers(project.spreadsheetId, runtime.google);
     check();
     const seeds = allSeeds.filter(isSeedEligibleForValidation);
@@ -1266,9 +1277,14 @@ export async function runOptimizeQuery(
       ...(resume?.available ? {
         maxIterations: resume.remaining.evaluatedTrials,
         resumeBudget: { runId: resumeRunId!, limits: resume.data.limits, consumed: resume.data.consumed },
-        previousRejectedTrials: [...resume.data.previousRejectedTrials, ...checkpoint!.trials.filter((trial) => !trial.accepted)
-          .map(({ formula, reason, fingerprint }) => ({ formula, reason, fingerprint }))],
       } : {}),
+      // 人の除外は再開可否と切り離して引き継ぐ。
+      previousRejectedTrials: [
+        ...(resume?.available ? [...resume.data.previousRejectedTrials, ...checkpoint!.trials.filter((trial) => !trial.accepted)
+          .map(({ formula, reason, fingerprint, candidateId }) => ({ formula, reason, fingerprint,
+            rejectedByHuman: checkpoint!.heldRejections?.[candidateId] != null }))] : []),
+        ...getHumanRejectedTrials(rejectionCheckpoint),
+      ],
       // 承認ブロックの blockIndex と組み立て式の ID は、ともに配列順の 1 始まり。
       // BlockDraft に独立 ID がないため、id と approvedBlockId は常に同じ値になる。
       approvedBlocks: state.blocksDraft.blocks.map((block, index) => ({
@@ -1287,12 +1303,17 @@ export async function runOptimizeQuery(
     if (!owns(store.getState())) return;
     update({ result, trials: result.trials, blockDiagnosis: result.blockDiagnosis });
     const outsideCheck: OptimizationOutsideCheckState = {
+      unjudgedSeedPmids: allSeeds.filter((seed) => seed.pmid && seed.userDecision == null).map((seed) => seed.pmid!),
       status: 'skipped', reason: '自動調整が停止・エラーで終了したため外側の確認は未実行です',
       originalHits: null, marginHits: null, evaluatedCount: 0, candidates: [], decisions: {},
     };
+    const savedDecisions = new Map(allSeeds.filter((seed) => seed.pmid && seed.userDecision)
+      .map((seed) => [seed.pmid!, seed.userDecision!]));
     const seen = new Set(existingPmids);
     for (const trial of result.trials.filter((trial) => trial.held)) {
       for (const paper of trial.impact?.inspected ?? []) {
+        const decision = savedDecisions.get(paper.pmid);
+        if (decision) outsideCheck.decisions[paper.pmid] = { decision, status: 'saved', error: null };
         if (seen.has(paper.pmid)) continue;
         seen.add(paper.pmid);
         outsideCheck.candidates.push({ ...paper, abstract: null, source: 'lost', reason: '',
@@ -1418,6 +1439,77 @@ export async function runReadjustOptimization(
     || !decisions.some((item) => item.status === 'saved' && item.decision === 'include')) return;
   await runOptimizeQuery(store, runtime, baseDeps, { maxHits: run.maxHits, maxIterations: run.maxIterations },
     undefined, run.result.best.formula);
+}
+
+/**
+ * 保留候補（issue #172）の式を初期式にして、新しい予算で調整を開始する。
+ * 最良候補の再調整（include 保護）とは別の出口で、include 保存の条件は課さない。
+ */
+export async function runReadjustFromHeldOptimizationCandidate(
+  store: AppStore, runtime: ChromeRuntimeDeps,
+  baseDeps: Omit<LlmFactoryDeps, 'llmLogFolderId' | 'spreadsheetId'>,
+  candidateId: string
+): Promise<void> {
+  const run = store.getState().queryOptimizationRun;
+  const trial = run?.trials.find((item) => item.candidateId === candidateId && item.held);
+  if (!run || !trial || run.projectId !== store.getState().project?.projectId || run.status === 'running'
+    || run.save?.status === 'saving') return;
+  await runOptimizeQuery(store, runtime, baseDeps, { maxHits: run.maxHits, maxIterations: run.maxIterations },
+    undefined, trial.formula);
+}
+
+const heldRejectionWrites = new WeakMap<AppStore, Promise<void>>();
+
+/**
+ * 保留候補を人が「除外」する。式は保存せず、同じプロジェクトの
+ * 次の run がこの式を測定前に却下できるよう、判断だけをチェックポイントへ残す。
+ */
+export function rejectHeldOptimizationCandidate(store: AppStore, runtime: ChromeRuntimeDeps, candidateId: string): void {
+  const state = store.getState();
+  const run = state.queryOptimizationRun;
+  const trial = run?.trials.find((item) => item.candidateId === candidateId && item.held);
+  if (!run || !trial || run.projectId !== state.project?.projectId || run.status === 'running'
+    || heldRejectionWrites.has(store) || run?.heldRejectionSaving || run.heldRejections?.[candidateId]) return;
+  const heldRejections = { ...run.heldRejections, [candidateId]: { rejectedAt: nowIso() } };
+  const runId = run.runId;
+  store.setState((s) => s.queryOptimizationRun?.runId !== runId ? s
+    : { ...s, queryOptimizationRun: { ...s.queryOptimizationRun!, heldRejections, heldRejectionSaving: true } });
+  const pending = updateQueryOptimizationHeldRejections(run.projectId, runId, heldRejections, runtime.store,
+    () => store.getState().queryOptimizationRun?.runId === runId
+  ).catch((err) => {
+    store.setState((s) => s.queryOptimizationRun?.runId !== runId ? s
+      : { ...s, queryOptimizationRun: { ...s.queryOptimizationRun!, heldRejections: run.heldRejections, heldRejectionSaving: true } });
+    console.warn('保留候補の除外をチェックポイントに保存できませんでした', err);
+  }).finally(() => {
+    heldRejectionWrites.delete(store);
+    store.setState((s) => s.queryOptimizationRun?.runId !== runId ? s
+      : { ...s, queryOptimizationRun: { ...s.queryOptimizationRun!, heldRejectionSaving: false } });
+  });
+  heldRejectionWrites.set(store, pending);
+}
+
+/** 「除外」を取り消す（issue #172）。押し間違いを戻せるようにし、記録も消す。 */
+export function undoHeldOptimizationCandidateRejection(store: AppStore, runtime: ChromeRuntimeDeps, candidateId: string): void {
+  const state = store.getState();
+  const run = state.queryOptimizationRun;
+  if (heldRejectionWrites.has(store) || run?.heldRejectionSaving || !run || !run.heldRejections?.[candidateId] || run.projectId !== state.project?.projectId) return;
+  const heldRejections = { ...run.heldRejections };
+  delete heldRejections[candidateId];
+  const runId = run.runId;
+  store.setState((s) => s.queryOptimizationRun?.runId !== runId ? s
+    : { ...s, queryOptimizationRun: { ...s.queryOptimizationRun!, heldRejections, heldRejectionSaving: true } });
+  const pending = updateQueryOptimizationHeldRejections(run.projectId, runId, heldRejections, runtime.store,
+    () => store.getState().queryOptimizationRun?.runId === runId
+  ).catch((err) => {
+    store.setState((s) => s.queryOptimizationRun?.runId !== runId ? s
+      : { ...s, queryOptimizationRun: { ...s.queryOptimizationRun!, heldRejections: run.heldRejections, heldRejectionSaving: true } });
+    console.warn('保留候補の除外の取り消しをチェックポイントに保存できませんでした', err);
+  }).finally(() => {
+    heldRejectionWrites.delete(store);
+    store.setState((s) => s.queryOptimizationRun?.runId !== runId ? s
+      : { ...s, queryOptimizationRun: { ...s.queryOptimizationRun!, heldRejectionSaving: false } });
+  });
+  heldRejectionWrites.set(store, pending);
 }
 
 /**

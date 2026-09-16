@@ -176,6 +176,108 @@ test.each(['achieved', 'needs_review', 'stopped', 'error'] as const)('最終状�
   expect(container.textContent).toContain('保留候補 candidate-2: 失う集合 未測定 件のうち書誌を確認できたのは先頭 0 件');
 });
 
+function heldTrialFixture(overrides: Record<string, unknown> = {}) {
+  const formula = parsePubmedFormulaMd('## PubMed/MEDLINE\n```\n#1 a[tiab] OR c[tiab]\n```');
+  return { kind: 'proposal' as const, candidateId: 'candidate-1', formula, accepted: false, held: true,
+    reason: '失う集合のため保留', rationale: '', before: null, after: run('achieved').result!.best!.measurement, apiEvents: [],
+    impact: { lostHits: 2, gainedHits: 1, error: null,
+      inspected: [{ pmid: '2', title: null, year: null }, { pmid: '3', title: null, year: null }] },
+    ...overrides };
+}
+function heldLostOutsideCheck() {
+  return { status: 'ready' as const, reason: null, originalHits: 10, marginHits: 0, evaluatedCount: 0,
+    candidates: ['2', '3'].map((pmid) => ({ pmid, title: null, year: null, abstract: null,
+      source: 'lost' as const, heldCandidateId: 'candidate-1', reason: '' })),
+    decisions: { '2': { decision: 'exclude' as const, status: 'saved' as const, error: null },
+      '3': { decision: 'exclude' as const, status: 'saved' as const, error: null } } };
+}
+
+describe('保留候補の 3 操作（issue #172）', () => {
+  test('最良候補が回収したシードを失う候補はボタンを無効化し PMID を表示する', () => {
+    const current = run('needs_review');
+    current.trials.push(heldTrialFixture());
+    current.result!.best!.measurement.capturedPmids!.push('999');
+    current.outsideCheck = heldLostOutsideCheck();
+    const container = document.createElement('div');
+    renderOptimizationReview(container, current, { ...actions, adoptHeld: jest.fn(async () => {}) });
+    const card = container.querySelector('.optimization__held-candidate')!;
+    expect(card.querySelector('button')!.disabled).toBe(true);
+    expect(card.textContent).toContain('PMID: 999');
+  });
+
+  test('ゲートを満たせば採用ボタンが押せ、候補ごとの操作を呼び分ける', () => {
+    const current = run('needs_review');
+    current.trials.push(heldTrialFixture());
+    current.outsideCheck = heldLostOutsideCheck();
+    const adoptHeld = jest.fn(async () => {});
+    const readjustHeld = jest.fn(async () => {});
+    const rejectHeld = jest.fn();
+    const container = document.createElement('div');
+    renderOptimizationReview(container, current, { ...actions, adoptHeld, readjustHeld, rejectHeld });
+    const card = container.querySelector('.optimization__held-candidate')!;
+    expect(card.textContent).toContain('失う 2 件・増える 1 件・判定済み 2 件・未確認 0 件');
+    const buttons = Array.from(card.querySelectorAll('button'));
+    const adoptButton = buttons.find((b) => b.textContent === 'この候補を採用して保存')!;
+    expect(adoptButton.disabled).toBe(false);
+    const bestButtons = Array.from(container.querySelectorAll('button')).filter((button) => button.textContent === '採用して保存');
+    expect(bestButtons).toHaveLength(1);
+    expect(bestButtons[0]!.closest('.optimization__held-candidate')).toBeNull();
+    adoptButton.click();
+    expect(adoptHeld).toHaveBeenCalledWith('candidate-1');
+    buttons.find((b) => b.textContent === 'これを初期式に再調整')!.click();
+    expect(readjustHeld).toHaveBeenCalledWith('candidate-1');
+    buttons.find((b) => b.textContent === '除外')!.click();
+    expect(rejectHeld).toHaveBeenCalledWith('candidate-1');
+  });
+
+  test('ゲート未達なら採用ボタンを無効化し、あと何件必要かを表示する', () => {
+    const current = run('needs_review');
+    current.trials.push(heldTrialFixture({ impact: { lostHits: 50, gainedHits: 1, error: null,
+      inspected: [{ pmid: '2', title: null, year: null }] } }));
+    const container = document.createElement('div');
+    renderOptimizationReview(container, current, { ...actions, adoptHeld: jest.fn(async () => {}) });
+    const card = container.querySelector('.optimization__held-candidate')!;
+    const adoptButton = Array.from(card.querySelectorAll('button')).find((b) => b.textContent === 'この候補を採用して保存')!;
+    expect(adoptButton.disabled).toBe(true);
+    expect(card.textContent).toContain('あと 50 件の確認が必要です');
+  });
+
+  test('除外済みは「除外を取り消す」に変わり、採用・再調整ができなくなる', () => {
+    const current = run('needs_review');
+    current.trials.push(heldTrialFixture());
+    current.outsideCheck = heldLostOutsideCheck();
+    current.heldRejections = { 'candidate-1': { rejectedAt: '2026-09-12T00:00:00Z' } };
+    const undoRejectHeld = jest.fn();
+    const container = document.createElement('div');
+    renderOptimizationReview(container, current, { ...actions, adoptHeld: jest.fn(async () => {}),
+      readjustHeld: jest.fn(async () => {}), undoRejectHeld });
+    const card = container.querySelector('.optimization__held-candidate')!;
+    const cardButtons = Array.from(card.querySelectorAll('button'));
+    expect(cardButtons.find((b) => b.textContent === 'この候補を採用して保存')!.disabled).toBe(true);
+    expect(cardButtons.find((b) => b.textContent === 'これを初期式に再調整')!.disabled).toBe(true);
+    const undoButton = cardButtons.find((b) => b.textContent === '除外を取り消す')!;
+    expect(undoButton.disabled).toBe(false);
+    undoButton.click();
+    expect(undoRejectHeld).toHaveBeenCalledWith('candidate-1');
+    expect(card.textContent).toContain('人がこの変更を除外しました');
+  });
+
+  test('保留候補の採用は最良候補の保存と排他で、状態表示にどちらが保存されたか出す', () => {
+    const current = run('needs_review');
+    current.trials.push(heldTrialFixture());
+    current.save = { formulaVersionId: 'r', status: 'saved', error: null, target: { kind: 'held', candidateId: 'candidate-1' } };
+    const container = document.createElement('div');
+    renderOptimizationReview(container, current, { ...actions, adoptHeld: jest.fn(async () => {}) });
+    expect(container.querySelector('.optimization__save-status')?.textContent)
+      .toContain('保留候補 candidate-1 の式を採用して保存しました');
+    const heldCard = container.querySelector('.optimization__held-candidate')!;
+    expect(Array.from(heldCard.querySelectorAll('button')).find((b) => b.textContent === 'この候補を採用して保存')!.disabled).toBe(true);
+    const bottomButtons = Array.from(container.querySelectorAll<HTMLButtonElement>('.optimization__review-actions button'))
+      .filter((b) => !b.closest('.optimization__held-candidate'));
+    expect(bottomButtons.find((b) => b.textContent === '採用して保存')!.disabled).toBe(true);
+  });
+});
+
 test.each([['achieved', '目安件数と既知シードの捕捉を満たしました'], ['needs_review', '要確認'], ['stopped', '停止'], ['error', 'エラー']] as const)(
   '%s を %s と区別し、最終式・上限・既知シード・正味の変更と懸念を出す', (status, label) => {
     const container = document.createElement('div');

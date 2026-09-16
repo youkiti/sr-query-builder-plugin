@@ -58,6 +58,11 @@ export interface DraftViewCallbacks extends ValidationResultsCallbacks {
   onBlocksFromOptimization?: () => void;
   onDecideOutsideCandidate?: (pmid: string, decision: 'include' | 'exclude' | 'maybe') => Promise<void>;
   onReadjustOptimization?: () => Promise<void>;
+  /** 保留候補（issue #172）の 3 操作。提供しない描画用途では省略する。 */
+  onAdoptHeldOptimizationCandidate?: (candidateId: string) => Promise<void>;
+  onReadjustHeldOptimizationCandidate?: (candidateId: string) => Promise<void>;
+  onRejectHeldOptimizationCandidate?: (candidateId: string) => void;
+  onUndoRejectHeldOptimizationCandidate?: (candidateId: string) => void;
   /** 「生成して検証する」ボタンが押されたとき。進捗・エラーは store.draftRun 経由で反映される */
   onGenerate?: () => Promise<void>;
   /**
@@ -233,7 +238,9 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
     renderOptimizationReview(container,
       ctx.state.queryOptimizationRun?.projectId === ctx.state.project.projectId ? ctx.state.queryOptimizationRun : null,
       { adopt: callbacks.onAdoptOptimization, edit: callbacks.onEditOptimization, blocks: callbacks.onBlocksFromOptimization,
-        decide: callbacks.onDecideOutsideCandidate, readjust: callbacks.onReadjustOptimization });
+        decide: callbacks.onDecideOutsideCandidate, readjust: callbacks.onReadjustOptimization,
+        adoptHeld: callbacks.onAdoptHeldOptimizationCandidate, readjustHeld: callbacks.onReadjustHeldOptimizationCandidate,
+        rejectHeld: callbacks.onRejectHeldOptimizationCandidate, undoRejectHeld: callbacks.onUndoRejectHeldOptimizationCandidate });
     if (!ctx.state.queryOptimizationSetup && callbacks.onPrepareOptimization) {
       void Promise.resolve().then(() => callbacks.onPrepareOptimization?.());
     }
