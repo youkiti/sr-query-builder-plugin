@@ -62,3 +62,7 @@ video/tools/
 video/build/
 
 experiments/query-optimization-bench/results/
+
+# Agent ツールの worktree 隔離（isolation: worktree）が作るチェックアウト。リポジトリの
+# 作業コピーそのものなのでコミットしない。
+.claude/worktrees/
