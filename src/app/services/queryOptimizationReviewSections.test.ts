@@ -1,6 +1,8 @@
 import { buildOptimizationReviewSections, countLostSampleAnnotations, evaluateHeldCandidateAdoptionGate,
-  HELD_CANDIDATE_ADOPTION_LOST_HITS_THRESHOLD } from './queryOptimizationReviewSections';
+  formatUnconfirmedEligibleUpperBound, HELD_CANDIDATE_ADOPTION_LOST_HITS_THRESHOLD, HELD_CANDIDATE_ADOPTION_MAX_LOST_HITS,
+  unconfirmedEligibleUpperBound } from './queryOptimizationReviewSections';
 import type { OptimizationOutsideCheckState, QueryOptimizationRunState } from '../store';
+import type { OptimizationTrial } from '@/features/formula/skills/optimizeQuery';
 
 function fixture(): QueryOptimizationRunState {
   const formula = { blocks: [{ id: '1', expression: 'a[tiab]', isCombination: false }], combinationExpression: null };
@@ -309,13 +311,13 @@ describe('保留候補ごとの採用ゲート（issue #172）', () => {
     const decisions = run.outsideCheck!.decisions;
     run.outsideCheck!.decisions = {};
     const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions, { bestCapturedPmids: run.result!.best!.measurement.capturedPmids });
-    expect(gate).toEqual({ allowed: false, judgedCount: 0, sampledCount: 2,
+    expect(gate).toEqual({ allowed: false, judgedCount: 0, sampledCount: 2, exceedsMaxLostHits: false,
       reason: expect.stringContaining('あと 2 件の確認が必要') });
     expect(evaluateHeldCandidateAdoptionGate(trial, { '2': decisions['2']! }, { bestCapturedPmids: run.result!.best!.measurement.capturedPmids })).toMatchObject({
       allowed: false, judgedCount: 1, reason: expect.stringContaining('あと 1 件の確認が必要'),
     });
     expect(evaluateHeldCandidateAdoptionGate(trial, decisions, { bestCapturedPmids: run.result!.best!.measurement.capturedPmids })).toEqual({
-      allowed: true, judgedCount: 2, sampledCount: 2, reason: null,
+      allowed: true, judgedCount: 2, sampledCount: 2, exceedsMaxLostHits: false, reason: null,
     });
   });
 
@@ -326,7 +328,7 @@ describe('保留候補ごとの採用ゲート（issue #172）', () => {
       trial.impact!.lostHits = lostHits;
       run.outsideCheck!.decisions['3'] = { decision: 'include', status, error: null };
       expect(evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions, { bestCapturedPmids: run.result!.best!.measurement.capturedPmids })).toEqual({
-        allowed: false, judgedCount: 1, sampledCount: 2, reason: expect.stringContaining('PMID: 3'),
+        allowed: false, judgedCount: 1, sampledCount: 2, exceedsMaxLostHits: false, reason: expect.stringContaining('PMID: 3'),
       });
     });
 
@@ -356,7 +358,7 @@ describe('保留候補ごとの採用ゲート（issue #172）', () => {
     const trial = run.trials[0]!;
     trial.impact!.lostHits = 200; // 閾値超過。inspected は標本 2 件で全件 exclude 保存済み
     const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions, { bestCapturedPmids: run.result!.best!.measurement.capturedPmids });
-    expect(gate).toEqual({ allowed: true, judgedCount: 2, sampledCount: 2, reason: null });
+    expect(gate).toEqual({ allowed: true, judgedCount: 2, sampledCount: 2, exceedsMaxLostHits: false, reason: null });
   });
 
   test('失う集合が閾値超過で標本が未判定なら押せず、判定不足・全体未確認の両方を理由に出す', () => {
@@ -397,6 +399,117 @@ describe('保留候補ごとの採用ゲート（issue #172）', () => {
     expect(gate.allowed).toBe(true);
     expect(section(run, 'deletion_impact').state).toBe('decided');
   });
+});
+
+describe('保留候補ごとの採用不可上限（issue #172 第3段階）', () => {
+  test('既定の上限は 1,000 件', () => {
+    expect(HELD_CANDIDATE_ADOPTION_MAX_LOST_HITS).toBe(1000);
+  });
+
+  test('失う 1,001 件は標本を全件 exclude 保存済みでも採用できない', () => {
+    const run = deletionFixture();
+    const trial = run.trials[0]!;
+    trial.impact!.lostHits = 1001;
+    const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck!.decisions,
+      { bestCapturedPmids: run.result!.best!.measurement.capturedPmids });
+    expect(gate.allowed).toBe(false);
+    expect(gate.exceedsMaxLostHits).toBe(true);
+    expect(gate.reason).toContain('1,001');
+    expect(gate.reason).toContain('1,000');
+  });
+
+  test('失う 1,000 件ちょうどは標本を全件 exclude 保存済みなら採用できる', () => {
+    const run = deletionFixture();
+    const trial = run.trials[0]!;
+    trial.impact!.lostHits = 1000;
+    const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck!.decisions,
+      { bestCapturedPmids: run.result!.best!.measurement.capturedPmids });
+    expect(gate.allowed).toBe(true);
+    expect(gate.exceedsMaxLostHits).toBe(false);
+  });
+
+  test('include の判定があっても、失う 1,001 件なら件数上限の理由が優先して返る', () => {
+    const run = deletionFixture();
+    const trial = run.trials[0]!;
+    trial.impact!.lostHits = 1001;
+    run.outsideCheck!.decisions['3'] = { decision: 'include', status: 'saved', error: null };
+    const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck!.decisions,
+      { bestCapturedPmids: run.result!.best!.measurement.capturedPmids });
+    expect(gate.allowed).toBe(false);
+    expect(gate.exceedsMaxLostHits).toBe(true);
+    expect(gate.reason).not.toContain('PMID: 3');
+  });
+});
+
+describe('否定できない適格文献の上限（issue #172 第3段階）', () => {
+  test.each([
+    [10800, 20, 1500],
+    [150, 20, 19],
+    [1000, 20, 137],
+    [566, 20, 76],
+    [100, 100, 0],
+    [5, 0, null],
+  ] as const)('lostHits=%i, sampleSize=%i => %s', (lostHits, sampleSize, expected) => {
+    expect(unconfirmedEligibleUpperBound(lostHits, sampleSize)).toBe(expected);
+  });
+
+  function heldTrial(overrides: Partial<OptimizationTrial> = {}): OptimizationTrial {
+    return { kind: 'proposal', candidateId: 'candidate-1', formula: fixture().result!.best!.formula,
+      before: null, after: null, accepted: false, held: true, rationale: '', reason: '', apiEvents: [],
+      impact: { lostHits: 150, gainedHits: 0, error: null,
+        inspected: Array.from({ length: 20 }, (_, i) => ({ pmid: String(i + 2), title: null, year: null })),
+        sample: { method: 'all', seed: 1, populationCount: 150, retrievedCount: 150,
+          pmids: Array.from({ length: 20 }, (_, i) => String(i + 2)), sampledAt: '' } },
+      ...overrides };
+  }
+
+  test('通常の抽出（method: all）は件数と上限を文で示す', () => {
+    const text = formatUnconfirmedEligibleUpperBound(heldTrial());
+    expect(text).toBe('標本 20 件をすべて exclude と判定しても、残り 130 件に適格文献が最大 19 件（片側 95% 上限）含まれる可能性を否定できません。');
+  });
+
+  test('retrieved_subset は集合全体の上限ではない旨を追記する', () => {
+    const trial = heldTrial({ impact: { lostHits: 150, gainedHits: 0, error: null,
+      inspected: Array.from({ length: 20 }, (_, i) => ({ pmid: String(i + 2), title: null, year: null })),
+      sample: { method: 'retrieved_subset', seed: 1, populationCount: 150, retrievedCount: 100,
+        pmids: Array.from({ length: 20 }, (_, i) => String(i + 2)), sampledAt: '' } } });
+    const text = formatUnconfirmedEligibleUpperBound(trial);
+    expect(text).toContain('標本 20 件をすべて exclude と判定しても');
+    expect(text).toContain('（取得できた 100 件からの抽出のため、集合全体に対する上限ではありません）');
+  });
+
+  test('標本が失う集合以上（上限 0 件）なら null', () => {
+    const trial = heldTrial({ impact: { lostHits: 20, gainedHits: 0, error: null,
+      inspected: Array.from({ length: 20 }, (_, i) => ({ pmid: String(i + 2), title: null, year: null })) } });
+    expect(formatUnconfirmedEligibleUpperBound(trial)).toBeNull();
+  });
+
+  test('lostHits が未測定（null）なら null', () => {
+    const trial = heldTrial({ impact: { lostHits: null, gainedHits: 0, error: null, inspected: [] } });
+    expect(formatUnconfirmedEligibleUpperBound(trial)).toBeNull();
+  });
+});
+
+test('削除影響の確認区分に上限の行が出て、deletion.state は上限の有無で変わらない', () => {
+  const run = deletionFixture();
+  const trial = run.trials[0]!;
+  trial.impact!.lostHits = 150;
+  trial.impact!.inspected = Array.from({ length: 20 }, (_, i) => ({ pmid: String(i + 2), title: null, year: null }));
+  trial.impact!.sample = { method: 'all', seed: 1, populationCount: 150, retrievedCount: 150,
+    pmids: Array.from({ length: 20 }, (_, i) => String(i + 2)), sampledAt: '' };
+  run.outsideCheck!.candidates = trial.impact!.inspected.map((paper) => ({
+    pmid: paper.pmid, title: null, year: null, abstract: null, source: 'lost' as const, heldCandidateId: 'candidate-1', reason: '' }));
+  run.outsideCheck!.decisions = Object.fromEntries(trial.impact!.inspected.map((paper) =>
+    [paper.pmid, { decision: 'exclude' as const, status: 'saved' as const, error: null }]));
+  const withBound = buildOptimizationReviewSections(run);
+  expect(withBound.sections[3]!.state).toBe('decided');
+  expect(withBound.sections[3]!.lines.join('\n')).toContain('標本 20 件をすべて exclude と判定しても');
+  // sample.pmids（抽出母集団）を lostHits と同数まで広げると上限は 0 になり表示されなくなるが、
+  // state の判定は inspected.length（20 件固定）を使うため変わらない。
+  trial.impact!.sample!.pmids = Array.from({ length: 150 }, (_, i) => String(i + 2));
+  const withoutBound = buildOptimizationReviewSections(run);
+  expect(withoutBound.sections[3]!.lines.join('\n')).not.toContain('片側 95% 上限');
+  expect(withoutBound.sections[3]!.state).toBe('decided');
 });
 
 test.each([false, true])('中間手の採用は既知文献の捕捉区分に残し、最終結果の捕捉状態を維持する: 回収済み=%s', (recovered) => {

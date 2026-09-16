@@ -298,7 +298,9 @@ test('未確認件数が残る監査記録も「見たから安全」とは書�
   expect(note).toContain('未確認 198 件');
   expect(note).not.toContain('安全');
   const log = JSON.parse(f.upload.mock.calls[0]![0].content);
-  expect(log.heldAdoption).toEqual({ candidateId: 'candidate-1', lostHits: 200, judgedCount: 2, unconfirmedCount: 198, sampleMethod: 'retrieved_subset' });
+  // sampleSize は sample.pmids（2 件）基準。issue #172で、否定できない適格文献の上限（片側 95%）が監査に加わった。
+  expect(log.heldAdoption).toEqual({ candidateId: 'candidate-1', lostHits: 200, judgedCount: 2, unconfirmedCount: 198,
+    sampleMethod: 'retrieved_subset', unconfirmedEligibleUpperBound: 154 });
 });
 
 test.each(['success', 'failure'] as const)('保留採用の参考注釈 %s の集計を note と監査に残す', async (status) => {
@@ -329,6 +331,34 @@ test('ゲート未達の保留候補（失う集合を全件確認していな�
   expect(f.upload).not.toHaveBeenCalled();
   expect(f.append).not.toHaveBeenCalled();
   expect(f.store.getState().queryOptimizationRun?.save).toBeUndefined();
+});
+
+test('失う集合が上限(1,000件)を超える保留候補は、標本を全件exclude保存済みでも保存しない（issue #172 第3段階）', async () => {
+  const f = setup();
+  f.run.trials.push(heldTrial({ impact: { lostHits: 1001, gainedHits: 1, error: null,
+    inspected: [{ pmid: '2', title: '研究2', year: 2001 }, { pmid: '3', title: '研究3', year: 2002 }],
+    sample: { method: 'all', seed: 1, populationCount: 1001, retrievedCount: 1001, pmids: ['2', '3'], sampledAt: '2026-09-12T00:00:00Z' } } }));
+  f.run.outsideCheck = { status: 'ready', reason: null, originalHits: 10, marginHits: 0, evaluatedCount: 0,
+    ...lostCandidates(['2', '3']) };
+  await adoptHeldOptimizationCandidate(f, 'candidate-1');
+  expect(f.upload).not.toHaveBeenCalled();
+  expect(f.append).not.toHaveBeenCalled();
+  expect(f.store.getState().queryOptimizationRun?.save).toBeUndefined();
+});
+
+test('失う集合 150 件の保留候補を採用すると、note と監査記録に否定できない適格文献の上限が残る（issue #172 第3段階）', async () => {
+  const f = setup();
+  const inspected = Array.from({ length: 20 }, (_, i) => ({ pmid: String(i + 2), title: `研究${i + 2}`, year: 2001 }));
+  f.run.trials.push(heldTrial({ impact: { lostHits: 150, gainedHits: 1, error: null, inspected,
+    sample: { method: 'all', seed: 1, populationCount: 150, retrievedCount: 150,
+      pmids: inspected.map((paper) => paper.pmid), sampledAt: '2026-09-12T00:00:00Z' } } }));
+  f.run.outsideCheck = { status: 'ready', reason: null, originalHits: 10, marginHits: 0, evaluatedCount: 0,
+    ...lostCandidates(inspected.map((paper) => paper.pmid)) };
+  await adoptHeldOptimizationCandidate(f, 'candidate-1');
+  const note = f.append.mock.calls[0]![1].note as string;
+  expect(note).toContain('標本 20 件をすべて exclude と判定しても、残り 130 件に適格文献が最大 19 件（片側 95% 上限）含まれる可能性を否定できません。');
+  const log = JSON.parse(f.upload.mock.calls[0]![0].content);
+  expect(log.heldAdoption.unconfirmedEligibleUpperBound).toBe(19);
 });
 
 test('未判定の既知シードが失う集合にあれば採用保存も監査ファイル作成も行わない', async () => {

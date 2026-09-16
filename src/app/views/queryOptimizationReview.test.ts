@@ -303,6 +303,35 @@ describe('保留候補の 3 操作（issue #172）', () => {
       .filter((b) => !b.closest('.optimization__held-candidate'));
     expect(bottomButtons.find((b) => b.textContent === '採用して保存')!.disabled).toBe(true);
   });
+
+  test('失う集合が上限(1,000件)を超える候補は「採用して保存」を出さず、再調整・除外・理由文だけ出す（issue #172 第3段階）', () => {
+    const current = run('needs_review');
+    current.trials.push(heldTrialFixture({ impact: { lostHits: 1001, gainedHits: 1, error: null,
+      inspected: [{ pmid: '2', title: null, year: null }] } }));
+    const container = document.createElement('div');
+    renderOptimizationReview(container, current, { ...actions, adoptHeld: jest.fn(async () => {}),
+      readjustHeld: jest.fn(async () => {}), rejectHeld: jest.fn() });
+    const card = container.querySelector('.optimization__held-candidate')!;
+    const cardButtons = Array.from(card.querySelectorAll('button'));
+    expect(cardButtons.find((b) => b.textContent === 'この候補を採用して保存')).toBeUndefined();
+    expect(cardButtons.find((b) => b.textContent === 'これを初期式に再調整')).toBeDefined();
+    expect(cardButtons.find((b) => b.textContent === '除外')).toBeDefined();
+    expect(card.querySelector('.optimization__held-gate-reason')?.textContent).toContain('1,000');
+  });
+
+  test('否定できない適格文献の上限を保留候補カードに段落で示す（issue #172 第3段階）', () => {
+    const current = run('needs_review');
+    const inspected = Array.from({ length: 20 }, (_, i) => ({ pmid: String(i + 2), title: null, year: null }));
+    current.trials.push(heldTrialFixture({ impact: { lostHits: 150, gainedHits: 1, error: null, inspected,
+      sample: { method: 'all' as const, seed: 1, populationCount: 150, retrievedCount: 150,
+        pmids: inspected.map((paper) => paper.pmid), sampledAt: '' } } }));
+    const container = document.createElement('div');
+    renderOptimizationReview(container, current, { ...actions, adoptHeld: jest.fn(async () => {}) });
+    const card = container.querySelector('.optimization__held-candidate')!;
+    expect(card.querySelector('button')?.textContent).toBe('この候補を採用して保存');
+    const upperBound = card.querySelector('.optimization__held-upper-bound');
+    expect(upperBound?.textContent).toContain('最大 19 件');
+  });
 });
 
 test.each([['achieved', '目安件数と既知シードの捕捉を満たしました'], ['needs_review', '要確認'], ['stopped', '停止'], ['error', 'エラー']] as const)(
