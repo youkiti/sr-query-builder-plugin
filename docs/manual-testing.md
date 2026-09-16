@@ -97,6 +97,14 @@ npm run manual:check -- draft export --keep        # 失敗しなくても終了
 上限を保証しない。最終レビューが「要確認」等でも採用可能な候補があれば保存するため、
 レビュー表示も確認する。
 
+**手順を追加・変更してセレクタや前提条件を新しく使うときは harness contract も更新する
+（issue #183）**: `manualCheck.mjs` は `.mjs` のため CI から見えず、`src/` の DOM 構造が変わっても
+気づけない。依存するセレクタと前提条件を
+[`tests/harness-contract/contract.ts`](../tests/harness-contract/contract.ts) の
+`HARNESS_CONTRACT` に追記し、検証できるものは
+[`tests/harness-contract/contract.test.ts`](../tests/harness-contract/contract.test.ts) にテストを
+足す。描画までは用意できない場合は `verified: false` と理由を書いて宣言のみに留めてよい。
+
 ### ストア掲載用スクリーンショット（`--shots`）
 
 > **通常は `npm run shots`（`tests/shots/`・Playwright・stub 環境・無人実行）を使う。**

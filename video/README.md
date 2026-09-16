@@ -582,6 +582,18 @@ CONTRACT の全文と ctx API の詳細は `video/scripts/record.mjs` の先頭�
 `00-` 始まりのシーンキーを最終動画の対象から自動的に除外する（`video/build/` は git 管理外で
 毎回消えるとは限らないため、過去のスモーク収録が残っていても `final.mp4` に紛れ込まない）。
 
+### `src/` のセレクタに依存するときは harness contract を更新する（issue #183）
+
+シーンスクリプトは `.mjs` のため jest / eslint / webpack のどこからも参照されず、`src/` の DOM
+構造が変わっても CI では気づけない（tools/selenium/manualCheck.mjs も同様）。新しいシーンを
+足す・既存シーンが依存するセレクタや前提条件（どのルート・どの demoSeed で見るか）を変えるときは、
+[`tests/harness-contract/contract.ts`](../tests/harness-contract/contract.ts) の
+`HARNESS_CONTRACT` に consumer（ファイルと手順）と expectation（存在ではなく条件つきの構造）を
+追記・更新すること。実際に検証まで書けるものは `verified: true` にして
+[`tests/harness-contract/contract.test.ts`](../tests/harness-contract/contract.test.ts) にテストを
+足す。描画が難しい・優先度が低いものは `verified: false` と `unverifiedReason` を書いて宣言のみに
+留めてよい（黙って省略しない）。
+
 ## タイミング精度についての注意
 
 - `ctx.cue(n)` が記録するのは「その瞬間の壁時計時刻」を、アクティブなセグメント（ページ）が
