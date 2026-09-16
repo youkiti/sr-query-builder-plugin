@@ -111,6 +111,9 @@ export function buildOptimizationReviewSections(run: QueryOptimizationRunState):
             : `${prefix}のうち書誌を確認できたのは先頭 ${count} 件`);
         if (trial.impact?.annotation) deletion.lines.push(formatLostSampleAnnotation(trial.impact.annotation));
         if (lostHits != null && lostHits > count) deletion.lines.push(`残り ${lostHits - count} 件は未確認`);
+        // 標本を全件 exclude と判定しても否定できない適格文献の上限（片側 95%）。deletion.state の判定には使わない。
+        const upperBound = formatUnconfirmedEligibleUpperBound(trial);
+        if (upperBound) deletion.lines.push(upperBound);
         if (trial.impact?.error) deletion.lines.push(trial.impact.error);
       }
       if (deletion.maybeCount) deletion.lines.push(`maybe で保存した候補 ${deletion.maybeCount} 件は未確認として残ります`);
@@ -133,6 +136,14 @@ export function buildOptimizationReviewSections(run: QueryOptimizationRunState):
  */
 export const HELD_CANDIDATE_ADOPTION_LOST_HITS_THRESHOLD = 100;
 
+/**
+ * 失う集合がこの件数を超える候補は、標本の判定結果にかかわらず採用できない。
+ * 標本（最大 20 件）の判定では集合全体の安全性を確かめられないため（実 API の評価で、
+ * 失う集合が 1,000〜13,000 件で held-out の適格研究を 7〜10 件失う候補でも、
+ * 無作為標本 20 件に適格文献が 1 件も入らなかった実測による。issue #172）。
+ */
+export const HELD_CANDIDATE_ADOPTION_MAX_LOST_HITS = 1000;
+
 export interface HeldCandidateAdoptionGate {
   allowed: boolean;
   /** 標本（inspected）のうち保存済み exclude の件数。maybe は未確認として扱う。 */
@@ -141,6 +152,49 @@ export interface HeldCandidateAdoptionGate {
   sampledCount: number;
   /** allowed=false のとき、あと何件の確認・判定が必要かを含めた理由。allowed=true なら null。 */
   reason: string | null;
+  /** 失う集合が HELD_CANDIDATE_ADOPTION_MAX_LOST_HITS を超えるため、判定によらず採用できない。 */
+  exceedsMaxLostHits: boolean;
+}
+
+/**
+ * 標本（失う集合 lostHits 件からの非復元抽出 sampleSize 件）に適格文献が 0 件だったときの、
+ * 母集団に含まれる適格件数の片側 95% 上限（超幾何分布）。表示・監査用の参考値で、採用ゲートの
+ * 判定には使わない。sampleSize が 0 以下（標本なし）は null、lostHits 以上（全件確認）は 0 を返す。
+ *
+ * 適格件数 K のとき、標本 n 件が全件非適格になる確率は P(0|K) = C(L-K, n) / C(L, n)。
+ * この上限は「P(0|K) >= 0.05 を満たす最大の K」で、二項係数を直接計算せず漸化式
+ * P(0|K+1) = P(0|K) × (L-K-n) / (L-K)（P(0|0) = 1）で K を 0 から増やして求める。
+ */
+export function unconfirmedEligibleUpperBound(lostHits: number, sampleSize: number): number | null {
+  if (sampleSize <= 0) return null;
+  if (sampleSize >= lostHits) return 0;
+  const populationSize = lostHits;
+  const maxK = populationSize - sampleSize;
+  let probabilityAllNonEligible = 1;
+  let upperBound = 0;
+  while (upperBound < maxK) {
+    const nextProbability = probabilityAllNonEligible
+      * (populationSize - upperBound - sampleSize) / (populationSize - upperBound);
+    if (nextProbability < 0.05) break;
+    probabilityAllNonEligible = nextProbability;
+    upperBound += 1;
+  }
+  return upperBound;
+}
+
+/** 保留候補カード・最終レビュー・採用監査で共通して使う、否定できない適格文献上限の表示文。 */
+export function formatUnconfirmedEligibleUpperBound(trial: OptimizationTrial): string | null {
+  const impact = trial.impact;
+  if (!impact || impact.lostHits == null) return null;
+  const sampleSize = impact.sample?.pmids.length ?? impact.inspected.length;
+  const upperBound = unconfirmedEligibleUpperBound(impact.lostHits, sampleSize);
+  if (upperBound === null || upperBound === 0) return null;
+  const remaining = impact.lostHits - sampleSize;
+  let text = `標本 ${sampleSize} 件をすべて exclude と判定しても、残り ${remaining} 件に適格文献が最大 ${upperBound} 件（片側 95% 上限）含まれる可能性を否定できません。`;
+  if (impact.sample?.method === 'retrieved_subset') {
+    text += `（取得できた ${impact.sample.retrievedCount} 件からの抽出のため、集合全体に対する上限ではありません）`;
+  }
+  return text;
 }
 
 export function evaluateHeldCandidateAdoptionGate(
@@ -159,39 +213,44 @@ export function evaluateHeldCandidateAdoptionGate(
     && decisions[paper.pmid]?.decision === 'exclude').length ?? 0;
   if (!trial.held || !impact || impact.lostHits === null
     || impact.failedMeasurements?.includes('lost_search') || (impact.error && !impact.failedMeasurements)) {
-    return { allowed: false, judgedCount, sampledCount,
+    return { allowed: false, judgedCount, sampledCount, exceedsMaxLostHits: false,
       reason: '失う集合を実測できていないため採用できません。' };
   }
-  if (impact.failedMeasurements?.includes('lost_fetch')) return { allowed: false, judgedCount, sampledCount,
+  if (impact.lostHits > HELD_CANDIDATE_ADOPTION_MAX_LOST_HITS) {
+    return { allowed: false, judgedCount, sampledCount, exceedsMaxLostHits: true,
+      reason: `失う集合 ${impact.lostHits.toLocaleString('ja-JP')} 件が上限 ${HELD_CANDIDATE_ADOPTION_MAX_LOST_HITS.toLocaleString('ja-JP')} 件を超えるため、`
+        + 'この候補は採用できません。標本の判定では集合全体に適格文献が無いことを確かめられません。再調整するか除外してください。' };
+  }
+  if (impact.failedMeasurements?.includes('lost_fetch')) return { allowed: false, judgedCount, sampledCount, exceedsMaxLostHits: false,
     reason: '失う集合の書誌を取得できていないため採用できません。' };
   const lostKnownSeeds = impact.inspected.filter((paper) => unjudgedSeedPmids.includes(paper.pmid))
     .map((paper) => paper.pmid);
-  if (lostKnownSeeds.length) return { allowed: false, judgedCount, sampledCount,
+  if (lostKnownSeeds.length) return { allowed: false, judgedCount, sampledCount, exceedsMaxLostHits: false,
     reason: `失う文献に未判定の既知シードがあるため採用できません（PMID: ${lostKnownSeeds.join(', ')}）。` };
   const includedPmids = impact.inspected.filter((paper) => decisions?.[paper.pmid]?.decision === 'include')
     .map((paper) => paper.pmid);
   if (includedPmids.length) {
-    return { allowed: false, judgedCount, sampledCount,
+    return { allowed: false, judgedCount, sampledCount, exceedsMaxLostHits: false,
       reason: `失う文献に include と判定した文献があるため採用できません（PMID: ${includedPmids.join(', ')}）。` };
   }
   const heldCapturedPmids = trial.after?.capturedPmids;
-  if (bestCapturedPmids == null || heldCapturedPmids == null) return { allowed: false, judgedCount, sampledCount,
+  if (bestCapturedPmids == null || heldCapturedPmids == null) return { allowed: false, judgedCount, sampledCount, exceedsMaxLostHits: false,
     reason: '最良候補と保留候補の既知シード捕捉を比較できません（未測定）。採用できません。' };
   const missingSeeds = bestCapturedPmids.filter((pmid) => !heldCapturedPmids.includes(pmid));
-  if (missingSeeds.length) return { allowed: false, judgedCount, sampledCount,
+  if (missingSeeds.length) return { allowed: false, judgedCount, sampledCount, exceedsMaxLostHits: false,
     reason: `最良候補が捕捉している既知シードを失うため採用できません（PMID: ${missingSeeds.join(', ')}）。` };
   if (impact.lostHits <= threshold) {
-    if (sampledCount >= impact.lostHits && judgedCount >= sampledCount) return { allowed: true, judgedCount, sampledCount, reason: null };
-    return { allowed: false, judgedCount, sampledCount,
+    if (sampledCount >= impact.lostHits && judgedCount >= sampledCount) return { allowed: true, judgedCount, sampledCount, exceedsMaxLostHits: false, reason: null };
+    return { allowed: false, judgedCount, sampledCount, exceedsMaxLostHits: false,
       reason: `失う集合 ${impact.lostHits} 件のうち exclude と判定して保存したのは ${judgedCount} 件です（あと ${impact.lostHits - judgedCount} 件の確認が必要です）。` };
   }
   const sampledPmids = impact.sample?.pmids ?? impact.inspected.map((paper) => paper.pmid);
   const missingBibliography = sampledPmids.filter((pmid) => !impact.inspected.some((paper) => paper.pmid === pmid));
-  if (missingBibliography.length) return { allowed: false, judgedCount, sampledCount,
+  if (missingBibliography.length) return { allowed: false, judgedCount, sampledCount, exceedsMaxLostHits: false,
     reason: `抽出した標本 ${sampledPmids.length} 件のうち ${missingBibliography.length} 件の書誌が未取得です。全件の書誌取得と exclude 判定の保存が必要です。` };
   const unjudgedCount = sampledPmids.filter((pmid) => decisions?.[pmid]?.status !== 'saved'
     || decisions[pmid]?.decision !== 'exclude').length;
-  if (sampledPmids.length > 0 && unjudgedCount === 0) return { allowed: true, judgedCount, sampledCount, reason: null };
-  return { allowed: false, judgedCount, sampledCount,
+  if (sampledPmids.length > 0 && unjudgedCount === 0) return { allowed: true, judgedCount, sampledCount, exceedsMaxLostHits: false, reason: null };
+  return { allowed: false, judgedCount, sampledCount, exceedsMaxLostHits: false,
     reason: `標本 ${sampledPmids.length} 件のうち ${sampledPmids.length - unjudgedCount} 件しか判定されていません（あと ${unjudgedCount} 件の判定が必要です。集合全体では残り ${impact.lostHits - judgedCount} 件が未確認のままです）。` };
 }

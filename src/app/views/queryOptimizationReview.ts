@@ -4,7 +4,8 @@ import type { OptimizationTrial } from '@/features/formula/skills/optimizeQuery'
 import { serializePubmedFormulaMd } from '@/lib/search-formula-md';
 import { buildPubmedSearchUrl } from '@/lib/ncbi/pubmedUrl';
 import type { QueryOptimizationRunState } from '../store';
-import { buildOptimizationReviewSections, evaluateHeldCandidateAdoptionGate, formatLostSampleAnnotation, type ReviewSectionState } from '../services/queryOptimizationReviewSections';
+import { buildOptimizationReviewSections, evaluateHeldCandidateAdoptionGate, formatLostSampleAnnotation,
+  formatUnconfirmedEligibleUpperBound, type ReviewSectionState } from '../services/queryOptimizationReviewSections';
 
 export interface OptimizationReviewActions {
   adopt: (() => Promise<void>) | undefined;
@@ -49,21 +50,32 @@ function renderHeldCandidateCard(
     annotation.textContent = formatLostSampleAnnotation(impact.annotation);
     card.appendChild(annotation);
   }
+  const upperBoundText = formatUnconfirmedEligibleUpperBound(trial);
+  if (upperBoundText) {
+    const upperBound = doc.createElement('p');
+    upperBound.className = 'optimization__held-upper-bound';
+    upperBound.textContent = upperBoundText;
+    card.appendChild(upperBound);
+  }
   const rejected = run.heldRejections?.[trial.candidateId];
   const savingGlobal = run.save?.status === 'saving';
   const buttons = doc.createElement('div');
   buttons.className = 'optimization__review-actions';
-  const adoptButton = doc.createElement('button');
-  adoptButton.type = 'button';
-  adoptButton.textContent = 'この候補を採用して保存';
-  adoptButton.setAttribute('aria-label', `保留候補 ${trial.candidateId} を採用して保存`);
-  adoptButton.disabled = !actions.adoptHeld || !!rejected || !gate.allowed
-    || run.save?.status === 'saving' || run.save?.status === 'saved';
-  adoptButton.addEventListener('click', () => {
-    if (adoptButton.disabled) return;
-    adoptButton.disabled = true;
-    void actions.adoptHeld?.(trial.candidateId);
-  });
+  // 失う集合が上限を超える候補は、判定によらず「採用して保存」自体を出さない（再調整・除外は出す）。
+  if (!gate.exceedsMaxLostHits) {
+    const adoptButton = doc.createElement('button');
+    adoptButton.type = 'button';
+    adoptButton.textContent = 'この候補を採用して保存';
+    adoptButton.setAttribute('aria-label', `保留候補 ${trial.candidateId} を採用して保存`);
+    adoptButton.disabled = !actions.adoptHeld || !!rejected || !gate.allowed
+      || run.save?.status === 'saving' || run.save?.status === 'saved';
+    adoptButton.addEventListener('click', () => {
+      if (adoptButton.disabled) return;
+      adoptButton.disabled = true;
+      void actions.adoptHeld?.(trial.candidateId);
+    });
+    buttons.appendChild(adoptButton);
+  }
   const readjustButton = doc.createElement('button');
   readjustButton.type = 'button';
   readjustButton.textContent = 'これを初期式に再調整';
@@ -77,7 +89,7 @@ function renderHeldCandidateCard(
     if (rejectButton.disabled) return;
     if (rejected) actions.undoRejectHeld?.(trial.candidateId); else actions.rejectHeld?.(trial.candidateId);
   });
-  buttons.append(adoptButton, readjustButton, rejectButton);
+  buttons.append(readjustButton, rejectButton);
   card.appendChild(buttons);
   if (run.heldRejectionSaving) {
     const notice = doc.createElement('p');

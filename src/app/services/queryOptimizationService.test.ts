@@ -713,7 +713,7 @@ test.each([20, 21, 50, 100, 101])('失う集合 %i 件は閾値以下なら全�
     decision: 'exclude' as const, status: 'saved' as const, error: null,
   }]));
   expect(evaluateHeldCandidateAdoptionGate(trial, decisions, { bestCapturedPmids: result.best?.measurement.capturedPmids })).toEqual({
-    allowed: true, judgedCount: expectedCount, sampledCount: expectedCount, reason: null,
+    allowed: true, judgedCount: expectedCount, sampledCount: expectedCount, exceedsMaxLostHits: false, reason: null,
   });
 });
 
