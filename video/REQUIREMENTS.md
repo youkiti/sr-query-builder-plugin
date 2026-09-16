@@ -83,7 +83,7 @@
 | 4 | 研究プロトコルを入力する | 1:30 → **1:45** | `#protocol` | `?demoSeed=04-protocol#/protocol` |
 | 5 | 検索式ブロックを承認する | 1:20 → **1:21** | `#blocks` | `?demoSeed=05-blocks#/blocks` |
 | 6 | シード論文を登録する | 1:10 → **1:19** | `#seeds` | `?demoSeed=06-seeds#/seeds` |
-| 7 | 検索式を生成して検証する | 2:00 → **2:13** | `#draft` | `?demoSeed=07-draft#/draft`（生成 → line_hits ライブ表示） |
+| 7 | 検索式を作成・自動調整する | 新稿目安 2:30（旧収録 **2:13**、再計測が必要） | `#draft` | `?demoSeed=07-draft#/draft`（設定 → 自動調整 → 最終レビュー → 採用保存 → 検証のみ再実行） |
 | 8 | 検証結果を読む（捕捉率・MeSH・行ごとのヒット数） | 1:20 → **1:47** | `#draft` | `?demoSeed=08-validation#/draft`（検証結果パネル） |
 | 9 | 対話的シード拡張（実験的機能） | 1:30 → **1:47** | `#expand` | `?demoSeed=09-expand#/expand` |
 | 10 | 検索式を編集して**新しいバージョンを保存する**（AI 改善 + 手編集） | 1:10 → **1:56** | `#edit` | `?demoSeed=10-edit#/edit` → `?demoSeed=11-export#/draft` |
@@ -98,11 +98,10 @@
 
 > ⚠️ **PR4 で判明した実装とのずれ（章 08〜14 ぶん）**
 >
-> 1. **第 10 章から「再検証」が外れた（現在も有効）。** `#/draft` の「再生成して再検証する」は
->    `blocksDraft` から LLM で作り直す処理で `currentFormulaMarkdown` を入力に取らないため、
->    **手編集の内容が失われる**。検証だけを再実行する導線も無い。よって「編集 → 再検証で 100%」は
->    ライブで実演できず、`11-export` プリセット（v2-demo・捕捉率 100%）へ切り替えて
->    「保存済みの新バージョンではこうなる」と見せる構成にした。章タイトルもそれに合わせた。
+> 1. **第 10 章は保存と履歴確認までを実演する。** 現在は `#/draft` の
+>    「検証のみ再実行」で手編集の式を変えずに検証できる。章の構成は維持し、
+>    `11-export` プリセット（v2-demo・捕捉率 100%）へ切り替えて
+>    「保存済みの新バージョンではこうなる」と見せる。
 > 2. ~~**第 10 章で AI 改善提案を扱わない。**~~ **解消済み（2026-08-08）。** issue #39 の修正
 >    （`blockImprovement` / `formulaEditDraft` の store 化）を取り込み、第 10 章は §4 が当初
 >    想定していた「AI に改善させる → 提案の理由と Before/After を読む → 採用」を実演する構成に
@@ -143,9 +142,10 @@
 - **章の内容を重複させない。** 移植元では「準備」章と「設定」章がどちらも設定画面の話になりかけた。
   本件では **02 = 初回セットアップとして API キーを入れる**、**13 = 履歴・設定画面そのものの機能と
   トラブルシューティング** と役割を分ける。
-- **07 と 08 を分ける理由**: `#/draft` は「生成して検証する」1 操作で生成 → line_hits ライブ表示 →
-  捕捉率・MeSH 検証まで一気に走る。1 章に詰めると 2 分半を超えて頭出しの粒度が粗くなるため、
-  「操作して待つ」（07）と「出てきた結果の読み方」（08）で切る。
+- **07 と 08 を分ける理由**: 07 は主操作の「検索式を作成・自動調整する」で設定・進捗・
+  最終レビューを見せ、採用保存した後に「検証のみ再実行」で結果パネルを出す。
+  自動調整だけでは捕捉率・MeSH の検証パネルは更新されない。08 は検証済みプリセットを
+  読む構成を維持し、結果の読み方に集中する。
 - **画面に映らないものを「これが〜です」と説明しない。** デモビルドは OAuth 同意画面を出せないので、
   ログイン手順は「拡張アイコンをクリックすると、**この**プロジェクト選択画面が開きます。初回はここで
   『Google でログイン』を押し…」のように、映っている画面を起点に説明する。
@@ -241,7 +241,7 @@ E2E フィクスチャと同じテーマを使う（`tests/e2e/fixtures/scenario
 | 04 | RQ「成人 ARDS に対する ECMO は生存率を改善するか」を PICO で入力 |
 | 05 | ブロック #1 = ARDS / #2 = ECMO / #3 = RCT フィルタ、`#1 AND #2 AND #3` を承認 |
 | 06 | シード論文 5 本（PMID 90000001〜90000005）を登録 |
-| 07 | 生成 → line_hits が #1/#2/#3 の順に表示され、最終行のヒット数が出る |
+| 07 | 目安100件・反復1回で自動調整 → 最終レビュー → 採用保存 → 検証のみ再実行で行ごとの件数・捕捉率・MeSH を表示 |
 | 08 | **捕捉率 80%（5 本中 4 本）**。1 本取りこぼす。MeSH 検証が `"Extracorporeal Membrane Oxygenation"[Mesh]` の追加を提案 |
 | 09 | 拡張式の margin から境界事例 3 本を提示 → 1 本を include（`source=interactive`）|
 | 10 | 提案語をブロック #2 に追加して保存 → 再検証で **捕捉率 100%** |
@@ -281,7 +281,7 @@ PR3 で実測して決めた章ごとの係数は次のとおり。
 | 04 | 8 | submit → `#/blocks` 6.9 秒（進捗の 2 段階が両方出る） |
 | 05 | 3 | 承認時の保存に間を持たせる |
 | 06 | 2 | シード 5 件の登録 ≒ 5.8 秒 |
-| 07 | 5.6 | 生成 → 検証 ≒ 62 秒（実行中に流れる cue 02〜05 の合計 62.5 秒に合わせた）。**録画を回した状態で測ること**（素の Playwright だと倍近く速く出る） |
+| 07 | 1（暫定） | 自動調整 → 採用保存 → 検証の新導線は未計測。cue 01〜07 の TTS を再生成してから、録画を回した状態で係数と尺を調整する。旧導線の係数5.6・約62秒は適用しない |
 
 ---
 
@@ -340,7 +340,7 @@ PR1〜PR4 は `npm test` / `npm run typecheck` / `npm run lint` / `npm run dev` 
   const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
   const p = await b.newPage();
   await p.setContent(`
-    <div id="app" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Hiragino Sans','Yu Gothic UI','Meiryo',sans-serif;font-size:32px">検索式を生成して検証する</div>
+    <div id="app" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Hiragino Sans','Yu Gothic UI','Meiryo',sans-serif;font-size:32px">検索式を作成・自動調整する</div>
   `);
   const cdp = await p.context().newCDPSession(p);
   await cdp.send('DOM.enable'); await cdp.send('CSS.enable');
