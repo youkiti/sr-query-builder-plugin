@@ -2,8 +2,8 @@
  * 凍結 C0 に対して、LLM を使わずブロック診断（構造診断 diagnoseStructure / 件数診断
  * diagnoseNarrowing）だけを NCBI 通信で実行する評価コマンド（issue #164）。
  *
- * `blockDiagnosis.ts` のコメントどおり、`BLOCK_NARROWING_MIN_REDUCTION`（既定 0.2）は
- * 「凍結 C0 の分布を見て調整する前提の初期値」であり、このコマンドの目的は分布そのものを取ること。
+ * `BLOCK_NARROWING_MIN_REDUCTION`（現在 0.13）は凍結 C0 の削減率分布で校正した値で、このコマンドの
+ * 目的は校正の材料になる分布そのものを取ること（初期値 0.2 からの校正は 2026-09-16 に実施）。
  * `eval:optimize` の full run（LLM を使う自動調整）に依存せず、診断だけを独立して回せるようにする。
  *
  * 既存の full run（`results/default/<caseId>/<c0名>/<split>+<runLabel>/run.json`）から

@@ -21,7 +21,10 @@ function fixture(proposals = [{ id: '1', expression: 'a[tiab] AND narrow[tiab]' 
       const lost = params.get('retmax') !== '0' && query.split(') NOT (')[1]?.includes('held');
       count = lost ? 1 : 0;
     } else if (query.includes('[uid]')) count = 1;
-    else if (query.includes('a[tiab]') && query.includes('b[tiab]')) count = query.includes('held') ? 100 : query.includes('narrow') ? 180 : 200;
+    // narrow の 190 は「ブロックを外すと 210 件」との削減率が (210-190)/210≈0.095 となり、採用で式が
+    // 変わった後も閾値 BLOCK_NARROWING_MIN_REDUCTION（0.13）未満に留まる値。診断ブロック扱いが
+    // 採用後も続くことが「保留の連続」のテストの前提になっている。
+    else if (query.includes('a[tiab]') && query.includes('b[tiab]')) count = query.includes('held') ? 100 : query.includes('narrow') ? 190 : 200;
     return { ok: true, status: 200, json: async () => ({ esearchresult: { count: String(count), idlist: query.includes('[uid]') ? ['11'] : [] } }),
       text: async () => '<PubmedArticleSet/>' } as Response;
   });
@@ -49,7 +52,7 @@ test('初期測定後・AI 前に診断し、採用後は変わった Q−i だ�
   expect(f.events.filter((query) => query === without1)).toHaveLength(1);
   expect(f.events).toContain('(a[tiab] AND narrow[tiab]) AND (trial[pt])');
   expect(result.blockDiagnosis?.fingerprint).toBe(result.best?.measurement.fingerprint);
-  expect(result.blockDiagnosis?.narrowing.map((row) => row.finalHits)).toEqual([180, 180]);
+  expect(result.blockDiagnosis?.narrowing.map((row) => row.finalHits)).toEqual([190, 190]);
   expect(f.progress.some((p) => p.blockDiagnosis?.fingerprint === result.blockDiagnosis?.fingerprint)).toBe(true);
   expect(f.write).toHaveBeenLastCalledWith(expect.objectContaining({ queryOptimizationCheckpoint: expect.objectContaining({ blockDiagnosis: result.blockDiagnosis }) }));
 });

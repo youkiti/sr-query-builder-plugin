@@ -99,7 +99,10 @@ test('対象の項だけを取り除きフィルタと最後の単一参照も�
   expect(queryWithoutBlock(f, ['1', 'filter'], '1')).toBe('("Parent"[Mesh])');
   expect(queryWithoutBlock(f, ['1'], '1')).toBeNull();
 });
-test.each([[81, 100, 0.19, true], [80, 100, 0.2, false], [70, 100, 0.3, false]])('削減率と閾値: %i / %i', (q, without, reduction, ineffective) => {
+// 閾値 0.13 は凍結 C0 の削減率分布の切れ目（9.8%〜17.0%）で校正した値（issue #164）。
+// 0.19 は初期値 0.2 のときは「絞り込みに効いていない」だったが、切れ目の上側の密集
+// （17.0〜17.3%）に属する側なので今は検出しない。ちょうど 0.13 も含めない。
+test.each([[88, 100, 0.12, true], [87, 100, 0.13, false], [81, 100, 0.19, false], [70, 100, 0.3, false]])('削減率と閾値: %i / %i', (q, without, reduction, ineffective) => {
   expect(diagnoseNarrowing(approved[0]!, q as number, without as number)).toMatchObject({ reduction, ineffective });
 });
 test.each([[null, 100, ''], [80, null, '未判定: 測定失敗'], [80, 0, ''], [80, 79, '']])('件数が不確かな場合は未判定: %s / %s', (q, without, failure) => {
