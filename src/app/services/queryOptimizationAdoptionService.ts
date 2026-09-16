@@ -37,19 +37,31 @@ async function performOptimizationAdoption(deps: EditServiceDeps, selection: Ado
   // runId は実行開始時の UUID。応答喪失後も同じ ID で既存行を照会できる。
   const versionId = selection.target.kind === 'held'
     ? `${run.runId}-held-${encodeURIComponent(selection.target.candidateId)}` : run.runId;
+  const previousSave = run.save?.status === 'error' && run.save.formulaVersionId
+    && run.save.formulaVersionId !== versionId ? run.save : undefined;
+  // 前回の照会が失敗した場合も、その版 ID を次回の確認対象として保持する。
+  let saveVersionId = previousSave?.formulaVersionId ?? versionId;
+  let saveTarget = previousSave ? previousSave.target ?? { kind: 'best' as const } : selection.target;
   const owns = (): boolean => {
     const current = deps.store.getState();
     return current.project?.projectId === project.projectId && current.queryOptimizationRun?.runId === run.runId;
   };
   // 最良候補の保存は従来どおり target キーを持たない形（既存テストの厳密一致を壊さないため）。
   const withTarget = (save: FormulaSaveState): FormulaSaveState & { target?: OptimizationSaveTarget } =>
-    selection.target.kind === 'held' ? { ...save, target: selection.target } : save;
+    saveTarget.kind === 'held' ? { ...save, target: saveTarget } : save;
   const setSave = (save: FormulaSaveState): void => {
     if (owns()) deps.store.setState((s) => ({ ...s, queryOptimizationRun: { ...s.queryOptimizationRun!, save: withTarget(save) } }));
   };
-  setSave({ formulaVersionId: versionId, status: 'saving', error: null });
+  setSave({ formulaVersionId: saveVersionId, status: 'saving', error: null });
   try {
-    let version = await getFormulaVersionById(project.spreadsheetId, versionId, deps.google);
+    let version = previousSave
+      ? await getFormulaVersionById(project.spreadsheetId, saveVersionId, deps.google) : null;
+    if (!version) {
+      saveVersionId = versionId;
+      saveTarget = selection.target;
+      setSave({ formulaVersionId: saveVersionId, status: 'saving', error: null });
+      version = await getFormulaVersionById(project.spreadsheetId, versionId, deps.google);
+    }
     if (!version) {
       const protocol = await resolveProtocolContext(deps, state);
       const createdAt = (deps.now ?? nowIso)();
@@ -97,10 +109,10 @@ async function performOptimizationAdoption(deps: EditServiceDeps, selection: Ado
         currentFormulaVersionId: saved.versionId, currentFormulaMarkdown: saved.formulaMd,
         currentFormulaCreatedBy: saved.createdBy, currentFormulaModel: saved.model,
       } : {}),
-      queryOptimizationRun: { ...s.queryOptimizationRun!, save: withTarget({ formulaVersionId: versionId, status: 'saved', error: null }) },
+      queryOptimizationRun: { ...s.queryOptimizationRun!, save: withTarget({ formulaVersionId: saved.versionId, status: 'saved', error: null }) },
     }));
   } catch (err) {
-    setSave({ formulaVersionId: versionId, status: 'error', error: err instanceof Error ? err.message : String(err) });
+    setSave({ formulaVersionId: saveVersionId, status: 'error', error: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -136,7 +148,10 @@ export async function adoptHeldOptimizationCandidate(deps: EditServiceDeps, cand
   const trial = run?.trials.find((item) => item.candidateId === candidateId && item.held);
   if (!project || !run || run.projectId !== project.projectId || run.status === 'running' || !run.result || !trial
     || run.save?.status === 'saving' || run.save?.status === 'saved' || run.heldRejections?.[candidateId]) return;
-  const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions, undefined, run.outsideCheck?.unjudgedSeedPmids);
+  const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions, {
+    bestCapturedPmids: run.result?.best?.measurement.capturedPmids,
+    unjudgedSeedPmids: run.outsideCheck?.unjudgedSeedPmids,
+  });
   if (!gate.allowed) return;
   const impact = trial.impact!;
   const lostHits = impact.lostHits ?? 0;

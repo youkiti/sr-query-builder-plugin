@@ -33,7 +33,10 @@ function renderHeldCandidateCard(
   const card = doc.createElement('article');
   card.className = 'optimization__held-candidate';
   card.setAttribute('aria-label', `保留候補 ${trial.candidateId} の操作`);
-  const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions, undefined, run.outsideCheck?.unjudgedSeedPmids);
+  const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions, {
+    bestCapturedPmids: run.result?.best?.measurement.capturedPmids,
+    unjudgedSeedPmids: run.outsideCheck?.unjudgedSeedPmids,
+  });
   const impact = trial.impact;
   const unconfirmed = impact?.lostHits != null ? impact.lostHits - gate.judgedCount : null;
   const summary = doc.createElement('p');

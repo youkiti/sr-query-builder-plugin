@@ -429,11 +429,11 @@ test.each([20, 21, 50, 100, 101])('失う集合 %i 件は閾値以下なら全�
   expect(pmids).toEqual(trial.impact!.sample!.pmids);
   if (lostHits <= 100) expect(pmids).toEqual(lost);
   expect(requests.filter((url) => url.searchParams.get('term')?.includes(') NOT ('))).toHaveLength(2);
-  expect(evaluateHeldCandidateAdoptionGate(trial, undefined).allowed).toBe(false);
+  expect(evaluateHeldCandidateAdoptionGate(trial, undefined, { bestCapturedPmids: result.best?.measurement.capturedPmids }).allowed).toBe(false);
   const decisions = Object.fromEntries(pmids.map((pmid) => [pmid, {
     decision: 'exclude' as const, status: 'saved' as const, error: null,
   }]));
-  expect(evaluateHeldCandidateAdoptionGate(trial, decisions)).toEqual({
+  expect(evaluateHeldCandidateAdoptionGate(trial, decisions, { bestCapturedPmids: result.best?.measurement.capturedPmids })).toEqual({
     allowed: true, judgedCount: expectedCount, sampledCount: expectedCount, reason: null,
   });
 });
@@ -1764,7 +1764,7 @@ test.each([
     const decisions = Object.fromEntries(expected.map((pmid) => [pmid, {
       decision: 'exclude' as const, status: 'saved' as const, error: null,
     }]));
-    expect(evaluateHeldCandidateAdoptionGate(result.trials[1]!, decisions).allowed).toBe(retrieved === count);
+    expect(evaluateHeldCandidateAdoptionGate(result.trials[1]!, decisions, { bestCapturedPmids: result.best?.measurement.capturedPmids }).allowed).toBe(retrieved === count);
   }
 });
 
@@ -2381,5 +2381,5 @@ test('増える集合だけの通信失敗なら失う書誌の exclude 保存�
   expect(trial).toMatchObject({ accepted: false, held: true, impact: {
     lostHits: 1, gainedHits: null, failedMeasurements: ['gained_search'], error: expect.stringContaining('414'),
   } });
-  expect(evaluateHeldCandidateAdoptionGate(trial, { '901': { status: 'saved', decision: 'exclude', error: null } }).allowed).toBe(true);
+  expect(evaluateHeldCandidateAdoptionGate(trial, { '901': { status: 'saved', decision: 'exclude', error: null } }, { bestCapturedPmids: result.best?.measurement.capturedPmids }).allowed).toBe(true);
 });

@@ -179,7 +179,7 @@ test.each(['achieved', 'needs_review', 'stopped', 'error'] as const)('最終状�
 function heldTrialFixture(overrides: Record<string, unknown> = {}) {
   const formula = parsePubmedFormulaMd('## PubMed/MEDLINE\n```\n#1 a[tiab] OR c[tiab]\n```');
   return { kind: 'proposal' as const, candidateId: 'candidate-1', formula, accepted: false, held: true,
-    reason: '失う集合のため保留', rationale: '', before: null, after: null, apiEvents: [],
+    reason: '失う集合のため保留', rationale: '', before: null, after: run('achieved').result!.best!.measurement, apiEvents: [],
     impact: { lostHits: 2, gainedHits: 1, error: null,
       inspected: [{ pmid: '2', title: null, year: null }, { pmid: '3', title: null, year: null }] },
     ...overrides };
@@ -193,6 +193,18 @@ function heldLostOutsideCheck() {
 }
 
 describe('保留候補の 3 操作（issue #172）', () => {
+  test('最良候補が回収したシードを失う候補はボタンを無効化し PMID を表示する', () => {
+    const current = run('needs_review');
+    current.trials.push(heldTrialFixture());
+    current.result!.best!.measurement.capturedPmids!.push('999');
+    current.outsideCheck = heldLostOutsideCheck();
+    const container = document.createElement('div');
+    renderOptimizationReview(container, current, { ...actions, adoptHeld: jest.fn(async () => {}) });
+    const card = container.querySelector('.optimization__held-candidate')!;
+    expect(card.querySelector('button')!.disabled).toBe(true);
+    expect(card.textContent).toContain('PMID: 999');
+  });
+
   test('ゲートを満たせば採用ボタンが押せ、候補ごとの操作を呼び分ける', () => {
     const current = run('needs_review');
     current.trials.push(heldTrialFixture());

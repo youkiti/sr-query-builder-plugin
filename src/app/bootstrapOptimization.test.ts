@@ -770,13 +770,13 @@ test.each(['exclude', 'include', 'maybe'] as const)('SeedPapers の保存済み 
   const f = setupOutside();
   f.list.mockResolvedValue([seed('11', { userDecision: 'include' }), seed('99', { userDecision: decision })]);
   f.completed.trials = [{ kind: 'proposal', candidateId: 'held', formula, held: true, accepted: false,
-    reason: '', rationale: '', before: null, after: null, apiEvents: [],
+    reason: '', rationale: '', before: null, after: f.completed.best!.measurement, apiEvents: [],
     impact: { lostHits: 1, gainedHits: 0, error: null, inspected: [{ pmid: '99', title: null, year: null }] } }];
   await f.invoke();
   const run = f.store.getState().queryOptimizationRun!;
   expect(run.outsideCheck!.candidates.filter((paper) => paper.pmid === '99')).toHaveLength(0);
   expect(run.outsideCheck!.decisions['11']).toBeUndefined();
-  const gate = evaluateHeldCandidateAdoptionGate(run.trials[0]!, run.outsideCheck!.decisions, undefined, run.outsideCheck!.unjudgedSeedPmids);
+  const gate = evaluateHeldCandidateAdoptionGate(run.trials[0]!, run.outsideCheck!.decisions, { bestCapturedPmids: run.result?.best?.measurement.capturedPmids, unjudgedSeedPmids: run.outsideCheck!.unjudgedSeedPmids });
   expect(gate.allowed).toBe(decision === 'exclude');
   expect(gate.judgedCount).toBe(decision === 'exclude' ? 1 : 0);
   if (decision === 'include') expect(gate.reason).toContain('include');
@@ -792,7 +792,7 @@ test('未判定の initial シードを失う候補は PMID を示して採用�
   const run = f.store.getState().queryOptimizationRun!;
   expect(run.outsideCheck!.candidates.filter((paper) => paper.pmid === '99')).toHaveLength(0);
   expect(run.outsideCheck!.decisions['99']).toBeUndefined();
-  const gate = evaluateHeldCandidateAdoptionGate(run.trials[0]!, run.outsideCheck!.decisions, undefined, run.outsideCheck!.unjudgedSeedPmids);
+  const gate = evaluateHeldCandidateAdoptionGate(run.trials[0]!, run.outsideCheck!.decisions, { bestCapturedPmids: run.result?.best?.measurement.capturedPmids, unjudgedSeedPmids: run.outsideCheck!.unjudgedSeedPmids });
   expect(gate).toMatchObject({ allowed: false, judgedCount: 0 });
   expect(gate.reason).toContain('99');
   const container = document.createElement('div');

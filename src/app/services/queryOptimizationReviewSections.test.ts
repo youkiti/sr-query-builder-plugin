@@ -16,6 +16,45 @@ function fixture(): QueryOptimizationRunState {
   };
 }
 const candidate = (source: 'outside' | 'lost') => ({ pmid: '2', title: '研究', year: 2000, abstract: null, source, reason: '' });
+test('回帰1: 保留後に最良候補が回収したシードは標本全件 exclude でも失えない', () => {
+  const run = deletionFixture();
+  const trial = run.trials[0]!;
+  trial.after = { ...run.result!.best!.measurement, capturedPmids: ['1'] };
+  run.result!.best!.measurement.capturedPmids = ['1', '999'];
+  trial.impact!.lostHits = 200;
+  const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck!.decisions,
+    { bestCapturedPmids: run.result!.best!.measurement.capturedPmids });
+  expect(gate.allowed).toBe(false);
+  expect(gate.reason).toContain('999');
+});
+
+test('回帰3: 抽出20件のうち書誌1件だけを exclude にしても採用できない', () => {
+  const run = deletionFixture();
+  const trial = run.trials[0]!;
+  trial.after = run.result!.best!.measurement;
+  trial.impact!.lostHits = 200;
+  trial.impact!.inspected = [{ pmid: '2', title: '研究', year: 2000 }];
+  trial.impact!.sample = { method: 'all', seed: 1, populationCount: 200, retrievedCount: 200,
+    pmids: Array.from({ length: 20 }, (_, index) => String(index + 2)), sampledAt: '' };
+  const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck!.decisions,
+    { bestCapturedPmids: run.result!.best!.measurement.capturedPmids });
+  expect(gate.allowed).toBe(false);
+  expect(gate.reason).toContain('書誌');
+  expect(gate.reason).toContain('19 件');
+  expect(gate.sampledCount).toBe(1);
+});
+
+test.each(['best', 'held', 'after'] as const)('捕捉集合が未測定なら比較不能として採用できない: %s', (missing) => {
+  const run = deletionFixture();
+  const trial = run.trials[0]!;
+  if (missing === 'best') run.result!.best!.measurement.capturedPmids = null;
+  else if (missing === 'held') trial.after = { ...trial.after!, capturedPmids: null };
+  else trial.after = null;
+  const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck!.decisions,
+    { bestCapturedPmids: run.result!.best!.measurement.capturedPmids });
+  expect(gate.allowed).toBe(false);
+  expect(gate.reason).toContain('比較できません');
+});
 const section = (run: QueryOptimizationRunState, key: string) => buildOptimizationReviewSections(run).sections.find((item) => item.key === key)!;
 
 test('4 区分が確認済みなら未確認事項は空で、既知シードの限界は捕捉区分だけに出す', () => {
@@ -109,7 +148,7 @@ test.each(['outside', 'lost'] as const)('%s の候補は保存済みだけを判
 function deletionFixture(): QueryOptimizationRunState {
   const run = fixture();
   run.trials = [{ kind: 'proposal', candidateId: 'candidate-1', formula: run.result!.best!.formula,
-    before: null, after: null, accepted: false, held: true, rationale: '', reason: '', apiEvents: [],
+    before: null, after: run.result!.best!.measurement, accepted: false, held: true, rationale: '', reason: '', apiEvents: [],
     impact: { lostHits: 2, gainedHits: 0, inspected: [
       { pmid: '2', title: '研究', year: 2000 }, { pmid: '3', title: '研究', year: 2000 },
     ], error: null } }];
@@ -235,7 +274,7 @@ describe('保留候補ごとの採用ゲート（issue #172）', () => {
     const run = deletionFixture();
     const trial = run.trials[0]!;
     trial.impact!.lostHits = 50; // 取得・判定済みは 2 件のまま。
-    const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions);
+    const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions, { bestCapturedPmids: run.result!.best!.measurement.capturedPmids });
     expect(gate.allowed).toBe(false);
     expect(gate.reason).toContain('あと 48 件の確認が必要');
   });
@@ -246,13 +285,13 @@ describe('保留候補ごとの採用ゲート（issue #172）', () => {
     trial.impact!.lostHits = 2;
     const decisions = run.outsideCheck!.decisions;
     run.outsideCheck!.decisions = {};
-    const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions);
+    const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions, { bestCapturedPmids: run.result!.best!.measurement.capturedPmids });
     expect(gate).toEqual({ allowed: false, judgedCount: 0, sampledCount: 2,
       reason: expect.stringContaining('あと 2 件の確認が必要') });
-    expect(evaluateHeldCandidateAdoptionGate(trial, { '2': decisions['2']! })).toMatchObject({
+    expect(evaluateHeldCandidateAdoptionGate(trial, { '2': decisions['2']! }, { bestCapturedPmids: run.result!.best!.measurement.capturedPmids })).toMatchObject({
       allowed: false, judgedCount: 1, reason: expect.stringContaining('あと 1 件の確認が必要'),
     });
-    expect(evaluateHeldCandidateAdoptionGate(trial, decisions)).toEqual({
+    expect(evaluateHeldCandidateAdoptionGate(trial, decisions, { bestCapturedPmids: run.result!.best!.measurement.capturedPmids })).toEqual({
       allowed: true, judgedCount: 2, sampledCount: 2, reason: null,
     });
   });
@@ -263,7 +302,7 @@ describe('保留候補ごとの採用ゲート（issue #172）', () => {
       const trial = run.trials[0]!;
       trial.impact!.lostHits = lostHits;
       run.outsideCheck!.decisions['3'] = { decision: 'include', status, error: null };
-      expect(evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions)).toEqual({
+      expect(evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions, { bestCapturedPmids: run.result!.best!.measurement.capturedPmids })).toEqual({
         allowed: false, judgedCount: 1, sampledCount: 2, reason: expect.stringContaining('PMID: 3'),
       });
     });
@@ -273,7 +312,7 @@ describe('保留候補ごとの採用ゲート（issue #172）', () => {
       const trial = run.trials[0]!;
       trial.impact!.lostHits = lostHits;
       run.outsideCheck!.decisions['3']!.decision = 'maybe';
-      const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions);
+      const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions, { bestCapturedPmids: run.result!.best!.measurement.capturedPmids });
       expect(gate).toMatchObject({ allowed: false, judgedCount: 1, sampledCount: 2 });
       expect(gate.reason).toContain(lostHits <= 100 ? `あと ${lostHits - 1} 件の確認が必要` : 'あと 1 件の判定が必要');
     });
@@ -283,7 +322,7 @@ describe('保留候補ごとの採用ゲート（issue #172）', () => {
       const trial = run.trials[0]!;
       trial.impact!.lostHits = lostHits;
       run.outsideCheck!.decisions['3']!.status = status;
-      expect(evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions)).toMatchObject({
+      expect(evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions, { bestCapturedPmids: run.result!.best!.measurement.capturedPmids })).toMatchObject({
         allowed: false, judgedCount: 1, sampledCount: 2,
       });
     });
@@ -293,7 +332,7 @@ describe('保留候補ごとの採用ゲート（issue #172）', () => {
     const run = deletionFixture();
     const trial = run.trials[0]!;
     trial.impact!.lostHits = 200; // 閾値超過。inspected は標本 2 件で全件 exclude 保存済み
-    const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions);
+    const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions, { bestCapturedPmids: run.result!.best!.measurement.capturedPmids });
     expect(gate).toEqual({ allowed: true, judgedCount: 2, sampledCount: 2, reason: null });
   });
 
@@ -302,7 +341,7 @@ describe('保留候補ごとの採用ゲート（issue #172）', () => {
     const trial = run.trials[0]!;
     trial.impact!.lostHits = 200;
     delete run.outsideCheck!.decisions['3'];
-    const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions);
+    const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions, { bestCapturedPmids: run.result!.best!.measurement.capturedPmids });
     expect(gate.allowed).toBe(false);
     expect(gate.judgedCount).toBe(1);
     expect(gate.reason).toContain('あと 1 件の判定が必要');
@@ -313,15 +352,15 @@ describe('保留候補ごとの採用ゲート（issue #172）', () => {
     const run = deletionFixture();
     const trial = run.trials[0]!;
     trial.impact!.lostHits = null;
-    expect(evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions).allowed).toBe(false);
+    expect(evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions, { bestCapturedPmids: run.result!.best!.measurement.capturedPmids }).allowed).toBe(false);
     trial.impact = { lostHits: 5, gainedHits: 0, inspected: [], error: '差集合の測定失敗' };
-    expect(evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions).allowed).toBe(false);
+    expect(evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions, { bestCapturedPmids: run.result!.best!.measurement.capturedPmids }).allowed).toBe(false);
   });
 
   test('held でない試行は常に押せない（失う集合が閾値以下で全件確認済みでも）', () => {
     const run = deletionFixture();
     const trial = { ...run.trials[0]!, held: false };
-    expect(evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions).allowed).toBe(false);
+    expect(evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions, { bestCapturedPmids: run.result!.best!.measurement.capturedPmids }).allowed).toBe(false);
   });
 
   test('既存の deletion.state（4 区分の判定）はゲートの影響を受けない', () => {
@@ -331,7 +370,7 @@ describe('保留候補ごとの採用ゲート（issue #172）', () => {
     // そのまま働き、ゲート（このテストでは標本を全件判定済みなので押せる）とは独立に
     // 「decided（残件あり）」になる。
     run.trials[0]!.impact!.lostHits = 200;
-    const gate = evaluateHeldCandidateAdoptionGate(run.trials[0]!, run.outsideCheck?.decisions);
+    const gate = evaluateHeldCandidateAdoptionGate(run.trials[0]!, run.outsideCheck?.decisions, { bestCapturedPmids: run.result!.best!.measurement.capturedPmids });
     expect(gate.allowed).toBe(true);
     expect(section(run, 'deletion_impact').state).toBe('decided');
   });
@@ -364,7 +403,7 @@ test.each(['lost_search', 'lost_fetch', 'gained_search'] as const)('採用ゲー
   trial.impact!.lostHits = 2;
   trial.impact!.error = '通信失敗';
   trial.impact!.failedMeasurements = [measurement];
-  const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck!.decisions);
+  const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck!.decisions, { bestCapturedPmids: run.result!.best!.measurement.capturedPmids });
   expect(gate.allowed).toBe(measurement === 'gained_search');
   if (measurement === 'lost_fetch') expect(gate.reason).toContain('書誌を取得');
   if (measurement === 'lost_search') expect(gate.reason).toContain('失う集合を実測');

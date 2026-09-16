@@ -103,7 +103,7 @@ export function buildOptimizationReviewSections(run: QueryOptimizationRunState):
 /**
  * 保留候補ごとの採用ゲート。判定済みは保存済み exclude のみを数え、include があれば採用できない。
  * - 失う集合が閾値以下: 全件の書誌を取得し、全件判定済みであることを要求する
- * - 閾値超過: 標本（inspected）を全件判定済みであれば押せる（集合全体の残りは未確認）
+ * - 閾値超過: 抽出した PMID の全件を取得・判定済みなら押せる（集合全体の残りは未確認）
  * 既存の deletion.state（confirmed/decided/unmet 等、全保留候補をまとめて見る判定）とは別に、
  * 候補ごとに「採用して保存」を押せるかどうかだけを判定する。
  */
@@ -122,9 +122,13 @@ export interface HeldCandidateAdoptionGate {
 export function evaluateHeldCandidateAdoptionGate(
   trial: OptimizationTrial,
   decisions: OptimizationOutsideCheckState['decisions'] | undefined,
-  threshold: number = HELD_CANDIDATE_ADOPTION_LOST_HITS_THRESHOLD,
-  unjudgedSeedPmids: readonly string[] = []
+  options: {
+    bestCapturedPmids: readonly string[] | null | undefined;
+    threshold?: number;
+    unjudgedSeedPmids?: readonly string[];
+  }
 ): HeldCandidateAdoptionGate {
+  const { bestCapturedPmids, threshold = HELD_CANDIDATE_ADOPTION_LOST_HITS_THRESHOLD, unjudgedSeedPmids = [] } = options;
   const impact = trial.impact;
   const sampledCount = impact?.inspected.length ?? 0;
   const judgedCount = impact?.inspected.filter((paper) => decisions?.[paper.pmid]?.status === 'saved'
@@ -146,12 +150,24 @@ export function evaluateHeldCandidateAdoptionGate(
     return { allowed: false, judgedCount, sampledCount,
       reason: `失う文献に include と判定した文献があるため採用できません（PMID: ${includedPmids.join(', ')}）。` };
   }
+  const heldCapturedPmids = trial.after?.capturedPmids;
+  if (bestCapturedPmids == null || heldCapturedPmids == null) return { allowed: false, judgedCount, sampledCount,
+    reason: '最良候補と保留候補の既知シード捕捉を比較できません（未測定）。採用できません。' };
+  const missingSeeds = bestCapturedPmids.filter((pmid) => !heldCapturedPmids.includes(pmid));
+  if (missingSeeds.length) return { allowed: false, judgedCount, sampledCount,
+    reason: `最良候補が捕捉している既知シードを失うため採用できません（PMID: ${missingSeeds.join(', ')}）。` };
   if (impact.lostHits <= threshold) {
     if (sampledCount >= impact.lostHits && judgedCount >= sampledCount) return { allowed: true, judgedCount, sampledCount, reason: null };
     return { allowed: false, judgedCount, sampledCount,
       reason: `失う集合 ${impact.lostHits} 件のうち exclude と判定して保存したのは ${judgedCount} 件です（あと ${impact.lostHits - judgedCount} 件の確認が必要です）。` };
   }
-  if (sampledCount > 0 && judgedCount >= sampledCount) return { allowed: true, judgedCount, sampledCount, reason: null };
+  const sampledPmids = impact.sample?.pmids ?? impact.inspected.map((paper) => paper.pmid);
+  const missingBibliography = sampledPmids.filter((pmid) => !impact.inspected.some((paper) => paper.pmid === pmid));
+  if (missingBibliography.length) return { allowed: false, judgedCount, sampledCount,
+    reason: `抽出した標本 ${sampledPmids.length} 件のうち ${missingBibliography.length} 件の書誌が未取得です。全件の書誌取得と exclude 判定の保存が必要です。` };
+  const unjudgedCount = sampledPmids.filter((pmid) => decisions?.[pmid]?.status !== 'saved'
+    || decisions[pmid]?.decision !== 'exclude').length;
+  if (sampledPmids.length > 0 && unjudgedCount === 0) return { allowed: true, judgedCount, sampledCount, reason: null };
   return { allowed: false, judgedCount, sampledCount,
-    reason: `標本 ${sampledCount} 件のうち ${judgedCount} 件しか判定されていません（あと ${sampledCount - judgedCount} 件の判定が必要です。集合全体では残り ${impact.lostHits - judgedCount} 件が未確認のままです）。` };
+    reason: `標本 ${sampledPmids.length} 件のうち ${sampledPmids.length - unjudgedCount} 件しか判定されていません（あと ${unjudgedCount} 件の判定が必要です。集合全体では残り ${impact.lostHits - judgedCount} 件が未確認のままです）。` };
 }
