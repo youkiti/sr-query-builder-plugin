@@ -31,7 +31,9 @@ test('全式・承認対応・基準・上限をテンプレートへ安全に�
     expect(prompt).toContain(value);
   }
   expect(prompt).toContain('目安件数（最終式の件数の目安。適格文献を落としてまで合わせない）: 4321');
-  expect(chat.mock.calls[0]![0][0].content).toContain('目安件数に近づけることを目指し');
+  for (const rule of ['1 run で 3 件そろうと終了', '互いに異なる狭め方', 'rationale', '失う 0 件・増える 0 件']) {
+    expect(chat.mock.calls[0]![0][0].content).toContain(rule);
+  }
   expect(prompt).not.toMatch(/\{\{[A-Z_]+\}\}/);
   expect(chat.mock.calls[0]![1]).toMatchObject({ responseFormat: 'json', temperature: 0.3,
     responseSchema: { type: 'object', additionalProperties: false } });

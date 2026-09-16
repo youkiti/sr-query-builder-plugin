@@ -3,7 +3,7 @@ import type { OptimizationTrial, PreviousOptimizationRejection } from '@/feature
 import type { PubmedFormula } from '@/lib/search-formula-md';
 import { nowIso } from '@/utils/iso8601';
 import type { OptimizationStopReason, QueryOptimizationResult } from './queryOptimizationService';
-import type { OptimizationReviewSection } from './queryOptimizationReviewSections';
+import { countLostSampleAnnotations, type OptimizationReviewSection } from './queryOptimizationReviewSections';
 import type { BlocksDraft, ProtocolDraft } from '../store';
 
 const CHECKPOINT_KEY = 'queryOptimizationCheckpoint';
@@ -85,6 +85,7 @@ export function getQueryOptimizationResumeAvailability(
 }
 
 export interface OptimizationTrialSummary {
+  annotation?: { status: 'success' | 'failure'; counts: ReturnType<typeof countLostSampleAnnotations> };
   sample?: NonNullable<OptimizationTrial['impact']>['sample'];
   duplicateOf?: string;
   formulaDiff?: OptimizationTrial['formulaDiff'];
@@ -170,6 +171,8 @@ export async function saveQueryOptimizationCheckpoint(
       } } : {}),
       trials: trials.map((trial) => ({
         candidateId: trial.candidateId,
+        ...(trial.impact?.annotation ? { annotation: { status: trial.impact.annotation.status,
+          counts: countLostSampleAnnotations(trial.impact.annotation) } } : {}),
         ...(trial.impact?.sample ? { sample: { ...trial.impact.sample, pmids: [...trial.impact.sample.pmids] } } : {}),
         ...(trial.duplicateOf ? { duplicateOf: trial.duplicateOf } : {}),
         ...(trial.formulaDiff ? { formulaDiff: trial.formulaDiff.map((block) => ({

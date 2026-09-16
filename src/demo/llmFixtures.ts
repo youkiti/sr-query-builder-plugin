@@ -25,6 +25,7 @@ import {
   PICK_BOUNDARY_SYSTEM_PROMPT,
 } from '@/features/formula/skills';
 import { OPTIMIZE_QUERY_SYSTEM_PROMPT, type ApprovedOptimizationBlock } from '@/features/formula/skills/optimizeQuery';
+import { ANNOTATE_LOST_SAMPLE_SYSTEM_PROMPT } from '@/features/formula/skills/annotateLostSample';
 import type { PubmedFormula } from '@/lib/search-formula-md';
 import {
   BLOCK_DEFS,
@@ -50,6 +51,7 @@ type SkillId =
   | 'pick_boundary'
   | 'improve_block'
   | 'optimize_query'
+  | 'annotate_lost_sample'
   | 'interpret_result';
 
 const SKILL_SYSTEM_PROMPTS: ReadonlyArray<readonly [string, SkillId]> = [
@@ -61,6 +63,7 @@ const SKILL_SYSTEM_PROMPTS: ReadonlyArray<readonly [string, SkillId]> = [
   [PICK_BOUNDARY_SYSTEM_PROMPT, 'pick_boundary'],
   [IMPROVE_BLOCK_SYSTEM_PROMPT, 'improve_block'],
   [OPTIMIZE_QUERY_SYSTEM_PROMPT, 'optimize_query'],
+  [ANNOTATE_LOST_SAMPLE_SYSTEM_PROMPT, 'annotate_lost_sample'],
   [INTERPRET_RESULT_SYSTEM_PROMPT, 'interpret_result'],
 ];
 
@@ -206,6 +209,13 @@ function buildPickBoundaryResponse(userText: string): unknown {
     });
   }
   return { picks };
+}
+
+function buildAnnotateLostSampleResponse(userText: string): unknown {
+  const section = /標本書誌:\n([\s\S]*?)\n\nスキーマ:/.exec(userText)?.[1] ?? '';
+  return { items: [...section.matchAll(/"pmid"\s*:\s*"([^"]+)"/g)].map((match) => ({
+    pmid: match[1], judgement: 'unclear', reason: '研究基準への適格性は人による確認が必要です。',
+  })) };
 }
 
 /* ------------------------------------------------------------------------ */
@@ -369,6 +379,8 @@ function buildResponseObject(skill: SkillId, userText: string): unknown {
       return buildExpandRecallResponse(userText);
     case 'pick_boundary':
       return buildPickBoundaryResponse(userText);
+    case 'annotate_lost_sample':
+      return buildAnnotateLostSampleResponse(userText);
     case 'improve_block':
       return buildImproveBlockResponse(userText);
     case 'optimize_query':

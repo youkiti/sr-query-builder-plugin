@@ -180,6 +180,9 @@ test('削除候補が差集合検査に届いて保留になり、best は初期
   const realFactory: LlmProviderFactory = {
     model: 'real-model',
     forPurpose: (purpose) => {
+      // 保留標本の参考注釈は検索式のリプレイ応答を消費せず、専用の fake で返す。
+      if (purpose === 'annotate_lost_sample') return { providerId: 'gemini', model: 'annotation-fake',
+        chat: async () => ({ text: '{"items":[]}', tokensIn: null, tokensOut: null, raw: {} }) };
       realCalls.push(purpose);
       throw new Error(`予期しない purpose 呼び出し: ${purpose}`);
     },

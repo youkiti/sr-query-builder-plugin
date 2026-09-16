@@ -13,6 +13,7 @@ import {
 } from '@/features/formula/skills';
 import { handleGeminiGenerateContent } from './llmFixtures';
 import { optimizeQuery, type OptimizeQueryInput } from '@/features/formula/skills/optimizeQuery';
+import { annotateLostSample } from '@/features/formula/skills/annotateLostSample';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
 import { esearch, sharedEutilsRateLimiters } from '@/lib/ncbi';
 import { expandFormula } from '@/features/validation';
@@ -41,6 +42,12 @@ function makeProvider(): LLMProvider {
     handleGeminiGenerateContent(init ?? {})) as unknown as typeof fetch;
   return new GeminiProvider({ apiKey: 'demo-api-key', fetch: fetchImpl });
 }
+
+test('参考注釈のデモ応答は入力 PMID ごとに決定的な判断不能を返す', async () => {
+  const result = await annotateLostSample({ criteria: { researchQuestion: 'RQ', inclusionCriteria: '組入', exclusionCriteria: '除外' },
+    articles: ['111', '222'].map((pmid) => ({ pmid, title: '研究', year: 2024, abstract: null, meshHeadings: [] })) }, makeProvider());
+  expect(result).toEqual(['111', '222'].map((pmid) => ({ pmid, judgement: 'unclear', reason: '研究基準への適格性は人による確認が必要です。' })));
+});
 
 describe('extract-protocol フィクスチャ', () => {
   it('ブロック #1〜#3（ARDS/ECMO/RCT フィルタ）を返す', async () => {

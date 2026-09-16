@@ -199,7 +199,15 @@ function renderDetails(details: HTMLElement, trial: OptimizationTrial, nodes: Op
       link.target = '_blank';
       link.rel = 'noopener noreferrer';
       p.appendChild(link);
+      const annotation = impact.annotation?.items.find((item) => item.pmid === article.pmid);
+      if (annotation) {
+        const label = { likely_eligible: '適格らしい', unclear: '判断不能', likely_ineligible: '非適格らしい' }[annotation.judgement];
+        p.appendChild(doc.createTextNode(` — AI: ${label}（${annotation.reason}）`));
+      }
       deletion.appendChild(p);
+    }
+    if (impact.annotation?.status === 'failure') {
+      paragraph(deletion, `AI の参考注釈を取得できませんでした（${impact.annotation.error}）。人の判定には影響しません。`);
     }
     if (impact.error) paragraph(deletion, `実測・取得の失敗: ${impact.error}`);
   }

@@ -53,7 +53,9 @@ function fixture(words: number, mesh: number, rounds: number, mode: 'expand' | '
     tokensIn: null, tokensOut: null, raw: {} }));
   const deps: QueryOptimizationDeps = { measureTermDetails: true,
     eutils: { fetch, maxRetries: 0, rateLimiter: { acquire: async () => undefined } },
-    llmFactory: { model: 'fake', forPurpose: (_purpose, onRequestState, attempts) => withRetry(withSignalDeadline({ providerId: 'gemini', model: 'fake', chat }), { ...attempts, onRequestState }) },
+    llmFactory: { model: 'fake', forPurpose: (purpose, onRequestState, attempts) => withRetry(withSignalDeadline({ providerId: 'gemini', model: 'fake',
+      chat: purpose === 'annotate_lost_sample' ? async () => ({ text: '{"items":[]}', tokensIn: null, tokensOut: null, raw: {} }) : chat,
+    }), { ...attempts, onRequestState }) },
     checkpoint: { read: async () => undefined, write: async () => undefined },
   };
   return { input, deps, queries, chat, atoms, sets };
@@ -234,8 +236,9 @@ test('差集合の書誌取得で候補を保留した後も最終再検証1回�
   expect(result.trials[1]).toMatchObject({ accepted: false, impact: { lostHits: 10, gainedHits: 0,
     inspected: expect.arrayContaining([{ pmid: '1001', title: '研究 1001', year: null }]) } });
   expect(f.deps.eutils.fetch).toHaveBeenCalledWith(expect.stringContaining('efetch.fcgi'), expect.any(Object));
-  expect(result.apiCalls).toBe(33);
-  expect(40 - result.apiCalls).toBeGreaterThan(6);
+  // 注釈の実送信も 1 通信として数え、最終再検証 6 通信分は残る。
+  expect(result.apiCalls).toBe(34);
+  expect(40 - result.apiCalls).toBeGreaterThanOrEqual(6);
   expect(result.stopReason).toBe('iteration_limit');
 });
 

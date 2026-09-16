@@ -1,4 +1,5 @@
 import { waitWithSignal } from '@/utils/abort';
+import { annotateLostSample, type AnnotateLostSampleInput } from '@/features/formula/skills/annotateLostSample';
 import {
   optimizeQuery,
   type ApprovedOptimizationBlock,
@@ -128,7 +129,7 @@ export interface VerifiedOptimizationCandidate {
 export type OptimizationStopReason =
   | 'conditions_met' | 'iteration_limit' | 'repeated_formula' | 'no_improvement'
   | 'request_timeout' | 'user_stop' | 'api_error' | 'api_budget' | 'time_budget' | 'invalid_input'
-  | 'revalidation_failed' | 'diagnosed_block_held' | 'seed_capture_stalled';
+  | 'revalidation_failed' | 'diagnosed_block_held' | 'seed_capture_stalled' | 'held_candidates_collected';
 
 /** NCBI の失敗とは区別する、反復サービスの制御用例外。 */
 export class QueryOptimizationStopError extends Error {
@@ -138,7 +139,8 @@ export class QueryOptimizationStopError extends Error {
       iteration_limit: '反復回数の上限に達したため終了しました。',
       diagnosed_block_held: '診断したブロックを狭める案が、既に捕捉している文献を失うため連続して保留になり、終了しました。',
       repeated_formula: '評価済みの同じ式に戻ったため終了しました。',
-      no_improvement: '件数を減らしつつ既に捕捉している文献を失わない変更が、連続して見つからなかったため終了しました。',
+      no_improvement: '採用できる変更も、人に判断を求める保留候補も得られない回が 2 回続いたため終了しました。',
+      held_candidates_collected: `実測で失う集合のある保留候補が ${MAX_HELD_CANDIDATES} 件そろったため終了しました。自動調整は既に捕捉している文献を失う変更を自動採用しないため、保留候補を最終レビューで判定してください。`,
       seed_capture_stalled: 'ブロックの捕捉を増やす中間手を承認済みブロック数と同じ回数続けて採用しましたが、最終式の捕捉数が増えなかったため終了しました。',
       user_stop: 'ユーザーの停止要求により処理を停止しました。',
       api_error: 'API エラーにより処理を続けられません。',
@@ -170,8 +172,9 @@ export interface QueryOptimizationResult {
 }
 
 // 最大 5 候補＋初期・最終測定と語別分析を収めつつ、暴走を有限にする既定値。
-// NCBI と optimize_query の実送信（リトライ含む）を数え、監査ログ通信は除く。
+// NCBI と optimize_query / annotate_lost_sample の実送信（リトライ含む）を数え、監査ログ通信は除く。
 export const DEFAULT_MAX_ITERATIONS = 5;
+export const MAX_HELD_CANDIDATES = 3;
 export const DEFAULT_MAX_API_CALLS = 200;
 export const MAX_TERM_API_CALLS = 100;
 // 保存回数を約1/10に抑えつつ、中断時に払い戻されうる通信を最大9回に留める。
@@ -661,10 +664,13 @@ export async function runQueryOptimization(
         meshHeadings: [], note: `書誌の取得に失敗: ${err instanceof Error ? err.message : String(err)}` }));
     }
   }
-  const measureImpact = async (before: PubmedFormula, after: PubmedFormula): Promise<OptimizationImpact> => {
+  const measureImpact = async (before: PubmedFormula, after: PubmedFormula): Promise<{
+    impact: OptimizationImpact; articles: AnnotateLostSampleInput['articles'];
+  }> => {
     task = null;
     notify();
     const impact: OptimizationImpact = { lostHits: null, gainedHits: null, inspected: [], error: null, failedMeasurements: [] };
+    let articles: AnnotateLostSampleInput['articles'] = [];
     const failure = (err: unknown, measurement: 'lost_search' | 'lost_fetch' | 'gained_search'): void => {
       if (err instanceof QueryOptimizationStopError) throw err;
       boundary();
@@ -696,10 +702,12 @@ export async function runQueryOptimization(
     } catch (err) { failure(err, 'gained_search'); }
     if (impact.lostHits !== null && impact.lostHits > 0) {
       try {
-        impact.inspected = (await efetchArticles(pmids, eutils)).map(({ pmid, title, year }) => ({ pmid, title, year }));
+        articles = (await efetchArticles(pmids, eutils)).map(({ pmid, title, year, abstract, meshHeadings }) =>
+          ({ pmid, title, year, abstract, meshHeadings }));
+        impact.inspected = articles.map(({ pmid, title, year }) => ({ pmid, title, year }));
       } catch (err) { failure(err, 'lost_fetch'); }
     }
-    return impact;
+    return { impact, articles };
   };
   async function finish(reason: OptimizationStopReason,
     latestMeasurement: OptimizationMeasurement | undefined = best?.measurement): Promise<QueryOptimizationResult> {
@@ -743,11 +751,13 @@ export async function runQueryOptimization(
     if (latestMeasurement?.missedPmids?.length) unmetReasons.push(`未捕捉シード: ${latestMeasurement.missedPmids.join(', ')}`);
     if (latestMeasurement?.totalHits != null && latestMeasurement.totalHits > fixed.maxHits) {
       unmetReasons.push(`目安件数 ${fixed.maxHits} 件を超えています（実測 ${latestMeasurement.totalHits} 件）`);
-      if (['no_improvement', 'diagnosed_block_held', 'iteration_limit', 'repeated_formula'].includes(reason)) {
-        unmetReasons.push('既に捕捉している文献を失わずに件数を減らす変更は見つかりませんでした。件数を減らす候補には未確認の損失があります。これは件数を減らせないことの証明ではありません。検索戦略のレビュー（概念と検索語の対応・AND/OR の論理・フィルタの適用対象）か、目安件数の見直しを検討してください。');
+      if (['no_improvement', 'diagnosed_block_held', 'held_candidates_collected', 'iteration_limit', 'repeated_formula'].includes(reason)) {
         const heldCount = trials.filter((trial) => trial.held
           && typeof trial.before?.totalHits === 'number' && typeof trial.after?.totalHits === 'number'
           && trial.after.totalHits < trial.before.totalHits).length;
+        unmetReasons.push(heldCount > 0
+          ? '件数を減らす候補は見つかりましたが、既に捕捉している文献を失うため自動採用していません。自動調整は捕捉済みの文献を失わない変更だけを自動採用するので、自動では件数は減りません。件数を減らすには、保留候補を最終レビューで判定して採用するか、検索戦略のレビュー・目安件数の見直しを検討してください。'
+          : '件数を減らす変更案は得られませんでした。これは件数を減らせないことの証明ではありません。自動調整は捕捉済みの文献を失わない変更だけを自動採用するので、自動では件数は減りません。検索戦略のレビュー（概念と検索語の対応・AND/OR の論理・フィルタの適用対象）か、目安件数の見直しを検討してください。');
         if (heldCount > 0) unmetReasons.push(`件数を減らす候補を ${heldCount} 件保留しました（削除影響の確認を参照）。`);
       }
     }
@@ -829,6 +839,7 @@ export async function runQueryOptimization(
     await save();
     if (!best) return finish('api_error');
     let noImprovement = 0;
+    let heldCandidates = 0;
     let intermediateAcceptances = 0;
     // 各承認ブロックを一度ずつ直す機会を残す。入力検証済みなので上限は最低 1 回。
     const maxIntermediateAcceptances = fixed.approvedBlocks.length;
@@ -956,31 +967,93 @@ export async function runQueryOptimization(
           const afterBlock = targetRow?.capturedPmids;
           const improved = measured.evaluation.status === 'success' && lostSeeds.length === 0
             && isImprovement(before, measured.measurement, fixed.maxHits, beforeBlock?.length, afterBlock?.length);
+          const redundant = !improved && !failed && lostSeeds.length === 0 && before.missedPmids!.length === 0
+            && measured.measurement.totalHits === before.totalHits
+            && proposal.addedTerms.length === 0 && proposal.replacedTerms.length === 0
+            && formulaDiff.every((block) => block.added.length === 0)
+            && formulaDiff.some((block) => block.removed.length > 0);
           const rejection = failed ? describeMeasurementFailure(measured.evaluation)
             : lostSeeds.length > 0 ? `捕捉済みシードを失う: ${lostSeeds.join(', ')}`
               : '局面の指標に改善がありません';
           // 採否に要る差集合を先に測る。追加詳細（語別計測）の途中で停止しても採否は確定している。
-          const impact: OptimizationImpact | undefined = improved
+          const impactResult = improved || redundant
             ? await measureImpact(best.formula, candidate)
             : undefined;
-          const accepted = impact?.lostHits === 0 && impact.gainedHits !== null;
-          const held = impact !== undefined && !accepted;
+          const impact = impactResult?.impact;
+          const accepted = impact?.lostHits === 0 && impact.gainedHits !== null && (!redundant || impact.gainedHits === 0);
+          const held = improved && impact !== undefined && !accepted;
           const intermediate = accepted && before.missedPmids!.length > 0
             && measured.measurement.capturedPmids!.length === before.capturedPmids!.length;
           const improvementReason = before.missedPmids!.length && beforeBlock && afterBlock
             ? `ブロック #${proposal.targetBlockId} のシード捕捉が ${beforeBlock.length} 件から ${afterBlock.length} 件に増えました${intermediate ? '（最終式の捕捉数は変わらない中間手を採用）' : ''}`
             : '局面の指標が改善しました';
           // 候補または差集合の測定失敗は照合対象にせず、再測定の機会を残す。
-          if (!failed && !(held && (impact.lostHits === null || impact.gainedHits === null))) {
+          if (!failed && !(impact && (impact.lostHits === null || impact.gainedHits === null))) {
             seen.set(measured.evaluation.fingerprint, candidateId);
           }
-          const impactReason = impact && (accepted
+          const impactReason = impact && (redundant
+            ? accepted ? '冗長整理: 検索集合が変わらない削除を採用しました（失う集合 0 件、増える集合 0 件）'
+              : `冗長整理の不成立: 検索集合が同一と確認できないため却下しました（失う集合 ${impact.lostHits ?? '未測定'} 件、増える集合 ${impact.gainedHits ?? '未測定'} 件）${impact.error ? `: ${impact.error}` : ''}`
+            : accepted
             ? `${improvementReason}（失う集合 0 件、増える集合 ${impact.gainedHits} 件）`
             : impact.lostHits !== null && impact.lostHits > 0
               ? `失う集合 ${impact.lostHits} 件のためレビュー候補に留めました（${impact.sample?.method === 'retrieved_subset' ? `取得できた ${impact.sample.retrievedCount} 件から無作為抽出した書誌` : '無作為抽出した書誌'} ${impact.inspected.length} 件 / 全体 ${impact.lostHits}、増える集合 ${impact.gainedHits ?? '未測定'} 件）`
               : `${impact.lostHits === null ? '失う集合' : '増える集合'}を実測できなかったためレビュー候補に留めました: ${impact.error}`);
           let detailStop: QueryOptimizationStopError | null = null;
-          if (deps.measureTermDetails && measured.evaluation.status === 'success') {
+          const productiveHold = held && impact!.lostHits !== null && impact!.lostHits >= 1;
+          if (productiveHold) heldCandidates += 1;
+          noImprovement = accepted || productiveHold ? 0 : noImprovement + 1;
+          if (productiveHold && impactResult!.articles.length) {
+            let annotationSignal: AbortSignal | undefined;
+            const annotation: NonNullable<OptimizationImpact['annotation']> = {
+              status: 'failure', annotatedAt: new Date(now()).toISOString(),
+              requestedPmids: impactResult!.articles.map((article) => article.pmid), items: [], error: null,
+            };
+            apiSource = 'AI';
+            try {
+              const annotationProvider = deps.llmFactory.forPurpose('annotate_lost_sample', deps.onProgress ? (state) => {
+                if (terminal) return;
+                if (state === 'idle') { apiWaiting = null; notify(); return; }
+                apiEvent(state);
+              } : undefined, {
+                beforeAttempt: async () => {
+                  boundary();
+                  apiCalls += 1;
+                  await persistProgress();
+                  boundary(false);
+                },
+                createSignal: () => {
+                  annotationSignal = requestSignal(deps.llmRequestTimeoutMs ?? DEFAULT_LLM_REQUEST_TIMEOUT_MS);
+                  return annotationSignal;
+                },
+                sleep,
+              });
+              annotation.items = await abortable(annotateLostSample({ criteria: fixed.criteria,
+                articles: impactResult!.articles }, annotationProvider));
+              boundary(false);
+              annotation.status = 'success';
+            } catch (err) {
+              // run の停止を最優先し、実測済み trial を保存した後で投げ直す。
+              let failure = err;
+              try { boundary(false); } catch (stopped) { failure = stopped; }
+              if (failure instanceof QueryOptimizationStopError) {
+                detailStop = failure;
+                annotation.error = failure.message;
+              } else if (annotationSignal?.aborted && annotationSignal.reason instanceof DOMException
+                && annotationSignal.reason.name === 'TimeoutError') {
+                annotation.error = 'AI の参考注釈の通信が期限切れになりました';
+                apiEvent('failure');
+              } else {
+                annotation.error = failure instanceof Error ? failure.message : String(failure);
+                apiEvent('failure');
+              }
+            } finally {
+              annotation.annotatedAt = new Date(now()).toISOString();
+              impact!.annotation = annotation;
+              apiSource = 'PubMed';
+            }
+          }
+          if (!detailStop && deps.measureTermDetails && measured.evaluation.status === 'success') {
             try {
               measured.measurement = { ...measured.measurement, terms: await measureTerms(candidate, fixed.approvedBlocks, {
                 ...termOptions, blocks: measured.measurement.blocks, finalHits: measured.measurement.totalHits,
@@ -1005,7 +1078,6 @@ export async function runQueryOptimization(
             best = measured;
             await updateDiagnosis(best);
           }
-          noImprovement = accepted ? 0 : noImprovement + 1;
           // 追加詳細の停止でも、実測済み候補と採否を履歴へ残してから終了する。
           if (detailStop) throw detailStop;
           await save();
@@ -1033,6 +1105,7 @@ export async function runQueryOptimization(
       diagnosedHeldId = diagnosedHeldBlock(trials, blockDiagnosis);
       if (diagnosedHeldId) return finish('diagnosed_block_held');
       if (intermediateAcceptances >= maxIntermediateAcceptances) return finish('seed_capture_stalled');
+      if (heldCandidates >= MAX_HELD_CANDIDATES) return finish('held_candidates_collected');
       if (noImprovement >= 2) return finish('no_improvement');
     }
     return finish(reason);

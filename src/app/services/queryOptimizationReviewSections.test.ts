@@ -1,4 +1,4 @@
-import { buildOptimizationReviewSections, evaluateHeldCandidateAdoptionGate,
+import { buildOptimizationReviewSections, countLostSampleAnnotations, evaluateHeldCandidateAdoptionGate,
   HELD_CANDIDATE_ADOPTION_LOST_HITS_THRESHOLD } from './queryOptimizationReviewSections';
 import type { OptimizationOutsideCheckState, QueryOptimizationRunState } from '../store';
 
@@ -56,6 +56,29 @@ test.each(['best', 'held', 'after'] as const)('捕捉集合が未測定なら比
   expect(gate.reason).toContain('比較できません');
 });
 const section = (run: QueryOptimizationRunState, key: string) => buildOptimizationReviewSections(run).sections.find((item) => item.key === key)!;
+
+test.each(['success', 'failure'] as const)('参考注釈 %s は件数だけを表示し、区分と採用ゲートを変えない', (status) => {
+  const run = deletionFixture();
+  const trial = run.trials[0]!;
+  const options = { bestCapturedPmids: run.result!.best!.measurement.capturedPmids };
+  const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck!.decisions, options);
+  const state = section(run, 'deletion_impact').state;
+  const annotation = { status, annotatedAt: '2026-09-16T00:00:00Z', requestedPmids: ['2', '3', '4', '5'],
+    items: [
+      { pmid: '2', judgement: 'likely_eligible' as const, reason: '参考理由。' },
+      { pmid: '3', judgement: 'unclear' as const, reason: '参考理由。' },
+      { pmid: '4', judgement: 'likely_ineligible' as const, reason: '参考理由。' },
+    ], error: status === 'failure' ? '期限切れ' : null };
+  trial.impact!.annotation = annotation;
+  expect(countLostSampleAnnotations(annotation)).toEqual({ likelyEligible: 1, unclear: 1, likelyIneligible: 1, unannotated: 1 });
+  expect(evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck!.decisions, options)).toEqual(gate);
+  const deletion = section(run, 'deletion_impact');
+  expect(deletion.state).toBe(state);
+  expect(deletion.lines.join('\n')).toContain(status === 'success'
+    ? '標本 4 件中 適格らしい 1 件・判断不能 1 件・非適格らしい 1 件・未注釈 1 件'
+    : 'AI の参考注釈を取得できませんでした（期限切れ）。人の判定には影響しません。');
+  expect(deletion.lines.join('\n')).not.toContain('参考理由');
+});
 
 test('4 区分が確認済みなら未確認事項は空で、既知シードの限界は捕捉区分だけに出す', () => {
   const review = buildOptimizationReviewSections(fixture());

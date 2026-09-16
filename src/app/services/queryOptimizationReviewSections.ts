@@ -2,6 +2,29 @@ import type { OptimizationTrial } from '@/features/formula/skills/optimizeQuery'
 import type { OptimizationOutsideCheckState, QueryOptimizationRunState } from '../store';
 
 export type ReviewSectionState = 'confirmed' | 'unmet' | 'needs_decision' | 'decided' | 'unconfirmed';
+type LostSampleAnnotation = NonNullable<NonNullable<OptimizationTrial['impact']>['annotation']>;
+
+/** 参考注釈の表示・保存用集計。人の判定や採用条件には使わない。 */
+export function countLostSampleAnnotations(annotation: LostSampleAnnotation): {
+  likelyEligible: number; unclear: number; likelyIneligible: number; unannotated: number;
+} {
+  const counts = { likelyEligible: 0, unclear: 0, likelyIneligible: 0, unannotated: 0 };
+  for (const pmid of new Set(annotation.requestedPmids)) {
+    const item = annotation.items.find((entry) => entry.pmid === pmid);
+    if (!item) counts.unannotated += 1;
+    else if (item.judgement === 'likely_eligible') counts.likelyEligible += 1;
+    else if (item.judgement === 'likely_ineligible') counts.likelyIneligible += 1;
+    else counts.unclear += 1;
+  }
+  return counts;
+}
+
+export function formatLostSampleAnnotation(annotation: LostSampleAnnotation): string {
+  if (annotation.status === 'failure') return `AI の参考注釈を取得できませんでした（${annotation.error}）。人の判定には影響しません。`;
+  const counts = countLostSampleAnnotations(annotation);
+  return `AI の参考注釈（採否には使いません）: 標本 ${new Set(annotation.requestedPmids).size} 件中 適格らしい ${counts.likelyEligible} 件・判断不能 ${counts.unclear} 件・非適格らしい ${counts.likelyIneligible} 件`
+    + (counts.unannotated ? `・未注釈 ${counts.unannotated} 件` : '');
+}
 export interface OptimizationReviewSection {
   key: 'known_capture' | 'hit_target' | 'outside_check' | 'deletion_impact';
   label: string;
@@ -86,6 +109,7 @@ export function buildOptimizationReviewSections(run: QueryOptimizationRunState):
           : sample?.method === 'retrieved_subset'
             ? `${prefix}のうち取得できた ${sample.retrievedCount} 件から無作為抽出した ${count} 件の書誌を確認（集合全体からの無作為抽出ではありません）`
             : `${prefix}のうち書誌を確認できたのは先頭 ${count} 件`);
+        if (trial.impact?.annotation) deletion.lines.push(formatLostSampleAnnotation(trial.impact.annotation));
         if (lostHits != null && lostHits > count) deletion.lines.push(`残り ${lostHits - count} 件は未確認`);
         if (trial.impact?.error) deletion.lines.push(trial.impact.error);
       }

@@ -301,6 +301,26 @@ test('未確認件数が残る監査記録も「見たから安全」とは書�
   expect(log.heldAdoption).toEqual({ candidateId: 'candidate-1', lostHits: 200, judgedCount: 2, unconfirmedCount: 198, sampleMethod: 'retrieved_subset' });
 });
 
+test.each(['success', 'failure'] as const)('保留採用の参考注釈 %s の集計を note と監査に残す', async (status) => {
+  const f = setup();
+  const trial = heldTrial();
+  trial.impact!.annotation = { status, annotatedAt: '', requestedPmids: ['2', '3'],
+    items: status === 'failure' ? [] : [{ pmid: '2', judgement: 'likely_eligible', reason: '参考理由。' }],
+    error: status === 'failure' ? '期限切れ' : null };
+  f.run.trials.push(trial);
+  f.run.outsideCheck = { status: 'ready', reason: null, originalHits: 10, marginHits: 0, evaluatedCount: 0,
+    ...lostCandidates(['2', '3']) };
+  await adoptHeldOptimizationCandidate(f, 'candidate-1');
+  const counts = { likelyEligible: status === 'success' ? 1 : 0, unclear: 0, likelyIneligible: 0,
+    unannotated: status === 'success' ? 1 : 2 };
+  expect(f.append.mock.calls[0]![1].note).toContain(`AI の参考注釈（採否には不使用）: 標本 2 件中 適格らしい ${counts.likelyEligible} 件・判断不能 0 件・非適格らしい 0 件・未注釈 ${counts.unannotated} 件`);
+  const audit = JSON.parse(f.upload.mock.calls[0]![0].content).heldAdoption;
+  expect(audit.annotation).toEqual({ status, counts });
+  expect(JSON.stringify(audit)).not.toContain('参考理由');
+  expect(audit.judgedCount).toBe(2);
+  expect(f.store.getState().queryOptimizationRun!.save!.status).toBe('saved');
+});
+
 test('ゲート未達の保留候補（失う集合を全件確認していない）は保存しない', async () => {
   const f = setup();
   f.run.trials.push(heldTrial({ impact: { lostHits: 50, gainedHits: 1, error: null,
