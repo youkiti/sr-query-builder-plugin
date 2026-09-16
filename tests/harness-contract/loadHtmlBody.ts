@@ -14,7 +14,7 @@ import path from 'node:path';
  * `<script>` はブラウザ専用の副作用（chrome.* 呼び出し等）を持つため読み込む前に取り除く。
  */
 export function loadHtmlBody(relativePathFromRepoRoot: string): string {
-  const absolute = path.resolve(process.cwd(), relativePathFromRepoRoot);
+  const absolute = path.resolve(__dirname, '../..', relativePathFromRepoRoot);
   const raw = readFileSync(absolute, 'utf8');
   const withoutScripts = raw.replace(/<script[\s\S]*?<\/script>/gi, '');
   const match = /<body[^>]*>([\s\S]*)<\/body>/i.exec(withoutScripts);

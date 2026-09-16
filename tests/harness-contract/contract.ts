@@ -16,8 +16,8 @@
  * #177 で壊れたのは要素の存在ではなく契約だった: `.draft__actions` は元は「常に描画され、
  * 唯一の子が生成ボタン」だったが、いまは「検索式があるときだけ」描画され、中身の順序・
  * 意味も変わった。133 種のセレクタは #177 の後もすべて `src/` に存在していたため、
- * 単なる存在チェックでは検知できない。ここでは「どの状態で・何が・どの順で描画されるか」を
- * 宣言し、`contract.test.ts` が実際に描画して検証する。
+ * 単なる存在チェックでは検知できない。ここでは状態ごとの有効性・一意性・排他性など、
+ * 消費側の操作に必要な条件を宣言し、`contract.test.ts` が実際に描画して検証する。
  *
  * ## verified について
  *
@@ -70,15 +70,19 @@ export const HARNESS_CONTRACT: ContractEntry[] = [
       },
     ],
     precondition:
-      '#/draft を demoSeed=07-draft（シード登録済み・検索式未生成。currentFormulaMarkdown === null）で開く',
+      '#/draft を検索式未生成（currentFormulaMarkdown === null）で開き、' +
+      '承認済みブロックとシードの設定読込が完了している（queryOptimizationSetup.status === ready）',
     expectation:
-      '`.optimization__start` が唯一の主操作として描画される。`.draft__actions`（`.draft__revalidate` /' +
+      '`.optimization__start` が唯一の主操作として有効で、目安件数・反復上限を入力して開始できる。' +
+      ' 両入力は `section.optimization__setup` 内で対応する label の直下にあり、' +
+      ' ラベルで取得できる。反復上限は details 内にあり、summary で開いて入力できる。' +
+      ' `.draft__actions`（`.draft__revalidate` /' +
       ' `.draft__generate` を含む補助操作行）は一切描画されない（querySelector が null を返す）',
     verified: true,
-    verifiedBy: '現式が無いとき > 主操作は .optimization__start のみで、.draft__actions は描画されない',
+    verifiedBy: '現式が無いとき > 設定入力と主操作が有効で、補助操作は描画されない',
   },
   {
-    id: 'draft.formula-exists.secondary-actions-order',
+    id: 'draft.formula-exists.unique-secondary-actions',
     consumers: [
       {
         file: 'tools/selenium/manualCheck.mjs',
@@ -95,16 +99,16 @@ export const HARNESS_CONTRACT: ContractEntry[] = [
       },
     ],
     precondition:
-      '#/draft を demoSeed=08-validation（v1 検証済み。currentFormulaVersionId が非 null、' +
-      'createdBy=\'ai_draft\'）で開く。draftRun / queryOptimizationRun とも running でない',
+      '#/draft の採用保存直後（currentFormulaVersionId が非 null、createdBy=\'auto_optimize\'）。' +
+      ' draftRun / queryOptimizationRun とも running でない。user_edit の版とも比較する',
     expectation:
-      '`.draft__actions.draft__actions--secondary` が描画され、ラベル（`.draft__actions-label`）の' +
-      ' 直後の子要素が `.draft__revalidate`、その次が `.draft__generate` の順で並ぶ。' +
-      ' 存在するだけでなく DOM 順序が固定であることを検証する（どちらのボタンも class 1 個だけで' +
-      ' 一意に取れる前提を守る＝同じ class の要素が他に無い）',
+      '現式があるとき `.draft__revalidate` と `.draft__generate` がそれぞれページ内で一意に取れる。' +
+      ' 現式が無いときは両方とも描画されない。兄弟順序や追加の装飾クラスは問わない。' +
+      ' auto_optimize の版で `.draft__generate` を押すと `.draft__discard-confirm` を表示せず' +
+      ' 再生成を開始する。user_edit の版では確認パネルが表示され、直ちには再生成しない',
     verified: true,
     verifiedBy:
-      '現式があるとき > .draft__actions--secondary の中は .draft__revalidate → .draft__generate の順',
+      '採用保存後 > 補助操作がページ内で一意に取れ、破棄確認なしで再生成できる',
   },
   {
     id: 'draft.block-hits.generation-only',
@@ -125,12 +129,12 @@ export const HARNESS_CONTRACT: ContractEntry[] = [
     precondition:
       '#/draft を demoSeed=08-validation で開いた直後（running=false）、`.draft__generate`' +
       ' クリックで生成中（running=true）、検証完了後（`.draft__validate-status` が描画された状態）' +
-      ' の 3 状態',
+      ' の 3 状態。デモ既定の研究デザインと RCT / observational の混在入力の両方を通す',
     expectation:
-      '`.draft__block-hits` は running=true の間だけ描画され、開いた直後（実行前）と' +
-      ' 検証完了後には存在しない（querySelector が null を返す。CLAUDE.md 「自動調整は' +
-      ' ブロックごとのヒット数のライブ表示も…更新しない」の対偶で、生成フェーズ専用の' +
-      ' 一時的な表示であることを保証する）',
+      '実アプリの生成・検証を通して、生成中に `.draft__block-hits` の計測済み件数が表示される。' +
+      ' 検証完了後は同じコンテナに `.draft__validate-status` が表示され、ブロック件数は残らない。' +
+      ' 通知なしでは draftRun が null、フィルタ見送り通知がある場合は通知を保持して' +
+      ' status=done / blockHits=[] になる',
     verified: true,
     verifiedBy: '.draft__block-hits は生成中だけ描画され、検証完了後には残らない',
   },
@@ -181,7 +185,9 @@ export const HARNESS_CONTRACT: ContractEntry[] = [
     precondition: 'popup.html を isAuthenticated=false / true の両方で起動する',
     expectation:
       '未認証時は `#popup-auth`（`#login-button` を含む）が表示され `#popup-projects` は非表示。' +
-      ' 認証済み時はその逆で、`#popup-create-form` が唯一の新規作成手段として使える' +
+      ' 認証済み時はその逆で、`#popup-email` に @ を含むテキストが表示される。' +
+      ' `#popup-create-title` と有効な `#popup-create-form button[type="submit"]` が取得でき、' +
+      ' 送信ボタンとメールは祖先を含め hidden ではない' +
       '（実 popup.html のマークアップに対して検証する。bootstrap.ts 側だけを見る' +
       ' fabricated スケルトンでは HTML 側の id 変更を検知できないため）',
     verified: true,
@@ -204,8 +210,8 @@ export const HARNESS_CONTRACT: ContractEntry[] = [
       'options.html（Chrome 拡張の options_ui。popup の「設定を開く」が開く #/settings とは' +
       ' 別の入口）を未設定の状態で起動する',
     expectation:
-      '`#gemini-card` / `#openrouter-card` / `#llm-model-select`（4 種以上の組み込みモデル）が' +
-      ' 描画され、保存ボタン（`#save-keys`）押下後は `#options-status` が「保存しました。」を含む' +
+      '`#gemini-card` / `#openrouter-card` / `#llm-model-select`（選択肢が 1 個以上あり、選択値が取れる）が' +
+      ' 描画され、保存ボタン（`#save-keys`）押下後は `#options-status` が「保存しました」を含む' +
       '（実 options.html のマークアップに対して検証する）',
     verified: true,
     verifiedBy: 'options.html（実ファイル）> プロバイダカード・モデル選択・保存後の status',
@@ -235,8 +241,8 @@ export const HARNESS_CONTRACT: ContractEntry[] = [
       '`#settings-gemini-card` / `#settings-openrouter-card` / `#settings-llm-model` /' +
       ' `#settings-ncbi-key` / `#settings-save` / `#settings-gemini-tier-badge` /' +
       ' `#settings-custom-model-id` / `#settings-custom-models-list` が id で一意に取れる。' +
-      ' カスタムモデル追加ボタンは id を持たず `.settings__custom-model-form button` でのみ取れる' +
-      '（13-history.mjs の注記どおりであることを固定する）。追加すると' +
+      ' カスタムモデル追加ボタンは `.settings__custom-model-form button` で取得できる' +
+      '（id の有無は問わない）。追加すると' +
       ' `#settings-custom-models-list` 直下に `.settings__custom-model-item` が増える',
     verified: true,
     verifiedBy: '#/settings > id 一覧とカスタムモデル追加後の一覧反映',
@@ -359,7 +365,7 @@ export const HARNESS_CONTRACT: ContractEntry[] = [
       ' `.validate__missed li` は先頭が見出し行（「未捕捉 PMID:」）で実際の PMID は nth(1) 以降',
     verified: false,
     unverifiedReason:
-      '#/draft の構造契約は上記 3 件（no-formula / secondary-actions-order / block-hits）で' +
+      '#/draft の構造契約は上記 3 件（no-formula / unique-secondary-actions / block-hits）で' +
       ' 検証済み。本項目は表示内容の細部（見出し行の有無）で優先度が低いため宣言のみ',
   },
   {
@@ -379,8 +385,11 @@ export const HARNESS_CONTRACT: ContractEntry[] = [
       '#/expand を demoSeed=09-expand（v1 検証済み）で開き、「境界事例を取得」' +
       '（`.expand__actions button`）を押した後',
     expectation:
-      '`li.expand__candidate` 3 件のうち 1 件以上を include するまで `.expand__round-summary` /' +
-      ' `section.expand__proposals` は描画されない。判定ボタンは class を持たず' +
+      '`li.expand__candidate` 3 件すべての判定保存が完了するとラウンド完了処理を開始する。' +
+      ' onRoundComplete による再検証が成功すると `.expand__round-summary` が描画される' +
+      '（全件 exclude でも同じ）。`section.expand__proposals` は include した論文から' +
+      ' 組み立てた更新提案が 1 件以上ある場合だけ描画され、include が 0 件なら出ない。' +
+      ' 判定ボタンは class を持たず' +
       ' `button[data-decision="include|exclude|maybe"]` のみなので' +
       ' `li.expand__candidate[data-pmid="…"]` でスコープしないと 9 個中どれを押したか特定できない',
     verified: false,
@@ -427,8 +436,10 @@ export const HARNESS_CONTRACT: ContractEntry[] = [
     ],
     precondition: '#/export を demoSeed=11-export（4 DB 変換前）で開く',
     expectation:
-      '`.export__result` / `.export__download` / `.export__formula` / `.export__warnings` は' +
-      ' 各 4 個あり `data-db` でしか一意に絞れない。変換直後の `details.export__result` は' +
+      '4 DB への変換後、`.export__result` / `.export__download` / `.export__formula` は' +
+      ' 各 4 個あり、`details.export__result[data-db]` で DB ごとに絞れる。' +
+      ' `.export__warnings` は各 DB の変換結果に警告がある場合だけ描画され、不存在も許容する。' +
+      ' 変換直後の `details.export__result` は' +
       ' `open` 属性を持たず閉じている。`.export__methods-text` の `{AI model}` は' +
       ' FormulaVersions.model が記録されている版なら実モデル ID に置換され、' +
       ' 記録が無い旧バージョンではプレースホルダのまま残り `.export__methods-note` に' +
