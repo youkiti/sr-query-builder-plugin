@@ -401,7 +401,7 @@ describe('保留候補ごとの採用ゲート（issue #172）', () => {
   });
 });
 
-describe('保留候補ごとの採用不可上限（issue #172 第3段階）', () => {
+describe('保留候補ごとの採用不可上限（issue #172）', () => {
   test('既定の上限は 1,000 件', () => {
     expect(HELD_CANDIDATE_ADOPTION_MAX_LOST_HITS).toBe(1000);
   });
@@ -441,14 +441,17 @@ describe('保留候補ごとの採用不可上限（issue #172 第3段階）', (
   });
 });
 
-describe('否定できない適格文献の上限（issue #172 第3段階）', () => {
+describe('否定できない適格文献の上限（issue #172）', () => {
   test.each([
-    [10800, 20, 1500],
+    [10800, 20, 1501],
     [150, 20, 19],
     [1000, 20, 137],
-    [566, 20, 76],
+    [566, 20, 77],
     [100, 100, 0],
     [5, 0, null],
+    [106, 20, 13],
+    [21, 20, 0],
+    [200, 2, 154],
   ] as const)('lostHits=%i, sampleSize=%i => %s', (lostHits, sampleSize, expected) => {
     expect(unconfirmedEligibleUpperBound(lostHits, sampleSize)).toBe(expected);
   });

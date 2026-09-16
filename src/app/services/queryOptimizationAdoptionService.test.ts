@@ -333,7 +333,7 @@ test('ゲート未達の保留候補（失う集合を全件確認していな�
   expect(f.store.getState().queryOptimizationRun?.save).toBeUndefined();
 });
 
-test('失う集合が上限(1,000件)を超える保留候補は、標本を全件exclude保存済みでも保存しない（issue #172 第3段階）', async () => {
+test('失う集合が上限(1,000件)を超える保留候補は、標本を全件exclude保存済みでも保存しない（issue #172）', async () => {
   const f = setup();
   f.run.trials.push(heldTrial({ impact: { lostHits: 1001, gainedHits: 1, error: null,
     inspected: [{ pmid: '2', title: '研究2', year: 2001 }, { pmid: '3', title: '研究3', year: 2002 }],
@@ -346,7 +346,7 @@ test('失う集合が上限(1,000件)を超える保留候補は、標本を全�
   expect(f.store.getState().queryOptimizationRun?.save).toBeUndefined();
 });
 
-test('失う集合 150 件の保留候補を採用すると、note と監査記録に否定できない適格文献の上限が残る（issue #172 第3段階）', async () => {
+test('失う集合 150 件の保留候補を採用すると、note と監査記録に否定できない適格文献の上限が残る（issue #172）', async () => {
   const f = setup();
   const inspected = Array.from({ length: 20 }, (_, i) => ({ pmid: String(i + 2), title: `研究${i + 2}`, year: 2001 }));
   f.run.trials.push(heldTrial({ impact: { lostHits: 150, gainedHits: 1, error: null, inspected,

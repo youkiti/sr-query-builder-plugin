@@ -304,7 +304,7 @@ describe('保留候補の 3 操作（issue #172）', () => {
     expect(bottomButtons.find((b) => b.textContent === '採用して保存')!.disabled).toBe(true);
   });
 
-  test('失う集合が上限(1,000件)を超える候補は「採用して保存」を出さず、再調整・除外・理由文だけ出す（issue #172 第3段階）', () => {
+  test('失う集合が上限(1,000件)を超える候補は「採用して保存」を出さず、再調整・除外・理由文だけ出す（issue #172）', () => {
     const current = run('needs_review');
     current.trials.push(heldTrialFixture({ impact: { lostHits: 1001, gainedHits: 1, error: null,
       inspected: [{ pmid: '2', title: null, year: null }] } }));
@@ -319,7 +319,7 @@ describe('保留候補の 3 操作（issue #172）', () => {
     expect(card.querySelector('.optimization__held-gate-reason')?.textContent).toContain('1,000');
   });
 
-  test('否定できない適格文献の上限を保留候補カードに段落で示す（issue #172 第3段階）', () => {
+  test('否定できない適格文献の上限を保留候補カードに段落で示す（issue #172）', () => {
     const current = run('needs_review');
     const inspected = Array.from({ length: 20 }, (_, i) => ({ pmid: String(i + 2), title: null, year: null }));
     current.trials.push(heldTrialFixture({ impact: { lostHits: 150, gainedHits: 1, error: null, inspected,

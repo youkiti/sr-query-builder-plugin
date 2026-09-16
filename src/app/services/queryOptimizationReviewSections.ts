@@ -157,15 +157,29 @@ export interface HeldCandidateAdoptionGate {
 }
 
 /**
- * 標本を全件 exclude と判定しても、残りの未確認分に適格文献が最大何件含まれうるかの上限（片側 95%）。
- * 表示・監査用の参考値で、採用ゲートの判定には使わない。
- * sampleSize が 0 以下（標本なし）は null、lostHits 以上（全件確認）は 0 を返す。
+ * 標本（失う集合 lostHits 件からの非復元抽出 sampleSize 件）に適格文献が 0 件だったときの、
+ * 母集団に含まれる適格件数の片側 95% 上限（超幾何分布）。表示・監査用の参考値で、採用ゲートの
+ * 判定には使わない。sampleSize が 0 以下（標本なし）は null、lostHits 以上（全件確認）は 0 を返す。
+ *
+ * 適格件数 K のとき、標本 n 件が全件非適格になる確率は P(0|K) = C(L-K, n) / C(L, n)。
+ * この上限は「P(0|K) >= 0.05 を満たす最大の K」で、二項係数を直接計算せず漸化式
+ * P(0|K+1) = P(0|K) × (L-K-n) / (L-K)（P(0|0) = 1）で K を 0 から増やして求める。
  */
 export function unconfirmedEligibleUpperBound(lostHits: number, sampleSize: number): number | null {
   if (sampleSize <= 0) return null;
   if (sampleSize >= lostHits) return 0;
-  const p = 1 - 0.05 ** (1 / sampleSize);
-  return Math.ceil((lostHits - sampleSize) * p);
+  const populationSize = lostHits;
+  const maxK = populationSize - sampleSize;
+  let probabilityAllNonEligible = 1;
+  let upperBound = 0;
+  while (upperBound < maxK) {
+    const nextProbability = probabilityAllNonEligible
+      * (populationSize - upperBound - sampleSize) / (populationSize - upperBound);
+    if (nextProbability < 0.05) break;
+    probabilityAllNonEligible = nextProbability;
+    upperBound += 1;
+  }
+  return upperBound;
 }
 
 /** 保留候補カード・最終レビュー・採用監査で共通して使う、否定できない適格文献上限の表示文。 */
