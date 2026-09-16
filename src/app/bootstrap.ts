@@ -544,7 +544,7 @@ function buildDefaultViewOptions(
       onFetchMeshTrees: async (descriptors: string[]) => {
         const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
         const treeByDescriptor = await fetchMeshTreeNumbers(descriptors, eutils);
-        return Array.from(treeByDescriptor, ([descriptor, treeNumbers]) => ({
+        return Array.from(treeByDescriptor.trees, ([descriptor, treeNumbers]) => ({
           descriptor,
           treeNumbers,
         }));

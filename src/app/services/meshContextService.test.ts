@@ -10,7 +10,7 @@ const eutils = { fetch: jest.fn() };
 beforeEach(() => jest.resetAllMocks());
 
 test('最大 3 枝に制限し、取得した親子と枝をまとめる', async () => {
-  tree.mockResolvedValue(new Map([['term', ['A01', 'A02', 'A03', 'A04']]]));
+  tree.mockResolvedValue({ trees: new Map([['term', ['A01', 'A02', 'A03', 'A04']]]), reasons: new Map() });
   labels.mockImplementation(async ([branch]) => new Map([[branch!, { descriptorUi: 'parent', label: 'Parent', treeNumber: branch! }]]));
   children.mockImplementation(async (branch) => [{ descriptorUi: 'child', label: 'Child', treeNumber: `${branch}.001` }]);
   const check = jest.fn();

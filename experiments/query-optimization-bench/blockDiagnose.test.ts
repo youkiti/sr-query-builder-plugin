@@ -69,7 +69,8 @@ function fakeFetch(opts: { pubmed: (term: string) => number | null; mesh?: Recor
       const result: Record<string, unknown> = { uids: ids };
       for (const id of ids) {
         const descriptor = Object.keys(opts.mesh ?? {}).find((key) => `uid-${key.toLowerCase()}` === id);
-        result[id] = { ds_idxlinks: (descriptor ? opts.mesh![descriptor] ?? [] : []).map((treenum) => ({ treenum })) };
+        result[id] = { ds_recordtype: 'descriptor', ds_meshterms: descriptor ? [descriptor] : [],
+          ds_idxlinks: (descriptor ? opts.mesh![descriptor] ?? [] : []).map((treenum) => ({ treenum })) };
       }
       return new Response(JSON.stringify({ result }));
     }
@@ -141,6 +142,32 @@ test('上位語と explode で ancestor が出て、木が取れない語は unk
   expect(record.diagnosis.overlaps.map((o) => [o.blockIds, o.kind])).toEqual([
     [['1', '2'], 'ancestor'], [['1', '3'], 'unknown'], [['2', '3'], 'unknown'],
   ]);
+});
+
+test('階層取得の未解決理由を小文字キーに揃えて unknown の note に保存する', async () => {
+  const { resultsRoot, fixturesRoot } = setup();
+  writeC0(fixturesRoot, CASE_ID, 'reasons-c0', [
+    { id: '1', expression: '"Incidence"[Mesh]', label: '発生率' },
+    { id: '2', expression: '"Hemostatics"[Mesh]', label: '止血薬' },
+  ]);
+  const reason = '候補の descriptor が語と一致しない（Epidemiology）';
+  const deps: DiagnoseDeps = {
+    fetch: fakeFetch({ pubmed: () => 50 }),
+    eutils: { maxRetries: 0, sleep: async () => undefined },
+    fetchMeshTreeNumbers: jest.fn(async () => ({
+      trees: new Map([['Hemostatics', ['D27.505.954.502.270.463']]]),
+      reasons: new Map([['Incidence', reason]]),
+    })),
+  };
+  await main(['--case', CASE_ID, '--c0', 'reasons-c0'], fixturesRoot, resultsRoot, deps);
+  const record = JSON.parse(readFileSync(join(resultsRoot, 'block-diagnosis', 'default', CASE_ID, 'reasons-c0.json'), 'utf8')) as DiagnosisRecord;
+  expect(record.complete).toBe(true);
+  expect(deps.fetchMeshTreeNumbers).toHaveBeenCalledWith(['Incidence', 'Hemostatics'], expect.anything());
+  expect(record.diagnosis.overlaps).toEqual([expect.objectContaining({
+    blockIds: ['1', '2'], kind: 'unknown',
+    terms: [{ blockId: '1', text: '"Incidence"[Mesh]' }],
+    note: `#1 と #2: 未判定: 階層を取得できなかった（"Incidence"[Mesh]: ${reason}）`,
+  })]);
 });
 
 test('件数診断: 閾値未満は ineffective、閾値以上は false、測定失敗・0 件・最終式より少ない場合は null で理由が入る', async () => {
