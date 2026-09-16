@@ -145,11 +145,12 @@ test('上位語と explode で ancestor が出て、木が取れない語は unk
 
 test('件数診断: 閾値未満は ineffective、閾値以上は false、測定失敗・0 件・最終式より少ない場合は null で理由が入る', async () => {
   const { resultsRoot, fixturesRoot } = setup();
-  // A: 外すと 100 件 → 削減率 (100-80)/100=0.2 ちょうど → false
-  // B: 外すと 99 件 → 削減率 (99-80)/99≈0.1919 → true（閾値未満）
+  // 件数は閾値 BLOCK_NARROWING_MIN_REDUCTION（0.13）の境界を跨ぐように選んである。
+  // A: 外すと 100 件 → 削減率 (100-87)/100=0.13 ちょうど → false（ちょうどは含めない）
+  // B: 外すと 95 件 → 削減率 (95-87)/95≈0.0842 → true（閾値未満）
   // C: 通信失敗（HTTP 500） → null、理由に本文を含む
   // D: 外した式が 0 件 → null
-  // E: 外した式が最終式より少ない（70 < 80）→ null
+  // E: 外した式が最終式より少ない（70 < 87）→ null
   writeC0(fixturesRoot, CASE_ID, 'narrowing-c0', [
     { id: '1', expression: 'A[tiab]', label: 'A' },
     { id: '2', expression: 'B[tiab]', label: 'B' },
@@ -158,9 +159,9 @@ test('件数診断: 閾値未満は ineffective、閾値以上は false、測定
     { id: '5', expression: 'E[tiab]', label: 'E' },
   ]);
   const counts: Record<string, number | null> = {
-    '(A[tiab]) AND (B[tiab]) AND (C[tiab]) AND (D[tiab]) AND (E[tiab])': 80,
+    '(A[tiab]) AND (B[tiab]) AND (C[tiab]) AND (D[tiab]) AND (E[tiab])': 87,
     '(B[tiab]) AND (C[tiab]) AND (D[tiab]) AND (E[tiab])': 100,
-    '(A[tiab]) AND (C[tiab]) AND (D[tiab]) AND (E[tiab])': 99,
+    '(A[tiab]) AND (C[tiab]) AND (D[tiab]) AND (E[tiab])': 95,
     '(A[tiab]) AND (B[tiab]) AND (D[tiab]) AND (E[tiab])': null,
     '(A[tiab]) AND (B[tiab]) AND (C[tiab]) AND (E[tiab])': 0,
     '(A[tiab]) AND (B[tiab]) AND (C[tiab]) AND (D[tiab])': 70,
@@ -171,11 +172,11 @@ test('件数診断: 閾値未満は ineffective、閾値以上は false、測定
   };
   await main(['--case', CASE_ID, '--c0', 'narrowing-c0'], fixturesRoot, resultsRoot, deps);
   const record = JSON.parse(readFileSync(join(resultsRoot, 'block-diagnosis', 'default', CASE_ID, 'narrowing-c0.json'), 'utf8')) as DiagnosisRecord;
-  expect(record.finalHits).toBe(80);
+  expect(record.finalHits).toBe(87);
   const byBlock = Object.fromEntries(record.diagnosis.narrowing.map((row) => [row.blockId, row]));
-  expect(byBlock['1']).toMatchObject({ reduction: 0.2, ineffective: false });
+  expect(byBlock['1']).toMatchObject({ reduction: 0.13, ineffective: false });
   expect(byBlock['2']).toMatchObject({ ineffective: true });
-  expect(byBlock['2']!.reduction!).toBeCloseTo((99 - 80) / 99);
+  expect(byBlock['2']!.reduction!).toBeCloseTo((95 - 87) / 95);
   expect(byBlock['3']).toMatchObject({ withoutHits: null, reduction: null, ineffective: null });
   expect(byBlock['3']!.note).toContain('未判定');
   expect(byBlock['4']).toMatchObject({ withoutHits: 0, reduction: null, ineffective: null, note: expect.stringContaining('0 件') });

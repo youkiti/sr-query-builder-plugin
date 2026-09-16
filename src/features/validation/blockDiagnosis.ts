@@ -4,8 +4,16 @@ import { extractMeshTerm, tokenizeExpression } from '@/lib/search-formula-md/exp
 import { isExplodeTag } from './blockTerms';
 import { expandFormula } from './expandFormula';
 
-// 凍結 C0 で分布を見て調整する前提の初期値。
-export const BLOCK_NARROWING_MIN_REDUCTION = 0.2;
+// 凍結 C0 43 本・判定できた 100 ブロックの削減率分布で校正した値（issue #164）。分布の下側に
+// ある最も広い切れ目は 9.8%〜17.0%（幅 7.2pt。次に広い切れ目の 1.6 倍）で、その中点 13.4% に
+// 最も近い丸めがこの 0.13。切れ目の上側 17.0〜17.3% には 4 ブロックが密集しているため、初期値
+// だった 0.2 はこの密集の中を通っていて、僅かな件数差で判定が反転していた。
+// 下げる方向が安全側である理由: 誤検出したブロックは blockDiagnosisLines 経由で AI に
+// 「絞り込みに効いていない」と伝わって実際は効いているブロックを狭めさせ、さらに
+// diagnosedHeldBlock 経由で diagnosed_block_held の早期停止を招く。取りこぼしは助言が
+// 出ないだけで済む。測り直す手順は experiments/query-optimization-bench/README.md の
+// 「ブロック診断だけの評価」を参照。
+export const BLOCK_NARROWING_MIN_REDUCTION = 0.13;
 export const MAX_DIAGNOSIS_API_CALLS = 30;
 export const DIAGNOSIS_LIMIT_NOTE = '未判定: 診断の通信上限（30 回）に達した';
 export const DIAGNOSIS_CHANGED_NOTE = '未判定: 式の変更後に再測定していない';
