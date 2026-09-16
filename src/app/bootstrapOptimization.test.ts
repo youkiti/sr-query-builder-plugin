@@ -2,8 +2,9 @@ import { runOptimizeQuery, runDecideOutsideCandidate, runReadjustOptimization,
   runReadjustFromHeldOptimizationCandidate, rejectHeldOptimizationCandidate,
   undoHeldOptimizationCandidateRejection, startApp } from './bootstrap';
 import * as expand from './services/expandService';
+import { renderOptimizationReview } from './views/queryOptimizationReview';
 import * as checkpointService from './services/queryOptimizationCheckpointService';
-import { buildOptimizationReviewSections } from './services/queryOptimizationReviewSections';
+import { buildOptimizationReviewSections, evaluateHeldCandidateAdoptionGate } from './services/queryOptimizationReviewSections';
 import { createStore, INITIAL_STATE } from './store';
 import type { ChromeRuntimeDeps } from './services/factories';
 import * as optimization from './services/queryOptimizationService';
@@ -726,4 +727,150 @@ test('保護再調整の開始式を渡した場合は初期生成の通知を�
   expect(generate).not.toHaveBeenCalled();
   expect(f.run.mock.calls[0]![0].initialFormula).toEqual(formula);
   expect(f.store.getState().queryOptimizationRun?.generationNotices).toBeUndefined();
+});
+
+
+test.each([false, true])('終了後の除外を保留候補からの次 run に渡し保存でも保持する（取消=%s）', async (undo) => {
+  const f = setupOutside();
+  const { checkpoint } = prepareResume(f);
+  const rejectedFormula = { ...formula, blocks: [{ id: '1', expression: 'rejected[tiab]', isCombination: false }] };
+  f.completed.trials = ['A', 'B'].map((candidateId) => ({ kind: 'proposal', candidateId,
+    formula: candidateId === 'A' ? rejectedFormula : formula, held: true, accepted: false,
+    reason: '保留', rationale: '', before: null, after: null, apiEvents: [],
+    impact: { lostHits: 1, gainedHits: 0, error: null, inspected: [] } }));
+  f.run.mockImplementation(async (input) => {
+    await checkpointService.saveQueryOptimizationCheckpoint({ projectId: 'p', runId: input.runId,
+      maxHits: 123, trials: f.completed.trials, resume: checkpoint.resume!,
+      completion: { status: 'needs_review', stopReason: 'iteration_limit', unmetReasons: [] } }, f.runtime.store);
+    return f.completed;
+  });
+  await f.invoke();
+  expect(checkpointService.getQueryOptimizationResumeAvailability(
+    (await checkpointService.getQueryOptimizationCheckpoint('p', f.runtime.store))!, checkpoint.resume!.inputIdentity).available).toBe(false);
+  rejectHeldOptimizationCandidate(f.store, f.runtime, 'A');
+  await flush();
+  if (undo) { undoHeldOptimizationCandidateRejection(f.store, f.runtime, 'A'); await flush(); }
+  await runReadjustFromHeldOptimizationCandidate(f.store, f.runtime,
+    { google: f.runtime.google, store: f.runtime.store }, 'B');
+  const rejections = f.run.mock.calls[1]![0].previousRejectedTrials ?? [];
+  expect(rejections.some((trial) => trial.rejectedByHuman && JSON.stringify(trial.formula) === JSON.stringify(rejectedFormula))).toBe(!undo);
+  const saved = await checkpointService.getQueryOptimizationCheckpoint('p', f.runtime.store);
+  expect(checkpointService.getHumanRejectedTrials(saved).length).toBe(undo ? 0 : 1);
+  // 新しい run が中断した場合も、さらにその記録から再開して同じ除外を受け取る。
+  await checkpointService.saveQueryOptimizationCheckpoint({ projectId: 'p', runId: 'interrupted-next', maxHits: 123,
+    trials: [], resume: checkpoint.resume! }, f.runtime.store);
+  const interrupted = await checkpointService.getQueryOptimizationCheckpoint('p', f.runtime.store);
+  f.store.setState((s) => ({ ...s, queryOptimizationSetup: { ...s.queryOptimizationSetup!, checkpoint: interrupted } }));
+  await runOptimizeQuery(f.store, f.runtime, { google: f.runtime.google, store: f.runtime.store },
+    { maxHits: 123, maxIterations: 5 }, 'interrupted-next');
+  expect(f.run.mock.calls[2]![0].previousRejectedTrials?.some((trial) => trial.rejectedByHuman)).toBe(!undo);
+});
+
+test.each(['exclude', 'include', 'maybe'] as const)('SeedPapers の保存済み %s をカードを重複させずゲートへ引き継ぐ', async (decision) => {
+  const f = setupOutside();
+  f.list.mockResolvedValue([seed('11', { userDecision: 'include' }), seed('99', { userDecision: decision })]);
+  f.completed.trials = [{ kind: 'proposal', candidateId: 'held', formula, held: true, accepted: false,
+    reason: '', rationale: '', before: null, after: null, apiEvents: [],
+    impact: { lostHits: 1, gainedHits: 0, error: null, inspected: [{ pmid: '99', title: null, year: null }] } }];
+  await f.invoke();
+  const run = f.store.getState().queryOptimizationRun!;
+  expect(run.outsideCheck!.candidates.filter((paper) => paper.pmid === '99')).toHaveLength(0);
+  expect(run.outsideCheck!.decisions['11']).toBeUndefined();
+  const gate = evaluateHeldCandidateAdoptionGate(run.trials[0]!, run.outsideCheck!.decisions, undefined, run.outsideCheck!.unjudgedSeedPmids);
+  expect(gate.allowed).toBe(decision === 'exclude');
+  expect(gate.judgedCount).toBe(decision === 'exclude' ? 1 : 0);
+  if (decision === 'include') expect(gate.reason).toContain('include');
+});
+
+test('未判定の initial シードを失う候補は PMID を示して採用を拒否する', async () => {
+  const f = setupOutside();
+  f.list.mockResolvedValue([seed('99', { source: 'initial', userDecision: null })]);
+  f.completed.trials = [{ kind: 'proposal', candidateId: 'held', formula, held: true, accepted: false,
+    reason: '', rationale: '', before: null, after: null, apiEvents: [],
+    impact: { lostHits: 1, gainedHits: 0, error: null, inspected: [{ pmid: '99', title: null, year: null }] } }];
+  await f.invoke();
+  const run = f.store.getState().queryOptimizationRun!;
+  expect(run.outsideCheck!.candidates.filter((paper) => paper.pmid === '99')).toHaveLength(0);
+  expect(run.outsideCheck!.decisions['99']).toBeUndefined();
+  const gate = evaluateHeldCandidateAdoptionGate(run.trials[0]!, run.outsideCheck!.decisions, undefined, run.outsideCheck!.unjudgedSeedPmids);
+  expect(gate).toMatchObject({ allowed: false, judgedCount: 0 });
+  expect(gate.reason).toContain('99');
+  const container = document.createElement('div');
+  renderOptimizationReview(container, run, { adopt: undefined, edit: undefined, blocks: undefined });
+  const reason = container.querySelector('.optimization__held-gate-reason')!.textContent;
+  expect(reason).toContain('99');
+  expect(reason).toContain('未判定の既知シード');
+  expect(reason).not.toContain('include と判定');
+});
+
+test.each([false, true])('除外変更の保存失敗は操作前へ戻り、再操作できる（取消=%s）', async (undo) => {
+  const f = setupOutside();
+  await f.invoke();
+  addHeldTrial(f);
+  const runId = f.store.getState().queryOptimizationRun!.runId;
+  seedCompletedCheckpoint(f, runId);
+  if (undo) { rejectHeldOptimizationCandidate(f.store, f.runtime, 'candidate-1'); await flush(); }
+  const before = f.store.getState().queryOptimizationRun!.heldRejections;
+  const pending = deferred<void>();
+  jest.spyOn(checkpointService, 'updateQueryOptimizationHeldRejections').mockReturnValueOnce(pending.promise);
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  const action = undo ? undoHeldOptimizationCandidateRejection : rejectHeldOptimizationCandidate;
+  action(f.store, f.runtime, 'candidate-1');
+  action(f.store, f.runtime, 'candidate-1');
+  pending.reject(new Error('保存失敗'));
+  await flush();
+  expect(f.store.getState().queryOptimizationRun!.heldRejections).toEqual(before);
+  expect(warn).toHaveBeenCalledTimes(1);
+  action(f.store, f.runtime, 'candidate-1');
+  await flush();
+  expect(!!f.store.getState().queryOptimizationRun!.heldRejections?.['candidate-1']).toBe(!undo);
+});
+
+test.each([false, true])('除外・取消の保存待ちでは別候補も無効表示し、完了後に戻す（失敗=%s）', async (fails) => {
+  const f = setupOutside();
+  await f.invoke();
+  addHeldTrial(f);
+  const runId = f.store.getState().queryOptimizationRun!.runId;
+  seedCompletedCheckpoint(f, runId);
+  f.store.setState((s) => ({ ...s, queryOptimizationRun: { ...s.queryOptimizationRun!,
+    trials: [...s.queryOptimizationRun!.trials, { ...s.queryOptimizationRun!.trials.find((trial) => trial.held)!, candidateId: 'candidate-2' }] } }));
+  const container = document.createElement('div');
+  const render = (): void => {
+    container.replaceChildren();
+    renderOptimizationReview(container, f.store.getState().queryOptimizationRun, {
+      adopt: undefined, edit: undefined, blocks: undefined, readjustHeld: jest.fn(),
+      rejectHeld: (id) => rejectHeldOptimizationCandidate(f.store, f.runtime, id),
+      undoRejectHeld: (id) => undoHeldOptimizationCandidateRejection(f.store, f.runtime, id),
+    });
+  };
+  const unsubscribe = f.store.subscribe(render);
+  const buttons = (): HTMLButtonElement[] => Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
+    .filter((button) => button.textContent === '除外' || button.textContent === '除外を取り消す');
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  for (const undo of [false, true]) {
+    if (undo && fails) { rejectHeldOptimizationCandidate(f.store, f.runtime, 'candidate-1'); await flush(); }
+    const before = f.store.getState().queryOptimizationRun!.heldRejections;
+    const pending = deferred<void>();
+    const write = jest.spyOn(checkpointService, 'updateQueryOptimizationHeldRejections').mockReturnValueOnce(pending.promise);
+    const calls = write.mock.calls.length;
+    render();
+    buttons()[0]!.click();
+    expect(buttons()).toHaveLength(2);
+    expect(buttons().every((button) => button.disabled)).toBe(true);
+    expect(container.textContent).toContain('除外・取り消しを保存中');
+    expect(Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.textContent === 'これを初期式に再調整' && !button.disabled)).toBeDefined();
+    buttons()[1]!.click();
+    rejectHeldOptimizationCandidate(f.store, f.runtime, 'candidate-2');
+    expect(write.mock.calls.length).toBe(calls + 1);
+    expect(f.store.getState().queryOptimizationRun!.heldRejections?.['candidate-2']).toBeUndefined();
+    if (fails) pending.reject(new Error('保存失敗')); else pending.resolve();
+    await flush();
+    expect(buttons().every((button) => !button.disabled)).toBe(true);
+    expect(container.textContent).not.toContain('除外・取り消しを保存中');
+    if (fails) expect(f.store.getState().queryOptimizationRun!.heldRejections).toEqual(before);
+    else expect(!!f.store.getState().queryOptimizationRun!.heldRejections?.['candidate-1']).toBe(!undo);
+  }
+  expect(warn).toHaveBeenCalledTimes(fails ? 2 : 0);
+  unsubscribe();
 });

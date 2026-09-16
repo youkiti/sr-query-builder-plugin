@@ -356,3 +356,16 @@ test.each([false, true])('中間手の採用は既知文献の捕捉区分に残
   expect(review.sections[0].lines.filter((line) => line.startsWith('中間手'))).toEqual([`中間手 candidate-1: ${reason}`]);
   expect(review.sections.slice(1).every((item) => item.lines.every((line) => !line.includes('中間手')))).toBe(true);
 });
+
+
+test.each(['lost_search', 'lost_fetch', 'gained_search'] as const)('採用ゲートは失敗した通信 %s を区別する', (measurement) => {
+  const run = deletionFixture();
+  const trial = run.trials[0]!;
+  trial.impact!.lostHits = 2;
+  trial.impact!.error = '通信失敗';
+  trial.impact!.failedMeasurements = [measurement];
+  const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck!.decisions);
+  expect(gate.allowed).toBe(measurement === 'gained_search');
+  if (measurement === 'lost_fetch') expect(gate.reason).toContain('書誌を取得');
+  if (measurement === 'lost_search') expect(gate.reason).toContain('失う集合を実測');
+});

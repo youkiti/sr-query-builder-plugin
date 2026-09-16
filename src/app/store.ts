@@ -152,6 +152,8 @@ export interface GenerationNotices {
 }
 
 export interface OptimizationOutsideCheckState {
+  /** SeedPapers に登録済みだが、人による判定はない保護対象。判定件数には含めない。 */
+  unjudgedSeedPmids?: string[];
   status: 'running' | 'ready' | 'error' | 'skipped';
   reason: string | null;
   originalHits: number | null;
@@ -189,6 +191,8 @@ export interface QueryOptimizationRunState {
    * 押し間違いを取り消せるようキーを削除するだけで取り消しになる。チェックポイントへも反映する。
    */
   heldRejections?: Record<string, { rejectedAt: string }>;
+  /** 除外・取消のチェックポイント保存待ち。全候補の同操作を無効化する。 */
+  heldRejectionSaving?: boolean;
   /** 初期式の準備が完了した時点で固定する。準備前は存在しない。 */
   inputSnapshot?: {
     researchQuestion: string;

@@ -33,7 +33,7 @@ function renderHeldCandidateCard(
   const card = doc.createElement('article');
   card.className = 'optimization__held-candidate';
   card.setAttribute('aria-label', `保留候補 ${trial.candidateId} の操作`);
-  const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions);
+  const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions, undefined, run.outsideCheck?.unjudgedSeedPmids);
   const impact = trial.impact;
   const unconfirmed = impact?.lostHits != null ? impact.lostHits - gate.judgedCount : null;
   const summary = doc.createElement('p');
@@ -63,13 +63,19 @@ function renderHeldCandidateCard(
   const rejectButton = doc.createElement('button');
   rejectButton.type = 'button';
   rejectButton.textContent = rejected ? '除外を取り消す' : '除外';
-  rejectButton.disabled = rejected ? !actions.undoRejectHeld : !actions.rejectHeld;
+  rejectButton.disabled = !!run.heldRejectionSaving || (rejected ? !actions.undoRejectHeld : !actions.rejectHeld);
   rejectButton.addEventListener('click', () => {
     if (rejectButton.disabled) return;
     if (rejected) actions.undoRejectHeld?.(trial.candidateId); else actions.rejectHeld?.(trial.candidateId);
   });
   buttons.append(adoptButton, readjustButton, rejectButton);
   card.appendChild(buttons);
+  if (run.heldRejectionSaving) {
+    const notice = doc.createElement('p');
+    notice.setAttribute('role', 'status');
+    notice.textContent = '除外・取り消しを保存中…';
+    card.appendChild(notice);
+  }
   if (!gate.allowed && gate.reason) {
     const reason = doc.createElement('p');
     reason.className = 'optimization__held-gate-reason';

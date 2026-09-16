@@ -122,16 +122,24 @@ export interface HeldCandidateAdoptionGate {
 export function evaluateHeldCandidateAdoptionGate(
   trial: OptimizationTrial,
   decisions: OptimizationOutsideCheckState['decisions'] | undefined,
-  threshold: number = HELD_CANDIDATE_ADOPTION_LOST_HITS_THRESHOLD
+  threshold: number = HELD_CANDIDATE_ADOPTION_LOST_HITS_THRESHOLD,
+  unjudgedSeedPmids: readonly string[] = []
 ): HeldCandidateAdoptionGate {
   const impact = trial.impact;
   const sampledCount = impact?.inspected.length ?? 0;
   const judgedCount = impact?.inspected.filter((paper) => decisions?.[paper.pmid]?.status === 'saved'
     && decisions[paper.pmid]?.decision === 'exclude').length ?? 0;
-  if (!trial.held || !impact || impact.lostHits === null || impact.error) {
+  if (!trial.held || !impact || impact.lostHits === null
+    || impact.failedMeasurements?.includes('lost_search') || (impact.error && !impact.failedMeasurements)) {
     return { allowed: false, judgedCount, sampledCount,
       reason: '失う集合を実測できていないため採用できません。' };
   }
+  if (impact.failedMeasurements?.includes('lost_fetch')) return { allowed: false, judgedCount, sampledCount,
+    reason: '失う集合の書誌を取得できていないため採用できません。' };
+  const lostKnownSeeds = impact.inspected.filter((paper) => unjudgedSeedPmids.includes(paper.pmid))
+    .map((paper) => paper.pmid);
+  if (lostKnownSeeds.length) return { allowed: false, judgedCount, sampledCount,
+    reason: `失う文献に未判定の既知シードがあるため採用できません（PMID: ${lostKnownSeeds.join(', ')}）。` };
   const includedPmids = impact.inspected.filter((paper) => decisions?.[paper.pmid]?.decision === 'include')
     .map((paper) => paper.pmid);
   if (includedPmids.length) {

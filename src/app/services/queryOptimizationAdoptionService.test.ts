@@ -271,13 +271,13 @@ test('ゲートを満たす保留候補は auto_optimize として保存され�
   f.run.outsideCheck = { status: 'ready', reason: null, originalHits: 10, marginHits: 0, evaluatedCount: 0,
     ...lostCandidates(['2', '3']) };
   await adoptHeldOptimizationCandidate(f, 'candidate-1');
-  expect(f.append).toHaveBeenCalledWith('s', expect.objectContaining({ versionId: 'r', createdBy: 'auto_optimize',
+  expect(f.append).toHaveBeenCalledWith('s', expect.objectContaining({ versionId: 'r-held-candidate-1', createdBy: 'auto_optimize',
     formulaMd: expect.stringContaining('wheeze'), note: expect.stringContaining('保留候補 candidate-1') }), f.google);
   const log = JSON.parse(f.upload.mock.calls[0]![0].content);
   expect(log.heldAdoption).toEqual({ candidateId: 'candidate-1', lostHits: 2, judgedCount: 2, unconfirmedCount: 0, sampleMethod: 'all' });
   expect(f.store.getState().queryOptimizationRun?.save).toMatchObject({ status: 'saved',
     target: { kind: 'held', candidateId: 'candidate-1' } });
-  expect(f.store.getState().currentFormulaVersionId).toBe('r');
+  expect(f.store.getState().currentFormulaVersionId).toBe('r-held-candidate-1');
   expect(f.store.getState().currentFormulaCreatedBy).toBe('auto_optimize');
 });
 
@@ -302,6 +302,18 @@ test('ゲート未達の保留候補（失う集合を全件確認していな�
   const f = setup();
   f.run.trials.push(heldTrial({ impact: { lostHits: 50, gainedHits: 1, error: null,
     inspected: [{ pmid: '2', title: null, year: null }] } }));
+  await adoptHeldOptimizationCandidate(f, 'candidate-1');
+  expect(f.upload).not.toHaveBeenCalled();
+  expect(f.append).not.toHaveBeenCalled();
+  expect(f.store.getState().queryOptimizationRun?.save).toBeUndefined();
+});
+
+test('未判定の既知シードが失う集合にあれば採用保存も監査ファイル作成も行わない', async () => {
+  const f = setup();
+  f.run.trials.push(heldTrial());
+  f.run.outsideCheck = { status: 'ready', reason: null, originalHits: 10, marginHits: 0, evaluatedCount: 0,
+    ...lostCandidates(['2', '3']), unjudgedSeedPmids: ['2'] };
+  delete f.run.outsideCheck.decisions['2'];
   await adoptHeldOptimizationCandidate(f, 'candidate-1');
   expect(f.upload).not.toHaveBeenCalled();
   expect(f.append).not.toHaveBeenCalled();
@@ -333,4 +345,29 @@ test('最良候補と保留候補の採用は run につき 1 回で排他にな
   expect(f.upload).toHaveBeenCalledTimes(1);
   expect(f.store.getState().currentFormulaCreatedBy).toBe('auto_optimize');
   expect(f.store.getState().currentFormulaMarkdown).toBe(md);
+});
+
+
+test.each(['best', 'held'] as const)('版保存失敗後に %s から別の保留候補へ切り替えると監査と実測値も切り替わる', async (first) => {
+  const f = setup();
+  f.run.trials.push(heldTrial(), heldTrial({ candidateId: 'candidate-2' }));
+  f.run.outsideCheck = { status: 'ready', reason: null, originalHits: 10, marginHits: 0, evaluatedCount: 0,
+    ...lostCandidates(['2', '3']) };
+  const files = new Map<string, { id: string; webViewLink: string }>();
+  f.find.mockImplementation(async (name) => files.get(name) ?? null);
+  f.upload.mockImplementation(async (file) => { const saved = { id: file.name, webViewLink: `https://drive.example/${file.name}` }; files.set(file.name, saved); return saved; });
+  const rows: string[][] = [['validation_id']];
+  jest.mocked(googleApi.getSheetValues).mockImplementation(async () => rows);
+  f.validation.mockImplementation(async (_sheet, row) => { rows.push([row.validationId]); });
+  f.append.mockRejectedValueOnce(new Error('版保存失敗')).mockRejectedValueOnce(new Error('版保存失敗'));
+  if (first === 'best') await adoptQueryOptimization(f);
+  else await adoptHeldOptimizationCandidate(f, 'candidate-1');
+  await adoptHeldOptimizationCandidate(f, 'candidate-2');
+  await adoptHeldOptimizationCandidate(f, 'candidate-2');
+  expect(f.upload).toHaveBeenCalledTimes(2);
+  expect(f.validation).toHaveBeenCalledTimes(2);
+  expect(files.size).toBe(2);
+  expect(JSON.parse(f.upload.mock.calls[1]![0].content).heldAdoption.candidateId).toBe('candidate-2');
+  expect(f.validation.mock.calls[1]![1]).toMatchObject({ versionId: 'r-held-candidate-2', totalHits: 12 });
+  expect(f.store.getState().currentFormulaVersionId).toBe('r-held-candidate-2');
 });

@@ -85,6 +85,8 @@ export interface OptimizationMeshRequestResult {
 }
 
 export interface OptimizationImpact {
+  /** 失敗した通信を区別する。未指定の旧記録は error を使って保守的に判定する。 */
+  failedMeasurements?: ('lost_search' | 'lost_fetch' | 'gained_search')[];
   /** 変更前 NOT 変更後 の実測件数。失敗時は null（未測定を 0 件として扱わない）。 */
   lostHits: number | null;
   /** 変更後 NOT 変更前 の実測件数。失敗時は null。 */

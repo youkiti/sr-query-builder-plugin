@@ -18,7 +18,7 @@ interface AdoptionSelection {
   } | null;
   /** 実行ログの note に追記する文（保留候補採用時だけ内容を持つ）。 */
   noteSuffix: string;
-  /** Drive の実行ログ（<runId>.json）へ残す、保留候補採用時の削除影響の監査記録。 */
+  /** Drive の実行ログ（<versionId>.json）へ残す、保留候補採用時の削除影響の監査記録。 */
   heldAudit: {
     candidateId: string; lostHits: number; judgedCount: number; unconfirmedCount: number;
     sampleMethod: 'all' | 'retrieved_subset' | null;
@@ -26,8 +26,8 @@ interface AdoptionSelection {
 }
 
 /**
- * 採用保存の本体。最良候補・保留候補のどちらでも、同じ run の同じ実行ログ（`<runId>.json`）・
- * 同じ FormulaVersions 行（version_id = runId）へ 1 回だけ保存する（issue #172）。
+ * 採用保存の本体。最良候補・保留候補ごとに実行ログ（`<versionId>.json`）と
+ * 採用対象ごとに固定した ID の FormulaVersions 行へ保存する。
  * target.kind==='best' のときは既存の保存内容と完全に同じ形（save に target キーを含めない）を保つ。
  */
 async function performOptimizationAdoption(deps: EditServiceDeps, selection: AdoptionSelection): Promise<void> {
@@ -35,7 +35,8 @@ async function performOptimizationAdoption(deps: EditServiceDeps, selection: Ado
   const run = state.queryOptimizationRun!;
   const project = state.project!;
   // runId は実行開始時の UUID。応答喪失後も同じ ID で既存行を照会できる。
-  const versionId = run.runId;
+  const versionId = selection.target.kind === 'held'
+    ? `${run.runId}-held-${encodeURIComponent(selection.target.candidateId)}` : run.runId;
   const owns = (): boolean => {
     const current = deps.store.getState();
     return current.project?.projectId === project.projectId && current.queryOptimizationRun?.runId === run.runId;
@@ -57,9 +58,9 @@ async function performOptimizationAdoption(deps: EditServiceDeps, selection: Ado
       // Drive は同名ファイルを上書きせず別 ID で増やすため、先に照会して再アップロードを避ける。
       // 照会失敗は保存失敗として扱い、アップロードへフォールバックしない。
       // 照会とアップロードは一括確定できず、その間に別タブが同名ファイルを作る競合は防げない。
-      const existing = await findChildFile(`${run.runId}.json`, folder.id, deps.google);
+      const existing = await findChildFile(`${versionId}.json`, folder.id, deps.google);
       const file = existing ?? await uploadTextFile({
-        name: `${run.runId}.json`, parentId: folder.id, mimeType: 'application/json',
+        name: `${versionId}.json`, parentId: folder.id, mimeType: 'application/json',
         content: JSON.stringify({ runId: run.runId, versionId, parentVersionId: state.currentFormulaVersionId,
           maxHits: run.maxHits, maxIterations: run.maxIterations, input: run.inputSnapshot ?? null,
           result: run.result, meshContext: run.meshContext, reviewSections: buildOptimizationReviewSections(run).sections,
@@ -135,7 +136,7 @@ export async function adoptHeldOptimizationCandidate(deps: EditServiceDeps, cand
   const trial = run?.trials.find((item) => item.candidateId === candidateId && item.held);
   if (!project || !run || run.projectId !== project.projectId || run.status === 'running' || !run.result || !trial
     || run.save?.status === 'saving' || run.save?.status === 'saved' || run.heldRejections?.[candidateId]) return;
-  const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions);
+  const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions, undefined, run.outsideCheck?.unjudgedSeedPmids);
   if (!gate.allowed) return;
   const impact = trial.impact!;
   const lostHits = impact.lostHits ?? 0;

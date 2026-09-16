@@ -648,36 +648,31 @@ test.each([false, true])('語別計測中は10通信ごとに保存し、未記�
   expect(availability).toMatchObject({ available: true, remaining: { apiCalls: 200 - consumedBefore - 25 } });
 });
 
-test('途中保存が遅くても別の並行通信は送信でき、10通信ごとの保存を重複させない', async () => {
+test('途中保存が遅い場合は同じキーの次の保存を待機し、10通信ごとの記録を重複させない', async () => {
   const f = setup();
   f.input.maxIterations = 1;
   f.input.initialFormula.blocks[0]!.expression = ['a[tiab]', ...Array.from({ length: 20 }, (_, i) => `word${i}[tiab]`)].join(' OR ');
   const releaseWrite = deferred<void>();
-  const sentWhileSaving = deferred<void>();
-  let saving = false;
+  const writeStarted = deferred<void>();
   f.write.mockImplementation(async (items: Record<string, checkpoint.QueryOptimizationCheckpoint>) => {
     if (items.queryOptimizationCheckpoint?.resume?.consumed.apiCalls === 15) {
-      saving = true;
+      writeStarted.resolve();
       await releaseWrite.promise;
-      saving = false;
     }
-  });
-  const fetch = f.fetch.getMockImplementation()!;
-  f.fetch.mockImplementation(async (url: string) => {
-    if (saving && f.fetch.mock.calls.length > 15) sentWhileSaving.resolve();
-    return fetch(url);
   });
   const running = runQueryOptimization(f.input, f.deps);
   try {
-    await sentWhileSaving.promise;
-    expect(saving).toBe(true);
+    await writeStarted.promise;
+    for (let i = 0; i < 100; i += 1) await Promise.resolve();
     const counts = f.write.mock.calls.map(([items]) => items.queryOptimizationCheckpoint.resume.consumed.apiCalls);
     expect(counts.filter((count) => count === 15)).toHaveLength(1);
-    expect(counts.filter((count) => count === 25)).toHaveLength(1);
+    expect(counts.filter((count) => count === 25)).toHaveLength(0);
   } finally { releaseWrite.resolve(); }
   const result = await running;
   expect(result.apiCalls).toBe(f.fetch.mock.calls.length + f.chat.mock.calls.length);
-  expect(f.write.mock.calls[f.write.mock.calls.length - 1]![0].queryOptimizationCheckpoint.resume.consumed.apiCalls).toBe(result.apiCalls);
+  const counts = f.write.mock.calls.map(([items]) => items.queryOptimizationCheckpoint.resume.consumed.apiCalls);
+  expect(counts.filter((count) => count === 25)).toHaveLength(1);
+  expect(counts[counts.length - 1]).toBe(result.apiCalls);
 });
 
 test('中断と再開を重ねても途中保存の通信・時間・評価試行を累積する', async () => {
@@ -2367,4 +2362,24 @@ describe('通信中のキャンセルと試行単位の予算', () => {
     expect(limited.chat).toHaveBeenCalledTimes(1);
     expect(stopped.apiCalls).toBe(limited.fetch.mock.calls.length + 1);
   });
+});
+
+
+test('増える集合だけの通信失敗なら失う書誌の exclude 保存後に採用できる', async () => {
+  const remaining = papers(50, ['11', '22']);
+  const { input, deps, fetch } = setup({ a: { pmids: [...remaining, '901'] }, b: { pmids: remaining } });
+  input.maxIterations = 1;
+  input.maxHits = 50;
+  const original = fetch.getMockImplementation()!;
+  fetch.mockImplementation(async (url: string) => {
+    const params = new URL(url).searchParams;
+    if (params.get('term')?.includes(') NOT (') && params.get('retmax') === '0') return { ok: false, status: 414 };
+    return original(url);
+  });
+  const result = await runQueryOptimization(input, deps);
+  const trial = result.trials[1]!;
+  expect(trial).toMatchObject({ accepted: false, held: true, impact: {
+    lostHits: 1, gainedHits: null, failedMeasurements: ['gained_search'], error: expect.stringContaining('414'),
+  } });
+  expect(evaluateHeldCandidateAdoptionGate(trial, { '901': { status: 'saved', decision: 'exclude', error: null } }).allowed).toBe(true);
 });
