@@ -84,11 +84,26 @@ npm run manual:check -- draft export --keep        # 失敗しなくても終了
 | `options` | Gemini API キー保存 + 使用モデル確認 | — |
 | `protocol` | サンプルプロトコル手入力 → `extract-protocol`（LLM）でブロック抽出 | — |
 | `blocks` | 抽出ブロックの承認 | — |
-| `draft` | 「生成して検証する」→ ブロック展開（LLM）+ ヒット数（NCBI）+ 捕捉率検証 | — |
+| `draft` | 目安100件・反復上限1回に設定 →「検索式を作成・自動調整する」→ 最終レビュー →「採用して保存」→「最初から作り直す」（LLM でブロック展開 + ヒット数（NCBI）+ 捕捉率・MeSH 検証） | — |
 | `export` | **Methods 文案にモデル ID + version が埋まる / コピー成功** | 手順1・手順2 |
 | `reload` | export を再読み込み → モデル ID が Sheets（FormulaVersions.model）から復元される | 手順3 |
 | `modelswitch` | Options でモデル変更 → 文案は**生成時のまま**（切替後にならない） | **手順4（肝）** |
 | `editmodel` | `#/edit` で手編集して保存 → モデル ID が元ドラフトのまま引き継がれる | 手順5 |
+
+`full` の新規作成通し確認も、同じ自動調整・採用保存・生成・検証の共通処理を使う。
+自動調整は反復1回でも初期式生成・実測・外側の確認に数分かかる場合があり、採用保存後の
+「最初から作り直す」も実 Gemini によるブロック展開を伴うため同様に数分かかる。
+自動調整と「最初から作り直す」の待ち上限はそれぞれ15分。目安100件は通信回数や結果件数の
+上限を保証しない。最終レビューが「要確認」等でも採用可能な候補があれば保存するため、
+レビュー表示も確認する。
+
+**手順を追加・変更してセレクタや前提条件を新しく使うときは harness contract も更新する
+（issue #183）**: `manualCheck.mjs` は `.mjs` のため CI から見えず、`src/` の DOM 構造が変わっても
+気づけない。依存するセレクタと前提条件を
+[`tests/harness-contract/contract.ts`](../tests/harness-contract/contract.ts) の
+`HARNESS_CONTRACT` に追記し、検証できるものは
+[`tests/harness-contract/contract.test.ts`](../tests/harness-contract/contract.test.ts) にテストを
+足す。描画までは用意できない場合は `verified: false` と理由を書いて宣言のみに留めてよい。
 
 ### ストア掲載用スクリーンショット（`--shots`）
 
@@ -109,9 +124,14 @@ Chrome ウェブストアの掲載ページに使うスクリーンショット�
   |---|---|
   | `s1-protocol.png` | 研究プロトコル入力画面（`#/protocol`） |
   | `s2-blocks.png` | 検索式ブロック承認画面（`#/blocks`） |
-  | `s3-draft.png` | 検索式ドラフト生成画面（`#/draft`。ブロックごとのヒット数が出ている状態） |
-  | `s4-validation.png` | 検証結果（捕捉率・MeSH 検証。`#/draft` 内の下側にスクロールした部分） |
+  | `s3-draft.png` | 検索式ドラフト画面（`#/draft`。自動調整した式を採用保存し、「最初から作り直す」で生成・検証した後の画面先頭） |
+  | `s4-validation.png` | 検証結果（「最初から作り直す」で更新した捕捉率・MeSH 検証。`#/draft` 内の `.draft__validate-status` へスクロール） |
   | `s5-export.png` | 各 DB 変換・エクスポート画面（`#/export`） |
+
+- **表示上の制約**: 現実装は検証完了時に `draftRun` のブロック件数を消すため、
+  `.draft__block-hits` は完了後には残らない。行ごとの件数は検証結果パネルで確認する。
+  `s3` は従来どおり画面先頭、`s4` は `.draft__validate-status` を撮影対象とするが、
+  `s3` にブロック件数が映るという旧説明は成立しない。実際の構図は再撮影時の確認が必要。
 
 - **サイズ**: Chrome ウェブストアの規格に合わせて正確に **1280×800 px** で保存する。`--shots` を付けると
   起動直後に 1 回だけウィンドウをリサイズしてビューポートをこのサイズに合わせ、保存後も PNG ヘッダから

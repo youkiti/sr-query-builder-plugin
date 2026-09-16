@@ -109,6 +109,15 @@ xvfb-run -a -s "-screen 0 1920x1080x24" node video/scripts/record.mjs    # scene
 npm run video:assemble
 ```
 
+第 7 章は「設定 → 自動調整 → 最終レビュー → 採用保存 → 検証のみ再実行」の構成に変更した。
+原稿の cue 01〜07 を変更したため、対応する TTS と音声尺を作り直してから章全体を再収録し、
+字幕・チャプター時刻を含めて再合成する必要がある。`demoLatency=1` は未計測の暫定値。
+公開済み動画と既存音声は旧導線のままであり、再収録・公開の判断は別途行う。
+第 8・10 章の変更はコメントのみで、操作と原稿は維持している。
+静的確認では `src/demo/llmFixtures.ts` に自動調整用の `optimize-query` プロンプトの
+固定応答が無いため、調整案の取得時にエラーになる可能性が残る。
+デモ層は今回変更しておらず、新導線の収録成立は未確認。再収録前に別途確認する。
+
 1 章だけ撮り直すときは番号を渡す（`record.mjs 07` のように、`NN` でも `NN-slug` でも一致する）。
 原稿を変えた章は `tts.mjs` も同じキーで回してから収録し直すこと。
 
@@ -337,13 +346,14 @@ tiab-review-plugin）の制作過程で実際に踏まれた失敗と、その�
   in-memory で即答するため、そのままだと進捗インジケータもライブ表示も**映らないまま静止画**になる。
   何倍にすべきかは章ごとに実測して決める（REQUIREMENTS.md §6-4 の表）。とくに
   **実行中にナレーションが流れる章は、実行時間をその cue の合計尺に合わせる**こと
-  （第 7 章は cue 02〜05 の合計 62.3 秒に対して係数 5.4）。ずれると「生成中です」と
+  （第 7 章の旧導線は cue 02〜05 に合わせていたが、新導線は再計測が必要）。ずれると「生成中です」と
   言っているのに画面は終わっている、という絵になる。
 
 - **DO: 実行時間の係数は「録画を回した状態」で測る。** PR3 で踏んだ失敗。素の Playwright で
   測って係数を決めたところ、収録時は 1920×1080 の録画ぶんの CPU 負荷が乗って倍近く遅くなり、
   ナレーションが終わったあとに 70 秒の無音が残った。録画ありで測り直すこと
-  （第 7 章は録画ありで係数 2.4 → 29.9 秒 / 3.4 → 39.8 秒。傾き ≒ 9.9 秒／係数 1）。
+  （第 7 章の旧導線は録画ありで係数 2.4 → 29.9 秒 / 3.4 → 39.8 秒だったが、
+  自動調整の導線へは流用しない）。
 
 - **DON'T: 実行中にしか出ない要素を素の `hoverSlow` でなぞらない。** 実行が終わって DOM から
   消えると `scrollIntoViewIfNeeded` → `locator.hover()` の既定 30 秒タイムアウトで詰まり、
@@ -571,6 +581,18 @@ CONTRACT の全文と ctx API の詳細は `video/scripts/record.mjs` の先頭�
 （実チャプターは 01〜14。REQUIREMENTS.md §4 参照）。`assemble.mjs` は `video/build/scenes/` 配下の
 `00-` 始まりのシーンキーを最終動画の対象から自動的に除外する（`video/build/` は git 管理外で
 毎回消えるとは限らないため、過去のスモーク収録が残っていても `final.mp4` に紛れ込まない）。
+
+### `src/` のセレクタに依存するときは harness contract を更新する（issue #183）
+
+シーンスクリプトは `.mjs` のため jest / eslint / webpack のどこからも参照されず、`src/` の DOM
+構造が変わっても CI では気づけない（tools/selenium/manualCheck.mjs も同様）。新しいシーンを
+足す・既存シーンが依存するセレクタや前提条件（どのルート・どの demoSeed で見るか）を変えるときは、
+[`tests/harness-contract/contract.ts`](../tests/harness-contract/contract.ts) の
+`HARNESS_CONTRACT` に consumer（ファイルと手順）と expectation（存在ではなく条件つきの構造）を
+追記・更新すること。実際に検証まで書けるものは `verified: true` にして
+[`tests/harness-contract/contract.test.ts`](../tests/harness-contract/contract.test.ts) にテストを
+足す。描画が難しい・優先度が低いものは `verified: false` と `unverifiedReason` を書いて宣言のみに
+留めてよい（黙って省略しない）。
 
 ## タイミング精度についての注意
 
