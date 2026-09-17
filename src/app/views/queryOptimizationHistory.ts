@@ -282,6 +282,9 @@ export function createOptimizationHistoryRenderer(): (
         if (trial.kind === 'information' && trial.informationResult) {
           paragraph(row, `情報要求 ${trial.candidateId}: 文脈へ反映 ${trial.informationResult.obtained} / 要求 ${trial.informationResult.requested} 件`);
         }
+        if (trial.kind === 'information' && trial.trialDetailIds?.length) {
+          paragraph(row, `要求した試行の詳細: ${trial.trialDetailIds.join(', ')}`);
+        }
         if (trial.kind === 'finish' && trial.finishKind) {
           paragraph(row, `終了区分: ${trial.finishKind === 'no_change_needed' ? '変更不要' : '人の判断が必要'}（この判断だけでは目安件数・既知シードの捕捉の達成は確定しません）`);
         }

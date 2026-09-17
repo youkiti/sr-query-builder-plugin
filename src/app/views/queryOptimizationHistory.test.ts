@@ -74,6 +74,27 @@ test('情報取得の件数と、その文脈を読んだ判断を別の履歴�
   expect(rows[1]!.textContent).toContain('情報要求 request で得た文脈 1/3 件を読んだうえでの判断');
 });
 
+test('trial_detail_ids を要求した情報要求は、要求した試行 ID を履歴行に表示する', () => {
+  const f = setup();
+  f.state.queryOptimizationRun!.trials = [
+    { ...trial('request'), kind: 'information', after: null,
+      informationResult: { requested: 2, obtained: 1 }, trialDetailIds: ['candidate-1', 'candidate-2'] },
+  ];
+  f.render();
+  const rows = f.container.querySelectorAll('.optimization__history li');
+  expect(rows[0]!.textContent).toContain('要求した試行の詳細: candidate-1, candidate-2');
+});
+
+test('trial_detail_ids の無い情報要求は詳細行を表示しない', () => {
+  const f = setup();
+  f.state.queryOptimizationRun!.trials = [
+    { ...trial('request'), kind: 'information', after: null, informationResult: { requested: 1, obtained: 1 } },
+  ];
+  f.render();
+  const rows = f.container.querySelectorAll('.optimization__history li');
+  expect(rows[0]!.textContent).not.toContain('要求した試行の詳細');
+});
+
 test.each(['no_change_needed', 'needs_human_judgment'] as const)('終了判断（%s）を終了判断として表示し、採用・却下とは区別する', (finishKind) => {
   const f = setup();
   f.state.queryOptimizationRun!.trials = [

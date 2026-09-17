@@ -53,9 +53,13 @@ test('測定・書誌・MeSH の全枝と採否履歴を欠測を補完せず渡
   await optimizeQuery(input, provider);
   const prompt = chat.mock.calls[0]![0][1].content as string;
   for (const value of ['run:initial', 'hash', '取得失敗', 'シード題名', 'D001', 'C01.100', 'C02.200', 'D000', 'D002',
-    '"explode": false', 'シード喪失', '構文不正', '"totalHits": 0', '"totalHits": "(未計測)"', '"delta": "(未計測)"', '"hits": 0']) {
+    '"explode": false', 'シード喪失', '構文不正', '"totalHits": 0', '"delta": "(未計測)"', '"hits": 0']) {
     expect(prompt).toContain(value);
   }
+  // 試行履歴は要約のみを渡す。全式・terms を含む測定 JSON はもう含まれない
+  // （旧: 'rejected' 試行の after を formatMeasurement した生 JSON に "totalHits": "(未計測)" が出ていた）。
+  expect(prompt).toContain('"afterHits":"未測定"');
+  expect(prompt).not.toContain('"query":"drug$[tiab]"');
 });
 
 test('snake_case の変更案を変換し、予想件数は出力型・スキーマに含めない', async () => {
@@ -113,6 +117,15 @@ test('追加情報の要求を変換し、descriptor または枝だけの指定
   expect(chat.mock.calls[0]![0][1].content).toContain('"mesh_requests"');
 });
 
+test('旧形式（action 無し）は trial_detail_ids を無視し、常に空配列にする', async () => {
+  const { input, provider } = setup(JSON.stringify({
+    mesh_requests: [{ descriptor: 'Disease' }], trial_detail_ids: ['candidate-1'],
+  }));
+  const result = await optimizeQuery(input, provider);
+  if (result.action !== 'request_context') throw new Error('request_context ではありません');
+  expect(result.trialDetailIds).toEqual([]);
+});
+
 test('未取得の理由を実在ノードと分けた文脈として渡す。mesh_requests が空の旧形式は propose_changes になる', async () => {
   const { input, provider, chat } = setup('{"mesh_requests":[]}');
   input.meshRequestResults = [{ request: { descriptor: 'Disease', treeNumber: 'C01.100' },
@@ -151,7 +164,9 @@ test('保留・却下・重複の変更一覧と変種の注記を実差分か�
   expect(list.split('\n').filter((line) => line.includes('測定せずに却下')).every((line) => !line.includes('同じ削除の変種'))).toBe(true);
   const system = f.chat.mock.calls[0]![0][0].content as string;
   for (const text of ['測定せずに却下', '失う集合が残る限り再び保留', '特異的な語と AND', '下位の MeSH', '採否は実測で決まります']) expect(system).toContain(text);
-  expect(prompt).toContain('試行履歴（採否・却下理由・前後の実測）');
+  // 試行履歴は要約であることと、詳細は trial_detail_ids で取り出せることが分かる見出しに変えた
+  // （旧: '試行履歴（採否・却下理由・前後の実測）'）。
+  expect(prompt).toContain('試行履歴（要約。採否・却下理由・前後件数のみ。全式・全測定は request_context の trial_detail_ids で取り出せます）');
 });
 
 test('変更一覧が空ならなし、長い差分はブロックごとに省略する', async () => {
@@ -194,7 +209,17 @@ describe('行動種別 (action)', () => {
       mesh_requests: [{ descriptor: 'Disease', tree_number: '' }], rationale: '周辺を確認したい',
       measurement_ids: ['run:initial'] }));
     expect(await optimizeQuery(input, provider)).toEqual({ action: 'request_context',
-      meshRequests: [{ descriptor: 'Disease', treeNumber: '' }], rationale: '周辺を確認したい', measurementIds: ['run:initial'] });
+      meshRequests: [{ descriptor: 'Disease', treeNumber: '' }], trialDetailIds: [],
+      rationale: '周辺を確認したい', measurementIds: ['run:initial'] });
+  });
+
+  test('request_context の正常系: trial_detail_ids だけでも成立する（mesh_requests は空でよい）', async () => {
+    const { input, provider } = setup(JSON.stringify({ action: 'request_context',
+      mesh_requests: [], trial_detail_ids: [' candidate-1 ', 'candidate-2', ''],
+      rationale: '候補の全式を確認したい', measurement_ids: [] }));
+    expect(await optimizeQuery(input, provider)).toEqual({ action: 'request_context',
+      meshRequests: [], trialDetailIds: ['candidate-1', 'candidate-2'],
+      rationale: '候補の全式を確認したい', measurementIds: [] });
   });
 
   test('propose_changes の正常系: 変更案だけを持つ決定を返す', async () => {
@@ -224,11 +249,14 @@ describe('行動種別 (action)', () => {
   test.each([
     ['request_context に proposed_expression が混在', { action: 'request_context', mesh_requests: [{ descriptor: 'Disease' }], proposed_expression: 'x[tiab]' }, '混在'],
     ['request_context に added_terms が混在', { action: 'request_context', mesh_requests: [{ descriptor: 'Disease' }], added_terms: ['x'] }, '混在'],
-    ['request_context に mesh_requests が無い', { action: 'request_context', mesh_requests: [] }, 'mesh_requests がありません'],
+    ['request_context に mesh_requests と trial_detail_ids のどちらも無い', { action: 'request_context', mesh_requests: [] }, 'mesh_requests と trial_detail_ids のどちらもありません'],
+    ['request_context の trial_detail_ids が空文字だけ', { action: 'request_context', mesh_requests: [], trial_detail_ids: [' ', ''] }, 'mesh_requests と trial_detail_ids のどちらもありません'],
     ['propose_changes に mesh_requests が混在', { action: 'propose_changes', target_block_id: '1', proposed_expression: 'x[tiab]', mesh_requests: [{ descriptor: 'Disease' }] }, '混在'],
+    ['propose_changes に trial_detail_ids が混在', { action: 'propose_changes', target_block_id: '1', proposed_expression: 'x[tiab]', trial_detail_ids: ['candidate-1'] }, '混在'],
     ['propose_changes に target_block_id が無い', { action: 'propose_changes', proposed_expression: 'x[tiab]' }, 'target_block_id または proposed_expression'],
     ['propose_changes に proposed_expression が無い', { action: 'propose_changes', target_block_id: '1' }, 'target_block_id または proposed_expression'],
     ['finish に mesh_requests が混在', { action: 'finish', finish_kind: 'no_change_needed', rationale: '理由', mesh_requests: [{ descriptor: 'Disease' }] }, '混在'],
+    ['finish に trial_detail_ids が混在', { action: 'finish', finish_kind: 'no_change_needed', rationale: '理由', trial_detail_ids: ['candidate-1'] }, '混在'],
     ['finish に added_terms が混在', { action: 'finish', finish_kind: 'no_change_needed', rationale: '理由', added_terms: ['x'] }, '混在'],
     ['finish の finish_kind が無い（not_applicable のまま）', { action: 'finish', finish_kind: 'not_applicable', rationale: '理由' }, 'finish_kind がありません'],
     ['finish の finish_kind が不明な値', { action: 'finish', finish_kind: 'unknown_kind', rationale: '理由' }, 'finish_kind がありません'],
@@ -250,5 +278,44 @@ describe('行動種別 (action)', () => {
       enum: ['not_applicable', 'no_change_needed', 'needs_human_judgment'] });
     expect(schema.required).toContain('action');
     expect(schema.required).toContain('finish_kind');
+    expect(schema.properties.trial_detail_ids).toMatchObject({ type: 'array', items: { type: 'string' } });
+    expect(schema.required).toContain('trial_detail_ids');
+  });
+});
+
+describe('trial_detail_ids で取り出した試行詳細（TRIAL_DETAILS 節）', () => {
+  test('要求が無ければ (要求なし) を渡す', async () => {
+    const { input, provider, chat } = setup();
+    await optimizeQuery(input, provider);
+    const prompt = chat.mock.calls[0]![0][1].content as string;
+    expect(prompt.split('要求した試行の詳細')[1]).toContain('(要求なし)');
+  });
+
+  test('取得できた詳細は全式・前後の実測・削除影響・rationale の全文を渡す', async () => {
+    const { input, provider, chat } = setup();
+    const longRationale = 'あ'.repeat(250);
+    input.trialDetails = [{ candidateId: 'candidate-1', note: null, formula: input.formula,
+      before: measurement(['901']), after: measurement([]),
+      impact: { lostHits: 1, gainedHits: 0, inspected: [], error: null },
+      reason: '局面の指標に改善がありません', rationale: longRationale }];
+    await optimizeQuery(input, provider);
+    const prompt = chat.mock.calls[0]![0][1].content as string;
+    const section = prompt.split('要求した試行の詳細（')[1]!.split('\n過去の run の却下記録')[0]!;
+    expect(section).toContain('candidate-1');
+    expect(section).toContain('drug$[tiab]');
+    expect(section).toContain('局面の指標に改善がありません');
+    // 詳細節は要約と違い rationale を切り詰めない（切り詰めは TRIALS 要約だけの制約）。
+    expect(section).toContain(longRationale);
+    expect(section).toContain('"lostHits": 1');
+  });
+
+  test('取り出せなかった試行は理由だけを渡す', async () => {
+    const { input, provider, chat } = setup();
+    input.trialDetails = [{ candidateId: 'unknown-id', note: 'この run に候補 ID unknown-id の試行が見つかりません' }];
+    await optimizeQuery(input, provider);
+    const prompt = chat.mock.calls[0]![0][1].content as string;
+    const section = prompt.split('要求した試行の詳細（')[1]!.split('\n過去の run の却下記録')[0]!;
+    expect(section).toContain('unknown-id');
+    expect(section).toContain('見つかりません');
   });
 });

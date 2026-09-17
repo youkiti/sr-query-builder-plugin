@@ -746,7 +746,9 @@ test('2 回の保留は次の AI に理由と件数を渡し、その後の同�
   expect(chat).toHaveBeenCalledTimes(4);
   expect(result.trials.filter((trial) => trial.held)).toHaveLength(2);
   const prompt = chat.mock.calls[1]![0][1].content as string;
-  for (const text of ['"held": true', '"lostHits": 150', '失う集合 150 件']) expect(prompt).toContain(text);
+  // 試行履歴は要約なので、旧: 生 JSON の '"held": true' / '"lostHits": 150'（インデント付き）ではなく、
+  // 要約が出す outcome ラベルと数値だけの lostHits（インデント無しの compact JSON）を確認する。
+  for (const text of ['"outcome":"保留"', '"lostHits":150', '失う集合 150 件']) expect(prompt).toContain(text);
 });
 
 test('保留の 2 件を次の AI に渡し、その後条件達成しても未達理由には保留を残さない', async () => {
@@ -757,8 +759,9 @@ test('保留の 2 件を次の AI に渡し、その後条件達成しても未�
   const result = await runQueryOptimization(input, deps);
   expect(result).toMatchObject({ status: 'achieved', stopReason: 'conditions_met', unmetReasons: [] });
   expect(result.trials[1]?.held).toBe(true);
-  expect(chat.mock.calls[1]![0][1].content).toContain('"held": true');
-  expect(chat.mock.calls[1]![0][1].content).toContain('"lostHits": 2');
+  // 旧: 生 JSON の '"held": true' / '"lostHits": 2' ではなく、要約の outcome ラベルと lostHits を確認する。
+  expect(chat.mock.calls[1]![0][1].content).toContain('"outcome":"保留"');
+  expect(chat.mock.calls[1]![0][1].content).toContain('"lostHits":2');
 });
 
 test.each(['seed_loss', 'within_target', 'repeated', 'syntax', 'failure'])(
@@ -1038,7 +1041,10 @@ test('上限だけ満たしてシードを失う候補は却下し、次の AI �
   expect(result.best?.formula.blocks[0]?.expression).toBe('a[tiab]');
   expect(result.unmetReasons.join(' ')).toContain('目安件数 100');
   const prompt = chat.mock.calls[1]![0][1].content as string;
-  for (const text of ['捕捉済みシードを失う: 22', '"accepted": false', '"totalHits": 200', '"totalHits": 50']) expect(prompt).toContain(text);
+  // '"totalHits": 200' は best.measurement（現在の測定スナップショット）由来で変わらない。
+  // 旧: 試行履歴の生 JSON '"accepted": false' / '"totalHits": 50' は要約化で消え、
+  // 要約の outcome ラベルと afterHits（文字列化した件数）に置き換わる。
+  for (const text of ['捕捉済みシードを失う: 22', '"outcome":"却下"', '"totalHits": 200', '"afterHits":"50"']) expect(prompt).toContain(text);
   expect(result.trials[2]?.before?.totalHits).toBe(200);
   expect(result.trials[2]).toMatchObject({ accepted: false, held: true, impact: { lostHits: 50, gainedHits: 0 } });
 });
@@ -1712,6 +1718,84 @@ test('1 反復の追加取得を優先順の 3 件までに制限し、残りの
   const notes = optimize.mock.calls[1]![0].meshRequestResults!;
   expect(notes).toHaveLength(5);
   for (const note of notes.slice(3)) expect(note.note).toContain('3 件の追加取得上限で打ち切りました');
+});
+
+function requestTrialDetails(chat: ReturnType<typeof setup>['chat'], ids: string[]) {
+  chat.mockResolvedValueOnce({ text: JSON.stringify({ action: 'request_context', mesh_requests: [],
+    trial_detail_ids: ids, rationale: '過去の候補の全式を確認したい' }) });
+}
+
+describe('trial_detail_ids による試行詳細の取り出し', () => {
+  test('取り出した詳細は次の 1 回の呼び出しにだけ渡り、その後は消える', async () => {
+    const { input, deps, chat } = setup();
+    input.maxIterations = 3;
+    requestTrialDetails(chat, ['initial']);
+    const optimize = jest.spyOn(skill, 'optimizeQuery');
+    const result = await runQueryOptimization(input, deps);
+    // round 2（情報要求の直後）には initial の詳細が渡る。
+    expect(optimize.mock.calls[1]![0].trialDetails).toEqual([
+      expect.objectContaining({ candidateId: 'initial', note: null, formula: input.initialFormula }),
+    ]);
+    // round 1（情報要求の前）と round 3（その次）には渡らない。
+    expect(optimize.mock.calls[0]![0].trialDetails).toBeUndefined();
+    expect(optimize.mock.calls[2]![0].trialDetails).toBeUndefined();
+    expect(result.trials[1]).toMatchObject({ kind: 'information', trialDetailIds: ['initial'] });
+  });
+
+  test('1 回 3 件までで、超過分と run に無い ID は取り出さず理由を注記する。詳細の取り出しは通信を発生させない', async () => {
+    const { input, deps, chat } = setup();
+    input.maxIterations = 2;
+    requestTrialDetails(chat, ['initial', 'unknown-id', 'also-unknown', 'and-another']);
+    // trial_detail_ids のみの要求（mesh_requests は空）で MeSH 取得 callback が呼ばれなければ、
+    // 詳細の取り出しが通信を経由していないことの裏付けになる
+    // （buildTrialDetails は trials 配列からのローカル参照だけで、eutils/fetchMeshContext を受け取らない）。
+    const fetchMeshContext = jest.fn().mockResolvedValue([]);
+    deps.fetchMeshContext = fetchMeshContext;
+    const optimize = jest.spyOn(skill, 'optimizeQuery');
+    const result = await runQueryOptimization(input, deps);
+    const informationTrial = result.trials.find((trial) => trial.kind === 'information')!;
+    expect(informationTrial.trialDetailIds).toEqual(['initial', 'unknown-id', 'also-unknown', 'and-another']);
+    // 要求 4 件（trial_detail_ids のみ）に対し、取得できたのは 'initial' の 1 件だけ。
+    expect(informationTrial.informationResult).toEqual({ requested: 4, obtained: 1 });
+    expect(informationTrial.reason).toContain('この run に候補 ID unknown-id の試行が見つかりません');
+    expect(informationTrial.reason).toContain('1 回の要求で取り出せる試行の詳細は 3 件までのため取り出しませんでした');
+    const details = optimize.mock.calls[1]![0].trialDetails!;
+    expect(details.find((detail) => detail.candidateId === 'initial')).toMatchObject({ note: null });
+    expect(details.find((detail) => detail.candidateId === 'unknown-id')).toMatchObject({ note: expect.stringContaining('見つかりません') });
+    expect(details.find((detail) => detail.candidateId === 'and-another')).toMatchObject({ note: expect.stringContaining('3 件までのため取り出しませんでした') });
+    expect(fetchMeshContext).not.toHaveBeenCalled();
+  });
+
+  test('情報要求の枠を使う: 詳細だけの要求が 3 回続くと枠が尽き、4 回目は取り出さない', async () => {
+    const { input, deps, chat } = setup();
+    input.maxIterations = 10;
+    for (let i = 0; i < 4; i += 1) requestTrialDetails(chat, ['initial']);
+    const optimize = jest.spyOn(skill, 'optimizeQuery');
+    const result = await runQueryOptimization(input, deps);
+    expect(result.informationTrials).toBe(3);
+    // round 1〜3（情報要求の枠内）は取り出しに成功し、次回の呼び出しへ 1 件ずつ渡る。
+    for (const index of [1, 2, 3]) {
+      expect(optimize.mock.calls[index]![0].trialDetails).toEqual([expect.objectContaining({ candidateId: 'initial' })]);
+    }
+    // round 4（上限超過）は取り出さないため、その次の呼び出しには trialDetails が渡らない
+    // （5 回目以降の呼び出し回数は、上限超過後にどの決定が返るかに依存するため固定しない）。
+    expect(optimize.mock.calls[4]![0].trialDetails).toBeUndefined();
+    const overBudget = result.trials.find((trial) => trial.kind === 'information'
+      && trial.reason.includes('情報要求の上限'));
+    expect(overBudget).toMatchObject({ trialDetailIds: ['initial'], informationResult: { requested: 1, obtained: 0 } });
+  });
+
+  test('mesh_requests と trial_detail_ids を同時に要求すると、両方の件数を合算する', async () => {
+    const { input, deps, chat } = setup();
+    input.maxIterations = 2;
+    deps.fetchMeshContext = jest.fn().mockResolvedValue([childNode]);
+    chat.mockResolvedValueOnce({ text: JSON.stringify({ action: 'request_context',
+      mesh_requests: [{ descriptor: meshRequest.descriptor, tree_number: meshRequest.treeNumber }],
+      trial_detail_ids: ['initial'], rationale: '両方確認したい' }) });
+    const result = await runQueryOptimization(input, deps);
+    const informationTrial = result.trials.find((trial) => trial.kind === 'information')!;
+    expect(informationTrial.informationResult).toEqual({ requested: 2, obtained: 2 });
+  });
 });
 
 test.each(['success', 'failure'])('追加取得が予算を使い切った場合は %s 応答を破棄する', async (kind) => {
