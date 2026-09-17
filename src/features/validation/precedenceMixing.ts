@@ -1,7 +1,12 @@
 /**
- * 概念ブロックの検索式で、括弧の無い AND/NOT と OR が同じ括弧の深さに混在していないかを
- * 判定する純粋関数（issue #202）。PubMed は結合演算子を左から評価するため、
- * `a OR b AND c` は `(a OR b) AND c` にも `a OR (b AND c)` にもならず、意図と違う集合になる。
+ * 概念ブロックの検索式で、括弧の無い AND/NOT と OR が同じ括弧グループ（括弧で囲まれていない
+ * 同じ並び）に混在していないかを判定する純粋関数（issue #202）。PubMed は結合演算子を左から
+ * 評価するため、`a OR b AND c` は `(a OR b) AND c` にも `a OR (b AND c)` にもならず、意図と
+ * 違う集合になる。
+ *
+ * 判定は「括弧の深さ」ではなく「括弧グループ」単位で行う（issue #202 の codex レビュー指摘）。
+ * 深さだけで見ると、同じ深さにある別々の括弧グループ（例: `(a OR b) AND (c AND d)` の 2 つの
+ * 括弧はどちらも深さ 1）の演算子を取り違えて混在と誤判定する。
  *
  * 自動調整の変更案検査（queryOptimizationService.validateOptimizationCandidate）と、
  * AI 呼び出し前のブロック構造診断（blockDiagnosis.diagnosePrecedenceMixing）の両方から使う。
@@ -40,8 +45,13 @@ export function expressionToOperatorSyntax(expression: string): { syntax: string
   return { syntax, operandIds };
 }
 
+interface PrecedenceGroup { hasOr: boolean; hasAndLike: boolean }
+
 /**
- * 括弧の無い AND/NOT と OR が同じ深さに混在しているかを判定する。
+ * 括弧の無い AND/NOT と OR が同じ括弧グループに混在しているかを判定する。
+ * 括弧グループとは「同じ `(` `)` の対、または最外側（括弧で囲まれていない並び）に属する演算子
+ * の集まり」を指す。`(` でグループをスタックに積み、`)` で取り出すことで、兄弟関係にある
+ * 別々のグループ（同じ深さでも異なる括弧）を混同しない。
  * 判定は正規化前のトークン列（`normalizeConceptNotForValidation` を通す前の syntax）で行う:
  * `a OR b NOT c` は「被演算子直後の NOT」を暗黙の AND NOT とみなし、OR との混在として検出する。
  * 先頭・`(` の直後・AND/OR の直後に現れる NOT は単項の否定とみなし、混在判定には数えない。
@@ -52,23 +62,31 @@ export function hasPrecedenceMixing(expression: string): boolean {
   const { syntax } = expressionToOperatorSyntax(expression);
   const { tokens, errors } = tokenizeCombination(syntax);
   if (errors.length > 0) return false;
-  let depth = 0;
-  const hasOrAtDepth = new Map<number, boolean>();
-  const hasAndLikeAtDepth = new Map<number, boolean>();
-  tokens.forEach((token, index) => {
-    if (token.kind === 'lparen') { depth += 1; return; }
-    if (token.kind === 'rparen') { depth -= 1; return; }
-    if (token.kind !== 'op') return;
-    if (token.op === 'OR') { hasOrAtDepth.set(depth, true); return; }
-    if (token.op === 'AND') { hasAndLikeAtDepth.set(depth, true); return; }
+  const groups: PrecedenceGroup[] = [];
+  const stack: PrecedenceGroup[] = [];
+  const openGroup = (): void => {
+    const group: PrecedenceGroup = { hasOr: false, hasAndLike: false };
+    groups.push(group);
+    stack.push(group);
+  };
+  openGroup(); // 最外側（括弧で囲まれていない並び）も 1 グループとして扱う
+  for (const [index, token] of tokens.entries()) {
+    if (token.kind === 'lparen') { openGroup(); continue; }
+    if (token.kind === 'rparen') {
+      stack.pop();
+      // 閉じ括弧が多い式は判定できない。初期式の診断は構文検査を経ずに呼ばれるため、例外にしない。
+      if (stack.length === 0) return false;
+      continue;
+    }
+    if (token.kind !== 'op') continue;
+    const current = stack[stack.length - 1]!;
+    if (token.op === 'OR') { current.hasOr = true; continue; }
+    if (token.op === 'AND') { current.hasAndLike = true; continue; }
     // NOT: 被演算子（ref または `)`）の直後だけ暗黙の AND NOT として数える。
     const previous = tokens[index - 1];
-    if (previous && (previous.kind === 'ref' || previous.kind === 'rparen')) hasAndLikeAtDepth.set(depth, true);
-  });
-  for (const [d, hasOr] of hasOrAtDepth) {
-    if (hasOr && hasAndLikeAtDepth.get(d)) return true;
+    if (previous && (previous.kind === 'ref' || previous.kind === 'rparen')) current.hasAndLike = true;
   }
-  return false;
+  return groups.some((group) => group.hasOr && group.hasAndLike);
 }
 
 /** AI の変更案を実測前に却下する理由文（queryOptimizationService.validateOptimizationCandidate）。 */

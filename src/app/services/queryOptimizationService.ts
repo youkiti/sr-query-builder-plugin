@@ -1325,8 +1325,9 @@ export function validateOptimizationCandidate(initial: PubmedFormula, candidate:
       // 識別子系のタグ付き語とタグなしの自由文は自動変更の許可範囲外とし、自前の PubMed パーサは持たない。
       const { syntax, operandIds } = expressionToOperatorSyntax(block.expression);
       if (validateCombinationExpression(normalizeConceptNotForValidation(syntax), operandIds).errors.length) return '検索語のタグ・括弧・演算子が不正、または自動変更の許可範囲外です';
-      // 括弧の無い AND/NOT と OR が同じ深さに混在していると、PubMed は左から評価するため
-      // 意図と違う集合になる（issue #202）。判定は正規化前の syntax（NOT を AND NOT 化する前）で行う。
+      // 括弧の無い AND/NOT と OR が同じ括弧グループ（括弧で囲まれていない同じ並び）に混在していると、
+      // PubMed は左から評価するため意図と違う集合になる（issue #202）。
+      // 判定は正規化前の syntax（NOT を AND NOT 化する前）で行う。
       if (hasPrecedenceMixing(block.expression)) return PRECEDENCE_MIXING_REJECT_MESSAGE;
     }
   }

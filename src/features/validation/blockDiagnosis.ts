@@ -52,8 +52,9 @@ export interface BlockDiagnosis {
   overlaps: BlockOverlap[];
   narrowing: BlockNarrowing[];
   note: string;
-  /** 括弧の無い AND/NOT と OR が同じ深さに混在している承認済み概念ブロック（issue #202）。
-   * 旧形式のチェックポイント・監査記録には存在しないため任意項目とし、無ければ空扱いにする。 */
+  /** 括弧の無い AND/NOT と OR が同じ括弧グループ（括弧で囲まれていない同じ並び）に混在している
+   * 承認済み概念ブロック（issue #202）。旧形式のチェックポイント・監査記録には存在しないため
+   * 任意項目とし、無ければ空扱いにする。 */
   precedence?: BlockPrecedenceMixing[];
 }
 
@@ -151,7 +152,8 @@ export function diagnoseStructure(formula: PubmedFormula, approved: readonly { i
 }
 
 /**
- * 承認済み概念ブロックのうち、括弧の無い AND/NOT と OR が同じ深さに混在しているものを診断する。
+ * 承認済み概念ブロックのうち、括弧の無い AND/NOT と OR が同じ括弧グループ（括弧で囲まれていない
+ * 同じ並び）に混在しているものを診断する。
  * diagnoseStructure と異なり、最終結合式が単純な AND であるかどうかには依存しない
  * （優先順位の混在はブロック単体の式だけで判定できるため）。
  */

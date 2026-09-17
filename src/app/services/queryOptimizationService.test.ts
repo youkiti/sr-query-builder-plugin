@@ -2062,6 +2062,8 @@ test.each([
   '("salt substitute*"[tiab] OR ("salt alternative"[tiab] AND b[tiab]))',
   '(("salt substitute*"[tiab] OR "salt alternative"[tiab]) AND b[tiab])',
   '("salt substitute*"[tiab] OR "salt alternative"[tiab]) NOT b[tiab]',
+  // 同じ深さでも別々の括弧グループなら混在ではない（issue #202 の codex レビュー指摘）
+  '("salt substitute*"[tiab] OR "salt alternative"[tiab]) AND (b[tiab] AND c[tiab])',
 ])('混在する部分を括弧で囲めば変更案として通る: %s', (expression) => {
   const { input } = setup();
   const proposal: skill.OptimizeQueryProposal = { targetBlockId: '2', proposedExpression: expression,
