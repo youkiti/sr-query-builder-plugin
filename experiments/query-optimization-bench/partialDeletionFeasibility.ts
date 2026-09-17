@@ -27,9 +27,13 @@ import type { PubmedFormula, FormulaBlock } from '@/lib/search-formula-md';
 
 export interface Measurement {
   fingerprint: string;
-  totalHits: number;
-  capturedPmids: string[];
-  missedPmids: string[];
+  /**
+   * `OptimizationMeasurement`（src/features/formula/skills/optimizeQuery.ts）と同じく、
+   * NCBI 側の測定が失敗した試行では null になる（壊れたデータではなく正規のログの状態）。
+   */
+  totalHits: number | null;
+  capturedPmids: string[] | null;
+  missedPmids: string[] | null;
   /** 測定によっては無い（例: initial の after）。無い場合を 0 に補完してはいけない。 */
   terms?: { blockId: string; query: string; finalContribution?: number }[];
 }
@@ -39,6 +43,12 @@ export interface TrialChanges {
   /** 件数だけを使う。要素の形は addedTerms が文字列、replacedTerms が {before,after} 等ログにより異なる。 */
   addedTermsCount: number;
   replacedTermsCount: number;
+}
+
+/** 候補・差集合の実測結果。`lostHits`/`gainedHits` は測定に失敗すると null になる。 */
+export interface TrialImpact {
+  lostHits: number | null;
+  gainedHits: number | null;
 }
 
 export interface Trial {
@@ -51,6 +61,7 @@ export interface Trial {
   duplicateOf?: string | null;
   resubmissionRequested?: boolean;
   changes?: TrialChanges | null;
+  impact?: TrialImpact | null;
   finishKind?: string;
 }
 
@@ -76,6 +87,19 @@ function asStringArray(value: unknown, context: string): string[] {
   return value as string[];
 }
 
+/** 測定失敗で null になりうるフィールド用。null はそのまま通し、それ以外は文字列配列として検証する。 */
+function asStringArrayOrNull(value: unknown, context: string): string[] | null {
+  if (value === null) return null;
+  return asStringArray(value, context);
+}
+
+/** 測定失敗で null になりうるフィールド用。null はそのまま通し、それ以外は数値として検証する。 */
+function asNumberOrNull(value: unknown, context: string): number | null {
+  if (value === null) return null;
+  if (typeof value !== 'number') throw new Error(`数値でも null でもありません: ${context}`);
+  return value;
+}
+
 /**
  * `changes.addedTerms` / `removedTerms` / `replacedTerms` の件数だけを見る（要素の形は使わない）。
  * `replacedTerms` は `{ before, after }` オブジェクトの配列のことがあり、文字列配列とは限らない
@@ -90,9 +114,9 @@ function asMeasurement(value: unknown, context: string): Measurement | null {
   if (value === null || value === undefined) return null;
   if (!isObject(value)) throw new Error(`測定の形式が不正です: ${context}`);
   if (typeof value.fingerprint !== 'string') throw new Error(`fingerprint がありません: ${context}`);
-  if (typeof value.totalHits !== 'number') throw new Error(`totalHits がありません: ${context}`);
-  const capturedPmids = asStringArray(value.capturedPmids, `${context}.capturedPmids`);
-  const missedPmids = asStringArray(value.missedPmids, `${context}.missedPmids`);
+  const totalHits = asNumberOrNull(value.totalHits, `${context}.totalHits`);
+  const capturedPmids = asStringArrayOrNull(value.capturedPmids, `${context}.capturedPmids`);
+  const missedPmids = asStringArrayOrNull(value.missedPmids, `${context}.missedPmids`);
   let terms: Measurement['terms'];
   if (value.terms !== undefined) {
     if (!Array.isArray(value.terms)) throw new Error(`terms の形式が不正です: ${context}`);
@@ -107,7 +131,17 @@ function asMeasurement(value: unknown, context: string): Measurement | null {
       };
     });
   }
-  return { fingerprint: value.fingerprint, totalHits: value.totalHits, capturedPmids, missedPmids, terms };
+  return { fingerprint: value.fingerprint, totalHits, capturedPmids, missedPmids, terms };
+}
+
+/** `impact`（候補・差集合の実測結果）。null/未指定なら null。 */
+function asImpact(value: unknown, context: string): TrialImpact | null {
+  if (value === null || value === undefined) return null;
+  if (!isObject(value)) throw new Error(`impact の形式が不正です: ${context}`);
+  return {
+    lostHits: asNumberOrNull(value.lostHits, `${context}.lostHits`),
+    gainedHits: asNumberOrNull(value.gainedHits, `${context}.gainedHits`),
+  };
 }
 
 function asFormulaBlock(value: unknown, context: string): FormulaBlock {
@@ -152,6 +186,7 @@ function asTrial(value: unknown, context: string): Trial {
     duplicateOf: typeof value.duplicateOf === 'string' ? value.duplicateOf : null,
     resubmissionRequested: typeof value.resubmissionRequested === 'boolean' ? value.resubmissionRequested : undefined,
     changes: asChanges(value.changes, `${context}.changes`),
+    impact: asImpact(value.impact, `${context}.impact`),
     finishKind: typeof value.finishKind === 'string' ? value.finishKind : undefined,
   };
 }
@@ -167,10 +202,21 @@ function findRunFiles(path: string): string[] {
 }
 
 /**
+ * `results/` に保存する run.json の `label` は `eval:optimize` の `--label` に対応し、
+ * 省略可能（`experiments/query-optimization-bench/types.ts` の `RunResult.label` も
+ * `label?: string`）。ラベル無しの通常実行結果を「対象外」として読み飛ばすと、正規のログが
+ * 黙って集計から落ちる。ラベルが無い run.json にはこの既定名を補い、`--label` で明示的に
+ * 指定して絞り込むこともできるようにする。
+ */
+export const DEFAULT_LABEL = '(ラベル未指定)';
+
+/**
  * `results/` には自動調整以外のツール（marginDesign.ts 等）も同名 `run.json` を残しており、
- * トップレベルの形が別物（`label`/`runId`/`optimization.trials` を持たない）。それらは
- * 「この解析の対象ではない」として静かに読み飛ばす（null）。runId・label・trials 配列が
- * 揃っているのに中身が壊れている場合は、自動調整の run.json とみなして厳格に検証し、例外にする。
+ * トップレベルの形が別物（`runId`/`optimization.trials` を持たない）。それらは
+ * 「この解析の対象ではない」として静かに読み飛ばす（null）。自動調整のログかどうかは
+ * `runId` と `optimization.trials` の有無だけで判定し、`label` の有無では判定しない
+ * （label は省略可能なため）。runId・trials 配列が揃っているのに中身が壊れている場合は、
+ * 自動調整の run.json とみなして厳格に検証し、例外にする。
  */
 export function parseRunFile(path: string): RunFile | null {
   let raw: unknown;
@@ -178,8 +224,7 @@ export function parseRunFile(path: string): RunFile | null {
   catch { throw new Error(`run.json が壊れています: ${path}`); }
   if (!isObject(raw)) return null;
   const { runId, label, gitCommit, model, maxHits, optimization } = raw;
-  if (typeof runId !== 'string' || !runId || typeof label !== 'string'
-    || !isObject(optimization) || !Array.isArray(optimization.trials)) {
+  if (typeof runId !== 'string' || !runId || !isObject(optimization) || !Array.isArray(optimization.trials)) {
     return null;
   }
   if (typeof gitCommit !== 'string') throw new Error(`gitCommit がありません: ${path}`);
@@ -187,7 +232,8 @@ export function parseRunFile(path: string): RunFile | null {
   if (typeof maxHits !== 'number') throw new Error(`maxHits がありません: ${path}`);
   if (typeof optimization.stopReason !== 'string') throw new Error(`stopReason がありません: ${path}`);
   const trials = optimization.trials.map((trial, index) => asTrial(trial, `${path}#trials[${index}]`));
-  return { runId, label, gitCommit, model, maxHits, stopReason: optimization.stopReason, trials, sourcePath: path };
+  const resolvedLabel = typeof label === 'string' ? label : DEFAULT_LABEL;
+  return { runId, label: resolvedLabel, gitCommit, model, maxHits, stopReason: optimization.stopReason, trials, sourcePath: path };
 }
 
 /** runId で重複排除する（同じ run が 2 箇所に保存されているため）。先に見つかったものを残す。 */
@@ -215,18 +261,30 @@ export interface FollowUpBreakdown {
   noNext: number;
   finish: Record<string, number>;
   sameFormula: number;
+  /**
+   * 情報要求（`kind: 'information'`。src/app/services/queryOptimizationService.ts が
+   * request_context への応答として push する正規の試行種別）。run あたり 3 回の別予算で、
+   * 変更案そのものではないため「新案」には数えない。
+   */
+  information: number;
   proposal: { accepted: number; held: number; rejected: number };
+  /** finish / same-formula / proposal / information のどれでもない、本当に未知の kind。 */
+  unknown: Record<string, number>;
 }
 
 type FollowUpTag =
   | { kind: 'no-next' }
   | { kind: 'finish'; finishKind: string }
   | { kind: 'same-formula' }
-  | { kind: 'proposal'; outcome: 'accepted' | 'held' | 'rejected' };
+  | { kind: 'information' }
+  | { kind: 'proposal'; outcome: 'accepted' | 'held' | 'rejected' }
+  | { kind: 'unknown'; actualKind: string };
 
 /**
  * 差し戻し（trials[i].resubmissionRequested === true）の直後の試行を分類する。
  * 判定順は brief のとおり: 次の試行が無い → finish → duplicateOf あり → proposal。
+ * `information`（情報要求）は変更案でも同じ式でもない独立の正規区分として扱い、
+ * それ以外の本当に未知の kind は `proposal/rejected` に吸収せず unknown として数える。
  */
 export function classifyFollowUp(trials: Trial[], i: number): FollowUpTag {
   const next = trials[i + 1];
@@ -238,9 +296,8 @@ export function classifyFollowUp(trials: Trial[], i: number): FollowUpTag {
     if (next.held === true) return { kind: 'proposal', outcome: 'held' };
     return { kind: 'proposal', outcome: 'rejected' };
   }
-  // kind が finish でも proposal でもない未知の種別。実データでは起きない想定だが、
-  // 黙って握りつぶさず「新案でも同じ式でもない」ことが分かるようにする。
-  return { kind: 'proposal', outcome: 'rejected' };
+  if (next.kind === 'information') return { kind: 'information' };
+  return { kind: 'unknown', actualKind: next.kind };
 }
 
 export interface Section1 {
@@ -262,7 +319,7 @@ function buildSection1(label: string, fileCount: number, runs: RunFile[]): Secti
   let duplicateTrialCount = 0;
   let resubmissionCount = 0;
   const followUp: FollowUpBreakdown = {
-    noNext: 0, finish: {}, sameFormula: 0, proposal: { accepted: 0, held: 0, rejected: 0 },
+    noNext: 0, finish: {}, sameFormula: 0, information: 0, proposal: { accepted: 0, held: 0, rejected: 0 }, unknown: {},
   };
   for (const run of runs) {
     stopReasonCounts[run.stopReason] = (stopReasonCounts[run.stopReason] ?? 0) + 1;
@@ -275,7 +332,9 @@ function buildSection1(label: string, fileCount: number, runs: RunFile[]): Secti
         if (tag.kind === 'no-next') followUp.noNext++;
         else if (tag.kind === 'finish') followUp.finish[tag.finishKind] = (followUp.finish[tag.finishKind] ?? 0) + 1;
         else if (tag.kind === 'same-formula') followUp.sameFormula++;
-        else followUp.proposal[tag.outcome]++;
+        else if (tag.kind === 'information') followUp.information++;
+        else if (tag.kind === 'proposal') followUp.proposal[tag.outcome]++;
+        else followUp.unknown[tag.actualKind] = (followUp.unknown[tag.actualKind] ?? 0) + 1;
       }
     });
   }
@@ -292,6 +351,15 @@ function buildSection1(label: string, fileCount: number, runs: RunFile[]): Secti
 // ---------------------------------------------------------------------------
 
 interface BestState { formula: PubmedFormula; measurement: Measurement }
+
+/**
+ * NCBI 測定が失敗すると `totalHits`/`capturedPmids`/`missedPmids` のいずれかが null になり、
+ * 捕捉率・件数の判定ができない。測定オブジェクト自体が無い場合も同様に扱う。
+ */
+function isMeasurementInsufficient(measurement: Measurement | null | undefined): boolean {
+  return !measurement || measurement.totalHits === null || measurement.capturedPmids === null
+    || measurement.missedPmids === null;
+}
 
 /** trials[0..uptoExclusive) を先頭から辿り、その時点の最良式を求める。 */
 function foldBest(trials: Trial[], uptoExclusive: number): BestState | null {
@@ -389,7 +457,7 @@ interface QualifyingHeld { trialIndex: number; targetBlockId: string; removedOpe
  * 条件 d が満たされない理由。「ただ 0 と出すだけのレポートにはしない」ため、
  * held===true の試行ごとに、どの下位条件で対象外になったかを記録する。
  * - no-held: held===true の試行が eventIndex より前に 1 件も無い
- * - missing-measurement: before/after の測定が無い
+ * - missing-measurement: before/after の測定が無い、または capturedPmids が null（測定失敗）
  * - fingerprint-mismatch: before.fingerprint が現在の best と一致しない
  * - captured-lost: 捕捉済みシードを失っている
  * - changes-mixed: changes が無い／addedTerms・replacedTerms が空でない／対象ブロックが見つからない
@@ -422,9 +490,10 @@ function findQualifyingHeldTrials(trials: Trial[], eventIndex: number, best: Bes
     if (trial.held !== true) continue;
     if (!trial.before || !trial.after) { reasons.push('missing-measurement'); continue; }
     if (trial.before.fingerprint !== best.measurement.fingerprint) { reasons.push('fingerprint-mismatch'); continue; }
-    if (!trial.before.capturedPmids.every((pmid) => trial.after!.capturedPmids.includes(pmid))) {
-      reasons.push('captured-lost'); continue;
-    }
+    const { capturedPmids: beforeCaptured } = trial.before;
+    const { capturedPmids: afterCaptured } = trial.after;
+    if (beforeCaptured === null || afterCaptured === null) { reasons.push('missing-measurement'); continue; }
+    if (!beforeCaptured.every((pmid) => afterCaptured.includes(pmid))) { reasons.push('captured-lost'); continue; }
     const changes = trial.changes;
     if (!changes || changes.addedTermsCount > 0 || changes.replacedTermsCount > 0) {
       reasons.push('changes-mixed'); continue;
@@ -475,17 +544,36 @@ async function buildCandidates(
 }
 
 /**
- * この時点（trialIndex より前）までに既に評価済みの式（initial と全 proposal の formula）の
- * 指紋集合。run 全体（未来の試行を含む）から集めてしまうと、イベントの時点ではまだ評価されて
- * いない後続候補まで「評価済み」に含まれ、まだ試していないはずの候補を誤って除外してしまう。
+ * 本体（`runQueryOptimization`, src/app/services/queryOptimizationService.ts）が重複判定に使う
+ * `seen` Map への登録条件を再現する。`initial` は無条件で登録するが、`proposal` は
+ * 「候補自身の測定が失敗していない」かつ「差集合の実測（impact.lostHits/gainedHits）が
+ * 失敗していない」場合だけ登録し、再測定の機会を残すために測定失敗の式は登録しない。
+ */
+function wasRegisteredAsEvaluated(trial: Trial): boolean {
+  if (trial.kind === 'initial') return true;
+  if (trial.kind !== 'proposal') return false;
+  const failed = isMeasurementInsufficient(trial.after);
+  const impactFailed = trial.impact != null && (trial.impact.lostHits === null || trial.impact.gainedHits === null);
+  return !failed && !impactFailed;
+}
+
+/**
+ * この時点（trialIndex より前）までに既に評価済みの式の指紋集合。run 全体（未来の試行を含む）
+ * から集めてしまうと、イベントの時点ではまだ評価されていない後続候補まで「評価済み」に含まれ、
+ * まだ試していないはずの候補を誤って除外してしまう。
  */
 async function collectEvaluatedFingerprints(trials: Trial[], uptoExclusive: number): Promise<Set<string>> {
-  const evaluated = trials.slice(0, uptoExclusive).filter((trial) => trial.kind === 'initial' || trial.kind === 'proposal');
+  const evaluated = trials.slice(0, uptoExclusive).filter(wasRegisteredAsEvaluated);
   const fingerprints = await Promise.all(evaluated.map((trial) => formulaFingerprint(trial.formula)));
   return new Set(fingerprints);
 }
 
-export type FailureCode = 'a' | 'b' | 'c' | 'd' | 'e';
+/**
+ * `measurement-insufficient` は条件 a の手前に置く前提条件。best の測定
+ * （totalHits/capturedPmids/missedPmids のいずれか）が NCBI 測定失敗で null のときに使う。
+ * a〜e は brief 由来の判定条件そのもの。
+ */
+export type FailureCode = 'measurement-insufficient' | 'a' | 'b' | 'c' | 'd' | 'e';
 
 export interface DuplicationEvent {
   runId: string;
@@ -515,8 +603,14 @@ async function evaluateDuplicationEvent(
   }
   const best = enrichBestWithTerms(trials, rawBest);
   const base = { runId: run.runId, runLabel: run.label, trialIndex: dupIndex, bucket, selfResubmissionRequested, best };
-  if (best.measurement.missedPmids.length !== 0) return { ...base, failedAt: 'a', dReasons: [], candidates: [] };
-  if (!(best.measurement.totalHits > run.maxHits)) return { ...base, failedAt: 'b', dReasons: [], candidates: [] };
+  // best の測定が NCBI 測定失敗で totalHits/capturedPmids/missedPmids のいずれか null なら、
+  // 条件 a（既知シードを全件捕捉しているか）以降を判定できない。
+  const { totalHits, missedPmids } = best.measurement;
+  if (totalHits === null || best.measurement.capturedPmids === null || missedPmids === null) {
+    return { ...base, failedAt: 'measurement-insufficient', dReasons: [], candidates: [] };
+  }
+  if (missedPmids.length !== 0) return { ...base, failedAt: 'a', dReasons: [], candidates: [] };
+  if (!(totalHits > run.maxHits)) return { ...base, failedAt: 'b', dReasons: [], candidates: [] };
   if (!isSimpleAndCombination(best.formula.combinationExpression)) return { ...base, failedAt: 'c', dReasons: [], candidates: [] };
   const { qualifying, reasons } = findQualifyingHeldTrials(trials, dupIndex, best);
   if (qualifying.length === 0) return { ...base, failedAt: 'd', dReasons: reasons, candidates: [] };
@@ -607,13 +701,18 @@ function renderSection1(section: Section1): string[] {
   lines.push(`  直後: 同じ式: ${section.followUp.sameFormula}`);
   const proposalTotal = section.followUp.proposal.accepted + section.followUp.proposal.held + section.followUp.proposal.rejected;
   lines.push(`  直後: 新案: ${proposalTotal}（採用 ${section.followUp.proposal.accepted}・保留 ${section.followUp.proposal.held}・却下 ${section.followUp.proposal.rejected}）`);
+  lines.push(`  直後: 情報要求: ${section.followUp.information}`);
   for (const [finishKind, count] of Object.entries(section.followUp.finish).sort(([a], [b]) => a.localeCompare(b))) {
     lines.push(`  直後: finish（${finishKind}）: ${count}`);
+  }
+  for (const [kind, count] of Object.entries(section.followUp.unknown).sort(([a], [b]) => a.localeCompare(b))) {
+    lines.push(`  直後: 未知の種別（${kind}）: ${count}`);
   }
   return lines;
 }
 
 const FAILURE_LABELS: Record<FailureCode, string> = {
+  'measurement-insufficient': '測定不足（totalHits/capturedPmids/missedPmids のいずれかが null）',
   a: 'a（既知シードを全件捕捉していない）',
   b: 'b（totalHits が maxHits を超えていない）',
   c: 'c（結合式が単純な AND ではない）',

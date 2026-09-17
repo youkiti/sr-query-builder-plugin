@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { PubmedFormula } from '@/lib/search-formula-md';
 import {
-  analyzeFeasibility, classifyContribution, classifyFollowUp, buildReport, renderReport,
+  analyzeFeasibility, classifyContribution, classifyFollowUp, buildReport, renderReport, parseRunFile,
   type RunFile, type Trial, type Measurement, type DuplicationEvent, type Report,
 } from './partialDeletionFeasibility';
 
@@ -264,9 +264,10 @@ describe('analyzeFeasibility: 前提条件 a〜e', () => {
         after: measurement({ fingerprint: 'fp-held', capturedPmids: ['p1'] }),
         changes: { targetBlockId: '1', addedTermsCount: 0, replacedTermsCount: 0 },
       }),
-      // A だけ削除した式、B だけ削除した式を、AI が既にどこかで提案済みだったことにする。
-      trial({ kind: 'proposal', formula: formula([B, C]), accepted: false }),
-      trial({ kind: 'proposal', formula: formula([A, C]), accepted: false }),
+      // A だけ削除した式、B だけ削除した式を、AI が既にどこかで提案済みだったことにする
+      // （測定が成功していないと本体の `seen` には登録されないため、after を明示する）。
+      trial({ kind: 'proposal', formula: formula([B, C]), accepted: false, after: measurement({ fingerprint: 'fp-remove-a' }) }),
+      trial({ kind: 'proposal', formula: formula([A, C]), accepted: false, after: measurement({ fingerprint: 'fp-remove-b' }) }),
       trial({ kind: 'proposal', formula: formula(['"Z"[tiab]']), accepted: false, resubmissionRequested: true }),
       trial({ kind: 'proposal', formula: heldFormula, accepted: false, duplicateOf: 'candidate-2' }),
     ];
@@ -396,6 +397,181 @@ describe('renderReport: 第 3 節の合計は重複排除する', () => {
     const text = renderReport(report);
     expect(text).toContain('差し戻しを経ずに改善なしへ直接計上された重複（この試行自体は resubmissionRequested を立てていない）（0 件）');
     expect(text).toContain('該当なし');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// measurement の totalHits/capturedPmids/missedPmids は測定失敗で null になりうる
+// ---------------------------------------------------------------------------
+
+describe('測定不足（totalHits/capturedPmids/missedPmids が null）', () => {
+  test('best の測定が null フィールドを含んでいても例外にならず、measurement-insufficient として扱う', async () => {
+    const trials = buildSuccessTrials();
+    trials[0] = trial({
+      kind: 'initial', formula: formula([A, B, C, D, E]), accepted: true,
+      after: { fingerprint: 'fp-initial', totalHits: null, capturedPmids: null, missedPmids: null },
+    });
+    const [event] = await analyzeFeasibility([run({ trials })]);
+    expect(event!.failedAt).toBe('measurement-insufficient');
+    expect(event!.candidates).toEqual([]);
+  });
+
+  test('一部のフィールドだけが null でも measurement-insufficient になる', async () => {
+    const trials = buildSuccessTrials();
+    trials[0] = trial({
+      kind: 'initial', formula: formula([A, B, C, D, E]), accepted: true,
+      after: { fingerprint: 'fp-initial', totalHits: 5000, capturedPmids: ['p1'], missedPmids: null },
+    });
+    const [event] = await analyzeFeasibility([run({ trials })]);
+    expect(event!.failedAt).toBe('measurement-insufficient');
+  });
+
+  test('parseRunFile は null 測定を含む run.json を例外にせず読み取れる', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'partial-deletion-null-measurement-'));
+    try {
+      const raw = {
+        runId: 'run-null-measurement', label: 'test-label', gitCommit: 'abc123', model: 'test-model', maxHits: 2000,
+        optimization: {
+          stopReason: 'no_improvement',
+          trials: [{
+            kind: 'initial', formula: formula([A, B, C]),
+            after: { fingerprint: 'fp-1', totalHits: null, capturedPmids: null, missedPmids: null },
+          }],
+        },
+      };
+      const path = join(dir, 'run.json');
+      writeFileSync(path, JSON.stringify(raw));
+      const parsed = parseRunFile(path);
+      expect(parsed).not.toBeNull();
+      expect(parsed!.trials[0]!.after!.totalHits).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// label は省略可能（--label 未指定の eval:optimize 結果）
+// ---------------------------------------------------------------------------
+
+describe('ラベル省略時の扱い', () => {
+  let dir: string;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'partial-deletion-no-label-')); });
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  function rawRunJsonWithoutLabel(): Record<string, unknown> {
+    return {
+      runId: 'no-label-run-1', gitCommit: 'abc123', model: 'test-model', maxHits: 2000,
+      optimization: {
+        stopReason: 'no_improvement',
+        trials: [{
+          kind: 'initial', formula: formula([A, B, C]),
+          after: { fingerprint: 'fp-initial', totalHits: 100, capturedPmids: [], missedPmids: [] },
+        }],
+      },
+    };
+  }
+
+  test('label の無い run.json も自動調整ログとして集計に入り、既定のラベル名を補う', async () => {
+    writeFileSync(join(dir, 'run.json'), JSON.stringify(rawRunJsonWithoutLabel()));
+    const report = await buildReport(dir);
+    expect(report.skippedFileCount).toBe(0);
+    expect(report.section1).toHaveLength(1);
+    expect(report.section1[0]!.runCount).toBe(1);
+    expect(report.section1[0]!.label).not.toBe('');
+    // 既定のラベル名で --label 指定しても選び出せる。
+    const filtered = await buildReport(dir, report.section1[0]!.label);
+    expect(filtered.section1[0]!.runCount).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 評価済み集合は、測定・差集合の実測が成功した候補だけを含む（本体の seen 登録条件を再現）
+// ---------------------------------------------------------------------------
+
+describe('評価済み集合は測定・差集合が成功した候補だけを含む', () => {
+  test('候補自身の測定が失敗（after が無い）していれば評価済みに数えず、同じ式を再度作れる', async () => {
+    const trials = buildSuccessTrials();
+    // D を削除した式を提案していたが、測定が失敗している（after が無い）。
+    trials.splice(2, 0, trial({ kind: 'proposal', formula: formula([A, B, C, E]), accepted: false, after: null }));
+    const [event] = await analyzeFeasibility([run({ trials })]);
+    expect(event!.failedAt).toBeNull();
+    expect(event!.candidates.map((c) => c.removedTerm).sort()).toEqual([D, E].sort());
+  });
+
+  test('候補自身の測定は成功していても、差集合の実測（impact）が失敗していれば評価済みに数えない', async () => {
+    const trials = buildSuccessTrials();
+    trials.splice(2, 0, trial({
+      kind: 'proposal', formula: formula([A, B, C, E]), accepted: false,
+      after: measurement({ fingerprint: 'fp-remove-d' }),
+      impact: { lostHits: null, gainedHits: 5 },
+    }));
+    const [event] = await analyzeFeasibility([run({ trials })]);
+    expect(event!.failedAt).toBeNull();
+    expect(event!.candidates.map((c) => c.removedTerm)).toContain(D);
+  });
+
+  test('測定・差集合の実測がどちらも成功していれば評価済みに数え、同じ候補を除外する', async () => {
+    const trials = buildSuccessTrials();
+    trials.splice(2, 0, trial({
+      kind: 'proposal', formula: formula([A, B, C, E]), accepted: false,
+      after: measurement({ fingerprint: 'fp-remove-d' }),
+      impact: { lostHits: 0, gainedHits: 5 },
+    }));
+    const [event] = await analyzeFeasibility([run({ trials })]);
+    expect(event!.failedAt).toBeNull();
+    expect(event!.candidates.map((c) => c.removedTerm)).not.toContain(D);
+    expect(event!.candidates.map((c) => c.removedTerm)).toContain(E);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// kind: 'information'（情報要求）は新案・却下に吸収しない
+// ---------------------------------------------------------------------------
+
+describe('差し戻し直後の情報要求（kind: information）', () => {
+  test('直後が kind: information なら情報要求として分類し、新案には数えない', () => {
+    const trials = [
+      trial({ kind: 'proposal', resubmissionRequested: true }),
+      trial({ kind: 'information' }),
+    ];
+    expect(classifyFollowUp(trials, 0)).toEqual({ kind: 'information' });
+  });
+
+  test('本当に未知の kind は proposal/rejected に吸収せず unknown として数える', () => {
+    const trials = [
+      trial({ kind: 'proposal', resubmissionRequested: true }),
+      trial({ kind: 'some-future-kind' }),
+    ];
+    expect(classifyFollowUp(trials, 0)).toEqual({ kind: 'unknown', actualKind: 'some-future-kind' });
+  });
+
+  test('buildReport の第 1 節でも情報要求は新案・却下に数えず、独立した区分で数える', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'partial-deletion-information-'));
+    try {
+      const raw = {
+        runId: 'run-information-1', label: 'test-label', gitCommit: 'abc123', model: 'test-model', maxHits: 2000,
+        optimization: {
+          stopReason: 'no_improvement',
+          trials: [
+            {
+              kind: 'initial', formula: formula([A, B, C]),
+              after: { fingerprint: 'fp-initial', totalHits: 100, capturedPmids: [], missedPmids: [] },
+            },
+            { kind: 'proposal', formula: formula([A, B]), resubmissionRequested: true },
+            { kind: 'information', formula: formula([A, B, C]) },
+          ],
+        },
+      };
+      writeFileSync(join(dir, 'run.json'), JSON.stringify(raw));
+      const report = await buildReport(dir, 'test-label');
+      const section = report.section1[0]!;
+      expect(section.resubmissionCount).toBe(1);
+      expect(section.followUp.information).toBe(1);
+      expect(section.followUp.proposal.accepted + section.followUp.proposal.held + section.followUp.proposal.rejected).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
