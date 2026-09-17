@@ -29,6 +29,7 @@
     "eval:report": "tsx experiments/query-optimization-bench/report.ts",
     "eval:api-audit": "tsx experiments/query-optimization-bench/apiAudit.ts",
     "eval:prompt-size": "tsx experiments/query-optimization-bench/promptSize.ts",
+    "eval:partial-deletion": "tsx experiments/query-optimization-bench/partialDeletionFeasibility.ts",
     "dev": "webpack --mode development",
     "watch": "webpack --mode development --watch",
     "build": "webpack --mode production",
