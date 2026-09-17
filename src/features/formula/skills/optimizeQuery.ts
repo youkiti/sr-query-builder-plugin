@@ -529,8 +529,10 @@ export function formatRejectedChanges(trials: OptimizationTrial[], currentFormul
       .sort((a, b) => String(a[0]).localeCompare(String(b[0]))));
   const lines = rejected.map((trial, index) => {
     const diff = formatFormulaDiff(trial.formulaDiff);
-    const changedIds = trial.formulaDiff ? trial.formulaDiff.map((block) => block.blockId)
-      : trial.changes?.targetBlockId ? [trial.changes.targetBlockId] : [];
+    const changedIds = [...new Set([
+      ...(trial.formulaDiff ?? []).map((block) => block.blockId),
+      ...(trial.changes?.targetBlockId ? [trial.changes.targetBlockId] : []),
+    ])];
     const changedBlocks = changedIds.flatMap((id) => {
       const block = trial.formula.blocks.find((candidate) => candidate.id === id && !candidate.isCombination);
       return block ? [block] : [];

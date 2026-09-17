@@ -212,12 +212,31 @@ test.each(['同じ', '別ブロック', '結合式'] as const)('保留の変更�
   f.input.trials = [{ kind: 'proposal', apiEvents: [], candidateId: 'candidate-1', accepted: false,
     held: true, before: measurement(), after: measurement(), reason: '保留', rationale: '',
     formula: { ...formula, blocks: formula.blocks.map((block) => block.id === '2' ? { ...block, expression } : block) },
+    changes: { targetBlockId: '2', addedTerms: [], removedTerms: [], replacedTerms: [] },
     formulaDiff: [{ blockId: '2', removed: [], added: ['specific[tiab]'] }] }];
   await optimizeQuery(f.input, f.provider);
   const list = (f.chat.mock.calls[0]![0][1].content as string).split('保留・却下した変更の一覧:\n')[1]!.split('\n試行履歴')[0]!;
   expect(list).toContain(` / 変更後の式: #2 = ${expression} / 現在の式との関係: ${difference === '同じ'
     ? 'このブロック以外は現在の式と同じ（同じブロックにこの式を出すと同一式）' : '他のブロックが現在の式と異なる'}`);
   expect(list).not.toContain('注意:');
+  expect(list.match(/#2 = /g)).toHaveLength(1);
+});
+
+test('演算子だけの変更で差分が空でも、保留の対象ブロックの式と現在の式との関係を渡す', async () => {
+  const f = setup();
+  f.input.formula = { blocks: [
+    { id: '1', expression: 'disease[tiab]', isCombination: false },
+    { id: '2', expression: 'drug[tiab] OR treatment[tiab]', isCombination: false },
+    { id: '3', expression: '#1 AND #2', isCombination: true },
+  ], combinationExpression: '#1 AND #2' };
+  f.input.trials = [{ kind: 'proposal', apiEvents: [], candidateId: 'operator-only', accepted: false,
+    held: true, before: measurement(), after: measurement(), reason: '保留', rationale: '',
+    formula: { ...f.input.formula, blocks: f.input.formula.blocks.map((block) => block.id === '2'
+      ? { ...block, expression: 'drug[tiab] AND treatment[tiab]' } : block) },
+    formulaDiff: [], changes: { targetBlockId: '2', addedTerms: [], removedTerms: [], replacedTerms: [] } }];
+  await optimizeQuery(f.input, f.provider);
+  const list = (f.chat.mock.calls[0]![0][1].content as string).split('保留・却下した変更の一覧:\n')[1]!.split('\n試行履歴')[0]!;
+  expect(list).toContain('変更後の式: #2 = drug[tiab] AND treatment[tiab] / 現在の式との関係: このブロック以外は現在の式と同じ（同じブロックにこの式を出すと同一式）');
 });
 
 test('一覧内の重複は式を繰り返さず、初期式の重複は式と関係を載せ、先頭で対応を注意する', async () => {
@@ -244,7 +263,7 @@ test('一覧内の重複は式を繰り返さず、初期式の重複は式と�
   expect(lines[3]).toContain('変更後の式: #2 = drug[tiab] / 現在の式との関係: このブロック以外は現在の式と同じ');
 });
 
-test('変更差分のない旧記録だけ対象 ID を使い、応答エラーや空の差分には式と関係を載せない', async () => {
+test('変更差分と変更案の対象 ID を使い、非結合ブロックが特定できない試行には式と関係を載せない', async () => {
   const f = setup();
   f.input.formula = { blocks: [
     { id: '1', expression: 'disease[tiab]', isCombination: false },
@@ -260,11 +279,14 @@ test('変更差分のない旧記録だけ対象 ID を使い、応答エラー�
     { ...base, candidateId: 'legacy' },
     { ...base, candidateId: 'combination', changes: { ...base.changes, targetBlockId: '3' } },
     { ...base, candidateId: 'missing', formulaDiff: [{ blockId: '4', added: [], removed: [] }] },
+    { ...base, candidateId: 'empty-without-changes', formulaDiff: [], changes: undefined },
+    { ...base, candidateId: 'without-changes', changes: undefined },
+    { ...base, candidateId: 'missing-without-changes', formulaDiff: [{ blockId: '4', added: [], removed: [] }], changes: undefined },
   ];
   await optimizeQuery(f.input, f.provider);
   const lines = (f.chat.mock.calls[0]![0][1].content as string).split('保留・却下した変更の一覧:\n')[1]!.split('\n試行履歴')[0]!.split('\n');
-  for (const index of [0, 1, 3, 4]) expect(lines[index]).not.toMatch(/変更後の式|現在の式との関係/);
-  expect(lines[2]).toContain('変更後の式: #2 = drug[tiab] / 現在の式との関係: このブロック以外は現在の式と同じ');
+  for (const index of [0, 3, 5, 6, 7]) expect(lines[index]).not.toMatch(/変更後の式|現在の式との関係/);
+  for (const index of [1, 2, 4]) expect(lines[index]).toContain('変更後の式: #2 = drug[tiab] / 現在の式との関係: このブロック以外は現在の式と同じ');
 });
 
 test('システムプロンプトは保留済みの式を再提案せず異なる狭め方を出すよう指示する', async () => {
