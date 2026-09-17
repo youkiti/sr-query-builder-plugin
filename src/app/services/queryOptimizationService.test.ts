@@ -2016,6 +2016,8 @@ test.each([
 test.each([
   '22[uid]', '22[pmid]', 'PMC22[pmcid]', '10.1234/example[doi]', '22[aid]', '22[lid]',
   '22[ PMID ]', '10.1234/example[ DoI ]',
+  '10.1234/example[Article Identifier]', '10.1234/example[ article  identifier ]',
+  '22[Location ID]', 'NCT00000022[si]', 'NCT00000022[Secondary Source ID]', 'PMC22[pmc]',
 ])('文献識別子のタグ付き語を追加する変更候補を拒否する: %s', (term) => {
   const { input } = setup();
   const proposal: skill.OptimizeQueryProposal = { targetBlockId: '2', proposedExpression: `(b[tiab] OR ${term})`,

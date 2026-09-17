@@ -1295,7 +1295,15 @@ function validateInput(input: QueryOptimizationInput, iterations: number, calls:
 }
 
 // PMID などの文献識別子で検索集合を直接指定させない。プロンプトでも PMID 指定の追加を禁じている。
-const IDENTIFIER_FIELD_TAG_PATTERN = /\[\s*(?:uid|pmid|pmcid|doi|aid|lid)\s*\]$/i;
+const IDENTIFIER_FIELD_TAGS = new Set([
+  'uid', 'pmid', 'pmcid', 'pmc', 'doi',
+  'aid', 'article identifier', 'lid', 'location id', 'si', 'secondary source id',
+]);
+
+function hasIdentifierFieldTag(text: string): boolean {
+  const tag = /\[([^\]]+)\]$/.exec(text)?.[1];
+  return tag !== undefined && IDENTIFIER_FIELD_TAGS.has(tag.trim().toLowerCase().replace(/\s+/g, ' '));
+}
 
 /** AI の操作は単一概念行の差替えに限定し、既存パーサで参照・結合構文を検査する。 */
 export function validateOptimizationCandidate(initial: PubmedFormula, candidate: PubmedFormula,
@@ -1323,7 +1331,7 @@ export function validateOptimizationCandidate(initial: PubmedFormula, candidate:
       // 識別子系のタグ付き語とタグなしの自由文は自動変更の許可範囲外とし、自前の PubMed パーサは持たない。
       const operands = new Set<string>();
       const syntax = tokenizeExpression(block.expression).map((segment) => {
-        if (IDENTIFIER_FIELD_TAG_PATTERN.test(segment.text)) return segment.text;
+        if (hasIdentifierFieldTag(segment.text)) return segment.text;
         if (segment.kind === 'plain' && !/\[[^\]]+\]$/.test(segment.text)) return segment.text;
         const id = `term${operands.size}`;
         operands.add(id);
