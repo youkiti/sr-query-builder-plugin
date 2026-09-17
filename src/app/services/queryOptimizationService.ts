@@ -1294,6 +1294,17 @@ function validateInput(input: QueryOptimizationInput, iterations: number, calls:
   return validateOptimizationCandidate(input.initialFormula, input.initialFormula, input.approvedBlocks);
 }
 
+// PMID などの文献識別子で検索集合を直接指定させない。プロンプトでも PMID 指定の追加を禁じている。
+const IDENTIFIER_FIELD_TAGS = new Set([
+  'uid', 'pmid', 'pmcid', 'pmc', 'doi',
+  'aid', 'article identifier', 'lid', 'location id', 'si', 'secondary source id',
+]);
+
+function hasIdentifierFieldTag(text: string): boolean {
+  const tag = /\[([^\]]+)\]$/.exec(text)?.[1];
+  return tag !== undefined && IDENTIFIER_FIELD_TAGS.has(tag.trim().toLowerCase().replace(/\s+/g, ' '));
+}
+
 /** AI の操作は単一概念行の差替えに限定し、既存パーサで参照・結合構文を検査する。 */
 export function validateOptimizationCandidate(initial: PubmedFormula, candidate: PubmedFormula,
   approved: ApprovedOptimizationBlock[], proposal?: OptimizeQueryProposal): string | null {
@@ -1316,11 +1327,12 @@ export function validateOptimizationCandidate(initial: PubmedFormula, candidate:
       if (wouldCreateReferenceCycle(candidate, block.id, block.expression)) return '循環参照は禁止です';
       if (!block.isCombination || refs.length === 0) return '概念ブロックへの参照追加は禁止です';
     } else if (proposal?.targetBlockId === block.id) {
-      // 既存の語分解でタグ付き語を仮の参照へ置き換え、既存の結合文法で括弧・演算子を検査する。
-      // タグなしの自由文は自動変更の許可範囲外とし、自前の PubMed パーサは持たない。
+      // 既存の語分解で識別子系を除くタグ付き語（近接タグや [pt] 等も含む）を仮の参照へ置き換え、結合文法で括弧・演算子を検査する。
+      // 識別子系のタグ付き語とタグなしの自由文は自動変更の許可範囲外とし、自前の PubMed パーサは持たない。
       const operands = new Set<string>();
       const syntax = tokenizeExpression(block.expression).map((segment) => {
-        if (segment.kind === 'plain') return segment.text;
+        if (hasIdentifierFieldTag(segment.text)) return segment.text;
+        if (segment.kind === 'plain' && !/\[[^\]]+\]$/.test(segment.text)) return segment.text;
         const id = `term${operands.size}`;
         operands.add(id);
         return `#${id}`;
