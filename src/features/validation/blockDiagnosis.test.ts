@@ -1,5 +1,5 @@
 import type { PubmedFormula } from '@/lib/search-formula-md';
-import { diagnoseStructure, diagnoseNarrowing, diagnosisTargets, queryWithoutBlock, meshOccurrences } from './blockDiagnosis';
+import { diagnoseStructure, diagnoseNarrowing, diagnosisTargets, queryWithoutBlock, meshOccurrences, diagnosePrecedenceMixing, blockDiagnosisLines } from './blockDiagnosis';
 
 const approved = [{ id: '1', label: '疾患' }, { id: '2', label: '治療' }];
 function formula(a = '"Parent"[Mesh]', b = '"Child"[Mesh]', combination = '#1 AND #2 AND #filter'): PubmedFormula {
@@ -107,4 +107,33 @@ test.each([[88, 100, 0.12, true], [87, 100, 0.13, false], [81, 100, 0.19, false]
 });
 test.each([[null, 100, ''], [80, null, '未判定: 測定失敗'], [80, 0, ''], [80, 79, '']])('件数が不確かな場合は未判定: %s / %s', (q, without, failure) => {
   expect(diagnoseNarrowing(approved[0]!, q as number | null, without as number | null, failure as string)).toMatchObject({ reduction: null, ineffective: null, note: expect.stringContaining('未判定') });
+});
+
+test('承認済み概念ブロックの優先順位混在を検出し、note に ID とラベルを含める（issue #202）', () => {
+  const f = formula('a[tiab] OR b[tiab] AND c[tiab]', '"Child"[Mesh]');
+  const precedence = diagnosePrecedenceMixing(f, approved);
+  expect(precedence).toEqual([{ blockId: '1', label: '疾患', note: expect.stringContaining('#1 疾患') }]);
+  expect(precedence[0]!.note).toContain('AND / NOT と OR');
+});
+test('混在の無い式・承認外ブロック・結合ブロックは対象にしない', () => {
+  expect(diagnosePrecedenceMixing(formula(), approved)).toEqual([]);
+  // filter は approved に含まれないため、混在があっても対象外
+  const f = formula();
+  f.blocks[2]!.expression = 'x[tiab] OR y[tiab] AND z[tiab]';
+  expect(diagnosePrecedenceMixing(f, approved)).toEqual([]);
+});
+test('優先順位混在は結合式が単純な AND でなくても診断する（diagnoseStructure と独立）', () => {
+  const f = formula('a[tiab] OR b[tiab] AND c[tiab]', '"Child"[Mesh]', '#1 OR #2');
+  expect(diagnoseStructure(f, approved, trees).note).toBe('未判定: 結合式が単純な AND ではない');
+  expect(diagnosePrecedenceMixing(f, approved)).toHaveLength(1);
+});
+test('blockDiagnosisLines は note の直後に優先順位混在の行を出す', () => {
+  const lines = blockDiagnosisLines({
+    fingerprint: 'x', note: '未判定: 結合式が単純な AND ではない', overlaps: [], narrowing: [],
+    precedence: [{ blockId: '1', label: '疾患', note: '#1 疾患: 混在しています' }],
+  });
+  expect(lines).toEqual(['未判定: 結合式が単純な AND ではない', '#1 疾患: 混在しています']);
+});
+test('blockDiagnosisLines は precedence の無い旧形式を空扱いで読める', () => {
+  expect(blockDiagnosisLines({ fingerprint: 'x', note: '', overlaps: [], narrowing: [] })).toEqual([]);
 });
