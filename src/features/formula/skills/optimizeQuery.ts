@@ -325,7 +325,11 @@ action を 1 つ選び、JSON だけで返してください。
   指定します。少なくとも片方を指定し、不要なら空配列を返します。要求は優先順に並べてください。
   取得は 1 反復 3 件までです。未取得・失敗・打ち切りの説明を読み、関係を推測しません。
 - 却下理由と前後の実測を読み、同じ失敗を繰り返しません。
-  「保留・却下した変更の一覧」と同じ式は測定せずに却下されます（差集合の測定失敗時は再測定できます）。
+  「保留・却下した変更の一覧」の各行には対象ブロックの変更後の式を載せます。
+  「このブロック以外は現在の式と同じ」とある行の式を同じブロックに再び出すと同一式となり、
+  測定せずに却下されて改善なしに数えられます（差集合の測定失敗時は再測定できます）。
+  保留になった変更は、失う集合とともにすでに人の判断に回っています。同じ式を再提案しても
+  新しい保留候補にはならないので出さないでください。保留候補を増やしたいときは、一覧のどの式とも異なる狭め方を出してください。
   一覧の削除を同じ形で出しても、失う集合が残る限り再び保留になります。
   件数を減らしたいときは、語を削る代わりにブロックの語を特異的な語と AND で組み合わせる、
   下位の MeSH に置き換える、といった狭める案を検討してください。採否は実測で決まります。
@@ -437,7 +441,7 @@ export async function optimizeQuery(
     MESH: formatContext(input.meshContext),
     MESH_REQUEST_RESULTS: formatContext(input.meshRequestResults),
     PREVIOUS_REJECTIONS: formatContext(input.previousRejectedTrials ?? []),
-    REJECTED_CHANGES: formatRejectedChanges(input.trials ?? []),
+    REJECTED_CHANGES: formatRejectedChanges(input.trials ?? [], input.formula),
     TRIALS: summarizeTrials(input.trials ?? []),
     TRIAL_DETAILS: formatTrialDetails(input.trialDetails),
   });
@@ -516,23 +520,49 @@ function formatFormulaDiff(formulaDiff: OptimizationTrial['formulaDiff']): strin
 }
 
 /** 保留・却下した実際の変更を、全式の履歴とは別に短く渡す。 */
-export function formatRejectedChanges(trials: OptimizationTrial[]): string {
+export function formatRejectedChanges(trials: OptimizationTrial[], currentFormula: PubmedFormula): string {
   const rejected = trials.filter((trial) => trial.kind === 'proposal' && !trial.accepted);
   const normalize = (term: string) => term.trim().toLowerCase().replace(/\s+/g, ' ');
   const signature = (trial: OptimizationTrial, key: 'added' | 'removed') => JSON.stringify(
     (trial.formulaDiff ?? []).filter((block) => block[key].length)
       .map((block) => [block.blockId, [...new Set(block[key].map(normalize))].sort()])
       .sort((a, b) => String(a[0]).localeCompare(String(b[0]))));
-  return rejected.map((trial, index) => {
+  const lines = rejected.map((trial, index) => {
     const diff = formatFormulaDiff(trial.formulaDiff);
-    if (trial.duplicateOf) return `${trial.candidateId} / ${diff}（${trial.duplicateOf} と同じ式） / 結果: 測定せずに却下`;
+    const changedIds = trial.formulaDiff ? trial.formulaDiff.map((block) => block.blockId)
+      : trial.changes?.targetBlockId ? [trial.changes.targetBlockId] : [];
+    const changedBlocks = changedIds.flatMap((id) => {
+      const block = trial.formula.blocks.find((candidate) => candidate.id === id && !candidate.isCombination);
+      return block ? [block] : [];
+    });
+    const sameOtherBlocks = trial.formula.blocks.length === currentFormula.blocks.length
+      && trial.formula.blocks.every((block, i) => {
+        const current = currentFormula.blocks[i]!;
+        return block.id === current.id && block.isCombination === current.isCombination
+          && (changedBlocks.some((changed) => changed.id === block.id) || block.expression === current.expression);
+      })
+      && trial.formula.combinationExpression === currentFormula.combinationExpression;
+    const formulaDetails = changedBlocks.length
+      ? ` / 変更後の式: ${changedBlocks.map((block) => `#${block.id} = ${block.expression}`).join(' ; ')}`
+        + ` / 現在の式との関係: ${sameOtherBlocks ? 'このブロック以外は現在の式と同じ（同じブロックにこの式を出すと同一式）' : '他のブロックが現在の式と異なる'}`
+      : '';
+    if (trial.duplicateOf) {
+      const listedOriginal = rejected.some((other, otherIndex) => otherIndex !== index && other.candidateId === trial.duplicateOf);
+      return `${trial.candidateId} / ${diff}（${trial.duplicateOf} と同じ式） / 結果: 測定せずに却下${listedOriginal ? '' : formulaDetails}`;
+    }
     const variant = signature(trial, 'removed') === '[]' ? undefined : rejected.slice(0, index).find((previous) =>
       signature(previous, 'removed') === signature(trial, 'removed')
       && signature(previous, 'added') !== signature(trial, 'added'));
     const result = trial.held ? `保留（失う ${trial.impact?.lostHits ?? '未測定'} 件・増える ${trial.impact?.gainedHits ?? '未測定'} 件）`
       : `却下（${trial.reason}）`;
-    return `${trial.candidateId} / ${diff}${variant ? `（${variant.candidateId} と同じ削除の変種）` : ''} / 結果: ${result}`;
-  }).join('\n') || '(なし)';
+    return `${trial.candidateId} / ${diff}${variant ? `（${variant.candidateId} と同じ削除の変種）` : ''} / 結果: ${result}${formulaDetails}`;
+  });
+  const duplicates = rejected.filter((trial) => trial.duplicateOf);
+  if (duplicates.length) {
+    const references = duplicates.map((trial) => `${trial.candidateId} → ${trial.duplicateOf}`).join(', ');
+    lines.unshift(`注意: 評価済みの式と同じ式を再提案し、測定せずに却下した回が ${duplicates.length} 回あります（${references}）。同一式の再提案は改善なし（採用にも保留にもならない回）に数えられ、2 回続くと run は停止します。各行の「変更後の式」と同じ式を出さないでください。`);
+  }
+  return lines.join('\n') || '(なし)';
 }
 
 const TRIAL_KIND_LABELS: Record<OptimizationTrial['kind'], string> = {
