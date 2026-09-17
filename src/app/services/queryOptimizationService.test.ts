@@ -1993,6 +1993,53 @@ test.each([
   expect(fetch.mock.calls.some(([url]) => new URL(url as string).searchParams.get('term') === expression)).toBe(true);
 });
 
+test.each([
+  ['通常タグの語を追加', '"salt substitute*"[tiab]', '("salt substitute*"[tiab] OR "salt alternative"[tiab])'],
+  ['近接タグの語を追加', '("salt substitute*"[tiab] OR "salt alternative"[tiab])',
+    '("salt substitute*"[tiab] OR "salt alternative"[tiab] OR "substitute salt"[tiab:~2])'],
+  ['出版種別タグの語を追加', '("salt substitute*"[tiab] OR "salt alternative"[tiab])',
+    '("salt substitute*"[tiab] OR "salt alternative"[tiab] OR randomized controlled trial[pt])'],
+  ['既存の近接タグを保って別の語を追加', '("salt substitute*"[tiab] OR "substitute salt"[tiab:~2])',
+    '("salt substitute*"[tiab] OR "substitute salt"[tiab:~2] OR "salt alternative"[tiab])'],
+  ['既存の出版種別タグを保って別の語を追加', '("salt substitute*"[tiab] OR randomized controlled trial[pt])',
+    '("salt substitute*"[tiab] OR randomized controlled trial[pt] OR "salt alternative"[tiab])'],
+])('タグ付き語の変更候補を許可する: %s', (_label, before, expression) => {
+  const { input } = setup();
+  input.initialFormula.blocks[1]!.expression = before!;
+  const proposal: skill.OptimizeQueryProposal = { targetBlockId: '2', proposedExpression: expression!,
+    addedTerms: [], removedTerms: [], replacedTerms: [], rationale: '', measurementIds: [] };
+  const candidate = { ...input.initialFormula, blocks: input.initialFormula.blocks.map((block) => ({ ...block })) };
+  candidate.blocks[1]!.expression = proposal.proposedExpression;
+  expect(validateOptimizationCandidate(input.initialFormula, candidate, input.approvedBlocks, proposal)).toBeNull();
+});
+
+test.each([
+  '22[uid]', '22[pmid]', 'PMC22[pmcid]', '10.1234/example[doi]', '22[aid]', '22[lid]',
+  '22[ PMID ]', '10.1234/example[ DoI ]',
+])('文献識別子のタグ付き語を追加する変更候補を拒否する: %s', (term) => {
+  const { input } = setup();
+  const proposal: skill.OptimizeQueryProposal = { targetBlockId: '2', proposedExpression: `(b[tiab] OR ${term})`,
+    addedTerms: [], removedTerms: [], replacedTerms: [], rationale: '', measurementIds: [] };
+  const candidate = { ...input.initialFormula, blocks: input.initialFormula.blocks.map((block) => ({ ...block })) };
+  candidate.blocks[1]!.expression = proposal.proposedExpression;
+  expect(validateOptimizationCandidate(input.initialFormula, candidate, input.approvedBlocks, proposal))
+    .toBe('検索語のタグ・括弧・演算子が不正、または自動変更の許可範囲外です');
+});
+
+test.each([
+  '("salt substitute*"[tiab] OR "salt alternative"[tiab] OR)',
+  '("a"[tiab] OR "b"[tiab]',
+  '"a"[tiab] OR OR "b"[tiab]',
+  '("a"[tiab] OR salt)',
+])('不正な構文やタグなし自由文の変更候補を拒否する: %s', (expression) => {
+  const { input } = setup();
+  const proposal: skill.OptimizeQueryProposal = { targetBlockId: '2', proposedExpression: expression,
+    addedTerms: [], removedTerms: [], replacedTerms: [], rationale: '', measurementIds: [] };
+  const candidate = { ...input.initialFormula, blocks: input.initialFormula.blocks.map((block) => ({ ...block })) };
+  candidate.blocks[1]!.expression = proposal.proposedExpression;
+  expect(validateOptimizationCandidate(input.initialFormula, candidate, input.approvedBlocks, proposal)).toContain('不正');
+});
+
 test('二項 NOT の結合行は従来の文法で拒否し、概念式の末尾 NOT も拒否する', () => {
   const { input } = setup();
   expect(validateCombinationExpression('#1 NOT #2', new Set(['1', '2'])).errors.length).toBeGreaterThan(0);
