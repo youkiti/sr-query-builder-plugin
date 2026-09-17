@@ -62,18 +62,20 @@ test('snake_case の変更案を変換し、予想件数は出力型・スキー
   const { input, provider, chat } = setup(JSON.stringify({ target_block_id: ' 1 ', proposed_expression: ' new[tiab] ',
     added_terms: ['new'], removed_terms: ['old'], replaced_terms: [{ before: 'old', after: 'new' }],
     rationale: '基準に沿う語へ置換', measurement_ids: ['run:initial'], predicted_hits: 123 }));
-  expect(await optimizeQuery(input, provider)).toEqual({ targetBlockId: '1', proposedExpression: 'new[tiab]',
+  expect(await optimizeQuery(input, provider)).toEqual({ action: 'propose_changes', targetBlockId: '1', proposedExpression: 'new[tiab]',
     addedTerms: ['new'], removedTerms: ['old'], replacedTerms: [{ before: 'old', after: 'new' }],
-    rationale: '基準に沿う語へ置換', measurementIds: ['run:initial'], meshRequests: [] });
+    rationale: '基準に沿う語へ置換', measurementIds: ['run:initial'] });
   expect(JSON.stringify(chat.mock.calls[0]![1].responseSchema)).not.toContain('predicted');
 });
 
 test('欠落プロパティは既存スキル同様に空へフォールバックする', async () => {
   const { input, provider } = setup();
-  expect(await optimizeQuery(input, provider)).toEqual({ targetBlockId: '', proposedExpression: '',
-    addedTerms: [], removedTerms: [], replacedTerms: [], rationale: '', measurementIds: [], meshRequests: [] });
+  expect(await optimizeQuery(input, provider)).toEqual({ action: 'propose_changes', targetBlockId: '', proposedExpression: '',
+    addedTerms: [], removedTerms: [], replacedTerms: [], rationale: '', measurementIds: [] });
   const second = setup('{"replaced_terms":[{}]}');
-  expect((await optimizeQuery(second.input, second.provider)).replacedTerms).toEqual([{ before: '', after: '' }]);
+  const decision = await optimizeQuery(second.input, second.provider);
+  if (decision.action !== 'propose_changes') throw new Error('propose_changes ではありません');
+  expect(decision.replacedTerms).toEqual([{ before: '', after: '' }]);
 });
 
 test('空の配列・基準を明示し、JSON 破損とプロバイダ失敗を伝播する', async () => {
@@ -90,12 +92,13 @@ test('空の配列・基準を明示し、JSON 破損とプロバイダ失敗を
   await expect(optimizeQuery(input, provider)).rejects.toThrow('通信失敗');
 });
 
-test('追加情報の要求を変換し、descriptor または枝だけの指定と欠落を扱う', async () => {
+test('追加情報の要求を変換し、descriptor または枝だけの指定と欠落を扱う（旧形式）', async () => {
   const { input, provider, chat } = setup(JSON.stringify({ mesh_requests: [
     { descriptor: ' Disease ', tree_number: ' C01.100 ' },
     { descriptor: 'Asthma' }, { tree_number: 'C02.200' }, {},
   ] }));
   const result = await optimizeQuery(input, provider);
+  if (result.action !== 'request_context') throw new Error('request_context ではありません');
   expect(result.meshRequests).toEqual([
     { descriptor: 'Disease', treeNumber: 'C01.100' },
     { descriptor: 'Asthma', treeNumber: '' }, { descriptor: '', treeNumber: 'C02.200' },
@@ -110,11 +113,11 @@ test('追加情報の要求を変換し、descriptor または枝だけの指定
   expect(chat.mock.calls[0]![0][1].content).toContain('"mesh_requests"');
 });
 
-test('未取得の理由を実在ノードと分けた文脈として渡す', async () => {
+test('未取得の理由を実在ノードと分けた文脈として渡す。mesh_requests が空の旧形式は propose_changes になる', async () => {
   const { input, provider, chat } = setup('{"mesh_requests":[]}');
   input.meshRequestResults = [{ request: { descriptor: 'Disease', treeNumber: 'C01.100' },
     note: '未取得: callback が未注入です' }];
-  expect((await optimizeQuery(input, provider)).meshRequests).toEqual([]);
+  expect((await optimizeQuery(input, provider)).action).toBe('propose_changes');
   expect(chat.mock.calls[0]![0][1].content).toContain('未取得: callback が未注入です');
 });
 
@@ -183,4 +186,69 @@ test('機械的な診断を一件一行で渡し、狭め方と保留の規則�
   const system = chat.mock.calls[0]![0][0].content as string;
   expect(system).toContain('特異的な語との AND・下位の MeSH への置換');
   expect(system).toContain('上位語でしか索引されない適格文献');
+});
+
+describe('行動種別 (action)', () => {
+  test('request_context の正常系: mesh_requests だけを持つ決定を返す', async () => {
+    const { input, provider } = setup(JSON.stringify({ action: 'request_context',
+      mesh_requests: [{ descriptor: 'Disease', tree_number: '' }], rationale: '周辺を確認したい',
+      measurement_ids: ['run:initial'] }));
+    expect(await optimizeQuery(input, provider)).toEqual({ action: 'request_context',
+      meshRequests: [{ descriptor: 'Disease', treeNumber: '' }], rationale: '周辺を確認したい', measurementIds: ['run:initial'] });
+  });
+
+  test('propose_changes の正常系: 変更案だけを持つ決定を返す', async () => {
+    const { input, provider } = setup(JSON.stringify({ action: 'propose_changes',
+      target_block_id: '1', proposed_expression: 'new[tiab]', added_terms: ['new'], removed_terms: [],
+      replaced_terms: [], rationale: '基準に沿う語へ置換', measurement_ids: [] }));
+    expect(await optimizeQuery(input, provider)).toEqual({ action: 'propose_changes', targetBlockId: '1',
+      proposedExpression: 'new[tiab]', addedTerms: ['new'], removedTerms: [], replacedTerms: [],
+      rationale: '基準に沿う語へ置換', measurementIds: [] });
+  });
+
+  test.each(['no_change_needed', 'needs_human_judgment'] as const)('finish(%s) の正常系: 区分と理由だけを持つ決定を返す', async (finishKind) => {
+    const { input, provider } = setup(JSON.stringify({ action: 'finish', finish_kind: finishKind,
+      rationale: '分析の結果、修正不要と判断', measurement_ids: ['run:initial'] }));
+    expect(await optimizeQuery(input, provider)).toEqual({ action: 'finish', finishKind,
+      rationale: '分析の結果、修正不要と判断', measurementIds: ['run:initial'] });
+  });
+
+  test('未知の action は例外にせず invalid を返す', async () => {
+    const { input, provider } = setup(JSON.stringify({ action: 'do_something_else', rationale: '謎の応答' }));
+    const decision = await optimizeQuery(input, provider);
+    expect(decision).toMatchObject({ action: 'invalid', rationale: '謎の応答' });
+    if (decision.action !== 'invalid') throw new Error('invalid ではありません');
+    expect(decision.reason).toContain('do_something_else');
+  });
+
+  test.each([
+    ['request_context に proposed_expression が混在', { action: 'request_context', mesh_requests: [{ descriptor: 'Disease' }], proposed_expression: 'x[tiab]' }, '混在'],
+    ['request_context に added_terms が混在', { action: 'request_context', mesh_requests: [{ descriptor: 'Disease' }], added_terms: ['x'] }, '混在'],
+    ['request_context に mesh_requests が無い', { action: 'request_context', mesh_requests: [] }, 'mesh_requests がありません'],
+    ['propose_changes に mesh_requests が混在', { action: 'propose_changes', target_block_id: '1', proposed_expression: 'x[tiab]', mesh_requests: [{ descriptor: 'Disease' }] }, '混在'],
+    ['propose_changes に target_block_id が無い', { action: 'propose_changes', proposed_expression: 'x[tiab]' }, 'target_block_id または proposed_expression'],
+    ['propose_changes に proposed_expression が無い', { action: 'propose_changes', target_block_id: '1' }, 'target_block_id または proposed_expression'],
+    ['finish に mesh_requests が混在', { action: 'finish', finish_kind: 'no_change_needed', rationale: '理由', mesh_requests: [{ descriptor: 'Disease' }] }, '混在'],
+    ['finish に added_terms が混在', { action: 'finish', finish_kind: 'no_change_needed', rationale: '理由', added_terms: ['x'] }, '混在'],
+    ['finish の finish_kind が無い（not_applicable のまま）', { action: 'finish', finish_kind: 'not_applicable', rationale: '理由' }, 'finish_kind がありません'],
+    ['finish の finish_kind が不明な値', { action: 'finish', finish_kind: 'unknown_kind', rationale: '理由' }, 'finish_kind がありません'],
+    ['finish に rationale が無い', { action: 'finish', finish_kind: 'no_change_needed' }, '終了理由'],
+  ] as const)('%s は例外にせず invalid を返す', async (_label, body, reasonSubstring) => {
+    const { input, provider } = setup(JSON.stringify(body));
+    const decision = await optimizeQuery(input, provider);
+    expect(decision.action).toBe('invalid');
+    if (decision.action !== 'invalid') throw new Error('invalid ではありません');
+    expect(decision.reason).toContain(reasonSubstring);
+  });
+
+  test('スキーマに action・finish_kind の enum を含む', async () => {
+    const { input, provider, chat } = setup();
+    await optimizeQuery(input, provider);
+    const schema = chat.mock.calls[0]![1].responseSchema;
+    expect(schema.properties.action).toMatchObject({ type: 'string', enum: ['request_context', 'propose_changes', 'finish'] });
+    expect(schema.properties.finish_kind).toMatchObject({ type: 'string',
+      enum: ['not_applicable', 'no_change_needed', 'needs_human_judgment'] });
+    expect(schema.required).toContain('action');
+    expect(schema.required).toContain('finish_kind');
+  });
 });

@@ -74,6 +74,25 @@ test('情報取得の件数と、その文脈を読んだ判断を別の履歴�
   expect(rows[1]!.textContent).toContain('情報要求 request で得た文脈 1/3 件を読んだうえでの判断');
 });
 
+test.each(['no_change_needed', 'needs_human_judgment'] as const)('終了判断（%s）を終了判断として表示し、採用・却下とは区別する', (finishKind) => {
+  const f = setup();
+  f.state.queryOptimizationRun!.trials = [
+    { ...trial('finish-1'), kind: 'finish', finishKind, after: null, accepted: false,
+      reason: finishKind === 'no_change_needed' ? 'AI の終了判断（変更不要）' : 'AI の終了判断（人の判断が必要）',
+      rationale: '分析の結果、判断した理由' },
+  ];
+  f.render();
+  const rows = f.container.querySelectorAll('.optimization__history li');
+  expect(rows).toHaveLength(1);
+  expect(rows[0]!.textContent).toContain('終了判断 — 前後件数:');
+  expect(rows[0]!.textContent).toContain(finishKind === 'no_change_needed'
+    ? '終了判断: AI の終了判断（変更不要）' : '終了判断: AI の終了判断（人の判断が必要）');
+  expect(rows[0]!.textContent).not.toContain('採用:');
+  expect(rows[0]!.textContent).not.toContain('却下:');
+  expect(rows[0]!.textContent).toContain(finishKind === 'no_change_needed' ? '終了区分: 変更不要' : '終了区分: 人の判断が必要');
+  expect(rows[0]!.textContent).toContain('変更理由（AI の説明）: 分析の結果、判断した理由');
+});
+
 test('捕捉表の列・行見出しと捕捉・未捕捉・未測定を表示する', () => {
   const f = setup();
   f.state.queryOptimizationRun!.trials[0]!.after!.seedCapture = { seedPmids: ['11', '22'], rows: [

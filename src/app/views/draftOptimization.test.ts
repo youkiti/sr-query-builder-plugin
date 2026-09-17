@@ -24,11 +24,11 @@ test('情報取得回数は通知値を表示し、未通知なら情報要求�
     accepted: false, reason: '情報取得', rationale: '', before: null, after: null, apiEvents: [] }];
   const render = createDraftView();
   render(container, { state: current, navigate: jest.fn() });
-  expect(container.querySelector('.optimization__metrics')!.textContent).toContain('情報取得: 1 回');
+  expect(container.querySelector('.optimization__metrics')!.textContent).toContain('情報取得: 1 / 最大 3 回');
   expect(container.querySelector('.optimization__metrics')!.textContent).toContain('試行回数: 0 / 最大 2');
   run.progress.informationTrials = 2;
   render(container, { state: current, navigate: jest.fn() });
-  expect(container.querySelector('.optimization__metrics')!.textContent).toContain('情報取得: 2 回');
+  expect(container.querySelector('.optimization__metrics')!.textContent).toContain('情報取得: 2 / 最大 3 回');
 });
 
 test('6 指標と現在段階を表示し、進捗更新で focus を呼ばず、全体の割合を出さない', () => {

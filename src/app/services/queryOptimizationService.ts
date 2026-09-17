@@ -2,6 +2,7 @@ import { waitWithSignal } from '@/utils/abort';
 import { annotateLostSample, type AnnotateLostSampleInput } from '@/features/formula/skills/annotateLostSample';
 import {
   optimizeQuery,
+  MAX_INFORMATION_TRIALS,
   type ApprovedOptimizationBlock,
   type OptimizationCriteria,
   type OptimizationMeasurement,
@@ -14,6 +15,7 @@ import {
   type OptimizationTrial,
   type OptimizationImpact,
   type OptimizationApiEvent,
+  type OptimizeQueryFinishKind,
   type OptimizeQueryProposal,
   type PreviousOptimizationRejection,
 } from '@/features/formula/skills/optimizeQuery';
@@ -129,7 +131,8 @@ export interface VerifiedOptimizationCandidate {
 export type OptimizationStopReason =
   | 'conditions_met' | 'iteration_limit' | 'repeated_formula' | 'no_improvement'
   | 'request_timeout' | 'user_stop' | 'api_error' | 'api_budget' | 'time_budget' | 'invalid_input'
-  | 'revalidation_failed' | 'diagnosed_block_held' | 'seed_capture_stalled' | 'held_candidates_collected';
+  | 'revalidation_failed' | 'diagnosed_block_held' | 'seed_capture_stalled' | 'held_candidates_collected'
+  | 'ai_finished';
 
 /** NCBI の失敗とは区別する、反復サービスの制御用例外。 */
 export class QueryOptimizationStopError extends Error {
@@ -149,6 +152,7 @@ export class QueryOptimizationStopError extends Error {
       time_budget: '実行時間の予算上限に達したため処理を停止しました。',
       invalid_input: '入力が不正なため処理を開始できません。',
       revalidation_failed: '最終再検証で条件を満たさなかったため終了しました。',
+      ai_finished: 'AI が、これ以上の変更は不要、または語の変更では解決できず人の判断が必要と判断したため終了しました。',
     };
     super(messages[stopReason]);
     this.name = 'QueryOptimizationStopError';
@@ -175,6 +179,8 @@ export interface QueryOptimizationResult {
 // NCBI と optimize_query / annotate_lost_sample の実送信（リトライ含む）を数え、監査ログ通信は除く。
 export const DEFAULT_MAX_ITERATIONS = 5;
 export const MAX_HELD_CANDIDATES = 3;
+// optimizeQuery.ts（features 層）のプロンプト文言と同じ値を使うため、そこから import して re-export する。
+export { MAX_INFORMATION_TRIALS };
 export const DEFAULT_MAX_API_CALLS = 200;
 export const MAX_TERM_API_CALLS = 100;
 // 保存回数を約1/10に抑えつつ、中断時に払い戻されうる通信を最大9回に留める。
@@ -412,15 +418,13 @@ export async function runQueryOptimization(
       notify();
     },
   };
-  const expandMesh = async (requests: readonly OptimizationMeshRequest[], canContinue: boolean) => {
+  const expandMesh = async (requests: readonly OptimizationMeshRequest[]) => {
     let obtained = 0;
     const results: OptimizationMeshRequestResult[] = [];
     for (const [index, request] of requests.entries()) {
       boundary();
       let note: string;
-      if (!canContinue) {
-        note = '未取得: 反復上限に達したため追加取得を打ち切りました。';
-      } else if (index >= MAX_MESH_REQUESTS_PER_ITERATION) {
+      if (index >= MAX_MESH_REQUESTS_PER_ITERATION) {
         note = `未取得: 1 反復あたり ${MAX_MESH_REQUESTS_PER_ITERATION} 件の追加取得上限で打ち切りました。`;
       } else if (!request.descriptor && !request.treeNumber) {
         note = '未取得: descriptor と tree number の両方が未指定です。';
@@ -744,6 +748,8 @@ export async function runQueryOptimization(
     if (diagnosedHeldId) unmetReasons.push(`ブロック #${diagnosedHeldId} を狭める案が 2 回続けて保留になりました（失う集合が残る）。このブロックは上位の MeSH でしか索引されない文献を含む可能性があります。狭めると適格文献を落とすおそれがあるため、目安件数の見直しを検討してください。`);
     if (!best) unmetReasons.push('検証済み候補がありません');
     if (pendingInformation) unmetReasons.push(`情報要求 ${pendingInformation.candidateId} への判断が未了です（文脈へ反映 ${pendingInformation.obtained} / 要求 ${pendingInformation.requested} 件）`);
+    const lastFinishTrial = reason !== 'conditions_met' ? [...trials].reverse().find((trial) => trial.kind === 'finish') : undefined;
+    if (lastFinishTrial) unmetReasons.push(`${lastFinishTrial.finishKind === 'no_change_needed' ? 'AI の判断（変更不要）' : 'AI の判断（人の判断が必要）'}: ${lastFinishTrial.rationale}`);
     if (termBudgetExhausted) unmetReasons.push(`語別計測は ${MAX_TERM_API_CALLS} 通信の上限に達しました。追加取得していない語別件数・固有寄与は未測定です。`);
     if (termBudgetReserved) unmetReasons.push('候補評価・差集合の実測・最終再検証の通信予算を確保するため、語別計測を打ち切りました。追加取得していない語別件数・固有寄与は未測定です。');
     if (fixed.seedPmids.length === 0) unmetReasons.push('シードが未指定です');
@@ -751,7 +757,7 @@ export async function runQueryOptimization(
     if (latestMeasurement?.missedPmids?.length) unmetReasons.push(`未捕捉シード: ${latestMeasurement.missedPmids.join(', ')}`);
     if (latestMeasurement?.totalHits != null && latestMeasurement.totalHits > fixed.maxHits) {
       unmetReasons.push(`目安件数 ${fixed.maxHits} 件を超えています（実測 ${latestMeasurement.totalHits} 件）`);
-      if (['no_improvement', 'diagnosed_block_held', 'held_candidates_collected', 'iteration_limit', 'repeated_formula'].includes(reason)) {
+      if (['no_improvement', 'diagnosed_block_held', 'held_candidates_collected', 'iteration_limit', 'repeated_formula', 'ai_finished'].includes(reason)) {
         const heldCount = trials.filter((trial) => trial.held
           && typeof trial.before?.totalHits === 'number' && typeof trial.after?.totalHits === 'number'
           && trial.after.totalHits < trial.before.totalHits).length;
@@ -792,6 +798,23 @@ export async function runQueryOptimization(
   const meetsTarget = (candidate: VerifiedOptimizationCandidate) =>
     fixed.seedPmids.length > 0 && candidate.evaluation.status === 'success'
       && candidate.measurement.missedPmids?.length === 0 && candidate.measurement.totalHits! <= fixed.maxHits;
+  // キャッシュに依存せず最良候補を測り直す。条件達成時の候補反復・AI の finish 判断の両方から呼ぶ共通経路。
+  async function finalizeAchievedCandidate(round: number): Promise<QueryOptimizationResult> {
+    const invalidFinal = validateOptimizationCandidate(fixed.initialFormula, best!.formula, fixed.approvedBlocks);
+    if (invalidFinal) return finish('revalidation_failed');
+    step = 'revalidating';
+    apiEvents = [];
+    notify();
+    const verified = await measure(best!.formula, `final-${round}`);
+    const achieved = meetsTarget(verified);
+    trials.push(makeTrial({ kind: 'final', candidateId: `final-${round}`, formula: best!.formula,
+      before: best!.measurement, after: verified.measurement, accepted: achieved,
+      reason: achieved ? '最終再検証で目安件数と既知シードの捕捉を満たしました' : '最終再検証で条件未達', rationale: '' }));
+    if (achieved) { best = verified; await updateDiagnosis(best); }
+    await save();
+    if (verified.evaluation.status === 'failure') return finish('api_error', verified.measurement);
+    return finish(achieved ? 'conditions_met' : 'revalidation_failed', verified.measurement);
+  }
 
   // shouldStop は通知型ではないため、通信中も短い間隔で確認する。
   const stopPoll = setInterval(() => {
@@ -845,8 +868,11 @@ export async function runQueryOptimization(
     const maxIntermediateAcceptances = fixed.approvedBlocks.length;
     let measurementFailures = 0;
     const reason: OptimizationStopReason = 'iteration_limit';
-    for (let round = 1; round <= maxIterations; round += 1) {
+    // 情報要求（request_context）は候補評価ではないため maxIterations を消費しない。
+    // 上限は evaluatedTrials（候補評価の回数）だけで判定し、round は AI 呼び出し・candidateId の通し番号として使う。
+    for (let round = 1; ; round += 1) {
       boundary();
+      if (evaluatedTrials >= maxIterations) break;
       apiEvents = [];
       step = 'adjusting';
       notify();
@@ -882,7 +908,7 @@ export async function runQueryOptimization(
         },
         sleep,
       });
-      const proposal = await abortable(optimizeQuery({
+      const decision = await abortable(optimizeQuery({
         formula: best.formula, approvedBlocks: fixed.approvedBlocks, criteria: fixed.criteria,
         maxHits: fixed.maxHits, measurement: best.measurement,
         missedSeeds: missedSeeds.filter((seed) => best!.measurement.missedPmids?.includes(seed.pmid)),
@@ -893,20 +919,53 @@ export async function runQueryOptimization(
       boundary();
       iterations = round;
       const candidateId = `candidate-${round}`;
-      if (proposal.meshRequests.length > 0) {
+      if (decision.action === 'request_context' && informationTrials < MAX_INFORMATION_TRIALS) {
         // 情報要求だけの回は候補評価を保留する。同一式回帰とせず、次の AI が取得結果を読む。
-        // この回も反復上限に数え、情報要求だけが続いても無限に継続しない。
+        // maxIterations を消費しないため、この回の後も次の round へ進める（run あたりの上限は別に持つ）。
         informationTrials += 1;
-        const information = await expandMesh(proposal.meshRequests, round < maxIterations);
+        const information = await expandMesh(decision.meshRequests);
         trials.push(makeTrial({ kind: 'information', candidateId, formula: best.formula,
-          before: best.measurement, after: null, accepted: false, reason: information.notes, rationale: proposal.rationale,
+          before: best.measurement, after: null, accepted: false, reason: information.notes, rationale: decision.rationale,
           informationResult: { requested: information.requested, obtained: information.obtained },
-          meshRequests: proposal.meshRequests.map((request) => ({ ...request })) }));
+          meshRequests: decision.meshRequests.map((request) => ({ ...request })) }));
         pendingInformation = { candidateId, requested: information.requested, obtained: information.obtained };
         await save();
         boundary();
         continue;
+      } else if (decision.action === 'request_context') {
+        // run あたりの情報要求上限に達した回は取得せず、改善なしに数えてループ末尾の停止判定へ進む。
+        const requested = decision.meshRequests.length;
+        const infoReason = `未取得: 情報要求の上限（run あたり ${MAX_INFORMATION_TRIALS} 回）に達したため取得しませんでした`;
+        trials.push(makeTrial({ kind: 'information', candidateId, formula: best.formula,
+          before: best.measurement, after: null, accepted: false, reason: infoReason, rationale: decision.rationale,
+          informationResult: { requested, obtained: 0 },
+          meshRequests: decision.meshRequests.map((request) => ({ ...request })) }));
+        pendingInformation = { candidateId, requested, obtained: 0 };
+        noImprovement += 1;
+        await save();
+      } else if (decision.action === 'finish') {
+        const finishReason = decision.finishKind === 'no_change_needed' ? 'AI の終了判断（変更不要）' : 'AI の終了判断（人の判断が必要）';
+        trials.push(makeTrial({ kind: 'finish', candidateId, formula: best.formula, finishKind: decision.finishKind,
+          ...(pendingInformation ? { informedBy: { ...pendingInformation } } : {}),
+          before: best.measurement, after: null, accepted: false, reason: finishReason, rationale: decision.rationale }));
+        pendingInformation = undefined;
+        await save();
+        boundary();
+        // finish しても条件達成の確定ではなく、最終実測（既存の最終再検証経路）で決まる。
+        // 未達なら 2 回目の AI 呼び出しはせず ai_finished ですぐ終える。
+        if (meetsTarget(best)) return await finalizeAchievedCandidate(round);
+        return finish('ai_finished');
+      } else if (decision.action === 'invalid') {
+        // 行動種別の必須・排他条件を満たさない応答は、測定前却下と同じ扱いにする（重複判定・実測はしない）。
+        evaluatedTrials += 1;
+        trials.push(makeTrial({ kind: 'proposal', candidateId, formula: best.formula,
+          changes: { targetBlockId: '', addedTerms: [], removedTerms: [], replacedTerms: [] },
+          before: best.measurement, after: null, accepted: false, responseError: decision.reason,
+          reason: `AI の応答が行動種別の条件を満たしません: ${decision.reason}`, rationale: decision.rationale }));
+        noImprovement += 1;
+        await save();
       } else {
+        const proposal = decision;
         evaluatedTrials += 1;
         const candidate = applyProposal(best.formula, proposal);
         const formulaDiff = diffOptimizationFormula(best.formula, candidate);
@@ -1086,22 +1145,7 @@ export async function runQueryOptimization(
       }
       boundary();
       // 条件達成時の最終測定は候補反復の一部。反復上限を終了状態へ確定する前に行う。
-      if (meetsTarget(best)) {
-        const invalidFinal = validateOptimizationCandidate(fixed.initialFormula, best.formula, fixed.approvedBlocks);
-        if (invalidFinal) return finish('revalidation_failed');
-        step = 'revalidating';
-        apiEvents = [];
-        notify();
-        const verified = await measure(best.formula, `final-${round}`);
-        const achieved = meetsTarget(verified);
-        trials.push(makeTrial({ kind: 'final', candidateId: `final-${round}`, formula: best.formula,
-          before: best.measurement, after: verified.measurement, accepted: achieved,
-          reason: achieved ? '最終再検証で目安件数と既知シードの捕捉を満たしました' : '最終再検証で条件未達', rationale: '' }));
-        if (achieved) { best = verified; await updateDiagnosis(best); }
-        await save();
-        if (verified.evaluation.status === 'failure') return finish('api_error', verified.measurement);
-        return finish(achieved ? 'conditions_met' : 'revalidation_failed', verified.measurement);
-      }
+      if (meetsTarget(best)) return await finalizeAchievedCandidate(round);
       diagnosedHeldId = diagnosedHeldBlock(trials, blockDiagnosis);
       if (diagnosedHeldId) return finish('diagnosed_block_held');
       if (intermediateAcceptances >= maxIntermediateAcceptances) return finish('seed_capture_stalled');
@@ -1157,10 +1201,11 @@ export function isImprovement(before: OptimizationMeasurement, after: Optimizati
   return Math.max(0, after.totalHits! - maxHits) < Math.max(0, before.totalHits! - maxHits);
 }
 
-type TrialInput = Omit<OptimizationTrial, 'kind' | 'changes' | 'meshRequests' | 'apiEvents'> & (
+type TrialInput = Omit<OptimizationTrial, 'kind' | 'changes' | 'meshRequests' | 'apiEvents' | 'finishKind'> & (
   | { kind: 'initial' | 'final' }
   | { kind: 'proposal'; changes: NonNullable<OptimizationTrial['changes']> }
   | { kind: 'information'; meshRequests: OptimizationMeshRequest[] }
+  | { kind: 'finish'; finishKind: OptimizeQueryFinishKind }
 );
 
 function makeTrial(input: TrialInput): OptimizationTrial {

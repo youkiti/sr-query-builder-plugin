@@ -3,7 +3,7 @@ import type { LLMProvider } from '@/lib/llm';
 import type { PubmedFormula } from '@/lib/search-formula-md';
 import { renderPromptTemplate } from './renderPromptTemplate';
 import { parseSkillJson } from './parseSkillJson';
-import { arraySchema, objectSchema, stringSchema } from './schema';
+import { arraySchema, enumSchema, objectSchema, stringSchema } from './schema';
 
 export interface OptimizationCriteria {
   researchQuestion: string;
@@ -129,11 +129,19 @@ export interface OptimizationTrial {
   held?: boolean;
   /** 採用判定の直前に実測した差集合。判定前に却下した試行には無い。 */
   impact?: OptimizationImpact;
-  kind: 'initial' | 'proposal' | 'information' | 'final';
+  kind: 'initial' | 'proposal' | 'information' | 'final' | 'finish';
   /** 変更案の生成時は必須。MeSH の変更語も run の文脈への参照として使う。 */
   changes?: Pick<OptimizeQueryProposal, 'targetBlockId' | 'addedTerms' | 'removedTerms' | 'replacedTerms'>;
   /** 情報要求の対象だけを保持し、ノード本体は run の文脈から引く。 */
   meshRequests?: OptimizationMeshRequest[];
+  /** kind が finish のときの区分。変更不要か、語の変更では解決できず人の判断が必要か。 */
+  finishKind?: OptimizeQueryFinishKind;
+  /**
+   * AI の応答が行動種別の必須・排他条件を満たさなかった（action: 'invalid'）ときの理由。
+   * 式は最良式のまま変更していないため、再開時の「過去の run の却下記録」（実際に却下された変更案）
+   * には含めないよう、この印で区別する。
+   */
+  responseError?: string;
   /** 情報要求の件数と、取得に成功して文脈へ反映できた要求の件数。 */
   informationResult?: { requested: number; obtained: number };
   /** 直前の情報要求で得た文脈を読んだうえでの判断。次の候補評価にだけ設定する。 */
@@ -195,16 +203,50 @@ export interface OptimizeQueryProposal {
   replacedTerms: { before: string; after: string }[];
   rationale: string;
   measurementIds: string[];
-  meshRequests: OptimizationMeshRequest[];
 }
+
+/** finish の区分。変更不要か、語の変更では解決できず人の判断が必要か。 */
+export type OptimizeQueryFinishKind = 'no_change_needed' | 'needs_human_judgment';
+
+/**
+ * optimize_query の応答を行動種別で判別した結果。
+ * - request_context: MeSH の追加取得だけを求め、式は変えない
+ * - propose_changes: 1 ブロックの変更案
+ * - finish: 変更を出さずに終える判断（変更不要 / 人の判断が必要）
+ * - invalid: 上記いずれの必須・排他条件も満たさない応答（例外にせず値として返す）
+ */
+export type OptimizeQueryDecision =
+  | ({ action: 'request_context' } & Pick<OptimizeQueryProposal, 'rationale' | 'measurementIds'> & { meshRequests: OptimizationMeshRequest[] })
+  | ({ action: 'propose_changes' } & OptimizeQueryProposal)
+  | ({ action: 'finish'; finishKind: OptimizeQueryFinishKind } & Pick<OptimizeQueryProposal, 'rationale' | 'measurementIds'>)
+  | { action: 'invalid'; reason: string; rationale: string };
 
 const SKILL_NAME = 'optimize-query';
 
+/**
+ * 情報要求（action: request_context）は反復上限（評価試行数）を消費しないため、無限に続かないよう
+ * run 単位で別に制限する。app 層（queryOptimizationService.ts）はここから import して re-export する
+ * （features 層から app 層を import しないため、この向きが正しい）。
+ */
+export const MAX_INFORMATION_TRIALS = 3;
+
 export const OPTIMIZE_QUERY_SYSTEM_PROMPT = `
 あなたはシステマティックレビューの司書です。研究基準と全式の結合構造を踏まえて、
-1 回に承認済み概念ブロック 1 件の変更案を JSON だけで返してください。
-- 初期式が目標内でも冗長語・低寄与語・シード漏れを分析し、修正要否を判断してください。
-  修正不要なら現在と同じ対象 ID・式を返し、理由を説明してください。
+action を 1 つ選び、JSON だけで返してください。
+- action は request_context・propose_changes・finish のいずれかです。他の値は使えません。
+  - request_context: MeSH の周辺文脈を追加取得したいときに選びます。mesh_requests を 1 件以上指定し、
+    proposed_expression は空文字、added_terms・removed_terms・replaced_terms は空配列にします。
+    この回は式を変更せず、追加取得の結果を次の反復で読んでから改めて判断します。
+    情報要求は run あたり ${MAX_INFORMATION_TRIALS} 回までです。上限に達すると以降の要求は取得されません。
+  - propose_changes: 承認済み概念ブロック 1 件の変更案を返すときに選びます。target_block_id・
+    proposed_expression を必須とし、mesh_requests は空配列にします。
+  - finish: 変更を出さずに終える判断です。初期式が目標内でも冗長語・低寄与語・シード漏れを分析し、
+    修正要否を判断してください。finish_kind に no_change_needed（分析の結果、修正不要と判断した）か
+    needs_human_judgment（承認外のブロックや結合構造が落としているなど、語の変更では解決できず
+    人の判断が必要）のどちらかを指定し、rationale に理由を書きます。mesh_requests・added_terms・
+    removed_terms・replaced_terms は空配列にします。target_block_id・proposed_expression の値は
+    無視されるため、何を入れても構いません。finish しても目安件数・既知シードの捕捉を満たしたことには
+    ならず、達成の判定は制御側の最終実測で決まります。
 - ID の追加・削除・変更、結合行と研究デザインフィルタの変更は禁止です。
 - proposed_expression はタグ付き検索語と AND/OR/NOT・括弧で構成する単一行です。
   他ブロック参照、PMID 指定、研究基準にない期間・言語・対象集団の制限を追加しません。
@@ -219,7 +261,7 @@ export const OPTIMIZE_QUERY_SYSTEM_PROMPT = `
   語・MeSH を照らし、そのブロックへの同義語追加・MeSH 拡張を優先します。
   抄録の無い文献は索引語（MeSH・タイトル語）から考えます。承認外のブロック
   （研究デザインフィルタ）や結合構造が落としている場合は、語の変更では回収できないことを
-  rationale に書き、変更不要なら現在の式を返します。
+  rationale に書き、finish（needs_human_judgment）を選びます。
 - 変更前に当たって変更後に当たらない文献（失う集合）が 1 件でもある変更案は自動採用されず保留になります。
   削除・置換を提案するときは、失う集合が 0 件になる冗長整理か、
   失う理由を rationale で説明できる変更に限ってください。
@@ -229,9 +271,8 @@ export const OPTIMIZE_QUERY_SYSTEM_PROMPT = `
   失う集合が出る狭め方は保留になります。研究デザインフィルタは変更しません。
 - MeSH は提供された実在ノードと親子関係を根拠にし、未取得の関係を推測しません。
   NoExp・qualifier・MajorTopic の変更は別の操作として理由を示します。
-- 周辺の外を調べる必要があれば mesh_requests に descriptor / tree_number を指定します。
-  少なくとも片方を指定し、不要なら空配列を返します。要求は優先順に並べてください。
-  要求がある回は式を変更せず、追加取得の結果を次の反復で読んでから提案してください。
+- 周辺の外を調べる必要があれば request_context を選び、mesh_requests に descriptor / tree_number を
+  指定します。少なくとも片方を指定し、不要なら空配列を返します。要求は優先順に並べてください。
   取得は 1 反復 3 件までです。未取得・失敗・打ち切りの説明を読み、関係を推測しません。
 - 却下理由と前後の実測を読み、同じ失敗を繰り返しません。
   「保留・却下した変更の一覧」と同じ式は測定せずに却下されます（差集合の測定失敗時は再測定できます）。
@@ -276,35 +317,44 @@ MeSH 追加取得要求の結果（未取得理由を含む）:
 {{PREVIOUS_REJECTIONS}}
 スキーマ:
 {
-  "target_block_id": "<変更対象 ID>",
-  "proposed_expression": "<変更後の式。変更不要なら現在の式>",
-  "added_terms": ["<追加語>"],
-  "removed_terms": ["<削除語>"],
+  "action": "<request_context | propose_changes | finish>",
+  "target_block_id": "<propose_changes のときの変更対象 ID。他の action では無視されます>",
+  "proposed_expression": "<propose_changes のときの変更後の式。他の action では空文字>",
+  "added_terms": ["<propose_changes のときの追加語。他の action では空配列>"],
+  "removed_terms": ["<propose_changes のときの削除語。他の action では空配列>"],
   "replaced_terms": [{"before": "<置換前>", "after": "<置換後>"}],
-  "rationale": "<日本語の変更理由・修正要否>",
+  "finish_kind": "<finish のときは no_change_needed または needs_human_judgment。他の action では not_applicable>",
+  "rationale": "<日本語の変更理由・終了理由>",
   "measurement_ids": ["<参照した測定 ID>"],
   "mesh_requests": [{"descriptor": "<展開対象の descriptor>", "tree_number": "<展開対象の枝。未指定なら空文字>"}]
 }
 `.trim();
 
 interface RawOptimizationProposal {
+  action?: string;
   target_block_id?: string;
   proposed_expression?: string;
   added_terms?: string[];
   removed_terms?: string[];
   replaced_terms?: { before?: string; after?: string }[];
+  finish_kind?: string;
   rationale?: string;
   measurement_ids?: string[];
   mesh_requests?: { descriptor?: string; tree_number?: string }[];
 }
 
+const OPTIMIZE_QUERY_ACTIONS = ['request_context', 'propose_changes', 'finish'] as const;
+const OPTIMIZE_QUERY_FINISH_KINDS = ['no_change_needed', 'needs_human_judgment'] as const;
+
 const OPTIMIZE_QUERY_SCHEMA = objectSchema({
-  target_block_id: stringSchema('承認済み概念ブロックの ID'),
-  proposed_expression: stringSchema('変更後の単一行の式'),
+  action: enumSchema(OPTIMIZE_QUERY_ACTIONS, '選んだ行動種別'),
+  target_block_id: stringSchema('承認済み概念ブロックの ID（propose_changes 以外は無視）'),
+  proposed_expression: stringSchema('変更後の単一行の式（propose_changes 以外は空文字）'),
   added_terms: arraySchema(stringSchema()),
   removed_terms: arraySchema(stringSchema()),
   replaced_terms: arraySchema(objectSchema({ before: stringSchema(), after: stringSchema() })),
-  rationale: stringSchema('日本語の変更理由・修正要否'),
+  finish_kind: enumSchema(['not_applicable', ...OPTIMIZE_QUERY_FINISH_KINDS], 'finish のときだけ意味を持つ区分'),
+  rationale: stringSchema('日本語の変更理由・終了理由'),
   measurement_ids: arraySchema(stringSchema()),
   mesh_requests: arraySchema(objectSchema({
     descriptor: stringSchema('展開対象の descriptor。tree number だけで指定するときは空文字'),
@@ -315,7 +365,7 @@ const OPTIMIZE_QUERY_SCHEMA = objectSchema({
 export async function optimizeQuery(
   input: OptimizeQueryInput,
   provider: LLMProvider
-): Promise<OptimizeQueryProposal> {
+): Promise<OptimizeQueryDecision> {
   const prompt = renderPromptTemplate(OPTIMIZE_QUERY_USER_PROMPT_TEMPLATE, {
     CRITERIA: formatContext(input.criteria),
     MAX_HITS: String(input.maxHits),
@@ -347,18 +397,44 @@ export async function optimizeQuery(
     { role: 'user', content: prompt },
   ], { responseFormat: 'json', responseSchema: OPTIMIZE_QUERY_SCHEMA, temperature: 0.3 });
   const raw = parseSkillJson<RawOptimizationProposal>(response.text, SKILL_NAME);
-  return {
-    targetBlockId: (raw.target_block_id ?? '').trim(),
-    proposedExpression: (raw.proposed_expression ?? '').trim(),
-    addedTerms: raw.added_terms ?? [],
-    removedTerms: raw.removed_terms ?? [],
-    replacedTerms: (raw.replaced_terms ?? []).map((term) => ({ before: term.before ?? '', after: term.after ?? '' })),
-    rationale: raw.rationale ?? '',
-    measurementIds: raw.measurement_ids ?? [],
-    meshRequests: (raw.mesh_requests ?? []).map((request) => ({
-      descriptor: (request.descriptor ?? '').trim(), treeNumber: (request.tree_number ?? '').trim(),
-    })),
-  };
+  const targetBlockId = (raw.target_block_id ?? '').trim();
+  const proposedExpression = (raw.proposed_expression ?? '').trim();
+  const addedTerms = raw.added_terms ?? [];
+  const removedTerms = raw.removed_terms ?? [];
+  const replacedTerms = (raw.replaced_terms ?? []).map((term) => ({ before: term.before ?? '', after: term.after ?? '' }));
+  const rationale = raw.rationale ?? '';
+  const measurementIds = raw.measurement_ids ?? [];
+  const meshRequests = (raw.mesh_requests ?? []).map((request) => ({
+    descriptor: (request.descriptor ?? '').trim(), treeNumber: (request.tree_number ?? '').trim(),
+  }));
+  const hasProposedExpression = proposedExpression !== '';
+  const hasTermChanges = addedTerms.length > 0 || removedTerms.length > 0 || replacedTerms.length > 0;
+  const invalid = (reason: string): OptimizeQueryDecision => ({ action: 'invalid', reason, rationale });
+
+  // action の無い旧形式は、mesh_requests の有無だけで判別していた従来の解釈を保つ
+  // （replay fixture・デモ・E2E スタブが旧形式のため、書き換えずに動くこと）。
+  if (raw.action === undefined) {
+    return meshRequests.length > 0
+      ? { action: 'request_context', meshRequests, rationale, measurementIds }
+      : { action: 'propose_changes', targetBlockId, proposedExpression, addedTerms, removedTerms, replacedTerms, rationale, measurementIds };
+  }
+  if (raw.action === 'request_context') {
+    if (hasProposedExpression || hasTermChanges) return invalid('変更案と情報要求が混在しています');
+    if (meshRequests.length === 0) return invalid('情報要求ですが mesh_requests がありません');
+    return { action: 'request_context', meshRequests, rationale, measurementIds };
+  }
+  if (raw.action === 'propose_changes') {
+    if (meshRequests.length > 0) return invalid('変更案と情報要求が混在しています');
+    if (!targetBlockId || !proposedExpression) return invalid('変更案に target_block_id または proposed_expression がありません');
+    return { action: 'propose_changes', targetBlockId, proposedExpression, addedTerms, removedTerms, replacedTerms, rationale, measurementIds };
+  }
+  if (raw.action === 'finish') {
+    if (meshRequests.length > 0 || hasTermChanges) return invalid('終了判断に変更内容が混在しています');
+    if (raw.finish_kind !== 'no_change_needed' && raw.finish_kind !== 'needs_human_judgment') return invalid('finish_kind がありません');
+    if (!rationale) return invalid('終了理由（rationale）がありません');
+    return { action: 'finish', finishKind: raw.finish_kind, rationale, measurementIds };
+  }
+  return invalid(`不明な action です: ${raw.action}`);
 }
 
 /** 欠測の数値や捕捉一覧は実測 0・空集合に補完しない。 */
