@@ -114,6 +114,21 @@ test.each(['no_change_needed', 'needs_human_judgment'] as const)('終了判断�
   expect(rows[0]!.textContent).toContain('変更理由（AI の説明）: 分析の結果、判断した理由');
 });
 
+test('受け付けなかった終了判断（変更不要）は「終了判断（受け付けず）」として表示する', () => {
+  const f = setup();
+  f.state.queryOptimizationRun!.trials = [
+    { ...trial('finish-1'), kind: 'finish', finishKind: 'no_change_needed', after: null, accepted: false,
+      finishRejectedReason: 'AI の終了判断（変更不要）を受け付けませんでした: 既知シードを全件捕捉したまま目安件数（100 件）を超えています（実測 200 件）。件数を減らす候補を出してください。失う集合のある候補は保留候補として人の判断に回ります。',
+      reason: 'AI の終了判断（変更不要）を受け付けませんでした: 既知シードを全件捕捉したまま目安件数（100 件）を超えています（実測 200 件）。件数を減らす候補を出してください。失う集合のある候補は保留候補として人の判断に回ります。',
+      rationale: '冗長語は無い' },
+  ];
+  f.render();
+  const rows = f.container.querySelectorAll('.optimization__history li');
+  expect(rows).toHaveLength(1);
+  expect(rows[0]!.textContent).toContain('終了判断（受け付けず）: AI の終了判断（変更不要）を受け付けませんでした: 既知シードを全件捕捉したまま目安件数（100 件）を超えています（実測 200 件）。');
+  expect(rows[0]!.textContent).not.toContain('終了判断: AI の終了判断');
+});
+
 test('捕捉表の列・行見出しと捕捉・未捕捉・未測定を表示する', () => {
   const f = setup();
   f.state.queryOptimizationRun!.trials[0]!.after!.seedCapture = { seedPmids: ['11', '22'], rows: [

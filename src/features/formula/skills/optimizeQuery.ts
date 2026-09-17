@@ -139,6 +139,12 @@ export interface OptimizationTrial {
   /** kind が finish のときの区分。変更不要か、語の変更では解決できず人の判断が必要か。 */
   finishKind?: OptimizeQueryFinishKind;
   /**
+   * 既知シードを全件捕捉したまま目安件数を超えている間の no_change_needed 終了判断を
+   * 制御側が受け付けなかったときの理由。設定時、この finish 試行は accepted: false のまま
+   * 改善なし回数へ数え、停止せずに次の AI 呼び出しへ進む（kind: 'finish' のみで設定）。
+   */
+  finishRejectedReason?: string;
+  /**
    * AI の応答が行動種別の必須・排他条件を満たさなかった（action: 'invalid'）ときの理由。
    * 式は最良式のまま変更していないため、再開時の「過去の run の却下記録」（実際に却下された変更案）
    * には含めないよう、この印で区別する。
@@ -283,6 +289,11 @@ action を 1 つ選び、JSON だけで返してください。
     added_terms・removed_terms・replaced_terms は空配列にします。target_block_id・proposed_expression の値は
     無視されるため、何を入れても構いません。finish しても目安件数・既知シードの捕捉を満たしたことには
     ならず、達成の判定は制御側の最終実測で決まります。
+    既知シードを全件捕捉したまま目安件数を超えている間は no_change_needed を受け付けません。
+    件数を減らす候補（語の削除より、特異的な語との AND・下位 MeSH への置換など失う集合を小さく保つ
+    狭め方）を propose_changes で出してください。失う集合がある候補は保留候補として人の判断に回るので、
+    それ自体は失敗ではありません。needs_human_judgment は、語の変更では解決できない場合
+    （承認外のブロックや結合構造が落としている等）に限ります。
 - ID の追加・削除・変更、結合行と研究デザインフィルタの変更は禁止です。
 - proposed_expression はタグ付き検索語と AND/OR/NOT・括弧で構成する単一行です。
   他ブロック参照、PMID 指定、研究基準にない期間・言語・対象集団の制限を追加しません。
@@ -527,7 +538,8 @@ const TRIAL_KIND_LABELS: Record<OptimizationTrial['kind'], string> = {
 
 /** 履歴画面（queryOptimizationHistory.ts）の表記と揃える。同じ語で読めるようにするため。 */
 function trialOutcomeLabel(trial: OptimizationTrial): string {
-  return trial.kind === 'information' ? '評価保留' : trial.kind === 'finish' ? '終了判断'
+  return trial.kind === 'information' ? '評価保留'
+    : trial.kind === 'finish' ? (trial.finishRejectedReason ? '終了判断（受け付けず）' : '終了判断')
     : trial.held ? '保留' : trial.accepted ? '採用' : '却下';
 }
 

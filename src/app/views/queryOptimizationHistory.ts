@@ -276,7 +276,8 @@ export function createOptimizationHistoryRenderer(): (
           continue;
         }
         const row = doc.createElement('li');
-        const outcome = trial.kind === 'information' ? '評価保留' : trial.kind === 'finish' ? '終了判断'
+        const outcome = trial.kind === 'information' ? '評価保留'
+          : trial.kind === 'finish' ? (trial.finishRejectedReason ? '終了判断（受け付けず）' : '終了判断')
           : trial.held ? '保留' : trial.accepted ? '採用' : '却下';
         paragraph(row, `${label} — 前後件数: ${hits(trial.before?.totalHits)} → ${hits(trial.after?.totalHits)} / シード: ${seedCount(trial.before, run.seedCount)} → ${seedCount(trial.after, run.seedCount)} / ${outcome}: ${trial.reason}`);
         if (trial.kind === 'information' && trial.informationResult) {

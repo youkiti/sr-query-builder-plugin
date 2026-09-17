@@ -754,7 +754,8 @@ export async function runQueryOptimization(
     if (!best) unmetReasons.push('検証済み候補がありません');
     if (pendingInformation) unmetReasons.push(`情報要求 ${pendingInformation.candidateId} への判断が未了です（文脈へ反映 ${pendingInformation.obtained} / 要求 ${pendingInformation.requested} 件）`);
     const lastFinishTrial = reason !== 'conditions_met' ? [...trials].reverse().find((trial) => trial.kind === 'finish') : undefined;
-    if (lastFinishTrial) unmetReasons.push(`${lastFinishTrial.finishKind === 'no_change_needed' ? 'AI の判断（変更不要）' : 'AI の判断（人の判断が必要）'}: ${lastFinishTrial.rationale}`);
+    if (lastFinishTrial) unmetReasons.push(`${lastFinishTrial.finishRejectedReason ? '受け付けなかった AI の判断（変更不要）'
+      : lastFinishTrial.finishKind === 'no_change_needed' ? 'AI の判断（変更不要）' : 'AI の判断（人の判断が必要）'}: ${lastFinishTrial.rationale}`);
     if (termBudgetExhausted) unmetReasons.push(`語別計測は ${MAX_TERM_API_CALLS} 通信の上限に達しました。追加取得していない語別件数・固有寄与は未測定です。`);
     if (termBudgetReserved) unmetReasons.push('候補評価・差集合の実測・最終再検証の通信予算を確保するため、語別計測を打ち切りました。追加取得していない語別件数・固有寄与は未測定です。');
     if (fixed.seedPmids.length === 0) unmetReasons.push('シードが未指定です');
@@ -960,6 +961,19 @@ export async function runQueryOptimization(
           meshRequests: decision.meshRequests.map((request) => ({ ...request })),
           ...(decision.trialDetailIds.length ? { trialDetailIds: [...decision.trialDetailIds] } : {}) }));
         pendingInformation = { candidateId, requested, obtained: 0 };
+        noImprovement += 1;
+        await save();
+      } else if (decision.action === 'finish' && decision.finishKind === 'no_change_needed'
+        && best.measurement.missedPmids?.length === 0
+        && typeof best.measurement.totalHits === 'number' && best.measurement.totalHits > fixed.maxHits) {
+        // 既知シードを全件捕捉したまま目安件数を超えている間は、変更不要の終了判断を受け付けない。
+        // 保留候補（失う集合のある候補）を集めるには、AI に件数を減らす提案を出させる必要があるため。
+        const finishRejectedReason = `AI の終了判断（変更不要）を受け付けませんでした: 既知シードを全件捕捉したまま目安件数（${fixed.maxHits} 件）を超えています（実測 ${best.measurement.totalHits} 件）。件数を減らす候補を出してください。失う集合のある候補は保留候補として人の判断に回ります。`;
+        trials.push(makeTrial({ kind: 'finish', candidateId, formula: best.formula, finishKind: decision.finishKind,
+          finishRejectedReason,
+          ...(pendingInformation ? { informedBy: { ...pendingInformation } } : {}),
+          before: best.measurement, after: null, accepted: false, reason: finishRejectedReason, rationale: decision.rationale }));
+        pendingInformation = undefined;
         noImprovement += 1;
         await save();
       } else if (decision.action === 'finish') {
