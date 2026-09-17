@@ -134,6 +134,8 @@ export interface OptimizationTrial {
   changes?: Pick<OptimizeQueryProposal, 'targetBlockId' | 'addedTerms' | 'removedTerms' | 'replacedTerms'>;
   /** 情報要求の対象だけを保持し、ノード本体は run の文脈から引く。 */
   meshRequests?: OptimizationMeshRequest[];
+  /** request_context で trial_detail_ids を指定した情報要求にだけ設定する（kind: 'information'）。 */
+  trialDetailIds?: string[];
   /** kind が finish のときの区分。変更不要か、語の変更では解決できず人の判断が必要か。 */
   finishKind?: OptimizeQueryFinishKind;
   /**
@@ -180,6 +182,23 @@ export interface PreviousOptimizationRejection {
   rejectedByHuman?: boolean;
 }
 
+/**
+ * request_context の trial_detail_ids で取り出した、個別試行の全式・前後の実測・削除影響。
+ * 見つからない・上限超過の ID は formula 以降を持たず、note に理由だけを残す。
+ */
+export interface OptimizeQueryTrialDetailResult {
+  candidateId: string;
+  /** 取り出せなかった理由。取得できたときは null。 */
+  note: string | null;
+  formula?: PubmedFormula;
+  before?: OptimizationMeasurement | null;
+  after?: OptimizationMeasurement | null;
+  /** annotation を除く。参考注釈は採否に使わないため詳細にも含めない。 */
+  impact?: Omit<OptimizationImpact, 'annotation'>;
+  reason?: string;
+  rationale?: string;
+}
+
 export interface OptimizeQueryInput {
   blockDiagnosis?: BlockDiagnosis;
   missedSeeds?: OptimizationMissedSeed[];
@@ -192,6 +211,8 @@ export interface OptimizeQueryInput {
   meshContext?: OptimizationMeshNode[];
   meshRequestResults?: OptimizationMeshRequestResult[];
   trials?: OptimizationTrial[];
+  /** 直前の情報要求で取り出した試行詳細。次の 1 回の呼び出しにだけ渡す。 */
+  trialDetails?: OptimizeQueryTrialDetailResult[];
   previousRejectedTrials?: PreviousOptimizationRejection[];
 }
 
@@ -216,7 +237,8 @@ export type OptimizeQueryFinishKind = 'no_change_needed' | 'needs_human_judgment
  * - invalid: 上記いずれの必須・排他条件も満たさない応答（例外にせず値として返す）
  */
 export type OptimizeQueryDecision =
-  | ({ action: 'request_context' } & Pick<OptimizeQueryProposal, 'rationale' | 'measurementIds'> & { meshRequests: OptimizationMeshRequest[] })
+  | ({ action: 'request_context' } & Pick<OptimizeQueryProposal, 'rationale' | 'measurementIds'>
+      & { meshRequests: OptimizationMeshRequest[]; trialDetailIds: string[] })
   | ({ action: 'propose_changes' } & OptimizeQueryProposal)
   | ({ action: 'finish'; finishKind: OptimizeQueryFinishKind } & Pick<OptimizeQueryProposal, 'rationale' | 'measurementIds'>)
   | { action: 'invalid'; reason: string; rationale: string };
@@ -230,21 +252,35 @@ const SKILL_NAME = 'optimize-query';
  */
 export const MAX_INFORMATION_TRIALS = 3;
 
+/**
+ * request_context の trial_detail_ids で 1 回に取り出せる試行詳細の上限。
+ * 超えた分・run に無い ID は取り出さず、理由を注記する（queryOptimizationService.ts が実装する）。
+ */
+export const MAX_TRIAL_DETAILS_PER_REQUEST = 3;
+
+/** TRIALS 要約に載せる rationale の上限文字数。全文は trial_detail_ids で取り出す。 */
+const TRIAL_SUMMARY_RATIONALE_LIMIT = 200;
+
 export const OPTIMIZE_QUERY_SYSTEM_PROMPT = `
 あなたはシステマティックレビューの司書です。研究基準と全式の結合構造を踏まえて、
 action を 1 つ選び、JSON だけで返してください。
+- 試行履歴（TRIALS）は要約だけを渡します。全式・変更前後の全測定（語別件数を含む）を確認したい試行が
+  あれば、request_context の trial_detail_ids に candidateId を指定してください（1 回 ${MAX_TRIAL_DETAILS_PER_REQUEST} 件まで）。
+  取り出した詳細は次の 1 回の判断にだけ渡ります。取得は通信を発生させませんが、情報要求の予算
+  （run あたり ${MAX_INFORMATION_TRIALS} 回）は mesh_requests と同じ枠を消費します。
 - action は request_context・propose_changes・finish のいずれかです。他の値は使えません。
-  - request_context: MeSH の周辺文脈を追加取得したいときに選びます。mesh_requests を 1 件以上指定し、
+  - request_context: MeSH の周辺文脈の追加取得、または過去の試行の詳細取得のどちらか、もしくは
+    両方を求めるときに選びます。mesh_requests・trial_detail_ids の少なくとも一方を 1 件以上指定し、
     proposed_expression は空文字、added_terms・removed_terms・replaced_terms は空配列にします。
     この回は式を変更せず、追加取得の結果を次の反復で読んでから改めて判断します。
     情報要求は run あたり ${MAX_INFORMATION_TRIALS} 回までです。上限に達すると以降の要求は取得されません。
   - propose_changes: 承認済み概念ブロック 1 件の変更案を返すときに選びます。target_block_id・
-    proposed_expression を必須とし、mesh_requests は空配列にします。
+    proposed_expression を必須とし、mesh_requests・trial_detail_ids は空配列にします。
   - finish: 変更を出さずに終える判断です。初期式が目標内でも冗長語・低寄与語・シード漏れを分析し、
     修正要否を判断してください。finish_kind に no_change_needed（分析の結果、修正不要と判断した）か
     needs_human_judgment（承認外のブロックや結合構造が落としているなど、語の変更では解決できず
-    人の判断が必要）のどちらかを指定し、rationale に理由を書きます。mesh_requests・added_terms・
-    removed_terms・replaced_terms は空配列にします。target_block_id・proposed_expression の値は
+    人の判断が必要）のどちらかを指定し、rationale に理由を書きます。mesh_requests・trial_detail_ids・
+    added_terms・removed_terms・replaced_terms は空配列にします。target_block_id・proposed_expression の値は
     無視されるため、何を入れても構いません。finish しても目安件数・既知シードの捕捉を満たしたことには
     ならず、達成の判定は制御側の最終実測で決まります。
 - ID の追加・削除・変更、結合行と研究デザインフィルタの変更は禁止です。
@@ -311,8 +347,10 @@ MeSH 追加取得要求の結果（未取得理由を含む）:
 {{MESH_REQUEST_RESULTS}}
 保留・却下した変更の一覧:
 {{REJECTED_CHANGES}}
-試行履歴（採否・却下理由・前後の実測）:
+試行履歴（要約。採否・却下理由・前後件数のみ。全式・全測定は request_context の trial_detail_ids で取り出せます）:
 {{TRIALS}}
+要求した試行の詳細（前回の情報要求で取得。この 1 回の判断にだけ使えます）:
+{{TRIAL_DETAILS}}
 過去の run の却下記録（未再検証。今回の実測ではなく、同じ失敗を避けるための文脈）:
 {{PREVIOUS_REJECTIONS}}
 スキーマ:
@@ -326,7 +364,8 @@ MeSH 追加取得要求の結果（未取得理由を含む）:
   "finish_kind": "<finish のときは no_change_needed または needs_human_judgment。他の action では not_applicable>",
   "rationale": "<日本語の変更理由・終了理由>",
   "measurement_ids": ["<参照した測定 ID>"],
-  "mesh_requests": [{"descriptor": "<展開対象の descriptor>", "tree_number": "<展開対象の枝。未指定なら空文字>"}]
+  "mesh_requests": [{"descriptor": "<展開対象の descriptor>", "tree_number": "<展開対象の枝。未指定なら空文字>"}],
+  "trial_detail_ids": ["<全式・全測定を確認したい試行の candidateId。1 回 3 件まで。他の action では空配列>"]
 }
 `.trim();
 
@@ -341,6 +380,7 @@ interface RawOptimizationProposal {
   rationale?: string;
   measurement_ids?: string[];
   mesh_requests?: { descriptor?: string; tree_number?: string }[];
+  trial_detail_ids?: string[];
 }
 
 const OPTIMIZE_QUERY_ACTIONS = ['request_context', 'propose_changes', 'finish'] as const;
@@ -360,6 +400,7 @@ const OPTIMIZE_QUERY_SCHEMA = objectSchema({
     descriptor: stringSchema('展開対象の descriptor。tree number だけで指定するときは空文字'),
     tree_number: stringSchema('展開対象の tree number。descriptor だけで指定するときは空文字'),
   })),
+  trial_detail_ids: arraySchema(stringSchema('全式・全測定を確認したい試行の candidateId（request_context 以外は空配列）')),
 });
 
 export async function optimizeQuery(
@@ -383,14 +424,8 @@ export async function optimizeQuery(
     MESH_REQUEST_RESULTS: formatContext(input.meshRequestResults),
     PREVIOUS_REJECTIONS: formatContext(input.previousRejectedTrials ?? []),
     REJECTED_CHANGES: formatRejectedChanges(input.trials ?? []),
-    TRIALS: input.trials?.length ? input.trials.map((trial) => [
-      formatContext({ candidateId: trial.candidateId, formula: trial.formula,
-        accepted: trial.accepted, reason: trial.reason, rationale: trial.rationale,
-        held: trial.held ?? false, impact: trial.impact ? Object.fromEntries(Object.entries(trial.impact)
-          .filter(([key]) => key !== 'annotation')) : null }),
-      `変更前: ${trial.before ? formatMeasurement(trial.before) : '(未計測)'}`,
-      `変更後: ${trial.after ? formatMeasurement(trial.after) : '(未計測)'}`,
-    ].join('\n')).join('\n') : '(なし)',
+    TRIALS: summarizeTrials(input.trials ?? []),
+    TRIAL_DETAILS: formatTrialDetails(input.trialDetails),
   });
   const response = await provider.chat([
     { role: 'system', content: OPTIMIZE_QUERY_SYSTEM_PROMPT },
@@ -407,29 +442,31 @@ export async function optimizeQuery(
   const meshRequests = (raw.mesh_requests ?? []).map((request) => ({
     descriptor: (request.descriptor ?? '').trim(), treeNumber: (request.tree_number ?? '').trim(),
   }));
+  const trialDetailIds = (raw.trial_detail_ids ?? []).map((id) => (id ?? '').trim()).filter((id) => id !== '');
   const hasProposedExpression = proposedExpression !== '';
   const hasTermChanges = addedTerms.length > 0 || removedTerms.length > 0 || replacedTerms.length > 0;
   const invalid = (reason: string): OptimizeQueryDecision => ({ action: 'invalid', reason, rationale });
 
   // action の無い旧形式は、mesh_requests の有無だけで判別していた従来の解釈を保つ
-  // （replay fixture・デモ・E2E スタブが旧形式のため、書き換えずに動くこと）。
+  // （replay fixture・デモ・E2E スタブが旧形式のため、書き換えずに動くこと）。旧形式に
+  // trial_detail_ids は存在しなかったため、常に空配列として扱う。
   if (raw.action === undefined) {
     return meshRequests.length > 0
-      ? { action: 'request_context', meshRequests, rationale, measurementIds }
+      ? { action: 'request_context', meshRequests, trialDetailIds: [], rationale, measurementIds }
       : { action: 'propose_changes', targetBlockId, proposedExpression, addedTerms, removedTerms, replacedTerms, rationale, measurementIds };
   }
   if (raw.action === 'request_context') {
     if (hasProposedExpression || hasTermChanges) return invalid('変更案と情報要求が混在しています');
-    if (meshRequests.length === 0) return invalid('情報要求ですが mesh_requests がありません');
-    return { action: 'request_context', meshRequests, rationale, measurementIds };
+    if (meshRequests.length === 0 && trialDetailIds.length === 0) return invalid('情報要求ですが mesh_requests と trial_detail_ids のどちらもありません');
+    return { action: 'request_context', meshRequests, trialDetailIds, rationale, measurementIds };
   }
   if (raw.action === 'propose_changes') {
-    if (meshRequests.length > 0) return invalid('変更案と情報要求が混在しています');
+    if (meshRequests.length > 0 || trialDetailIds.length > 0) return invalid('変更案と情報要求が混在しています');
     if (!targetBlockId || !proposedExpression) return invalid('変更案に target_block_id または proposed_expression がありません');
     return { action: 'propose_changes', targetBlockId, proposedExpression, addedTerms, removedTerms, replacedTerms, rationale, measurementIds };
   }
   if (raw.action === 'finish') {
-    if (meshRequests.length > 0 || hasTermChanges) return invalid('終了判断に変更内容が混在しています');
+    if (meshRequests.length > 0 || trialDetailIds.length > 0 || hasTermChanges) return invalid('終了判断に変更内容が混在しています');
     if (raw.finish_kind !== 'no_change_needed' && raw.finish_kind !== 'needs_human_judgment') return invalid('finish_kind がありません');
     if (!rationale) return invalid('終了理由（rationale）がありません');
     return { action: 'finish', finishKind: raw.finish_kind, rationale, measurementIds };
@@ -452,6 +489,18 @@ function formatContext(value: unknown): string {
   }, 2);
 }
 
+/** 語一覧を先頭 10 語 + 省略件数に切り詰める。0 件は「なし」。 */
+function formatTermList(terms: string[]): string {
+  return terms.length ? terms.slice(0, 10).join(', ') + (terms.length > 10 ? `、ほか ${terms.length - 10} 語` : '') : 'なし';
+}
+
+/** formulaDiff をブロックごとの「削除: ... / 追加: ...」に整形する。記録の有無を区別する。 */
+function formatFormulaDiff(formulaDiff: OptimizationTrial['formulaDiff']): string {
+  const diff = formulaDiff?.map((block) =>
+    `#${block.blockId} 削除: ${formatTermList(block.removed)} / 追加: ${formatTermList(block.added)}`).join(' ; ');
+  return diff || (formulaDiff ? '変更なし' : '変更差分の記録なし');
+}
+
 /** 保留・却下した実際の変更を、全式の履歴とは別に短く渡す。 */
 export function formatRejectedChanges(trials: OptimizationTrial[]): string {
   const rejected = trials.filter((trial) => trial.kind === 'proposal' && !trial.accepted);
@@ -460,12 +509,8 @@ export function formatRejectedChanges(trials: OptimizationTrial[]): string {
     (trial.formulaDiff ?? []).filter((block) => block[key].length)
       .map((block) => [block.blockId, [...new Set(block[key].map(normalize))].sort()])
       .sort((a, b) => String(a[0]).localeCompare(String(b[0]))));
-  const words = (terms: string[]) => terms.length
-    ? terms.slice(0, 10).join(', ') + (terms.length > 10 ? `、ほか ${terms.length - 10} 語` : '') : 'なし';
   return rejected.map((trial, index) => {
-    const diff = trial.formulaDiff?.map((block) =>
-      `#${block.blockId} 削除: ${words(block.removed)} / 追加: ${words(block.added)}`).join(' ; ')
-      || (trial.formulaDiff ? '変更なし' : '変更差分の記録なし');
+    const diff = formatFormulaDiff(trial.formulaDiff);
     if (trial.duplicateOf) return `${trial.candidateId} / ${diff}（${trial.duplicateOf} と同じ式） / 結果: 測定せずに却下`;
     const variant = signature(trial, 'removed') === '[]' ? undefined : rejected.slice(0, index).find((previous) =>
       signature(previous, 'removed') === signature(trial, 'removed')
@@ -474,4 +519,87 @@ export function formatRejectedChanges(trials: OptimizationTrial[]): string {
       : `却下（${trial.reason}）`;
     return `${trial.candidateId} / ${diff}${variant ? `（${variant.candidateId} と同じ削除の変種）` : ''} / 結果: ${result}`;
   }).join('\n') || '(なし)';
+}
+
+const TRIAL_KIND_LABELS: Record<OptimizationTrial['kind'], string> = {
+  initial: '初期実測', proposal: '変更案', information: '情報要求', finish: '終了判断', final: '最終再検証',
+};
+
+/** 履歴画面（queryOptimizationHistory.ts）の表記と揃える。同じ語で読めるようにするため。 */
+function trialOutcomeLabel(trial: OptimizationTrial): string {
+  return trial.kind === 'information' ? '評価保留' : trial.kind === 'finish' ? '終了判断'
+    : trial.held ? '保留' : trial.accepted ? '採用' : '却下';
+}
+
+function truncateRationale(rationale: string): string {
+  return rationale.length > TRIAL_SUMMARY_RATIONALE_LIMIT
+    ? `${rationale.slice(0, TRIAL_SUMMARY_RATIONALE_LIMIT)}…` : rationale;
+}
+
+/** 欠測（未計測）と実測 0 件を区別する。measurement が無い（測定していない）ときは呼び出し元が理由を渡す。 */
+function measurementCounts(measurement: OptimizationMeasurement | null | undefined): { hits: string; seedCapture: string } {
+  if (!measurement) return { hits: '未測定', seedCapture: '未測定' };
+  const hits = measurement.totalHits == null ? '未測定' : String(measurement.totalHits);
+  const seedCapture = measurement.capturedPmids == null || measurement.missedPmids == null ? '未測定'
+    : `${measurement.capturedPmids.length}/${measurement.capturedPmids.length + measurement.missedPmids.length}`;
+  return { hits, seedCapture };
+}
+
+/**
+ * 試行履歴を要約する。全式・terms を含む測定 JSON は渡さず、4 つの数（件数・シード捕捉・
+ * 失う集合・増える集合）と却下・保留理由、測定 ID だけを渡す。詳細は trial_detail_ids で取り出す。
+ */
+function summarizeTrials(trials: OptimizationTrial[]): string {
+  if (!trials.length) return '(なし)';
+  let prevAfterId: string | null = null;
+  const lines = trials.map((trial) => {
+    // 直前の試行の変更後と同じ測定なら、件数は繰り返さず ID だけ残す（重複回避が本来の目的）。
+    const beforeIsPriorAfter = trial.before !== null && trial.before !== undefined && trial.before.id === prevAfterId;
+    const before = beforeIsPriorAfter ? { hits: '(直前の試行の変更後と同一)', seedCapture: '(直前の試行の変更後と同一)' }
+      : measurementCounts(trial.before);
+    const afterUnmeasuredLabel = trial.after === null
+      ? (trial.kind === 'proposal' ? '未測定（測定前に却下）' : '(対象外: この試行では式を変更していません)')
+      : undefined;
+    const after = afterUnmeasuredLabel ? { hits: afterUnmeasuredLabel, seedCapture: afterUnmeasuredLabel } : measurementCounts(trial.after);
+    prevAfterId = trial.after?.id ?? prevAfterId;
+    const summary = {
+      candidateId: trial.candidateId,
+      kind: TRIAL_KIND_LABELS[trial.kind],
+      outcome: trialOutcomeLabel(trial),
+      ...(trial.kind === 'proposal' ? { diff: formatFormulaDiff(trial.formulaDiff) } : {}),
+      beforeMeasurementId: trial.before?.id ?? '(未測定)',
+      beforeHits: before.hits, beforeSeedCapture: before.seedCapture,
+      afterMeasurementId: trial.after?.id ?? afterUnmeasuredLabel ?? '(未測定)',
+      afterHits: after.hits, afterSeedCapture: after.seedCapture,
+      lostHits: trial.impact ? (trial.impact.lostHits ?? '未測定') : '(差集合は測っていない)',
+      gainedHits: trial.impact ? (trial.impact.gainedHits ?? '未測定') : '(差集合は測っていない)',
+      reason: trial.reason || '(なし)',
+      ...(trial.impact?.error ? { error: trial.impact.error } : {}),
+      ...(trial.duplicateOf ? { duplicateOf: trial.duplicateOf } : {}),
+      ...(trial.informedBy ? { informedBy: `${trial.informedBy.candidateId}（反映 ${trial.informedBy.obtained}/要求 ${trial.informedBy.requested}）` } : {}),
+      ...(trial.finishKind ? { finishKind: trial.finishKind } : {}),
+      ...(trial.kind === 'information' ? { meshRequests: (trial.meshRequests ?? [])
+        .map((request) => `${request.descriptor || '(未指定)'} / ${request.treeNumber || '(未指定)'}`) } : {}),
+      ...(trial.trialDetailIds?.length ? { trialDetailIds: trial.trialDetailIds } : {}),
+      ...(trial.informationResult ? { informationResult: `反映 ${trial.informationResult.obtained}/要求 ${trial.informationResult.requested}` } : {}),
+      rationale: truncateRationale(trial.rationale || ''),
+    };
+    return JSON.stringify(summary);
+  });
+  return lines.join('\n');
+}
+
+/** 前回の情報要求で取り出した試行詳細を、次の 1 回の判断にだけ渡す形式にする。 */
+function formatTrialDetails(details: OptimizeQueryTrialDetailResult[] | undefined): string {
+  if (!details?.length) return '(要求なし)';
+  return details.map((detail) => {
+    if (!detail.formula) return `${detail.candidateId}: 取り出せませんでした（${detail.note ?? '理由不明'}）`;
+    return [
+      `${detail.candidateId}:`,
+      formatContext({ formula: detail.formula, reason: detail.reason, rationale: detail.rationale }),
+      `変更前: ${detail.before ? formatMeasurement(detail.before) : '(未計測)'}`,
+      `変更後: ${detail.after ? formatMeasurement(detail.after) : '(未計測)'}`,
+      `削除影響: ${detail.impact ? formatContext(detail.impact) : '(未実測)'}`,
+    ].join('\n');
+  }).join('\n\n');
 }

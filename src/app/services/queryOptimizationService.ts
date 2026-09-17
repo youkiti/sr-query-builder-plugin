@@ -3,6 +3,7 @@ import { annotateLostSample, type AnnotateLostSampleInput } from '@/features/for
 import {
   optimizeQuery,
   MAX_INFORMATION_TRIALS,
+  MAX_TRIAL_DETAILS_PER_REQUEST,
   type ApprovedOptimizationBlock,
   type OptimizationCriteria,
   type OptimizationMeasurement,
@@ -17,6 +18,7 @@ import {
   type OptimizationApiEvent,
   type OptimizeQueryFinishKind,
   type OptimizeQueryProposal,
+  type OptimizeQueryTrialDetailResult,
   type PreviousOptimizationRejection,
 } from '@/features/formula/skills/optimizeQuery';
 import type { ProjectStoreDeps } from '@/features/project';
@@ -260,6 +262,9 @@ export async function runQueryOptimization(
   let evaluatedTrials = 0;
   let informationTrials = 0;
   let pendingInformation: OptimizationTrial['informedBy'];
+  // 直前の情報要求で取り出した試行詳細。次の 1 回の optimizeQuery 呼び出しにだけ渡し、その後は
+  // 呼び出しの決定を問わず消費済みとして破棄する（informedBy と同じ単発の受け渡し）。
+  let pendingTrialDetails: OptimizeQueryTrialDetailResult[] | undefined;
   let task: QueryOptimizationProgress['task'] = null;
   let apiWaiting: OptimizationApiEvent | null = null;
   let apiEvents: OptimizationApiEvent[] = [];
@@ -914,32 +919,46 @@ export async function runQueryOptimization(
         missedSeeds: missedSeeds.filter((seed) => best!.measurement.missedPmids?.includes(seed.pmid)),
         seedPapers: fixed.seedPapers ?? fixed.seedPmids.map((pmid) => ({ pmid, title: null })),
         blockDiagnosis, meshContext, meshRequestResults, trials, previousRejectedTrials: fixed.previousRejectedTrials,
+        trialDetails: pendingTrialDetails,
       }, provider));
       llmSignal = undefined;
       boundary();
       iterations = round;
       const candidateId = `candidate-${round}`;
+      // 試行詳細は直前の 1 回の呼び出しにだけ渡す。この回の決定が何であれ消費済みとして破棄する
+      // （この後 request_context 分岐で新しい詳細を要求すれば、そちらが次回分として設定し直す）。
+      pendingTrialDetails = undefined;
       if (decision.action === 'request_context' && informationTrials < MAX_INFORMATION_TRIALS) {
         // 情報要求だけの回は候補評価を保留する。同一式回帰とせず、次の AI が取得結果を読む。
         // maxIterations を消費しないため、この回の後も次の round へ進める（run あたりの上限は別に持つ）。
         informationTrials += 1;
         const information = await expandMesh(decision.meshRequests);
+        const details = buildTrialDetails(decision.trialDetailIds, trials);
+        const detailsObtained = details.filter((detail) => detail.note === null).length;
+        const requested = information.requested + decision.trialDetailIds.length;
+        const obtained = information.obtained + detailsObtained;
         trials.push(makeTrial({ kind: 'information', candidateId, formula: best.formula,
-          before: best.measurement, after: null, accepted: false, reason: information.notes, rationale: decision.rationale,
-          informationResult: { requested: information.requested, obtained: information.obtained },
-          meshRequests: decision.meshRequests.map((request) => ({ ...request })) }));
-        pendingInformation = { candidateId, requested: information.requested, obtained: information.obtained };
+          before: best.measurement, after: null, accepted: false,
+          reason: [information.notes, formatTrialDetailNotes(details)].filter(Boolean).join('\n'),
+          rationale: decision.rationale,
+          informationResult: { requested, obtained },
+          meshRequests: decision.meshRequests.map((request) => ({ ...request })),
+          ...(decision.trialDetailIds.length ? { trialDetailIds: [...decision.trialDetailIds] } : {}) }));
+        pendingInformation = { candidateId, requested, obtained };
+        // 取り出せた詳細だけを次回分として持ち越す（未検出・上限超過の注記だけの結果は文脈にならない）。
+        pendingTrialDetails = details.some((detail) => detail.note === null) ? details : undefined;
         await save();
         boundary();
         continue;
       } else if (decision.action === 'request_context') {
         // run あたりの情報要求上限に達した回は取得せず、改善なしに数えてループ末尾の停止判定へ進む。
-        const requested = decision.meshRequests.length;
+        const requested = decision.meshRequests.length + decision.trialDetailIds.length;
         const infoReason = `未取得: 情報要求の上限（run あたり ${MAX_INFORMATION_TRIALS} 回）に達したため取得しませんでした`;
         trials.push(makeTrial({ kind: 'information', candidateId, formula: best.formula,
           before: best.measurement, after: null, accepted: false, reason: infoReason, rationale: decision.rationale,
           informationResult: { requested, obtained: 0 },
-          meshRequests: decision.meshRequests.map((request) => ({ ...request })) }));
+          meshRequests: decision.meshRequests.map((request) => ({ ...request })),
+          ...(decision.trialDetailIds.length ? { trialDetailIds: [...decision.trialDetailIds] } : {}) }));
         pendingInformation = { candidateId, requested, obtained: 0 };
         noImprovement += 1;
         await save();
@@ -1176,6 +1195,35 @@ export async function runQueryOptimization(
     clearTimeout(deadline);
     runController.abort();
   }
+}
+
+/**
+ * request_context の trial_detail_ids に応じて、要約 (TRIALS) では渡していない全式・前後の実測・
+ * 削除影響を取り出す。1 回 MAX_TRIAL_DETAILS_PER_REQUEST 件まで。超過分と run に無い ID は
+ * 取り出さず、理由だけを note に残す。通信は発生させない（trials 配列からのローカル参照のみ）。
+ */
+function buildTrialDetails(ids: readonly string[], trials: readonly OptimizationTrial[]): OptimizeQueryTrialDetailResult[] {
+  const selected = ids.slice(0, MAX_TRIAL_DETAILS_PER_REQUEST);
+  const overflow = ids.slice(MAX_TRIAL_DETAILS_PER_REQUEST);
+  const details: OptimizeQueryTrialDetailResult[] = selected.map((candidateId) => {
+    const trial = trials.find((item) => item.candidateId === candidateId);
+    if (!trial) return { candidateId, note: `この run に候補 ID ${candidateId} の試行が見つかりません` };
+    return {
+      candidateId, note: null, formula: trial.formula, before: trial.before, after: trial.after,
+      reason: trial.reason, rationale: trial.rationale,
+      ...(trial.impact ? { impact: Object.fromEntries(Object.entries(trial.impact)
+        .filter(([key]) => key !== 'annotation')) as Omit<OptimizationImpact, 'annotation'> } : {}),
+    };
+  });
+  for (const candidateId of overflow) {
+    details.push({ candidateId, note: `1 回の要求で取り出せる試行の詳細は ${MAX_TRIAL_DETAILS_PER_REQUEST} 件までのため取り出しませんでした` });
+  }
+  return details;
+}
+
+/** 情報要求の trial の reason に、詳細取得の結果（取得済み／取り出せなかった理由）を追記する。 */
+function formatTrialDetailNotes(details: readonly OptimizeQueryTrialDetailResult[]): string {
+  return details.map((detail) => `詳細 ${detail.candidateId}: ${detail.note ?? '取得しました'}`).join('\n');
 }
 
 function describeMeasurementFailure(evaluation: QueryEvaluation): string {

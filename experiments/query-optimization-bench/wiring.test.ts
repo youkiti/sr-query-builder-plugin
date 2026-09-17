@@ -44,7 +44,7 @@ test.each(PROFILES)('$id: 初期生成にも目安を渡し、抽出・調整ま
       expand_freeword: { freewords: [{ query: 'smoking[tiab]', rationale: '喫煙を検索' }] },
       optimize_query: { action: 'propose_changes', target_block_id: '1', proposed_expression: '(smoking[tiab] OR tobacco[tiab])',
         added_terms: ['tobacco[tiab]'], removed_terms: [], replaced_terms: [], finish_kind: 'not_applicable',
-        rationale: '同義語で未捕捉シードを回収', measurement_ids: [], mesh_requests: [] },
+        rationale: '同義語で未捕捉シードを回収', measurement_ids: [], mesh_requests: [], trial_detail_ids: [] },
     };
     const llmFactory: LlmProviderFactory = { model: 'fake', forPurpose: (purpose) => ({ model: 'fake', providerId: 'gemini',
       chat: async (messages, options) => {
