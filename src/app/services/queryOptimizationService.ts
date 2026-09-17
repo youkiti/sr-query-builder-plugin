@@ -23,7 +23,8 @@ import {
 } from '@/features/formula/skills/optimizeQuery';
 import type { ProjectStoreDeps } from '@/features/project';
 import { fetchMeshTreeNumbers } from '@/lib/ncbi/mesh';
-import { diagnoseStructure, diagnosisTargets, meshOccurrences, queryWithoutBlock, diagnoseNarrowing, MAX_DIAGNOSIS_API_CALLS, DIAGNOSIS_LIMIT_NOTE, DIAGNOSIS_CHANGED_NOTE, type BlockDiagnosis } from '@/features/validation/blockDiagnosis';
+import { diagnoseStructure, diagnosisTargets, meshOccurrences, queryWithoutBlock, diagnoseNarrowing, diagnosePrecedenceMixing, MAX_DIAGNOSIS_API_CALLS, DIAGNOSIS_LIMIT_NOTE, DIAGNOSIS_CHANGED_NOTE, type BlockDiagnosis } from '@/features/validation/blockDiagnosis';
+import { expressionToOperatorSyntax, hasPrecedenceMixing, PRECEDENCE_MIXING_REJECT_MESSAGE } from '@/features/validation/precedenceMixing';
 import { diagnosedHeldBlock } from './queryOptimizationDiagnosis';
 import { extractBlockTerms } from '@/features/validation/blockTerms';
 import { analyzeFreewordDelta } from '@/features/validation/freewordDelta';
@@ -536,8 +537,11 @@ export async function runQueryOptimization(
       return eutils.fetch(resource, init);
     } };
     // 更新途中で停止しても、以前の式の件数を最新として保存しない。
+    // 優先順位の混在診断（precedence）は結合式が単純な AND かどうかに依存しないため、
+    // diagnoseStructure の simple 判定とは独立に毎回計算する。
     blockDiagnosis = { fingerprint: measurement.fingerprint,
       ...diagnoseStructure(formula, fixed.approvedBlocks, diagnosisTrees, diagnosisTreeReasons),
+      precedence: diagnosePrecedenceMixing(formula, fixed.approvedBlocks),
       narrowing: blocks.map((block) => diagnoseNarrowing(block, measurement.totalHits, null,
         changed ? DIAGNOSIS_CHANGED_NOTE : '未判定: 未測定')) };
     notify();
@@ -598,7 +602,8 @@ export async function runQueryOptimization(
         } finally { apiSource = 'PubMed'; }
       }
     }
-    Object.assign(blockDiagnosis, diagnoseStructure(formula, fixed.approvedBlocks, diagnosisTrees, diagnosisTreeReasons));
+    Object.assign(blockDiagnosis, diagnoseStructure(formula, fixed.approvedBlocks, diagnosisTrees, diagnosisTreeReasons),
+      { precedence: diagnosePrecedenceMixing(formula, fixed.approvedBlocks) });
     boundary();
     notify();
   }
@@ -1294,17 +1299,6 @@ function validateInput(input: QueryOptimizationInput, iterations: number, calls:
   return validateOptimizationCandidate(input.initialFormula, input.initialFormula, input.approvedBlocks);
 }
 
-// PMID などの文献識別子で検索集合を直接指定させない。プロンプトでも PMID 指定の追加を禁じている。
-const IDENTIFIER_FIELD_TAGS = new Set([
-  'uid', 'pmid', 'pmcid', 'pmc', 'doi',
-  'aid', 'article identifier', 'lid', 'location id', 'si', 'secondary source id',
-]);
-
-function hasIdentifierFieldTag(text: string): boolean {
-  const tag = /\[([^\]]+)\]$/.exec(text)?.[1];
-  return tag !== undefined && IDENTIFIER_FIELD_TAGS.has(tag.trim().toLowerCase().replace(/\s+/g, ' '));
-}
-
 /** AI の操作は単一概念行の差替えに限定し、既存パーサで参照・結合構文を検査する。 */
 export function validateOptimizationCandidate(initial: PubmedFormula, candidate: PubmedFormula,
   approved: ApprovedOptimizationBlock[], proposal?: OptimizeQueryProposal): string | null {
@@ -1329,15 +1323,11 @@ export function validateOptimizationCandidate(initial: PubmedFormula, candidate:
     } else if (proposal?.targetBlockId === block.id) {
       // 既存の語分解で識別子系を除くタグ付き語（近接タグや [pt] 等も含む）を仮の参照へ置き換え、結合文法で括弧・演算子を検査する。
       // 識別子系のタグ付き語とタグなしの自由文は自動変更の許可範囲外とし、自前の PubMed パーサは持たない。
-      const operands = new Set<string>();
-      const syntax = tokenizeExpression(block.expression).map((segment) => {
-        if (hasIdentifierFieldTag(segment.text)) return segment.text;
-        if (segment.kind === 'plain' && !/\[[^\]]+\]$/.test(segment.text)) return segment.text;
-        const id = `term${operands.size}`;
-        operands.add(id);
-        return `#${id}`;
-      }).join('');
-      if (validateCombinationExpression(normalizeConceptNotForValidation(syntax), operands).errors.length) return '検索語のタグ・括弧・演算子が不正、または自動変更の許可範囲外です';
+      const { syntax, operandIds } = expressionToOperatorSyntax(block.expression);
+      if (validateCombinationExpression(normalizeConceptNotForValidation(syntax), operandIds).errors.length) return '検索語のタグ・括弧・演算子が不正、または自動変更の許可範囲外です';
+      // 括弧の無い AND/NOT と OR が同じ深さに混在していると、PubMed は左から評価するため
+      // 意図と違う集合になる（issue #202）。判定は正規化前の syntax（NOT を AND NOT 化する前）で行う。
+      if (hasPrecedenceMixing(block.expression)) return PRECEDENCE_MIXING_REJECT_MESSAGE;
     }
   }
   const combination = candidate.blocks.filter((block) => block.isCombination).pop()?.expression ?? null;

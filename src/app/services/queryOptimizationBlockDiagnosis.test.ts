@@ -75,7 +75,8 @@ test('別ブロックの採用で改善なしがゼロに戻っても保留の�
   expect(result.stopReason).toBe('diagnosed_block_held');
 });
 test('MeSH 文脈を優先し、足りない descriptor だけ注入先に渡す', async () => {
-  const f = fixture([{ id: '1', expression: 'a[tiab] AND narrow[tiab] OR "Child"[Mesh]' }]);
+  // 括弧の無い AND と OR の混在は issue #202 の検査で実測前に却下されるため、AND 側を括弧で囲む。
+  const f = fixture([{ id: '1', expression: '(a[tiab] AND narrow[tiab]) OR "Child"[Mesh]' }]);
   f.input.initialFormula.blocks[0]!.expression += ' OR "Parent"[Mesh]';
   f.input.initialFormula.blocks[1]!.expression += ' OR "Child"[Mesh]';
   f.input.meshContext = [{ id: 'p', descriptor: 'Parent', label: null, treeNumbers: ['C01'], parentIds: [], childIds: [], explode: true, note: '' }];
@@ -88,7 +89,8 @@ test('MeSH 文脈を優先し、足りない descriptor だけ注入先に渡す
   expect(result.blockDiagnosis?.overlaps[0]?.kind).toBe('same');
 });
 test('追加取得した一部の階層で初回診断の内包を消さず、採用後も保持する', async () => {
-  const f = fixture([{ id: '1', expression: 'a[tiab] AND narrow[tiab] OR "Parent"[Mesh]' }]);
+  // 括弧の無い AND と OR の混在は issue #202 の検査で実測前に却下されるため、AND 側を括弧で囲む。
+  const f = fixture([{ id: '1', expression: '(a[tiab] AND narrow[tiab]) OR "Parent"[Mesh]' }]);
   f.input.maxIterations = 2;
   f.input.initialFormula.blocks[0]!.expression += ' OR "Parent"[Mesh]';
   f.input.initialFormula.blocks[1]!.expression += ' OR "Child"[Mesh]';

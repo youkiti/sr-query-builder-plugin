@@ -2042,6 +2042,53 @@ test.each([
   expect(validateOptimizationCandidate(input.initialFormula, candidate, input.approvedBlocks, proposal)).toContain('不正');
 });
 
+// issue #202: 括弧の無い AND/NOT と OR の混在は PubMed が左から評価するため意図と違う集合になる。
+test.each([
+  '(a[tiab] OR "salt substitute*"[tiab] AND "salt alternative"[tiab])',
+  '"salt substitute*"[tiab] AND "salt alternative"[tiab] OR b[tiab]',
+  '"salt substitute*"[tiab] OR "salt alternative"[tiab] NOT b[tiab]',
+  '("Sodium Chloride, Dietary"[Mesh] OR "salt substitute*"[tiab] OR "NaCl"[tiab] AND "chitosan"[tiab] OR "Symbiosal"[tiab])',
+])('括弧の無い AND/NOT と OR の混在を実測前に却下する: %s', (expression) => {
+  const { input } = setup();
+  const proposal: skill.OptimizeQueryProposal = { targetBlockId: '2', proposedExpression: expression,
+    addedTerms: [], removedTerms: [], replacedTerms: [], rationale: '', measurementIds: [] };
+  const candidate = { ...input.initialFormula, blocks: input.initialFormula.blocks.map((block) => ({ ...block })) };
+  candidate.blocks[1]!.expression = proposal.proposedExpression;
+  expect(validateOptimizationCandidate(input.initialFormula, candidate, input.approvedBlocks, proposal))
+    .toBe('AND / NOT と OR を括弧なしで同じ階層に混在させています（PubMed は左から評価するため意図と違う集合になります）。混在する部分を括弧で囲んでください');
+});
+
+test.each([
+  '("salt substitute*"[tiab] OR ("salt alternative"[tiab] AND b[tiab]))',
+  '(("salt substitute*"[tiab] OR "salt alternative"[tiab]) AND b[tiab])',
+  '("salt substitute*"[tiab] OR "salt alternative"[tiab]) NOT b[tiab]',
+])('混在する部分を括弧で囲めば変更案として通る: %s', (expression) => {
+  const { input } = setup();
+  const proposal: skill.OptimizeQueryProposal = { targetBlockId: '2', proposedExpression: expression,
+    addedTerms: [], removedTerms: [], replacedTerms: [], rationale: '', measurementIds: [] };
+  const candidate = { ...input.initialFormula, blocks: input.initialFormula.blocks.map((block) => ({ ...block })) };
+  candidate.blocks[1]!.expression = proposal.proposedExpression;
+  expect(validateOptimizationCandidate(input.initialFormula, candidate, input.approvedBlocks, proposal)).toBeNull();
+});
+
+test('初期式（proposal 無し）に混在があっても入力検査では却下せず run を開始できる', () => {
+  const { input } = setup();
+  input.initialFormula.blocks[1]!.expression = 'a[tiab] OR b[tiab] AND c[tiab]';
+  expect(validateOptimizationCandidate(input.initialFormula, input.initialFormula, input.approvedBlocks)).toBeNull();
+});
+
+test('初期式の優先順位混在は run を止めず、ブロック構造の診断（AI 入力の BLOCK_DIAGNOSIS）に載る', async () => {
+  // AI（chat モック）は常に block '1' だけを変更するため、block '2' の混在は run を通じて残る。
+  const { input, deps } = setup();
+  input.initialFormula.blocks[1]!.expression = 'fixed[tiab] OR extra[tiab] AND another[tiab]';
+  const result = await runQueryOptimization(input, deps);
+  expect(result.iterations).toBeGreaterThanOrEqual(1);
+  expect(result.blockDiagnosis?.precedence).toEqual([
+    { blockId: '2', label: '治療', note: expect.stringContaining('#2 治療') },
+  ]);
+  expect(result.blockDiagnosis!.precedence![0]!.note).toContain('AND / NOT と OR');
+});
+
 test('二項 NOT の結合行は従来の文法で拒否し、概念式の末尾 NOT も拒否する', () => {
   const { input } = setup();
   expect(validateCombinationExpression('#1 NOT #2', new Set(['1', '2'])).errors.length).toBeGreaterThan(0);
