@@ -1540,8 +1540,10 @@ test('情報要求は run あたり 3 回までで、上限超過分は取得せ
   }
 });
 
-test('finish（変更不要）は条件未達なら ai_finished ですぐ終わり、2 回目の AI 呼び出しをしない', async () => {
-  const { input, deps, chat } = setup();
+test('finish（変更不要）は条件未達（未捕捉シードあり）なら ai_finished ですぐ終わり、2 回目の AI 呼び出しをしない', async () => {
+  // 全件捕捉・目安超過（既定の setup() の状態）では no_change_needed を受け付けなくなったため、
+  // 「条件未達なら即終了」という本来の意図を保つべく未捕捉シードがある状態に変える（旧: setup()）。
+  const { input, deps, chat } = setup({ a: { pmids: papers(200, ['11']) } });
   chat.mockResolvedValueOnce({ text: JSON.stringify({ action: 'finish', finish_kind: 'no_change_needed',
     rationale: '冗長語は無く、修正不要と判断' }) });
   const result = await runQueryOptimization(input, deps);
@@ -1566,14 +1568,58 @@ test('finish は条件達成済みの最良候補でも最終再検証を経て�
   expect(result.trials[2]).toMatchObject({ accepted: true, reason: '最終再検証で目安件数と既知シードの捕捉を満たしました' });
 });
 
-test('finish（人の判断が必要）の区分が試行と未達理由に残る', async () => {
+test('finish（人の判断が必要）の区分が試行と未達理由に残る（全件捕捉・目安超過でも受け付ける）', async () => {
+  // 既定の setup() は全件捕捉・目安超過の状態。no_change_needed だけを拒否する仕様のため、
+  // needs_human_judgment はこの状態でも従来どおり即終了することを確認する。
   const { input, deps, chat } = setup();
   chat.mockResolvedValueOnce({ text: JSON.stringify({ action: 'finish', finish_kind: 'needs_human_judgment',
     rationale: '承認外のブロックが落としている' }) });
   const result = await runQueryOptimization(input, deps);
   expect(result.stopReason).toBe('ai_finished');
+  expect(chat).toHaveBeenCalledTimes(1);
+  expect(result.trials.map((trial) => trial.kind)).toEqual(['initial', 'finish']);
   expect(result.trials[1]).toMatchObject({ finishKind: 'needs_human_judgment', reason: 'AI の終了判断（人の判断が必要）' });
+  expect(result.trials[1]).not.toHaveProperty('finishRejectedReason');
   expect(result.unmetReasons).toContain('AI の判断（人の判断が必要）: 承認外のブロックが落としている');
+});
+
+test('全件捕捉・目安超過の no_change_needed は受け付けず、2 回続くと no_improvement で止まる', async () => {
+  // 既定の setup() は 200 件（maxHits 100 超過）・両シード捕捉済み。
+  const { input, deps, chat } = setup();
+  const finishBody = JSON.stringify({ action: 'finish', finish_kind: 'no_change_needed',
+    rationale: '冗長語は無く、修正不要と判断' });
+  chat.mockResolvedValueOnce({ text: finishBody }).mockResolvedValueOnce({ text: finishBody });
+  const result = await runQueryOptimization(input, deps);
+  expect(chat).toHaveBeenCalledTimes(2);
+  expect(result.stopReason).toBe('no_improvement');
+  expect(result.trials.map((trial) => trial.kind)).toEqual(['initial', 'finish', 'finish']);
+  for (const trial of [result.trials[1]!, result.trials[2]!]) {
+    expect(trial).toMatchObject({ finishKind: 'no_change_needed', accepted: false, after: null,
+      finishRejectedReason: expect.stringContaining('既知シードを全件捕捉したまま目安件数（100 件）を超えています（実測 200 件）') });
+    expect(trial.reason).toBe(trial.finishRejectedReason);
+  }
+  expect(result.unmetReasons.join('\n')).toContain('受け付けなかった AI の判断（変更不要）: 冗長語は無く、修正不要と判断');
+});
+
+test('全件捕捉・目安超過の no_change_needed を退けた後の変更案は保留候補として数えられる', async () => {
+  const before = ['11', '901', '903'];
+  const after = ['11'];
+  const f = setup({ a: { pmids: before }, b: { pmids: [...after] } });
+  f.input.seedPmids = ['11'];
+  f.input.maxHits = 1;
+  f.input.maxIterations = 1;
+  f.chat.mockResolvedValueOnce({ text: JSON.stringify({ action: 'finish', finish_kind: 'no_change_needed',
+    rationale: '冗長語は無く、修正不要と判断' }) });
+  const result = await runQueryOptimization(f.input, f.deps);
+  expect(f.chat).toHaveBeenCalledTimes(2);
+  expect(result.trials.map((trial) => trial.kind)).toEqual(['initial', 'finish', 'proposal']);
+  expect(result.trials[1]).toMatchObject({ finishKind: 'no_change_needed', accepted: false,
+    finishRejectedReason: expect.any(String) });
+  const impact = setImpact(before, after);
+  expect(impact.lostHits).toBeGreaterThan(0);
+  expect(result.trials[2]).toMatchObject({ accepted: false, held: true,
+    impact: { lostHits: impact.lostHits, gainedHits: impact.gainedHits } });
+  expect(result.stopReason).toBe('iteration_limit');
 });
 
 test('行動種別の条件を満たさない応答は測定前却下として残り、2 回続けば no_improvement で止まる', async () => {

@@ -62,6 +62,34 @@ test('測定・書誌・MeSH の全枝と採否履歴を欠測を補完せず渡
   expect(prompt).not.toContain('"query":"drug$[tiab]"');
 });
 
+test('試行履歴の要約: finish の受け付け・拒否を outcome で区別する', async () => {
+  const { input, provider, chat } = setup();
+  input.trials = [
+    { kind: 'finish', apiEvents: [], candidateId: 'finish-1', formula: input.formula, finishKind: 'no_change_needed',
+      accepted: false, after: null, before: measurement(), reason: 'AI の終了判断（変更不要）', rationale: '冗長語は無い' },
+    { kind: 'finish', apiEvents: [], candidateId: 'finish-2', formula: input.formula, finishKind: 'no_change_needed',
+      finishRejectedReason: '受け付けませんでした: 目安件数を超えています', accepted: false, after: null, before: measurement(),
+      reason: '受け付けませんでした: 目安件数を超えています', rationale: '冗長語は無い' },
+  ];
+  await optimizeQuery(input, provider);
+  const prompt = chat.mock.calls[0]![0][1].content as string;
+  const trialsSection = prompt.split('試行履歴（要約')[1]!;
+  expect(trialsSection).toContain('"candidateId":"finish-1"');
+  expect(trialsSection).toContain('"outcome":"終了判断"');
+  expect(trialsSection).toContain('"candidateId":"finish-2"');
+  expect(trialsSection).toContain('"outcome":"終了判断（受け付けず）"');
+});
+
+test('システムプロンプト: 全件捕捉・目安超過の間は no_change_needed を受け付けない旨を示す', async () => {
+  const { input, provider, chat } = setup();
+  await optimizeQuery(input, provider);
+  const system = chat.mock.calls[0]![0][0].content as string;
+  for (const text of ['既知シードを全件捕捉したまま目安件数を超えている間は no_change_needed を受け付けません',
+    'needs_human_judgment は、語の変更では解決できない場合']) {
+    expect(system).toContain(text);
+  }
+});
+
 test('snake_case の変更案を変換し、予想件数は出力型・スキーマに含めない', async () => {
   const { input, provider, chat } = setup(JSON.stringify({ target_block_id: ' 1 ', proposed_expression: ' new[tiab] ',
     added_terms: ['new'], removed_terms: ['old'], replaced_terms: [{ before: 'old', after: 'new' }],
