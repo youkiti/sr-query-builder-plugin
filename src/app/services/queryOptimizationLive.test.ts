@@ -40,8 +40,8 @@ test('情報要求は試行数に含めず、変更語と要求の参照だけ�
   const result = await runQueryOptimization(f.input, { ...f.deps, fetchMeshContext: async () => [node],
     onMeshContext: (nodes) => contexts.push(nodes),
     onProgress: (p) => { progress.push(p); if (p.trial?.changes) p.trial.changes.replacedTerms[0]!.after = '破損'; } });
-  // 情報要求（round 1）は maxIterations: 2 を消費しないため、round 2・3 の 2 回分の候補評価まで進む。
-  expect(result.iterations).toBe(3);
+  // 情報要求（round 1）と差し戻し（round 3）は評価試行を消費せず、round 4 まで進む。
+  expect(result.iterations).toBe(4);
   expect(progress[progress.length - 1]?.evaluatedTrials).toBe(2);
   expect(result.trials[1]).toMatchObject({ kind: 'information', after: null, meshRequests: [{ descriptor: 'Asthma', treeNumber: '' }] });
   expect(result.trials[2]).toMatchObject({ kind: 'proposal', changes: { replacedTerms: [{ before: 'a[tiab]', after: 'b[tiab]' }] } });
@@ -88,10 +88,9 @@ test('run の文脈通知を変更したり例外を投げたりしても、次�
     },
   });
   expect(snapshots).toEqual([[parent], [parent, child]]);
-  // 情報要求（round 1）は maxIterations: 2 を消費しないため round 2・3 まで進み、round 3 は round 2 と
-  // 同じ提案（同一式）で測定せずに却下されて no_improvement（2 回連続改善なし）で終了する。
+  // round 3 の同一式は差し戻し、round 4 でも同一式なら改善なしの 2 回目として終了する。
   expect(result.stopReason).toBe('no_improvement');
-  expect(result.trials).toHaveLength(4);
+  expect(result.trials).toHaveLength(5);
 });
 
 test('通信再試行とレート調整・取得失敗を分離し、試行数に加算しない', async () => {
@@ -132,7 +131,7 @@ test('AI 内部の再試行も取得イベントに記録し、修正案の試�
     { ...attempts, onRequestState, sleep: async () => undefined });
   const progress: QueryOptimizationProgress[] = [];
   const result = await runQueryOptimization(f.input, { ...f.deps, onProgress: (p) => progress.push(p) });
-  expect(f.chat).toHaveBeenCalledTimes(3);
+  expect(f.chat).toHaveBeenCalledTimes(4);
   expect(progress[progress.length - 1]?.evaluatedTrials).toBe(2);
   expect(result.trials[1]?.apiEvents).toContainEqual({ source: 'AI', status: 'retry' });
 });

@@ -3,6 +3,8 @@ import { annotateLostSample, type AnnotateLostSampleInput } from '@/features/for
 import {
   optimizeQuery,
   MAX_INFORMATION_TRIALS,
+  MAX_RESUBMISSION_RETRIES,
+  type OptimizeQueryInput,
   MAX_TRIAL_DETAILS_PER_REQUEST,
   type ApprovedOptimizationBlock,
   type OptimizationCriteria,
@@ -183,7 +185,7 @@ export interface QueryOptimizationResult {
 export const DEFAULT_MAX_ITERATIONS = 5;
 export const MAX_HELD_CANDIDATES = 3;
 // optimizeQuery.ts（features 層）のプロンプト文言と同じ値を使うため、そこから import して re-export する。
-export { MAX_INFORMATION_TRIALS };
+export { MAX_INFORMATION_TRIALS, MAX_RESUBMISSION_RETRIES };
 export const DEFAULT_MAX_API_CALLS = 200;
 export const MAX_TERM_API_CALLS = 100;
 // 保存回数を約1/10に抑えつつ、中断時に払い戻されうる通信を最大9回に留める。
@@ -261,6 +263,8 @@ export async function runQueryOptimization(
   const termCache = new Map<string, number>();
   let iterations = 0;
   let evaluatedTrials = 0;
+  let resubmissionRetries = 0;
+  let pendingResubmission: OptimizeQueryInput['resubmission'];
   let informationTrials = 0;
   let pendingInformation: OptimizationTrial['informedBy'];
   // 直前の情報要求で取り出した試行詳細。次の 1 回の optimizeQuery 呼び出しにだけ渡し、その後は
@@ -926,6 +930,7 @@ export async function runQueryOptimization(
         seedPapers: fixed.seedPapers ?? fixed.seedPmids.map((pmid) => ({ pmid, title: null })),
         blockDiagnosis, meshContext, meshRequestResults, trials, previousRejectedTrials: fixed.previousRejectedTrials,
         trialDetails: pendingTrialDetails,
+        resubmission: pendingResubmission,
       }, provider));
       llmSignal = undefined;
       boundary();
@@ -933,6 +938,8 @@ export async function runQueryOptimization(
       const candidateId = `candidate-${round}`;
       // 試行詳細は直前の 1 回の呼び出しにだけ渡す。この回の決定が何であれ消費済みとして破棄する
       // （この後 request_context 分岐で新しい詳細を要求すれば、そちらが次回分として設定し直す）。
+      const resubmittedThisCall = pendingResubmission !== undefined;
+      pendingResubmission = undefined;
       pendingTrialDetails = undefined;
       if (decision.action === 'request_context' && informationTrials < MAX_INFORMATION_TRIALS) {
         // 情報要求だけの回は候補評価を保留する。同一式回帰とせず、次の AI が取得結果を読む。
@@ -1041,6 +1048,21 @@ export async function runQueryOptimization(
           noImprovement += 1;
           await save();
         } else if (duplicateOf !== undefined) {
+          if (!resubmittedThisCall && resubmissionRetries < MAX_RESUBMISSION_RETRIES && !meetsTarget(best)) {
+            evaluatedTrials -= 1;
+            resubmissionRetries += 1;
+            trials.push(makeTrial({ ...details, candidateId, formula: candidate, before: best.measurement,
+              after: null, accepted: false, duplicateOf, resubmissionRequested: true,
+              reason: `評価済みの同一式の再提案のため測定せずに却下し、出し直しを求めました（${duplicateOf} と同じ式。評価試行・改善なし回数には数えません）`, rationale: proposal.rationale }));
+            pendingResubmission = {
+              candidateId, duplicateOf, targetBlockId: proposal.targetBlockId,
+              expression: candidate.blocks.find((block) => block.id === proposal.targetBlockId && !block.isCombination)?.expression ?? null,
+              duplicateOfHeld: trials.some((trial) => trial.candidateId === duplicateOf && trial.held === true),
+            };
+            await save();
+            boundary();
+            continue;
+          }
           trials.push(makeTrial({ ...details, candidateId, formula: candidate, before: best.measurement,
             after: null, accepted: false, duplicateOf,
             reason: `評価済みの同一式の再提案のため測定せずに却下（${duplicateOf} と同じ式）`, rationale: proposal.rationale }));

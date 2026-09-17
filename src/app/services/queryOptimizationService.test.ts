@@ -110,7 +110,7 @@ describe('保留標本の参考注釈', () => {
     expect(result.trials[1]!.impact!.annotation).toMatchObject({ status: 'success', requestedPmids: ['901', '902'], error: null });
     expect(result.trials[1]!.impact!.inspected[0]).not.toHaveProperty('abstract');
     expect(result.apiCalls).toBe(f.fetch.mock.calls.length + f.chat.mock.calls.length + 1);
-    expect(f.chat).toHaveBeenCalledTimes(2);
+    expect(f.chat).toHaveBeenCalledTimes(3);
     expect(f.chat.mock.calls[1]![0][1].content).not.toContain('後続の最適化には渡さない参考理由');
     expect(f.chat.mock.calls[1]![0][1].content).not.toContain('"annotation"');
   });
@@ -122,8 +122,8 @@ describe('保留標本の参考注釈', () => {
     if (kind === 'json') f.annotationChat.mockResolvedValue({ text: '壊れた JSON' });
     if (kind === 'timeout') f.annotationChat.mockImplementation(() => new Promise(() => {}));
     const result = await runQueryOptimization(f.input, f.deps);
-    expect(result).toMatchObject({ status: 'needs_review', stopReason: 'iteration_limit', iterations: 2 });
-    expect(f.chat).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({ status: 'needs_review', stopReason: 'iteration_limit', iterations: 3 });
+    expect(f.chat).toHaveBeenCalledTimes(3);
     const trial = result.trials[1]!;
     expect(trial.impact!.annotation).toMatchObject({ status: 'failure', items: [] });
     expect(trial.impact!.annotation!.error).toContain(kind === 'timeout' ? '期限切れ' : kind === 'exception' ? '注釈の通信エラー' : 'annotate-lost-sample');
@@ -263,7 +263,7 @@ describe('保留の収集と冗長整理', () => {
       : ['a[tiab] OR spare[tiab]', 'a[tiab] OR spare[tiab]']).map((expression) => ({ expression })));
     const result = await runQueryOptimization(f.input, f.deps);
     expect(result.stopReason).toBe('no_improvement');
-    expect(f.chat).toHaveBeenCalledTimes(held ? 4 : 2);
+    expect(f.chat).toHaveBeenCalledTimes(held ? 6 : 4);
     expect(result.unmetReasons).toContain(held ? heldTargetGuidance : hitTargetGuidance);
   });
 
@@ -454,7 +454,7 @@ test.each([true, false])('未捕捉 %s のときだけ全ブロックの捕捉�
   // 同一式の候補は測定せず、初期実測の 1 回に、未捕捉時だけ全ブロック分を加える。
   expect(captureQueries(f.fetch)).toHaveLength(1 + (missed ? f.input.initialFormula.blocks.length : 0));
   expect(f.fetch.mock.calls.filter(([url]) => url.includes('efetch.fcgi'))).toHaveLength(missed ? 1 : 0);
-  expect(result.apiCalls).toBe(f.fetch.mock.calls.length + 1);
+  expect(result.apiCalls).toBe(f.fetch.mock.calls.length + 2);
 });
 
 test.each(['declared', 'implicit', 'replacement', 'captured'])('削除制御 %s を測定前に適用する', async (kind) => {
@@ -743,7 +743,7 @@ test('2 回の保留は次の AI に理由と件数を渡し、その後の同�
     c: { pmids: papers(40, ['11', '22']) } }, ['b[tiab]', 'c[tiab]']);
   const result = await runQueryOptimization(input, deps);
   expect(result.stopReason).toBe('no_improvement');
-  expect(chat).toHaveBeenCalledTimes(4);
+  expect(chat).toHaveBeenCalledTimes(6);
   expect(result.trials.filter((trial) => trial.held)).toHaveLength(2);
   const prompt = chat.mock.calls[1]![0][1].content as string;
   // 試行履歴は要約なので、旧: 生 JSON の '"held": true' / '"lostHits": 150'（インデント付き）ではなく、
@@ -1001,7 +1001,8 @@ test('初期式が目標内でも AI を呼び、同じ式をキャッシュな�
   }));
   expect(evaluate).toHaveBeenCalledTimes(2);
   expect(result.trials.map((trial) => trial.candidateId)).toEqual(['initial', 'candidate-1', 'final-1']);
-  expect(result.trials[1]?.accepted).toBe(false);
+  expect(result.trials[1]).toMatchObject({ accepted: false, duplicateOf: 'initial', after: null });
+  expect(result.trials[1]).not.toHaveProperty('resubmissionRequested');
   expect(write).toHaveBeenCalledTimes(4);
   // 各区間は10通信未満でも、初期評価・候補評価・最終評価・終了は必ず保存する。
   expect(write.mock.calls.map(([items]) => items.queryOptimizationCheckpoint.resume.consumed.apiCalls)).toEqual([5, 8, 13, 13]);
@@ -1078,17 +1079,17 @@ test('目標内での件数削減は改善にせず初期式を最終検証す�
 test('fingerprint が初期式と一致する再提案は測定前に却下し、2 回連続で改善なしとして停止する', async () => {
   const { input, deps, chat } = setup({ a: { pmids: papers(200, ['11', '22']) } }, ['a[tiab]']);
   const result = await runQueryOptimization(input, deps);
-  expect(result).toMatchObject({ status: 'needs_review', stopReason: 'no_improvement', iterations: 2 });
+  expect(result).toMatchObject({ status: 'needs_review', stopReason: 'no_improvement', iterations: 4 });
   expect(result.trials[1]).toMatchObject({ after: null, duplicateOf: 'initial' });
   expect(result.trials[2]).toMatchObject({ after: null, duplicateOf: 'initial' });
   expect(await evaluation.formulaFingerprint(result.trials[1]!.formula)).toBe(result.trials[0]?.after?.fingerprint);
-  expect(chat).toHaveBeenCalledTimes(2);
+  expect(chat).toHaveBeenCalledTimes(4);
 });
 
 test('却下済みの式の再提案は改善なしの 2 回目として停止する', async () => {
   const { input, deps } = setup({ a: { pmids: papers(200, ['11', '22']) }, b: { pmids: papers(300, ['11', '22']) } });
   const result = await runQueryOptimization(input, deps);
-  expect(result).toMatchObject({ stopReason: 'no_improvement', iterations: 2 });
+  expect(result).toMatchObject({ stopReason: 'no_improvement', iterations: 3 });
   expect(result.best?.measurement.totalHits).toBe(200);
 });
 
@@ -1098,11 +1099,11 @@ test('採用直後の測定前却下が 1 回なら次の反復で AI を呼び�
   ['b[tiab]', 'b[tiab]', 'c[tiab]']);
   input.maxIterations = 3;
   const result = await runQueryOptimization(input, deps);
-  expect(result).toMatchObject({ stopReason: 'iteration_limit', iterations: 3 });
+  expect(result).toMatchObject({ stopReason: 'iteration_limit', iterations: 5 });
   expect(result.trials[1]).toMatchObject({ accepted: true });
   expect(result.trials[2]).toMatchObject({ accepted: false, after: null, duplicateOf: 'candidate-1' });
   expect(result.trials[3]).toMatchObject({ accepted: true });
-  expect(chat).toHaveBeenCalledTimes(3);
+  expect(chat).toHaveBeenCalledTimes(5);
   expect(result.best?.measurement.totalHits).toBe(202);
 });
 
@@ -1725,9 +1726,8 @@ test('追加取得した枝を次の AI 文脈へ反映し、情報要求だけ�
   expect(result.apiCalls).toBe(fetch.mock.calls.length + chat.mock.calls.length + 1);
   expect(evaluate).toHaveBeenCalledTimes(2);
   expect(result.trials[1]?.after).toBeNull();
-  // 情報要求（round 1）は evaluatedTrials を消費しないため、maxIterations: 2 でも round 3 まで進む
-  // （round 2 の変更案が却下された後、evaluatedTrials が上限に達するまで round が続く）。
-  expect(result.iterations).toBe(3);
+  // 情報要求（round 1）と差し戻し（round 3）は評価試行を消費せず、round 4 まで進む。
+  expect(result.iterations).toBe(4);
   expect(input.meshContext![0]!.childIds).toEqual([]);
   nodes[0]!.treeNumbers.push('late');
   expect(optimize.mock.calls[1]![0].meshContext![1]!.treeNumbers).toEqual(['C01.100.200']);
@@ -2374,10 +2374,11 @@ test('保留式の再提案は申告が空でも通信せず一致 ID と実差�
       added_terms: [], removed_terms: [], replaced_terms: [] }) };
   });
   const result = await runQueryOptimization(f.input, f.deps);
-  expect(result).toMatchObject({ stopReason: 'no_improvement', iterations: 3 });
+  expect(result).toMatchObject({ stopReason: 'no_improvement', iterations: 5 });
   expect(f.fetch.mock.calls.length).toBe(callCounts[1]);
   expect(result.trials[2]).toMatchObject({ duplicateOf: 'candidate-1', after: null, accepted: false,
-    reason: '評価済みの同一式の再提案のため測定せずに却下（candidate-1 と同じ式）',
+    resubmissionRequested: true,
+    reason: '評価済みの同一式の再提案のため測定せずに却下し、出し直しを求めました（candidate-1 と同じ式。評価試行・改善なし回数には数えません）',
     formulaDiff: [{ blockId: '1', removed: ['a[tiab]'], added: ['b[tiab]'] }] });
 });
 
@@ -2654,7 +2655,7 @@ describe('通信中のキャンセルと試行単位の予算', () => {
     const result = await pending;
     expect(signal.aborted).toBe(true);
     expect(result.stopReason).toBe('iteration_limit');
-    expect(f.chat).toHaveBeenCalledTimes(1);
+    expect(f.chat).toHaveBeenCalledTimes(2);
     expect(result.trials[1]?.before?.terms).toContainEqual(expect.objectContaining({ query: 'a[tiab]', hits: null }));
   });
 
@@ -2691,7 +2692,7 @@ describe('通信中のキャンセルと試行単位の予算', () => {
     const result = await pending;
     expect(signal.aborted).toBe(true);
     expect(result.stopReason).toBe('iteration_limit');
-    expect(f.chat).toHaveBeenCalledTimes(1);
+    expect(f.chat).toHaveBeenCalledTimes(2);
     expect(result.trials[1]?.before?.terms).toContainEqual(expect.objectContaining({ query, hits: null }));
   });
 
@@ -2778,8 +2779,7 @@ describe('通信中のキャンセルと試行単位の予算', () => {
 
   test.each(['fetch', 'json', 'text'] as const)('進捗通知なしの MeSH %s にも期限を適用し、取得単位で数える', async (stage) => {
     const f = setup(undefined, ['a[tiab]']);
-    // 情報要求（round 1）は evaluatedTrials を消費しないため、round 2 の 1 回だけを許す
-    // maxIterations: 1 で従来どおり 2 回の AI 呼び出しで打ち切る。
+    // 情報要求（round 1）と差し戻し（round 2）は評価試行を消費せず、round 3 で上限になる。
     f.input.maxIterations = 1;
     f.deps.ncbiRequestTimeoutMs = 50;
     requestMesh(f.chat, [meshRequest]);
@@ -2809,7 +2809,7 @@ describe('通信中のキャンセルと試行単位の予算', () => {
     const result = await pending;
     expect(signal.aborted).toBe(true);
     expect(result.stopReason).toBe('iteration_limit');
-    expect(f.chat).toHaveBeenCalledTimes(2);
+    expect(f.chat).toHaveBeenCalledTimes(3);
     expect(optimize.mock.calls[1]![0].meshRequestResults![0]!.note)
       .toBe('未取得: MeSH 取得に失敗しました。理由: NCBI の応答が 0.05 秒以内に返りませんでした');
     const pubmedCalls = f.fetch.mock.calls.filter(([url]) => url !== 'https://mesh.test/timeout').length;
@@ -2928,8 +2928,8 @@ describe('通信中のキャンセルと試行単位の予算', () => {
     retry.deps.eutils.sleep = async () => undefined;
     retry.chat.mockRejectedValueOnce(new LlmProviderError('混雑', 'gemini', 429, ''));
     const result = await runQueryOptimization(retry.input, retry.deps);
-    expect(retry.chat).toHaveBeenCalledTimes(2);
-    expect(result.apiCalls).toBe(retry.fetch.mock.calls.length + 2);
+    expect(retry.chat).toHaveBeenCalledTimes(3);
+    expect(result.apiCalls).toBe(retry.fetch.mock.calls.length + 3);
     const limited = setup();
     // 初期測定後の残りを 1 回にする。予約予算により任意の語別計測は省略される。
     limited.deps.maxApiCalls = retry.write.mock.calls[0]![0].queryOptimizationCheckpoint.resume.consumed.apiCalls + 1;
@@ -2960,4 +2960,62 @@ test('増える集合だけの通信失敗なら失う書誌の exclude 保存�
     lostHits: 1, gainedHits: null, failedMeasurements: ['gained_search'], error: expect.stringContaining('414'),
   } });
   expect(evaluateHeldCandidateAdoptionGate(trial, { '901': { status: 'saved', decision: 'exclude', error: null } }, { bestCapturedPmids: result.best?.measurement.capturedPmids }).allowed).toBe(true);
+});
+
+test('同一式は評価試行を消費せず差し戻し、次の一度だけ出し直しを求める', async () => {
+  const { input, deps, chat } = setup(undefined, ['a[tiab]', 'b[tiab]']);
+  input.maxIterations = 1;
+  const progress = jest.fn();
+  const result = await runQueryOptimization(input, { ...deps, onProgress: progress });
+  expect(result.trials[1]).toMatchObject({ candidateId: 'candidate-1', duplicateOf: 'initial',
+    resubmissionRequested: true, after: null, accepted: false });
+  expect(progress).toHaveBeenLastCalledWith(expect.objectContaining({ evaluatedTrials: 1 }));
+  expect(chat).toHaveBeenCalledTimes(2);
+  expect(chat.mock.calls[1]![0][1].content).toContain('直前の提案の差し戻し:\n直前の提案 candidate-1（#1 = a[tiab]）は initial と同じ式');
+});
+
+test('差し戻し直後の同一式は改善なしに数え、次回の差し戻し入力は消える', async () => {
+  const { input, deps, chat } = setup(undefined, ['a[tiab]']);
+  const progress = jest.fn();
+  const result = await runQueryOptimization(input, { ...deps, onProgress: progress });
+  expect(result.stopReason).toBe('no_improvement');
+  expect(result.trials).toHaveLength(5);
+  expect(result.trials[1]?.resubmissionRequested).toBe(true);
+  expect(result.trials[2]).toMatchObject({ duplicateOf: 'initial', after: null });
+  expect(result.trials[2]).not.toHaveProperty('resubmissionRequested');
+  expect(result.trials[3]?.resubmissionRequested).toBe(true);
+  expect(result.trials[4]).not.toHaveProperty('resubmissionRequested');
+  expect(chat.mock.calls[2]![0][1].content).toMatch(/^直前の提案の差し戻し:\n\(なし\)/);
+  expect(progress).toHaveBeenLastCalledWith(expect.objectContaining({ evaluatedTrials: 2 }));
+});
+
+test('差し戻しは run あたりの上限を超えず、その後の同一式は評価試行に数える', async () => {
+  const { input, deps, chat } = setup({ a: { pmids: papers(200, ['11', '22']) },
+    b: { pmids: papers(50, ['11', '22']) }, c: { pmids: papers(40, ['11', '22']) } },
+  ['a[tiab]', 'a[tiab]', 'b[tiab]', 'b[tiab]', 'b[tiab]', 'c[tiab]', 'c[tiab]', 'c[tiab]', 'c[tiab]']);
+  input.maxIterations = 10;
+  const progress = jest.fn();
+  const result = await runQueryOptimization(input, { ...deps, onProgress: progress });
+  expect(result.stopReason).toBe('no_improvement');
+  expect(result.trials.filter((trial) => trial.resubmissionRequested)).toHaveLength(skill.MAX_RESUBMISSION_RETRIES);
+  expect(result.trials[9]).toMatchObject({ duplicateOf: 'candidate-6', after: null });
+  expect(result.trials[9]).not.toHaveProperty('resubmissionRequested');
+  expect(chat).toHaveBeenCalledTimes(9);
+  expect(chat.mock.calls[8]![0][1].content).toMatch(/^直前の提案の差し戻し:\n\(なし\)/);
+  expect(progress).toHaveBeenLastCalledWith(expect.objectContaining({ evaluatedTrials: 6 }));
+});
+
+test('保留した式の差し戻しだけでは改善なしで停止せず別の変更案へ進む', async () => {
+  const { input, deps, chat } = setup({ a: { pmids: papers(200, ['11', '22']) },
+    b: { pmids: papers(50, ['11', '22']) }, c: { pmids: papers(40, ['11', '22']) } },
+  ['b[tiab]', 'b[tiab]', 'c[tiab]']);
+  input.maxIterations = 2;
+  const progress = jest.fn();
+  const result = await runQueryOptimization(input, { ...deps, onProgress: progress });
+  expect(result.stopReason).toBe('iteration_limit');
+  expect(result.trials[2]).toMatchObject({ duplicateOf: 'candidate-1', resubmissionRequested: true });
+  expect(result.trials[3]?.held).toBe(true);
+  expect(chat).toHaveBeenCalledTimes(3);
+  expect(chat.mock.calls[2]![0][1].content).toContain('直前の提案 candidate-2（#1 = b[tiab]）は candidate-1 と同じ式（保留候補としてすでに人の判断に回っています）');
+  expect(progress).toHaveBeenLastCalledWith(expect.objectContaining({ evaluatedTrials: 2 }));
 });
