@@ -12,7 +12,7 @@ import {
   suggestMesh,
 } from '@/features/formula/skills';
 import { handleGeminiGenerateContent } from './llmFixtures';
-import { optimizeQuery, type OptimizeQueryInput } from '@/features/formula/skills/optimizeQuery';
+import { optimizeQuery, type OptimizeQueryDecision, type OptimizeQueryInput } from '@/features/formula/skills/optimizeQuery';
 import { annotateLostSample } from '@/features/formula/skills/annotateLostSample';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
 import { esearch, sharedEutilsRateLimiters } from '@/lib/ncbi';
@@ -326,6 +326,12 @@ describe('プラン判定プローブ（第 2 章の tier バッジ）', () => {
 });
 
 
+/** デモのフィクスチャは旧形式（action 無し）なので常に propose_changes に解釈される。 */
+function asProposeChanges(decision: OptimizeQueryDecision): Extract<OptimizeQueryDecision, { action: 'propose_changes' }> {
+  if (decision.action !== 'propose_changes') throw new Error(`propose_changes ではありません: ${decision.action}`);
+  return decision;
+}
+
 describe('optimize-query フィクスチャ', () => {
   function input(): OptimizeQueryInput {
     return {
@@ -342,12 +348,12 @@ describe('optimize-query フィクスチャ', () => {
 
   it('実際の skill のプロンプトを判定し、決定的な MeSH 追加と測定参照を返す', async () => {
     const before = input();
-    const proposal = await optimizeQuery(before, makeProvider());
+    const proposal = asProposeChanges(await optimizeQuery(before, makeProvider()));
     expect(proposal).toEqual({
-      targetBlockId: '2',
+      action: 'propose_changes', targetBlockId: '2',
       proposedExpression: `(${before.formula.blocks[1]!.expression}) OR ${ECMO_MESH_ADDITION.tagSyntax}`,
       addedTerms: [ECMO_MESH_ADDITION.tagSyntax], removedTerms: [], replacedTerms: [],
-      rationale: expect.stringContaining('成人 ARDS'), measurementIds: ['demo-measurement'], meshRequests: [],
+      rationale: expect.stringContaining('成人 ARDS'), measurementIds: ['demo-measurement'],
     });
     expect(await optimizeQuery(before, makeProvider())).toEqual(proposal);
     before.formula.blocks[1]!.expression = proposal.proposedExpression;
@@ -368,7 +374,7 @@ describe('optimize-query フィクスチャ', () => {
 
   it('デモの AND/OR/NOT と uid 交差で、追加文献・削除ゼロ・シード捕捉表を実測する', async () => {
     const before = input();
-    const proposal = await optimizeQuery(before, makeProvider());
+    const proposal = asProposeChanges(await optimizeQuery(before, makeProvider()));
     const after = { ...before.formula, blocks: before.formula.blocks.map((block) =>
       block.id === proposal.targetBlockId ? { ...block, expression: proposal.proposedExpression } : block) };
     const eutils = { fetch: demoFetch, rateLimiter: { acquire: async () => undefined } };

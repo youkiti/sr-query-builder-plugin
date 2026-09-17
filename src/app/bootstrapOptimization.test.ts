@@ -77,12 +77,12 @@ async function switchProject(fixture: ReturnType<typeof setup>, projectId = 'oth
 }
 afterEach(() => { jest.restoreAllMocks(); document.body.innerHTML = ''; });
 
-function prepareResume(f: ReturnType<typeof setup>) {
+function prepareResume(f: ReturnType<typeof setup>, extraTrials: InterruptedQueryOptimization['trials'] = []) {
   const state = f.store.getState();
   const checkpoint: InterruptedQueryOptimization = { projectId: 'p', runId: 'old', maxHits: 123, savedAt: 'old-time',
     status: 'interrupted', needsRevalidation: true,
     trials: [{ candidateId: 'rejected', formula, reason: 'シードを失う', fingerprint: 'old-hash', accepted: false,
-      totalHits: 1, capturedSeedCount: 0 }],
+      totalHits: 1, capturedSeedCount: 0, kind: 'proposal' }, ...extraTrials],
     resume: { bestFormula: { blocks: [{ id: '1', expression: 'best[tiab]', isCombination: false }], combinationExpression: null },
       inputIdentity: createQueryOptimizationInputIdentity(state.protocolDraft!, state.blocksDraft!, ['11'], 123),
       limits: { apiCalls: 200, elapsedMs: 600000, evaluatedTrials: 5 },
@@ -115,6 +115,36 @@ test('再開は最良式・新 runId・3種類の残予算を使い、初期式�
   expect(generate).not.toHaveBeenCalled();
   expect(f.store.getState().queryOptimizationRun?.generationNotices).toBeUndefined();
   expect(f.data.queryOptimizationCheckpoint).toBe(checkpoint);
+});
+
+test('再開時の却下記録には、通常の却下 proposal だけを渡す（情報要求・終了判断・不正応答は混ぜない）', async () => {
+  const f = setup();
+  const { resume } = prepareResume(f, [
+    { candidateId: 'info-1', formula, reason: '情報要求', fingerprint: null, accepted: false,
+      totalHits: null, capturedSeedCount: null, kind: 'information' },
+    { candidateId: 'finish-1', formula, reason: 'AI の終了判断（変更不要）', fingerprint: null, accepted: false,
+      totalHits: null, capturedSeedCount: null, kind: 'finish' },
+    { candidateId: 'invalid-1', formula, reason: 'AI の応答が行動種別の条件を満たしません: 変更案と情報要求が混在しています',
+      fingerprint: null, accepted: false, totalHits: null, capturedSeedCount: null, kind: 'proposal',
+      responseError: '変更案と情報要求が混在しています' },
+  ]);
+  await resume();
+  const [input] = f.run.mock.calls[0]!;
+  // 通常の却下 proposal（'rejected'）だけが previousRejectedTrials に渡り、information・finish・
+  // responseError 付き proposal（式は最良式のまま）は「却下された式」として次の run の AI 文脈に入らない。
+  expect(input.previousRejectedTrials?.map((trial) => trial.reason)).toEqual(['さらに前の却下', 'シードを失う']);
+});
+
+test('kind の無い旧形式の却下試行は、information・finish・不正応答が存在しなかった当時どおり !accepted だけで引き継ぐ', async () => {
+  const f = setup();
+  const legacyTrial = { candidateId: 'legacy-rejected', formula, reason: '前回はシードを失った',
+    fingerprint: 'old-fingerprint', accepted: false, totalHits: 1, capturedSeedCount: 0 };
+  expect(legacyTrial).not.toHaveProperty('kind');
+  const { resume } = prepareResume(f, [legacyTrial]);
+  await resume();
+  const [input] = f.run.mock.calls[0]!;
+  expect(input.previousRejectedTrials?.map((trial) => trial.reason))
+    .toEqual(['さらに前の却下', 'シードを失う', '前回はシードを失った']);
 });
 
 test.each(['criteria', 'blocks', 'seeds', 'budget', 'completed', 'missing'] as const)('再開時にも %s を確認し、run 作成前に拒否する', async (kind) => {

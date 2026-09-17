@@ -40,8 +40,9 @@ test('情報要求は試行数に含めず、変更語と要求の参照だけ�
   const result = await runQueryOptimization(f.input, { ...f.deps, fetchMeshContext: async () => [node],
     onMeshContext: (nodes) => contexts.push(nodes),
     onProgress: (p) => { progress.push(p); if (p.trial?.changes) p.trial.changes.replacedTerms[0]!.after = '破損'; } });
-  expect(result.iterations).toBe(2);
-  expect(progress[progress.length - 1]?.evaluatedTrials).toBe(1);
+  // 情報要求（round 1）は maxIterations: 2 を消費しないため、round 2・3 の 2 回分の候補評価まで進む。
+  expect(result.iterations).toBe(3);
+  expect(progress[progress.length - 1]?.evaluatedTrials).toBe(2);
   expect(result.trials[1]).toMatchObject({ kind: 'information', after: null, meshRequests: [{ descriptor: 'Asthma', treeNumber: '' }] });
   expect(result.trials[2]).toMatchObject({ kind: 'proposal', changes: { replacedTerms: [{ before: 'a[tiab]', after: 'b[tiab]' }] } });
   expect(contexts).toEqual([[], [node]]);
@@ -87,8 +88,10 @@ test('run の文脈通知を変更したり例外を投げたりしても、次�
     },
   });
   expect(snapshots).toEqual([[parent], [parent, child]]);
-  expect(result.stopReason).toBe('iteration_limit');
-  expect(result.trials).toHaveLength(3);
+  // 情報要求（round 1）は maxIterations: 2 を消費しないため round 2・3 まで進み、round 3 は round 2 と
+  // 同じ提案（同一式）で測定せずに却下されて no_improvement（2 回連続改善なし）で終了する。
+  expect(result.stopReason).toBe('no_improvement');
+  expect(result.trials).toHaveLength(4);
 });
 
 test('通信再試行とレート調整・取得失敗を分離し、試行数に加算しない', async () => {

@@ -73,7 +73,7 @@ test('単一キーに要約だけを保存し、復元は中断・要再検証�
   const { data, deps, trial, options } = setup();
   const saved = await saveQueryOptimizationCheckpoint({ ...options, now: () => 'fixed-time' }, deps);
   expect(Object.keys(data)).toEqual(['queryOptimizationCheckpoint']);
-  expect(saved.trials).toEqual([{ candidateId: 'initial', formula: trial.formula, totalHits: 0,
+  expect(saved.trials).toEqual([{ candidateId: 'initial', kind: 'initial', formula: trial.formula, totalHits: 0,
     capturedSeedCount: 0, accepted: true, held: false, lostHits: null, gainedHits: null, reason: '初期式', fingerprint: 'hash' }]);
   for (const field of ['before', 'after', 'measurement', 'terms', 'capturedPmids', 'missedPmids', 'rationale']) {
     expect(JSON.stringify(saved)).not.toContain(`"${field}"`);

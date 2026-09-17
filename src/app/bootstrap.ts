@@ -1280,7 +1280,11 @@ export async function runOptimizeQuery(
       } : {}),
       // 人の除外は再開可否と切り離して引き継ぐ。
       previousRejectedTrials: [
-        ...(resume?.available ? [...resume.data.previousRejectedTrials, ...checkpoint!.trials.filter((trial) => !trial.accepted)
+        ...(resume?.available ? [...resume.data.previousRejectedTrials, ...checkpoint!.trials
+          // kind の無い旧形式の保存は、旧 finish・不正応答が存在しなかった従来どおり !accepted だけで引き継ぐ。
+          // kind がある試行は、finish・information・不正応答（式は最良式のまま）を却下記録から除く。
+          .filter((trial) => trial.kind === undefined ? !trial.accepted
+            : trial.kind === 'proposal' && !trial.accepted && !trial.responseError)
           .map(({ formula, reason, fingerprint, candidateId }) => ({ formula, reason, fingerprint,
             rejectedByHuman: checkpoint!.heldRejections?.[candidateId] != null }))] : []),
         ...getHumanRejectedTrials(rejectionCheckpoint),

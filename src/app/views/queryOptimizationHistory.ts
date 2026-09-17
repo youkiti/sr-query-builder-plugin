@@ -265,7 +265,7 @@ export function createOptimizationHistoryRenderer(): (
       const contextChanged = renderedContext !== run.meshContext;
       for (const trial of run.trials) {
         const label = trial.kind === 'initial' ? '初期式' : trial.kind === 'final' ? '最終再検証'
-          : trial.kind === 'information' ? '情報要求' : `試行${++evaluated}`;
+          : trial.kind === 'information' ? '情報要求' : trial.kind === 'finish' ? '終了判断' : `試行${++evaluated}`;
         const nodes = relatedMeshNodes(trial, run.meshContext);
         const existing = rows.get(trial.candidateId);
         if (existing && (existing.trial === trial || JSON.stringify(existing.trial) === JSON.stringify(trial))) {
@@ -276,9 +276,14 @@ export function createOptimizationHistoryRenderer(): (
           continue;
         }
         const row = doc.createElement('li');
-        paragraph(row, `${label} — 前後件数: ${hits(trial.before?.totalHits)} → ${hits(trial.after?.totalHits)} / シード: ${seedCount(trial.before, run.seedCount)} → ${seedCount(trial.after, run.seedCount)} / ${trial.kind === 'information' ? '評価保留' : trial.held ? '保留' : trial.accepted ? '採用' : '却下'}: ${trial.reason}`);
+        const outcome = trial.kind === 'information' ? '評価保留' : trial.kind === 'finish' ? '終了判断'
+          : trial.held ? '保留' : trial.accepted ? '採用' : '却下';
+        paragraph(row, `${label} — 前後件数: ${hits(trial.before?.totalHits)} → ${hits(trial.after?.totalHits)} / シード: ${seedCount(trial.before, run.seedCount)} → ${seedCount(trial.after, run.seedCount)} / ${outcome}: ${trial.reason}`);
         if (trial.kind === 'information' && trial.informationResult) {
           paragraph(row, `情報要求 ${trial.candidateId}: 文脈へ反映 ${trial.informationResult.obtained} / 要求 ${trial.informationResult.requested} 件`);
+        }
+        if (trial.kind === 'finish' && trial.finishKind) {
+          paragraph(row, `終了区分: ${trial.finishKind === 'no_change_needed' ? '変更不要' : '人の判断が必要'}（この判断だけでは目安件数・既知シードの捕捉の達成は確定しません）`);
         }
         if (trial.informedBy) {
           paragraph(row, `情報要求 ${trial.informedBy.candidateId} で得た文脈 ${trial.informedBy.obtained}/${trial.informedBy.requested} 件を読んだうえでの判断`);

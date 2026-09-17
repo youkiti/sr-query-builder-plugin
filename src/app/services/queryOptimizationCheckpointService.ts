@@ -89,6 +89,13 @@ export interface OptimizationTrialSummary {
   sample?: NonNullable<OptimizationTrial['impact']>['sample'];
   duplicateOf?: string;
   formulaDiff?: OptimizationTrial['formulaDiff'];
+  /**
+   * 旧形式の保存記録（このフィールド追加前）には無い。旧形式には finish・不正応答が存在しなかったため、
+   * 未指定の試行は再開時の却下記録の対象に含める（従来どおり !accepted だけで判定する）。
+   */
+  kind?: OptimizationTrial['kind'];
+  /** action: 'invalid'（行動種別の条件を満たさない応答）だった proposal 試行の印。式は最良式のまま。 */
+  responseError?: string;
   candidateId: string;
   formula: PubmedFormula;
   totalHits: number | null;
@@ -171,6 +178,8 @@ export async function saveQueryOptimizationCheckpoint(
       } } : {}),
       trials: trials.map((trial) => ({
         candidateId: trial.candidateId,
+        kind: trial.kind,
+        ...(trial.responseError ? { responseError: trial.responseError } : {}),
         ...(trial.impact?.annotation ? { annotation: { status: trial.impact.annotation.status,
           counts: countLostSampleAnnotations(trial.impact.annotation) } } : {}),
         ...(trial.impact?.sample ? { sample: { ...trial.impact.sample, pmids: [...trial.impact.sample.pmids] } } : {}),
