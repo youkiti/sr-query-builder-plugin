@@ -257,7 +257,7 @@ test('一覧内の重複は式を繰り返さず、初期式の重複は式と�
   await optimizeQuery(f.input, f.provider);
   const lines = (f.chat.mock.calls[0]![0][1].content as string).split('保留・却下した変更の一覧:\n')[1]!.split('\n試行履歴')[0]!.split('\n');
   expect(lines).toHaveLength(4);
-  expect(lines[0]).toBe('注意: 評価済みの式と同じ式を再提案し、測定せずに却下した回が 2 回あります（candidate-3 → candidate-1, candidate-4 → initial）。同一式の再提案は改善なし（採用にも保留にもならない回）に数えられ、2 回続くと run は停止します。各行の「変更後の式」と同じ式を出さないでください。');
+  expect(lines[0]).toBe('注意: 評価済みの式と同じ式を再提案し、測定せずに却下した回が 2 回あります（candidate-3 → candidate-1, candidate-4 → initial）。同一式の再提案は差し戻して出し直しを求めることがありますが、続けて同じ式を出すと改善なし（採用にも保留にもならない回）に数えられ、2 回続くと run は停止します。各行の「変更後の式」と同じ式を出さないでください。');
   expect(lines[1]).toContain('変更後の式: #2 = drug[tiab]');
   expect(lines[2]).not.toMatch(/変更後の式|現在の式との関係/);
   expect(lines[3]).toContain('変更後の式: #2 = drug[tiab] / 現在の式との関係: このブロック以外は現在の式と同じ');
@@ -446,4 +446,34 @@ describe('trial_detail_ids で取り出した試行詳細（TRIAL_DETAILS 節）
     expect(section).toContain('unknown-id');
     expect(section).toContain('見つかりません');
   });
+});
+
+test('差し戻しが無い回はプロンプト先頭に無しを示し、システムに再提案禁止を示す', async () => {
+  const { input, provider, chat } = setup();
+  await optimizeQuery(input, provider);
+  expect(chat.mock.calls[0]![0][1].content).toMatch(/^直前の提案の差し戻し:\n\(なし\)\n研究基準:/);
+  expect(chat.mock.calls[0]![0][0].content).toContain('「直前の提案の差し戻し」がある回は、差し戻された式と同じ式を出さないでください。');
+});
+
+test.each([
+  { duplicateOfHeld: true, expression: 'drug$[tiab]' },
+  { duplicateOfHeld: false, expression: 'drug$[tiab]' },
+  { duplicateOfHeld: false, expression: null },
+])('差し戻しの候補・式・保留状態を先頭に示す（%j）', async (values) => {
+  const { input, provider, chat } = setup();
+  input.resubmission = { candidateId: 'candidate-2', duplicateOf: 'candidate-1', targetBlockId: '1', ...values };
+  await optimizeQuery(input, provider);
+  const expected = `直前の提案 candidate-2（#1 = ${values.expression ?? '(式を特定できません)'}）は candidate-1 と同じ式${values.duplicateOfHeld ? '（保留候補としてすでに人の判断に回っています）' : ''}だったため、測定せずに差し戻しました。この式も「保留・却下した変更の一覧」にある式も出さず、別の変更案を返すか、変更が不要・不可能なら finish を選んでください。差し戻しは 1 回だけで、続けて同じ式を出すと改善なしに数えます。`;
+  expect(chat.mock.calls[0]![0][1].content.startsWith(`直前の提案の差し戻し:\n${expected}\n研究基準:`)).toBe(true);
+});
+
+test.each([true, false, undefined])('試行要約には差し戻した回だけ印を付ける（%s）', async (resubmissionRequested) => {
+  const { input, provider, chat } = setup();
+  input.trials = [{ kind: 'proposal', candidateId: 'candidate-2', duplicateOf: 'candidate-1',
+    resubmissionRequested, formula: input.formula, accepted: false, before: null, after: null,
+    apiEvents: [], reason: '同一式', rationale: '変更' }];
+  await optimizeQuery(input, provider);
+  const summary = chat.mock.calls[0]![0][1].content.split('試行履歴（要約')[1] as string;
+  if (resubmissionRequested) expect(summary).toContain('"duplicateOf":"candidate-1","resubmissionRequested":true');
+  else expect(summary).not.toContain('resubmissionRequested');
 });

@@ -123,6 +123,8 @@ export interface OptimizationImpact {
 
 export interface OptimizationTrial {
   duplicateOf?: string;
+  /** 同一式の再提案を測定せずに却下し、評価試行数・改善なし回数に数えずに次の AI 呼び出しで出し直しを求めた試行（kind: 'proposal'、duplicateOf と併せて設定）。 */
+  resubmissionRequested?: boolean;
   /** 提案前の最良式と候補式を、ブロックごとの検索語の集合で比べた差分。 */
   formulaDiff?: { blockId: string; added: string[]; removed: string[] }[];
   /** 採用判定を通ったが削除影響の確認が必要なため、レビュー候補として保留した試行。 */
@@ -206,6 +208,8 @@ export interface OptimizeQueryTrialDetailResult {
 }
 
 export interface OptimizeQueryInput {
+  /** 直前の呼び出しの提案を同一式として差し戻したときだけ渡す。次の 1 回の呼び出しにだけ使う。 */
+  resubmission?: { candidateId: string; duplicateOf: string; targetBlockId: string; expression: string | null; duplicateOfHeld: boolean };
   blockDiagnosis?: BlockDiagnosis;
   missedSeeds?: OptimizationMissedSeed[];
   formula: PubmedFormula;
@@ -257,6 +261,12 @@ const SKILL_NAME = 'optimize-query';
  * （features 層から app 層を import しないため、この向きが正しい）。
  */
 export const MAX_INFORMATION_TRIALS = 3;
+
+/**
+ * 同一式の再提案を差し戻して出し直しを求める回数の run あたりの上限。
+ * 差し戻しは評価試行数・改善なし回数を消費しないため、無限に続かないよう別に制限する。
+ */
+export const MAX_RESUBMISSION_RETRIES = 3;
 
 /**
  * request_context の trial_detail_ids で 1 回に取り出せる試行詳細の上限。
@@ -333,6 +343,7 @@ action を 1 つ選び、JSON だけで返してください。
   一覧の削除を同じ形で出しても、失う集合が残る限り再び保留になります。
   件数を減らしたいときは、語を削る代わりにブロックの語を特異的な語と AND で組み合わせる、
   下位の MeSH に置き換える、といった狭める案を検討してください。採否は実測で決まります。
+  「直前の提案の差し戻し」がある回は、差し戻された式と同じ式を出さないでください。
 - 過去の run の却下記録のうち rejectedByHuman が true のものは、人が失う集合を見て
   明示的に受け入れないと判断した変更です。同じ式を再度提案しても測定せずに却下されるため、
   別の変更を検討してください。
@@ -342,6 +353,8 @@ action を 1 つ選び、JSON だけで返してください。
 `.trim();
 
 export const OPTIMIZE_QUERY_USER_PROMPT_TEMPLATE = `
+直前の提案の差し戻し:
+{{RESUBMISSION}}
 研究基準:
 {{CRITERIA}}
 目安件数（最終式の件数の目安。適格文献を落としてまで合わせない）: {{MAX_HITS}}
@@ -426,6 +439,9 @@ export async function optimizeQuery(
   provider: LLMProvider
 ): Promise<OptimizeQueryDecision> {
   const prompt = renderPromptTemplate(OPTIMIZE_QUERY_USER_PROMPT_TEMPLATE, {
+    RESUBMISSION: input.resubmission
+      ? `直前の提案 ${input.resubmission.candidateId}（#${input.resubmission.targetBlockId} = ${input.resubmission.expression ?? '(式を特定できません)'}）は ${input.resubmission.duplicateOf} と同じ式${input.resubmission.duplicateOfHeld ? '（保留候補としてすでに人の判断に回っています）' : ''}だったため、測定せずに差し戻しました。この式も「保留・却下した変更の一覧」にある式も出さず、別の変更案を返すか、変更が不要・不可能なら finish を選んでください。差し戻しは 1 回だけで、続けて同じ式を出すと改善なしに数えます。`
+      : '(なし)',
     CRITERIA: formatContext(input.criteria),
     MAX_HITS: String(input.maxHits),
     FORMULA: formatContext(input.formula),
@@ -562,7 +578,7 @@ export function formatRejectedChanges(trials: OptimizationTrial[], currentFormul
   const duplicates = rejected.filter((trial) => trial.duplicateOf);
   if (duplicates.length) {
     const references = duplicates.map((trial) => `${trial.candidateId} → ${trial.duplicateOf}`).join(', ');
-    lines.unshift(`注意: 評価済みの式と同じ式を再提案し、測定せずに却下した回が ${duplicates.length} 回あります（${references}）。同一式の再提案は改善なし（採用にも保留にもならない回）に数えられ、2 回続くと run は停止します。各行の「変更後の式」と同じ式を出さないでください。`);
+    lines.unshift(`注意: 評価済みの式と同じ式を再提案し、測定せずに却下した回が ${duplicates.length} 回あります（${references}）。同一式の再提案は差し戻して出し直しを求めることがありますが、続けて同じ式を出すと改善なし（採用にも保留にもならない回）に数えられ、2 回続くと run は停止します。各行の「変更後の式」と同じ式を出さないでください。`);
   }
   return lines.join('\n') || '(なし)';
 }
@@ -623,6 +639,7 @@ function summarizeTrials(trials: OptimizationTrial[]): string {
       reason: trial.reason || '(なし)',
       ...(trial.impact?.error ? { error: trial.impact.error } : {}),
       ...(trial.duplicateOf ? { duplicateOf: trial.duplicateOf } : {}),
+      ...(trial.resubmissionRequested ? { resubmissionRequested: true } : {}),
       ...(trial.informedBy ? { informedBy: `${trial.informedBy.candidateId}（反映 ${trial.informedBy.obtained}/要求 ${trial.informedBy.requested}）` } : {}),
       ...(trial.finishKind ? { finishKind: trial.finishKind } : {}),
       ...(trial.kind === 'information' ? { meshRequests: (trial.meshRequests ?? [])
