@@ -30,6 +30,9 @@ npm test             # jest（jsdom）unit テスト
 npm run test:e2e     # Playwright E2E（実 Chromium + axe a11y。API はすべて stub）
 npm run test:e2e:ui  # Playwright UI モード
 npm run shots        # ストア掲載用スクリーンショット 5 枚を無人撮影（tests/shots/・stub 環境。hosted/screenshots/ へ出力）
+npm run store:status # ストアの公開・審査状況を確認
+npm run store:submit # 提出用 zip をアップロード・審査提出
+npm run test:tools   # ストア提出 CLI の単体テスト
 npm run typecheck    # tsc --noEmit
 npm run lint         # eslint（src + tests）
 npm run lint:css     # stylelint
@@ -40,7 +43,7 @@ npm run video:tts    # ナレーション音声合成（video/narration/ → vid
 npm run video:assemble # 合成（build/ 一式 → final.mp4 / chapters.txt / 字幕 / 説明文）
 ```
 
-**CI**: [.github/workflows/ci.yml](.github/workflows/ci.yml) を追加。`pull_request` と `master` への `push` で発火し、`verify` ジョブ（typecheck → lint → lint:css → test → dev ビルド）と `e2e` ジョブ（Playwright Chromium 導入 → test:e2e）を並列実行する。本番ビルド（`npm run build`）は `.env` の `OAUTH_CLIENT_ID` を要求するため CI では回さない。E2E 失敗時は `test-results/`（trace・スクリーンショット）が artifact として 7 日間保持される。
+**CI**: [.github/workflows/ci.yml](.github/workflows/ci.yml) を追加。`pull_request` と `master` への `push` で発火し、`verify` ジョブ（typecheck → lint → lint:css → test → test:tools → dev ビルド）と `e2e` ジョブ（Playwright Chromium 導入 → test:e2e）を並列実行する。本番ビルド（`npm run build`）は `.env` の `OAUTH_CLIENT_ID` を要求するため CI では回さない。E2E 失敗時は `test-results/`（trace・スクリーンショット）が artifact として 7 日間保持される。
 
 単一テストの実行: `npx jest src/app/views/blocksView.test.ts`、E2E 単体: `npx playwright test tests/e2e/app-blocks.spec.ts`。
 
@@ -109,6 +112,7 @@ Chrome ウェブストアへ提出・更新する zip を作る運用。**アル
 
 ```bash
 npm run release -- minor                 # 機能追加を含むリリース（patch / major / 明示 version も可）
+npm run release -- minor -Submit         # push 後にストアへ審査提出
 npm run release -- patch -NoPush         # push せずローカル commit + zip まで
 npm run release -- minor -SkipCiCheck    # CI 状態チェックを省略（gh 未導入 / 未認証の環境）
 npm run release -- minor -Force          # 前提チェックの警告（ブランチ不一致等）を停止ではなく警告に落とす
@@ -118,6 +122,7 @@ npm run pack:release                     # 既存 dist-release/ だけをパッ�
 
 実体は [tools/release/release.ps1](tools/release/release.ps1)（前提チェック → version バンプ → commit → 本番ビルド → [tools/release/pack.ps1](tools/release/pack.ps1) の実行 → push）と、パッケージング単体を担う [tools/release/pack.ps1](tools/release/pack.ps1)（既存 dist-release/ だけを検証・zip 化したいときはこちら単体で実行できる）。
 
+- API 提出は [tools/release/storeApi.mjs](tools/release/storeApi.mjs)、詳細は [tools/release/README.md](tools/release/README.md)。`-Submit` は版上げ前にストアの認証と提出可否を確認し、`-NoPush` / `-IncludeKeyPem` とは併用不可。upload / publish は自動再試行せず、結果不明は終了コード 3。jest は `tools/` を拾わないため `npm run test:tools` と CI の別ステップで検証する。
 - version は **`src/manifest.json` / `package.json` / `package-lock.json` の 3 箇所を揃える運用**。`release.ps1` が 3 箇所同時にバンプし、`pack.ps1` が不一致を検出して停止する
 - `key.pem`（リポジトリルート直下・gitignore 対象）は**初回ストアアップロードのときだけ** `-IncludeKeyPem` で zip に同梱する。以後の更新提出では同梱しない（Store がアイテムの拡張 ID を既に固定しているため）
 - `src/manifest.json` の `key` フィールドは常に保持する（dev の unpacked 読込で拡張 ID を固定するため）。production ビルド（`dist-release/`）からの除去は webpack.config.js の CopyPlugin transform が自動で行い、`pack.ps1` はその除去が起きたことを確認するだけで、削除そのものはしない
