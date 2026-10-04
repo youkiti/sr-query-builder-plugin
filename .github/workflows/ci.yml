@@ -50,6 +50,9 @@ jobs:
       - name: 単体テスト
         run: npm test
 
+      - name: リリースツールの単体テスト
+        run: npm run test:tools
+
       - name: 開発ビルド
         run: npm run dev
 
