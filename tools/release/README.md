@@ -51,4 +51,4 @@ CWS_PUBLISHER_ID=
 | 2 | 設定・引数の不備 |
 | 3 | 結果不明 |
 
-upload / publish は自動再試行しません。結果不明なら、再実行する前に `npm run store:status` で状況を確認してください。`npm run release -- <bump> -Submit` で提出段階まで進んだ場合、zip 作成と push は完了済みです。
+upload / publish は自動再試行しません。結果不明なら、再実行する前に `npm run store:status` で状況を確認してください。`npm run release -- <bump> -Submit` で提出段階まで進んだ場合、zip 作成と push は完了済みです。このときの結果不明も終了コード 3 で返します。

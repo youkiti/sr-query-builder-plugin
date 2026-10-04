@@ -309,7 +309,9 @@ if ($Submit) {
   Write-Host '=== 7. ストアへ提出 ===' -ForegroundColor Cyan
   node tools/release/storeApi.mjs submit "--zip=$zipPath"
   if ($LASTEXITCODE -eq 3) {
-    Stop-WithError '結果不明。npm run store:status で確認する。zip 作成と push は完了済み'
+    # 結果不明は「提出済みかもしれない」状態。失敗（1）と区別できるよう storeApi.mjs の終了コード 3 をそのまま返す
+    Write-Host 'NG  結果不明。npm run store:status で確認する（自動では再実行しない）。zip 作成と push は完了済み' -ForegroundColor Red
+    exit 3
   } elseif ($LASTEXITCODE -ne 0) {
     Stop-WithError '提出に失敗。zip 作成と push は完了済み。原因を解消したら npm run store:submit で提出だけやり直せる（version は上げ直さない）'
   }
