@@ -1,0 +1,164 @@
+{
+  "base": "v4",
+  "candidate": "v4g",
+  "subset": "validation",
+  "reviews": 74,
+  "runsPerReview": 2,
+  "generatedAt": "2026-10-05T12:15:19.413Z",
+  "sameDay": true,
+  "measuredDates": {
+    "base": [
+      "2026-10-05"
+    ],
+    "candidate": [
+      "2026-10-05"
+    ]
+  },
+  "comparison": {
+    "reviews": 74,
+    "allCapturedRate": {
+      "base": 0.4391891891891892,
+      "candidate": 0.46621621621621623,
+      "difference": 0.02702702702702703
+    },
+    "studyRecall": {
+      "base": 0.8857350023519428,
+      "candidate": 0.8798512749511141,
+      "difference": -0.005883727400828653,
+      "confidenceInterval": [
+        -0.04273633235803149,
+        0.03164037212685083
+      ]
+    },
+    "missedStudies": {
+      "base": 256.5,
+      "candidate": 268.5,
+      "difference": 12
+    },
+    "failureRate": {
+      "base": 0,
+      "candidate": 0,
+      "difference": 0
+    },
+    "hitsRatio": {
+      "reviews": 25,
+      "ratio": 0.9243560459652591,
+      "confidenceInterval": [
+        0.5115961722870284,
+        1.646549615630211
+      ]
+    },
+    "medianHits": {
+      "base": 1878.25,
+      "candidate": 2346
+    },
+    "tiers": {
+      "cc-by": {
+        "reviews": 13,
+        "allCapturedRate": {
+          "base": 0.34615384615384615,
+          "candidate": 0.38461538461538464,
+          "difference": 0.03846153846153849
+        },
+        "studyRecall": {
+          "base": 0.8719089220227948,
+          "candidate": 0.787780956183646,
+          "difference": -0.08412796583914883,
+          "confidenceInterval": [
+            -0.20091403821111412,
+            0.004656125715394293
+          ]
+        },
+        "missedStudies": {
+          "base": 35,
+          "candidate": 71.5,
+          "difference": 36.5
+        },
+        "failureRate": {
+          "base": 0,
+          "candidate": 0,
+          "difference": 0
+        },
+        "hitsRatio": {
+          "reviews": 4,
+          "ratio": 2.665410905569765,
+          "confidenceInterval": [
+            1.1721438676695508,
+            6.061043777548561
+          ]
+        },
+        "medianHits": {
+          "base": 2768,
+          "candidate": 2095.5
+        }
+      },
+      "cc-by-nc": {
+        "reviews": 61,
+        "allCapturedRate": {
+          "base": 0.45901639344262296,
+          "candidate": 0.48360655737704916,
+          "difference": 0.0245901639344262
+        },
+        "studyRecall": {
+          "base": 0.8886815440614335,
+          "candidate": 0.8994728182950011,
+          "difference": 0.010791274233567627,
+          "confidenceInterval": [
+            -0.02596400698569221,
+            0.050862531894546474
+          ]
+        },
+        "missedStudies": {
+          "base": 221.5,
+          "candidate": 197,
+          "difference": -24.5
+        },
+        "failureRate": {
+          "base": 0,
+          "candidate": 0,
+          "difference": 0
+        },
+        "hitsRatio": {
+          "reviews": 21,
+          "ratio": 0.7555001350960864,
+          "confidenceInterval": [
+            0.39218419382338865,
+            1.4286374227194005
+          ]
+        },
+        "medianHits": {
+          "base": 1708,
+          "candidate": 2379.5
+        }
+      }
+    },
+    "verdict": "reject",
+    "reasons": [
+      "平均再現率（研究単位）が下がっています",
+      "取りこぼし研究数の合計が増えています",
+      "再現率・件数のどちらも信頼区間による改善条件を満たしません"
+    ],
+    "improvedBy": [],
+    "conditions": {
+      "allCapturedNonDecreasing": true,
+      "recallNonDecreasing": false,
+      "missedStudiesNonIncreasing": false,
+      "recallAndMissedNonWorsening": false,
+      "failureNonIncreasing": true,
+      "recallImproved": false,
+      "hitsImproved": false,
+      "anyImprovement": false,
+      "tierDirections": {
+        "recall": {
+          "cc-by": "consistent",
+          "cc-by-nc": "inconsistent"
+        },
+        "hits": {
+          "cc-by": "inconsistent",
+          "cc-by-nc": "consistent"
+        }
+      },
+      "tierDirectionConsistent": false
+    }
+  }
+}
