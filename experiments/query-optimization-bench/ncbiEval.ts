@@ -101,7 +101,7 @@ export function observeRateLimiter(deps: Omit<EutilsDeps, 'rateLimiter'>,
 }
 
 export function createEvalFetch(searchDate: string, fetchImpl: typeof fetch, onCall: (event: ApiEvent) => void,
-  secrets: readonly string[] = []): typeof fetch {
+  secrets: readonly string[] = [], dateType: 'crdt' | 'edat' = 'crdt'): typeof fetch {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(searchDate) || !Number.isFinite(Date.parse(searchDate))) throw new Error('検索日が不正です');
   return async (input, init) => {
     const request = typeof Request !== 'undefined' && input instanceof Request ? input : null;
@@ -114,7 +114,7 @@ export function createEvalFetch(searchDate: string, fetchImpl: typeof fetch, onC
       if (body !== null && typeof body !== 'string' && !(body instanceof URLSearchParams)) throw new Error('ESearch の本文形式が不正です');
       const params = body === null ? url.searchParams : new URLSearchParams(String(body));
       if ((params.get('db') ?? url.searchParams.get('db')) === 'pubmed') {
-        params.set('datetype', 'crdt');
+        params.set('datetype', dateType);
         params.set('mindate', '1800/01/01');
         params.set('maxdate', searchDate.replace(/-/g, '/'));
         if (isPost) options = { ...init, body: params.toString() };

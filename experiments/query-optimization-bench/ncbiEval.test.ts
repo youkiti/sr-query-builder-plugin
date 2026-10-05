@@ -5,6 +5,15 @@ import type { EutilsDeps } from '../../src/lib/ncbi/eutils';
 const response = (count: number, idlist: string[] = []) => new Response(JSON.stringify({ esearchresult: { count: String(count), idlist } }));
 const deps = (fetch: typeof globalThis.fetch): EutilsDeps => ({ fetch, maxRetries: 0, rateLimiter: { acquire: async () => undefined } });
 
+test('edat を指定すると GET と POST の日付種別に反映する', async () => {
+  const network = jest.fn().mockImplementation(async () => response(0));
+  const wrapped = createEvalFetch('2020-01-31', network, () => undefined, [], 'edat');
+  await wrapped('https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed');
+  await wrapped('https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi', { method: 'POST', body: 'db=pubmed' });
+  const params = [new URL(network.mock.calls[0]![0]).searchParams, new URLSearchParams(network.mock.calls[1]![1].body)];
+  for (const entry of params) expect(Object.fromEntries(entry)).toMatchObject({ datetype: 'edat', mindate: '1800/01/01', maxdate: '2020/01/31' });
+});
+
 test('PubMed esearch だけに日付を付け、ログのキーをマスクする', async () => {
   const fetch = jest.fn().mockResolvedValue(response(0));
   const log = jest.fn();
