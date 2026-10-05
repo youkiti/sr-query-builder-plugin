@@ -10,3 +10,26 @@ test.each([{ version: 'v1' }, { model: 'claude-latest' }, { tools: ['check'] }, 
   expect(() => validateConditions({ ...loadConditions('v0'), ...change }, 'v0')).toThrow();
 });
 test('フォルダ外の版を拒否する', () => { expect(() => loadConditions('../v0')).toThrow(); });
+
+test('外側を見る道具を含む版も受け付ける', () => {
+  const conditions = loadConditions('v0');
+  conditions.tools.push('outside');
+  expect(validateConditions(conditions, 'v0').tools).toContain('outside');
+});
+
+test.each([2, 3, 10])('束ねる本数 %i と元の版を受け付ける', (k) => {
+  const conditions = { ...loadConditions('v0'), combine: { from: 'source_1-a', k } };
+  expect(validateConditions(conditions, 'v0')).toEqual(conditions);
+});
+
+test.each([{ from: 'v0', k: 3 }, { from: '../v1', k: 3 }, { from: '', k: 3 }, { from: 1, k: 3 },
+  { from: 'v1', k: 1 }, { from: 'v1', k: 11 }, { from: 'v1', k: 2.5 }, { from: 'v1', k: NaN }, null])(
+  '不正な束ねる条件を拒否する: %j', (combine) => {
+    expect(() => validateConditions({ ...loadConditions('v0'), combine }, 'v0')).toThrow('束ねる条件');
+  });
+
+test('束ねる条件のない既存版も受け付ける', () => {
+  const conditions = loadConditions('v0');
+  expect(conditions.combine).toBeUndefined();
+  expect(validateConditions(conditions, 'v0')).toEqual(conditions);
+});

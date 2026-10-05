@@ -1,0 +1,11 @@
+{
+  "version": "v2",
+  "model": "claude-haiku-4-5-20251001",
+  "generationSettings": "サブエージェントの既定（温度などは変更不可のため既定のまま）",
+  "inputs": ["protocol.md", "procedure.md"],
+  "tools": ["check", "count", "mesh", "submit"],
+  "maxMeasurements": 20,
+  "maxSubmissions": 4,
+  "costLimit": "道具の呼び出し回数の上限で代替する（サブエージェントの費用は直接制限できない）",
+  "finalSelection": "最後に受け付けられた提出 1 本。採点結果による選び直しはしない"
+}

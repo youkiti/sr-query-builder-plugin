@@ -1,11 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-export const COMMANDS = ['check', 'count', 'mesh', 'titles', 'submit'] as const;
+export const COMMANDS = ['check', 'count', 'mesh', 'titles', 'outside', 'submit'] as const;
 export type Command = typeof COMMANDS[number];
 export interface Conditions {
   version: string; model: string; generationSettings: string; inputs: string[]; tools: Command[];
   maxMeasurements: number; maxSubmissions: number; costLimit: string; finalSelection: string;
+  combine?: { from: string; k: number };
 }
 
 export function validateConditions(value: unknown, version: string): Conditions {
@@ -16,6 +17,9 @@ export function validateConditions(value: unknown, version: string): Conditions 
   if (![c.maxMeasurements, c.maxSubmissions].every((n) => Number.isSafeInteger(n) && n > 0)) throw new Error('上限は正の整数が必要です');
   if (!Array.isArray(c.inputs) || c.inputs.some((s) => typeof s !== 'string')
     || [c.generationSettings, c.costLimit, c.finalSelection].some((s) => typeof s !== 'string' || !s.trim())) throw new Error('生成条件の記述が不正です');
+  if (c.combine !== undefined && (!c.combine || typeof c.combine.from !== 'string'
+    || !/^[A-Za-z0-9_-]+$/.test(c.combine.from) || c.combine.from === version
+    || !Number.isInteger(c.combine.k) || c.combine.k < 2 || c.combine.k > 10)) throw new Error('束ねる条件の元の版または本数が不正です');
   return c;
 }
 
