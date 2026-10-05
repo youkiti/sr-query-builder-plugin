@@ -150,3 +150,71 @@ test('束ねた式が検査を通らなければ拒否する', () => {
   expect(() => main(f.args, f.runtime)).toThrow('束ねた式の検査に失敗');
   expect(existsSync(join(f.runs, 'combined'))).toBe(false);
 });
+
+function setupVersions(queries: (string | null | undefined)[][] = [['alpha', 'beta'], ['gamma', 'delta']]) {
+  const f = setup([]);
+  const versions = queries.map((_, i) => `source_${i + 1}`);
+  f.conditions.combine = { versions };
+  writeJson(join(f.runtime.harnessDir!, 'combined', 'conditions.json'), f.conditions);
+  for (const [index, runs] of queries.entries()) {
+    for (const [runIndex, query] of runs.entries()) {
+      if (query === undefined) continue;
+      const dir = runPath(f.runs, versions[index]!, f.selected.pmcid, runIndex + 1);
+      mkdirSync(dir, { recursive: true });
+      if (query !== null) writeJson(join(dir, 'submission.json'), { number: 2, query });
+    }
+  }
+  return f;
+}
+
+test('別々の版の同じ実行番号を束ね、提出元を版名で記録する', () => {
+  const f = setupVersions();
+  expect(main(f.args, f.runtime)).toBe(0);
+  for (const [index, words] of [['alpha', 'gamma'], ['beta', 'delta']].entries()) {
+    expect(readFileSync(join(f.output(index + 1), 'submissions', '1.md'), 'utf8'))
+      .toBe('## PubMed/MEDLINE\n\n```\n#1 ' + words.map((word) => `(${word})`).join(' OR ') + '\n```\n');
+    expect(JSON.parse(readFileSync(join(f.output(index + 1), 'submission.json'), 'utf8')).combinedFrom)
+      .toEqual(['source_1', 'source_2']);
+    expect(readRun(f.output(index + 1))).toMatchObject({ conditions: f.conditions, runIndex: index + 1 });
+  }
+  expect(f.runtime.stdout).toHaveBeenLastCalledWith('元の式が 2 個: 2 件、2 個未満: 0 件\n');
+  expect(JSON.stringify((f.runtime.stdout as jest.Mock).mock.calls)).not.toContain('PMC');
+  expect(f.runtime.fetchImpl).not.toHaveBeenCalled();
+  expect(f.runtime.sleep).not.toHaveBeenCalled();
+});
+
+test('提出のある版だけを記録し、全版が未提出なら提出を書かない', () => {
+  const f = setupVersions([[null, null], ['gamma', null]]);
+  main(f.args, f.runtime);
+  expect(readFileSync(join(f.output(1), 'submissions', '1.md'), 'utf8')).toContain('#1 (gamma)\n');
+  expect(JSON.parse(readFileSync(join(f.output(1), 'submission.json'), 'utf8')).combinedFrom).toEqual(['source_2']);
+  expect(readSubmissionState(f.output(2))).toEqual({ submission: null, fingerprint: null, submitAttempts: 0 });
+  expect(existsSync(join(f.output(2), 'submission.json'))).toBe(false);
+  expect(existsSync(join(f.output(2), 'submissions'))).toBe(false);
+  expect(existsSync(join(f.output(2), 'tool-log.jsonl'))).toBe(false);
+  expect(f.runtime.stdout).toHaveBeenLastCalledWith('元の式が 2 個: 0 件、2 個未満: 2 件\n');
+});
+
+test('別々の版の式が重複しても提出元の版名と本数を保つ', () => {
+  const f = setupVersions([['alpha', 'beta'], ['alpha', 'beta']]);
+  main(f.args, f.runtime);
+  expect(readFileSync(join(f.output(1), 'submissions', '1.md'), 'utf8')).toContain('#1 (alpha)\n');
+  expect(JSON.parse(readFileSync(join(f.output(1), 'submission.json'), 'utf8')).combinedFrom).toEqual(['source_1', 'source_2']);
+  expect(f.runtime.stdout).toHaveBeenLastCalledWith('元の式が 2 個: 2 件、2 個未満: 0 件\n');
+});
+
+test('ある版の後半の実行フォルダが不足していれば何も作らない', () => {
+  const f = setupVersions([['alpha', 'beta'], ['gamma', undefined]]);
+  expect(() => main(f.args, f.runtime)).toThrow('1 件不足');
+  expect(existsSync(join(f.runs, 'combined'))).toBe(false);
+  expect(f.runtime.stdout).not.toHaveBeenCalled();
+});
+
+test('別々の版を束ねる後半の出力が既にあれば何も作らない', () => {
+  const f = setupVersions();
+  mkdirSync(f.output(2), { recursive: true });
+  writeFileSync(join(f.output(2), '既存.txt'), '保持');
+  expect(() => main(f.args, f.runtime)).toThrow('既に');
+  expect(existsSync(f.output(1))).toBe(false);
+  expect(readFileSync(join(f.output(2), '既存.txt'), 'utf8')).toBe('保持');
+});

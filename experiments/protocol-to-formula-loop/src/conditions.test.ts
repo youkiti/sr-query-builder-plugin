@@ -33,3 +33,19 @@ test('束ねる条件のない既存版も受け付ける', () => {
   expect(conditions.combine).toBeUndefined();
   expect(validateConditions(conditions, 'v0')).toEqual(conditions);
 });
+
+test.each([2, 10])('別々の版 %i 個を束ねる条件を受け付ける', (count) => {
+  const conditions = { ...loadConditions('v0'), combine: {
+    versions: Array.from({ length: count }, (_, i) => `source_${i}-a`),
+  } };
+  expect(validateConditions(conditions, 'v0')).toEqual(conditions);
+});
+
+test.each([{ versions: ['v1'] }, { versions: Array.from({ length: 11 }, (_, i) => `source${i}`) },
+  { versions: ['v1', 'v1'] }, { versions: ['v1', 'v0'] }, { versions: ['v1', '../v2'] },
+  { versions: ['v1', ''] }, { versions: ['v1', 2] }, { versions: 'v1,v2' }, { versions: null },
+  { versions: ['v1', 'v2'], from: 'v1', k: 2 }, { versions: ['v1', 'v2'], from: 'v1' },
+  { versions: ['v1', 'v2'], k: 2 }, {}, { from: 'v1' }, { k: 2 }])(
+  '不正な別々の版の束ねる条件を拒否する: %j', (combine) => {
+    expect(() => validateConditions({ ...loadConditions('v0'), combine }, 'v0')).toThrow('束ねる条件');
+  });
