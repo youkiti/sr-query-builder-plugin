@@ -36,6 +36,7 @@
     "p2f:freeze-evaluable": "tsx experiments/protocol-to-formula-loop/src/freezeEvaluable.ts",
     "p2f:tool": "tsx experiments/protocol-to-formula-loop/src/tool.ts",
     "p2f:score": "tsx experiments/protocol-to-formula-loop/src/scoreRuns.ts",
+    "p2f:diagnose": "tsx experiments/protocol-to-formula-loop/src/diagnose.ts",
     "p2f:start-runs": "tsx experiments/protocol-to-formula-loop/src/startRuns.ts",
     "p2f:compare": "tsx experiments/protocol-to-formula-loop/src/compare.ts",
     "p2f:leak-check": "tsx experiments/protocol-to-formula-loop/src/leakCheck.ts",
