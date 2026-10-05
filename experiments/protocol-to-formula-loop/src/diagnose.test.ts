@@ -2,7 +2,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { attributeStudies, classifyLine, countTerms, main, quantile, summarizeDiagnoses, type Diagnosis } from './diagnose';
+import { attributeStudies, classifyLine, countTerms, requiredUnits, main, quantile, summarizeDiagnoses, type Diagnosis } from './diagnose';
 import { createRun, writeJson } from './runDir';
 import { loadConditions } from './conditions';
 import { fixture, review, writeLines } from './testFixtures';
@@ -62,32 +62,145 @@ function fakeFetch(answer: (params: URLSearchParams) => unknown): typeof fetch {
 }
 const readDiagnosis = (dir: string): Diagnosis => JSON.parse(readFileSync(join(dir, 'diagnosis.json'), 'utf8')) as Diagnosis;
 
-test('行を三種類に分類し、参照のある行を優先する', () => {
+function decompose(body: string) {
+  const result = validateFormulaMd(md(body));
+  if (!result.ok) throw new Error('合成式が不正です');
+  return requiredUnits(result.formula);
+}
+
+test('括弧内の選択肢は一単位とし、入れ子の結合行とインライン式を分解する', () => {
+  const base = '#1 alpha[tiab]\n#2 beta[tiab]\n#3 gamma[tiab]';
+  expect(decompose(base + '\n#4 (#1 OR #2) AND #3')).toEqual({
+    units: [{ id: 'inline-1', expression: '(alpha[tiab]) OR (beta[tiab])', negative: false },
+      { id: '3', expression: 'gamma[tiab]', negative: false }], unusedLines: 0, undetermined: false,
+  });
+  expect(decompose(base + '\n#4 (#1 AND #2)\n#5 #4 AND #3').units.map((unit) => unit.id)).toEqual(['1', '2', '3']);
+  expect(decompose(base + '\n#4 #1 AND "OR (NOT)"[tiab] AND (#2 OR extra[tiab])').units).toEqual([
+    { id: '1', expression: 'alpha[tiab]', negative: false },
+    { id: 'inline-1', expression: '"OR (NOT)"[tiab]', negative: false },
+    { id: 'inline-2', expression: '(beta[tiab]) OR extra[tiab]', negative: false },
+  ]);
+});
+
+test('起点は最後の結合行、結合行がなければ最後の行にする', () => {
+  expect(decompose('#1 alpha[tiab]\n#2 beta[tiab]').units[0]!.expression).toBe('beta[tiab]');
+  expect(decompose('#1 alpha[tiab]\n#2 #1 AND beta[tiab]\n#3 unused[tiab]').unusedLines).toBe(1);
+});
+
+test('最上位の選択肢、深さ超過、演算子の間の空項は分解不能にする', () => {
+  for (const expression of ['#1 OR #2', '(#1 OR #2)', '#1 AND AND #2']) {
+    expect(decompose('#1 alpha[tiab]\n#2 beta[tiab]\n#3 ' + expression)).toMatchObject({ units: [], undetermined: true });
+  }
+  const body = ['#1 alpha[tiab]', ...Array.from({ length: 22 }, (_, i) => '#' + (i + 2) + ' #' + (i + 1))].join('\n');
+  expect(decompose(body)).toMatchObject({ units: [], undetermined: true });
+});
+
+test('未使用の行は測定も帰属もせず、最上位の選択肢は通信しない', async () => {
+  const s = setup();
+  s.submit(0, '#1 alpha[tiab]\n#2 beta[tiab]\n#3 unused[tiab]\n#4 #1 AND #2');
+  s.submit(1, '#1 alpha[tiab]\n#2 beta[tiab]\n#3 #1 OR #2');
+  s.submit(2, '#1 alpha[tiab]');
+  s.runtime.fetchImpl = fakeFetch((params) => {
+    const term = params.get('term')!;
+    if (term.includes('unused')) throw new Error('未使用の行を測定しました');
+    if (term.includes('beta')) return { count: '0' };
+    return params.get('retmax') === '0' ? { count: '10' } : { count: '2', idlist: gold };
+  });
+  expect(await main(s.args, s.runtime)).toBe(0);
+  expect(s.runtime.fetchImpl).toHaveBeenCalledTimes(5);
+  expect(readDiagnosis(s.dirs[0]!)).toMatchObject({ unusedLines: 1, attribution: { single_concept: 1 }, singleCauseLines: { '2': 1 } });
+  expect(readDiagnosis(s.dirs[1]!)).toMatchObject({ undetermined: true, lines: [], attribution: { undetermined: 1 } });
+  expect(readDiagnosis(s.dirs[2]!)).toMatchObject({ attribution: { no_lines: 1 } });
+  const summary = summarizeDiagnoses(s.dirs.map(readDiagnosis));
+  expect(summary.byConceptCountExcludedRuns).toBe(1);
+  expect(summary.byConceptCount.map((group) => group.runs)).toEqual([1, 1]);
+  expect(summary.attribution.undetermined).toEqual({ studies: 1, proportion: 1 / 3 });
+  const complete = { ...readDiagnosis(s.dirs[1]!), missedStudies: 0 };
+  expect(summarizeDiagnoses([complete]).byConceptCountExcludedRuns).toBe(1);
+});
+
+test.each([true, false])('否定の単位は除外集合の補集合で捕捉を測り、件数を保存しない（除外あり=%s）', async (excluded) => {
+  const s = setup();
+  s.submit(0, '#A alpha[tiab]\n#B beta[tiab]\n#C excluded[tiab]\n#D delta[tiab]\n#E #A AND #B NOT #C AND #D');
+  s.runtime.fetchImpl = fakeFetch((params) => {
+    if (params.get('term')!.includes('excluded') && !excluded) {
+      expect(params.get('retmax')).toBe('0');
+      return { count: '0' };
+    }
+    return params.get('retmax') === '0' ? { count: '10' } : { count: '2', idlist: gold };
+  });
+  expect(await main(s.args, s.runtime)).toBe(0);
+  const row = readDiagnosis(s.dirs[0]!);
+  expect(row.lines.map((line) => line.kind)).toEqual(['concept', 'concept', 'filter', 'concept']);
+  expect(row.lines[2]).toMatchObject({ id: 'C', hits: null, capturedStudies: excluded ? 0 : 1 });
+  expect(row.attribution).toMatchObject({ single_filter: excluded ? 1 : 0, none: excluded ? 0 : 1 });
+  expect(s.runtime.fetchImpl).toHaveBeenCalledTimes(excluded ? 8 : 7);
+});
+
+test('複合式の否定は分割せず、参照を展開して一つの除外集合にする', () => {
+  expect(decompose('#1 alpha[tiab]\n#2 beta[tiab]\n#3 #1 NOT (#1 AND #2)').units[1]).toEqual({
+    id: 'inline-1', expression: '((alpha[tiab]) AND (beta[tiab]))', negative: true,
+  });
+});
+
+test('採点日時が同じなら再利用し、更新または旧形式なら再測定する', async () => {
+  const s = setup(); s.submit(0);
+  s.runtime.fetchImpl = fakeFetch(() => ({ count: '0' }));
+  expect(await main(s.args, s.runtime)).toBe(0);
+  expect(await main(s.args, s.runtime)).toBe(0);
+  expect(s.runtime.fetchImpl).toHaveBeenCalledTimes(1);
+  const scorePath = join(s.dirs[0]!, 'score.json');
+  const score = JSON.parse(readFileSync(scorePath, 'utf8'));
+  score.measuredAt = '2026-02-01T00:00:00.000Z';
+  writeJson(scorePath, score);
+  expect(await main(s.args, s.runtime)).toBe(0);
+  expect(s.runtime.fetchImpl).toHaveBeenCalledTimes(2);
+  expect(readDiagnosis(s.dirs[0]!).scoreMeasuredAt).toBe(score.measuredAt);
+  const saved = { ...readDiagnosis(s.dirs[0]!), scoreMeasuredAt: undefined };
+  writeJson(join(s.dirs[0]!, 'diagnosis.json'), saved);
+  expect(await main(s.args, s.runtime)).toBe(0);
+  expect(s.runtime.fetchImpl).toHaveBeenCalledTimes(3);
+});
+
+test('単位の中身で種類を決める', () => {
   const block = (id: string, expression: string, isCombination = false) => ({ id, expression, isCombination });
   expect(classifyLine(block('1', 'a[tiab]'))).toBe('concept');
-  expect(classifyLine(block('RCTfilter', 'a[tiab]'))).toBe('filter');
+  expect(classifyLine(block('RCTfilter', 'a[tiab]'))).toBe('concept');
   expect(classifyLine(block('2', 'Randomized Controlled Trial[pt]'))).toBe('filter');
-  expect(classifyLine(block('RCTfilter', '#1 AND #2', true))).toBe('combination');
+  expect(classifyLine(block('Design', 'randomized controlled trials[mh]'))).toBe('concept');
+  for (const tag of ['pt', 'Publication Type', 'sh', 'Subheading', 'dp', 'Date - Publication', 'edat', 'crdt', 'pdat', 'la', 'Language']) {
+    expect(classifyLine(block('1', '"synthetic"[' + tag.toUpperCase() + ']'))).toBe('filter');
+  }
+  expect(classifyLine(block('1', 'a[tiab]'), true)).toBe('filter');
 });
 
 test('語句を数え、引用符内の演算子、タグなしの句、未知のタグを区別する', () => {
   expect(countTerms('("alpha AND beta"[Mesh:noexp] OR gamma[mh]) AND (delta[tiab] OR epsilon[tw]) OR plain phrase OR "OR (NOT)" OR randomized controlled trial[pt]'))
     .toEqual({ meshTerms: 2, freewordTerms: 2, plainTerms: 2 });
+  expect(countTerms('"alpha beta"[tiab:~3]')).toEqual({ meshTerms: 0, freewordTerms: 1, plainTerms: 0 });
   expect(countTerms('#1 AND #2')).toEqual({ meshTerms: 0, freewordTerms: 0, plainTerms: 0 });
   expect(countTerms('(alpha OR beta) AND gamma')).toEqual({ meshTerms: 0, freewordTerms: 0, plainTerms: 3 });
 });
 
-test('帰属の五区分と単独原因行を研究単位で数える', () => {
+test('帰属の六区分と単独原因行を研究単位で数える', () => {
   const sample = gold.map((pmid) => ({ id: '合成', pmids: [pmid] }));
   const concept = { id: '1', kind: 'concept' as const, captured: [] as string[] };
   const filter = { id: 'F', kind: 'filter' as const, captured: [] as string[] };
-  const single = attributeStudies(sample, [gold[1]!], [concept]);
+  const pass = { ...concept, id: '2', captured: gold };
+  const single = attributeStudies(sample, [gold[1]!], [concept, pass]);
   expect(single).toMatchObject({ missedStudies: 1, attribution: { single_concept: 1 }, singleCauseLines: { '1': 1 },
-    lineCounts: [{ capturedStudies: 0, missedStudies: 1 }] });
-  expect(attributeStudies(sample, [], [filter]).attribution.single_filter).toBe(2);
+    lineCounts: [{ capturedStudies: 0, missedStudies: 1 }, { capturedStudies: 2, missedStudies: 0 }] });
+  expect(attributeStudies(sample, [], [filter, pass]).attribution.single_filter).toBe(2);
   expect(attributeStudies(sample, [], [concept, filter]).attribution.multiple).toBe(2);
   expect(attributeStudies(studies, [], [{ ...concept, captured: [gold[0]!] }, { ...filter, captured: [gold[1]!] }]).attribution.none).toBe(1);
-  expect(attributeStudies(studies, [], []).attribution.no_lines).toBe(1);
+  expect(attributeStudies(studies, [], [concept]).attribution.no_lines).toBe(1);
+  expect(attributeStudies(studies, [], [], true).attribution.undetermined).toBe(1);
+  for (const result of [single, attributeStudies(sample, [], [filter, pass]), attributeStudies(sample, [], [concept, filter]),
+    attributeStudies(studies, [], [pass, { ...filter, captured: gold }]), attributeStudies(studies, [], [concept]),
+    attributeStudies(studies, [], [], true)]) {
+    expect(Object.keys(result.attribution)).toHaveLength(6);
+    expect(Object.values(result.attribution).reduce((a, b) => a + b, 0)).toBe(result.missedStudies);
+  }
   expect(attributeStudies(studies, [gold[1]!], [concept, filter]).missedStudies).toBe(0);
 });
 
@@ -187,11 +300,11 @@ test('概念行数別、フィルタ有無、最大取りこぼし行の同点�
   const line = (id: string, hits: number, missedStudies: number, freewordTerms: number) => ({ id, hits, missedStudies, freewordTerms,
     kind: 'concept' as const, capturedStudies: 0, meshTerms: 0, plainTerms: 1 });
   const row: Diagnosis = { status: 'diagnosed', submission: { number: 1, querySha256: 'synthetic' }, studies: 3,
-    missedStudies: 3, studyRecall: 0, hits: 100, measuredAt: '2026-01-01Z', singleCauseLines: {},
-    attribution: { single_concept: 1, single_filter: 0, multiple: 2, none: 0, no_lines: 0 },
+    missedStudies: 3, studyRecall: 0, hits: 100, measuredAt: '2026-01-01Z', scoreMeasuredAt: '2026-01-01Z', unusedLines: 0, undetermined: false, singleCauseLines: {},
+    attribution: { single_concept: 1, single_filter: 0, multiple: 2, none: 0, no_lines: 0, undetermined: 0 },
     lines: [line('1', 20, 3, 5), line('2', 10, 3, 2), { ...line('F', 1, 1, 0), kind: 'filter' }] };
   const complete: Diagnosis = { ...row, missedStudies: 0, studyRecall: 1, hits: 200, lines: [line('1', 30, 0, 4)],
-    attribution: { single_concept: 0, single_filter: 0, multiple: 0, none: 0, no_lines: 0 } };
+    attribution: { single_concept: 0, single_filter: 0, multiple: 0, none: 0, no_lines: 0, undetermined: 0 } };
   const summary = summarizeDiagnoses([row, complete, { status: 'no_submission' }]);
   expect(summary.byConceptCount).toEqual([
     { conceptLines: 1, runs: 1, meanStudyRecall: 1, allCapturedRate: 1, medianHits: 200 },

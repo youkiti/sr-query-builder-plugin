@@ -3,7 +3,7 @@
   "subset": "fixed",
   "reviews": 20,
   "runsPerReview": 2,
-  "generatedAt": "2026-10-05T03:34:22.242Z",
+  "generatedAt": "2026-10-05T05:30:56.252Z",
   "summary": {
     "runs": 40,
     "noSubmission": 0,
@@ -23,17 +23,18 @@
         "medianHits": 175.5
       }
     ],
+    "byConceptCountExcludedRuns": 0,
     "withFilter": {
-      "runs": 26,
-      "meanStudyRecall": 0.83301363266999,
-      "allCapturedRate": 0.5384615384615384,
-      "medianHits": 198
+      "runs": 27,
+      "meanStudyRecall": 0.8299390536822125,
+      "allCapturedRate": 0.5185185185185185,
+      "medianHits": 206
     },
     "withoutFilter": {
-      "runs": 14,
-      "meanStudyRecall": 0.6982972345636818,
-      "allCapturedRate": 0.07142857142857142,
-      "medianHits": 533
+      "runs": 13,
+      "meanStudyRecall": 0.6943200987608881,
+      "allCapturedRate": 0.07692307692307693,
+      "medianHits": 569
     },
     "missedStudies": 797,
     "attribution": {
@@ -54,6 +55,10 @@
         "proportion": 0.010037641154328732
       },
       "no_lines": {
+        "studies": 0,
+        "proportion": 0
+      },
+      "undetermined": {
         "studies": 0,
         "proportion": 0
       }
