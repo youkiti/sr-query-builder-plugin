@@ -1,0 +1,59 @@
+{
+  "version": "v4",
+  "subset": "validation",
+  "reviews": 74,
+  "runsPerReview": 2,
+  "generatedAt": "2026-10-05T08:02:26.885Z",
+  "measuredFrom": "2026-10-05T07:59:57.094Z",
+  "measuredTo": "2026-10-05T08:02:26.883Z",
+  "summary": {
+    "reviews": 74,
+    "allCapturedRate": 0.4391891891891892,
+    "studyRecall": 0.8857350023519428,
+    "pmidRecall": 0.8657560339779293,
+    "missedStudies": 256.5,
+    "failures": {
+      "zeroHits": 0,
+      "invalidSubmission": 0,
+      "noSubmission": 0
+    },
+    "failureRate": 0,
+    "f7": 0.34587155797750324,
+    "reviewsWithoutSuccessfulRuns": 0,
+    "medianHits": 1878.25,
+    "tiers": {
+      "cc-by": {
+        "reviews": 13,
+        "allCapturedRate": 0.34615384615384615,
+        "studyRecall": 0.8719089220227948,
+        "pmidRecall": 0.8486240001754978,
+        "missedStudies": 35,
+        "failures": {
+          "zeroHits": 0,
+          "invalidSubmission": 0,
+          "noSubmission": 0
+        },
+        "failureRate": 0,
+        "f7": 0.41729798316248673,
+        "reviewsWithoutSuccessfulRuns": 0,
+        "medianHits": 2768
+      },
+      "cc-by-nc": {
+        "reviews": 61,
+        "allCapturedRate": 0.45901639344262296,
+        "studyRecall": 0.8886815440614335,
+        "pmidRecall": 0.8694071231489392,
+        "missedStudies": 221.5,
+        "failures": {
+          "zeroHits": 0,
+          "invalidSubmission": 0,
+          "noSubmission": 0
+        },
+        "failureRate": 0,
+        "f7": 0.3306495329380803,
+        "reviewsWithoutSuccessfulRuns": 0,
+        "medianHits": 1708
+      }
+    }
+  }
+}
