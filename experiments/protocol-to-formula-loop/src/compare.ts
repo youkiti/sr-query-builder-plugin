@@ -4,6 +4,7 @@ import { config } from 'dotenv';
 import { TIERS, type Tier } from './bench';
 import { aggregateVersion, type ReviewRuns, type RunScore } from './metrics';
 import { runPath, writeJson } from './runDir';
+import { readSubmissionState, scoreMatchesSubmission, type StoredScore } from './scoreRuns';
 import { parseRunOptions, targetReviews, type RunRuntime } from './startRuns';
 import { defaultRuntime } from './tool';
 
@@ -176,12 +177,15 @@ export function main(args: string[], runtime: RunRuntime = defaultRuntime()): nu
     const rows: ReviewRuns[] = reviews.map((review) => {
       const runs: RunScore[] = [];
       for (let i = 1; i <= options.runsPerReview; i++) {
-        const path = join(runPath(options.root, version, review.pmcid, i), 'score.json');
+        const dir = runPath(options.root, version, review.pmcid, i);
+        const path = join(dir, 'score.json');
         if (!existsSync(path)) { missing++; continue; }
-        let score: (RunScore & { measuredAt: string }) | null;
-        try { score = JSON.parse(readFileSync(path, 'utf8')) as typeof score; }
+        let score: StoredScore | null;
+        try {
+          score = JSON.parse(readFileSync(path, 'utf8')) as typeof score;
+          if (!score || !scoreMatchesSubmission(score, readSubmissionState(dir))) { unscored++; continue; }
+        }
         catch { unscored++; continue; }
-        if (!score || score.status !== 'scored') { unscored++; continue; }
         const date = typeof score.measuredAt === 'string' ? Date.parse(score.measuredAt) : NaN;
         if (!Number.isFinite(date)) invalidDates++;
         else dates.add(new Date(date).toISOString().slice(0, 10));

@@ -1,7 +1,8 @@
 /** @jest-environment node */
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { comparePaired, main, parseCompareOptions } from './compare';
 import type { ReviewRuns, ScoredRun } from './metrics';
 import type { RunRuntime } from './startRuns';
@@ -165,7 +166,14 @@ function setup() {
   const path = (version: string, i = 1) => join(root, 'runs', version, selected.pmcid, `run-${i}`, 'score.json');
   const args = ['--runs', join(root, 'runs'), '--base', 'v0', '--candidate', 'v1', '--subset', 'smoke', '--runs-per-review', '2'];
   const save = (dates = ['2026-01-01T00:00:00Z', '2026-01-01T01:00:00Z']) => {
-    for (const version of ['v0', 'v1']) for (let i = 1; i <= 2; i++) writeJson(path(version, i), { ...score(1, version === 'v0' ? 100 : 50), measuredAt: dates[i - 1] });
+    for (const version of ['v0', 'v1']) for (let i = 1; i <= 2; i++) {
+      const dir = dirname(path(version, i));
+      const submission = { number: 1, query: 'a[tiab]' };
+      writeJson(join(dir, 'submission.json'), submission);
+      writeLines(join(dir, 'tool-log.jsonl'), [{ command: 'submit' }]);
+      writeJson(path(version, i), { ...score(1, version === 'v0' ? 100 : 50), measuredAt: dates[i - 1],
+        submission: { number: submission.number, querySha256: createHash('sha256').update(submission.query).digest('hex') }, submitAttempts: 1 });
+    }
   };
   return { runtime, args, path, save, selected };
 }
@@ -182,6 +190,42 @@ test('採点ファイルの不足と未確定の件数を出し、試験群を�
   const args = s.args.map((value) => value === 'smoke' ? 'test' : value);
   expect(() => main(args, s.runtime)).toThrow('--open-test-set');
   expect(parseCompareOptions([...args, '--open-test-set']).openTestSet).toBe(true);
+  expect(s.runtime.fetchImpl).not.toHaveBeenCalled();
+});
+
+test.each([
+  { label: '別の式', number: 1, query: 'b[tiab]' },
+  { label: '別の提出番号', number: 2, query: 'a[tiab]' },
+])('採点後に$labelが提出された実行は未採点として比較を止める', ({ number, query }) => {
+  const s = setup(); s.save();
+  writeJson(join(dirname(s.path('v1')), 'submission.json'), { number, query });
+  expect(() => main(s.args, s.runtime)).toThrow('採点記録の不足 0 件、未採点 1 件、測定日不正 0 件');
+  expect(existsSync(s.runtime.reportsDir!)).toBe(false);
+  expect(s.runtime.stdout).not.toHaveBeenCalled();
+  expect(s.runtime.fetchImpl).not.toHaveBeenCalled();
+});
+
+test('採点後に提出試行数が増えた実行は未採点として比較を止める', () => {
+  const s = setup(); s.save();
+  writeLines(join(dirname(s.path('v0')), 'tool-log.jsonl'), [{ command: 'submit' }, { command: 'submit' }]);
+  expect(() => main(s.args, s.runtime)).toThrow('未採点 1 件');
+  expect(existsSync(s.runtime.reportsDir!)).toBe(false);
+});
+
+test.each(['submission', 'submitAttempts'])('採点記録に%sがない旧形式は未採点として比較を止める', (field) => {
+  const s = setup(); s.save();
+  const saved = JSON.parse(readFileSync(s.path('v1'), 'utf8'));
+  delete saved[field];
+  writeJson(s.path('v1'), saved);
+  expect(() => main(s.args, s.runtime)).toThrow('未採点 1 件');
+  expect(existsSync(s.runtime.reportsDir!)).toBe(false);
+});
+
+test('提出番号・式・試行数が採点時と同じなら比較できる', () => {
+  const s = setup(); s.save();
+  expect(main(s.args, s.runtime)).toBe(0);
+  const report = JSON.parse(readFileSync(join(s.runtime.reportsDir!, 'compare-v0-v1-smoke.json'), 'utf8'));
+  expect(report.comparison.verdict).toBe('adopt');
   expect(s.runtime.fetchImpl).not.toHaveBeenCalled();
 });
 
@@ -205,10 +249,10 @@ test.each([
 
 test('両版が別々の単一日でも同日扱いせず、日付不正は拒否する', () => {
   const s = setup(); s.save();
-  for (let i = 1; i <= 2; i++) writeJson(s.path('v1', i), { ...score(), measuredAt: '2026-01-02T00:00:00Z' });
+  for (let i = 1; i <= 2; i++) writeJson(s.path('v1', i), { ...JSON.parse(readFileSync(s.path('v1', i), 'utf8')), measuredAt: '2026-01-02T00:00:00Z' });
   main(s.args, s.runtime);
   expect(JSON.parse(readFileSync(join(s.runtime.reportsDir!, 'compare-v0-v1-smoke.json'), 'utf8')).sameDay).toBe(false);
-  writeJson(s.path('v1'), { ...score(), measuredAt: '日付ではない' });
+  writeJson(s.path('v1'), { ...JSON.parse(readFileSync(s.path('v1'), 'utf8')), measuredAt: '日付ではない' });
   expect(() => main(s.args, s.runtime)).toThrow('測定日不正 1 件');
 });
 
