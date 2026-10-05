@@ -10,7 +10,24 @@ import { readRun, runPath, writeJson } from './runDir';
 import { parseRunOptions, targetReviews, type RunRuntime } from './startRuns';
 import { defaultRuntime } from './tool';
 
-type StoredScore = RunScore & { measuredAt: string; submission: { number: number; querySha256: string } | null; submitAttempts: number };
+export type StoredScore = RunScore & { measuredAt: string; submission: { number: number; querySha256: string } | null; submitAttempts: number };
+
+export function readSubmissionState(dir: string) {
+  const submissionPath = join(dir, 'submission.json');
+  const submission = existsSync(submissionPath) ? JSON.parse(readFileSync(submissionPath, 'utf8')) as { number: number; query: string } : null;
+  const fingerprint = submission ? { number: submission.number, querySha256: createHash('sha256').update(submission.query).digest('hex') } : null;
+  const logPath = join(dir, 'tool-log.jsonl');
+  const submitAttempts = existsSync(logPath) ? readFileSync(logPath, 'utf8').split(/\r?\n/).filter(Boolean)
+    .filter((line) => (JSON.parse(line) as { command: string }).command === 'submit').length : 0;
+  return { submission, fingerprint, submitAttempts };
+}
+
+export function scoreMatchesSubmission(saved: StoredScore, state: ReturnType<typeof readSubmissionState>): boolean {
+  const { fingerprint, submitAttempts } = state;
+  return saved.status === 'scored' && saved.submitAttempts === submitAttempts
+    && (fingerprint === null ? saved.submission === null : saved.submission?.number === fingerprint.number
+      && saved.submission?.querySha256 === fingerprint.querySha256);
+}
 
 export async function main(args: string[], runtime: RunRuntime = defaultRuntime()): Promise<number> {
   const options = parseRunOptions(args, '--runs');
@@ -30,18 +47,12 @@ export async function main(args: string[], runtime: RunRuntime = defaultRuntime(
       if (info.version !== options.version || info.pmcid !== review.pmcid || info.runIndex !== index + 1
         || info.cutoffDate !== review.cutoffDate) throw new Error('実行条件が採点対象と一致しません');
       const scorePath = join(dir, 'score.json');
-      const submissionPath = join(dir, 'submission.json');
-      const submission = existsSync(submissionPath) ? JSON.parse(readFileSync(submissionPath, 'utf8')) as { number: number; query: string } : null;
-      const fingerprint = submission ? { number: submission.number, querySha256: createHash('sha256').update(submission.query).digest('hex') } : null;
-      const logPath = join(dir, 'tool-log.jsonl');
-      const submitAttempts = existsSync(logPath) ? readFileSync(logPath, 'utf8').split(/\r?\n/).filter(Boolean)
-        .filter((line) => (JSON.parse(line) as { command: string }).command === 'submit').length : 0;
+      const state = readSubmissionState(dir);
+      const { submission, fingerprint, submitAttempts } = state;
       if (existsSync(scorePath)) {
         const saved = JSON.parse(readFileSync(scorePath, 'utf8')) as StoredScore;
         if (saved.status !== 'scored' && saved.status !== 'unknown') throw new Error('採点記録の状態が不正です');
-        if (saved.status === 'scored' && saved.submitAttempts === submitAttempts
-          && (fingerprint === null ? saved.submission === null : saved.submission?.number === fingerprint.number
-            && saved.submission?.querySha256 === fingerprint.querySha256)) {
+        if (scoreMatchesSubmission(saved, state)) {
           runs.push(saved); measuredDates.push(saved.measuredAt); continue;
         }
       }
