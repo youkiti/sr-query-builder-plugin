@@ -2,6 +2,14 @@
 import { EutilsError } from '../../../src/lib/ncbi/eutils';
 import { isQueryRejection, createDeps, ncbiRate, timeoutFetch } from './ncbi';
 
+test('渡されたレート制限をそのまま使う', async () => {
+  const rateLimiter = { acquire: jest.fn(async () => undefined) };
+  const deps = createDeps({ env: {}, fetchImpl: jest.fn(async () => { throw new Error('想定外の通信'); }), rateLimiter });
+  expect(deps.rateLimiter).toBe(rateLimiter);
+  await deps.rateLimiter!.acquire();
+  expect(rateLimiter.acquire).toHaveBeenCalledTimes(1);
+});
+
 test('既定・分割したレートを読み、不正値を拒否する', () => {
   expect(ncbiRate({})).toBe(2);
   expect(ncbiRate({ P2F_NCBI_RPS: '0.5' })).toBe(0.5);

@@ -25,6 +25,23 @@ function setup(titles = false, outside = false) {
   return { root, dir, file, runtime, call };
 }
 
+test('渡されたレート制限を道具の呼び出しをまたいで毎回使う', async () => {
+  const s = setup();
+  const acquire = jest.fn(async () => undefined);
+  s.runtime.rateLimiter = { acquire };
+  let requests = 0;
+  s.runtime.fetchImpl = jest.fn(async (input) => {
+    const url = new URL(String(input));
+    if (url.origin !== 'https://eutils.ncbi.nlm.nih.gov' || url.pathname !== '/entrez/eutils/esearch.fcgi') throw new Error('想定外の通信');
+    expect(acquire).toHaveBeenCalledTimes(++requests);
+    return search(0);
+  });
+  expect(await s.call('count')).toBe(0);
+  expect(await s.call('count')).toBe(0);
+  expect(acquire).toHaveBeenCalledTimes(8);
+  expect(requests).toBe(8);
+});
+
 test('check は通信も予算消費もせず、未知と版で禁止したコマンドを拒否する', async () => {
   const s = setup();
   expect(await s.call('check')).toBe(0);

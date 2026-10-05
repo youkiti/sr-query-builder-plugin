@@ -1,0 +1,25 @@
+{
+  "version": "v4g",
+  "model": "gemini-3.5-flash-lite",
+  "generationSettings": "Gemini API の既定（温度などの生成設定は指定しない）",
+  "inputs": [
+    "protocol.md",
+    "procedure.md",
+    "道具の呼び方を関数呼び出しに読み替える設定の節（geminiRun.ts）"
+  ],
+  "tools": [
+    "check",
+    "count",
+    "mesh",
+    "submit"
+  ],
+  "maxMeasurements": 20,
+  "maxSubmissions": 4,
+  "costLimit": "1 本あたりの道具の呼び出し回数の上限は v1 と同じ。成果物 1 つに生成 3 本を使う",
+  "finalSelection": "v1g の手順で独立に作った 3 本それぞれの「最後に受け付けられた提出」を OR で束ねた 1 本。採点結果による選び直しはしない",
+  "runner": "gemini-api",
+  "combine": {
+    "from": "v1g",
+    "k": 3
+  }
+}

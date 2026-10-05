@@ -1,6 +1,18 @@
 /** @jest-environment node */
 import { loadConditions, validateConditions } from './conditions';
 
+test('日付の接尾辞のない固定モデルと実行役の正常値を受け付ける', () => {
+  for (const runner of [undefined, 'claude-subagent', 'gemini-api']) {
+    expect(validateConditions({ ...loadConditions('v0'), model: 'gemini-2.5-flash', runner }, 'v0').runner).toBe(runner);
+  }
+});
+test.each(['latest', 'gemini-latest-12345678', 'gemini.latest', 'prefixlatestsuffix', 'gemini/a'])('不正なモデルを拒否する: %s', (model) => {
+  expect(() => validateConditions({ ...loadConditions('v0'), model }, 'v0')).toThrow('固定 ID');
+});
+test.each(['other', '', null, 1])('不正な実行役を拒否する: %j', (runner) => {
+  expect(() => validateConditions({ ...loadConditions('v0'), runner }, 'v0')).toThrow('実行役');
+});
+
 test('固定した版と生成条件を読み込む', () => {
   expect(loadConditions('v0')).toMatchObject({ version: 'v0', model: 'claude-haiku-4-5-20251001',
     tools: ['check', 'count', 'mesh', 'submit'], maxMeasurements: 20, maxSubmissions: 4 });

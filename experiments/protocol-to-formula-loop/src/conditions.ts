@@ -7,12 +7,14 @@ export interface Conditions {
   version: string; model: string; generationSettings: string; inputs: string[]; tools: Command[];
   maxMeasurements: number; maxSubmissions: number; costLimit: string; finalSelection: string;
   combine?: { from: string; k: number } | { versions: string[] };
+  runner?: 'claude-subagent' | 'gemini-api';
 }
 
 export function validateConditions(value: unknown, version: string): Conditions {
   const c = value as Conditions | null;
   if (!/^[A-Za-z0-9_-]+$/.test(version) || !c || c.version !== version) throw new Error('版とフォルダ名が一致しません');
-  if (typeof c.model !== 'string' || !/^[A-Za-z0-9.-]+-\d{8}$/.test(c.model) || c.model.includes('-latest')) throw new Error('モデルは固定 ID が必要です');
+  if (typeof c.model !== 'string' || !/^[A-Za-z0-9.-]+$/.test(c.model) || c.model.includes('latest')) throw new Error('モデルは固定 ID が必要です');
+  if (c.runner !== undefined && c.runner !== 'claude-subagent' && c.runner !== 'gemini-api') throw new Error('実行役の指定が不正です');
   if (!Array.isArray(c.tools) || !c.tools.includes('submit') || c.tools.some((tool) => !COMMANDS.includes(tool))) throw new Error('道具の指定が不正です');
   if (![c.maxMeasurements, c.maxSubmissions].every((n) => Number.isSafeInteger(n) && n > 0)) throw new Error('上限は正の整数が必要です');
   if (!Array.isArray(c.inputs) || c.inputs.some((s) => typeof s !== 'string')
