@@ -15,6 +15,7 @@ export interface Runtime {
   env: NodeJS.ProcessEnv; fetchImpl: typeof fetch; now: () => Date;
   stdout: (text: string) => void; stderr: (text: string) => void; sleep?: DepsOptions['sleep'];
   timeoutMs?: number;
+  rateLimiter?: DepsOptions['rateLimiter'];
   lockOptions?: LockOptions;
 }
 export const defaultRuntime = (): Runtime => ({ env: process.env, fetchImpl: globalThis.fetch, now: () => new Date(),
@@ -64,7 +65,7 @@ export async function main(args: string[], runtime: Runtime = defaultRuntime()):
         budget.submissions++;
         return finish('成功', 0, `提出 ${number} を受け付けました`);
       }
-      const deps = createDeps({ env, fetchImpl, cutoffDate: run.cutoffDate, sleep, timeoutMs: runtime.timeoutMs });
+      const deps = createDeps({ env, fetchImpl, cutoffDate: run.cutoffDate, sleep, timeoutMs: runtime.timeoutMs, rateLimiter: runtime.rateLimiter });
       let message: string;
       if (command === 'mesh') {
         if (!argument?.trim() || args.length !== 4) throw new Error('MeSH の語を 1 つ指定してください');

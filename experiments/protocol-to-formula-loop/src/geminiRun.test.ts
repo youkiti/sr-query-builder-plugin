@@ -176,16 +176,83 @@ test('試験群の保護と並行数の範囲とキーの存在を検査する',
   await expect(main(s.args, s.runtime)).rejects.toThrow('GEMINI_API_KEY');
 });
 
-test.each([undefined, '12'])('道具のレートを並行数で割り、道具の例外にも両キーを伏せる: %s', async (rps) => {
+test.each([undefined, '12'])('道具のレート設定を保ち、道具の例外にも両キーを伏せる: %s', async (rps) => {
   const s = setup([call('write_formula', { content: formula }), call('tool', { command: 'check' }), done()], 1, 4);
   s.runtime.env.P2F_NCBI_RPS = rps;
   const spy = jest.spyOn(tool, 'main').mockImplementation(async (_args, runtime) => {
-    expect(runtime!.env.P2F_NCBI_RPS).toBe(String(Number(rps ?? 8) / 4));
+    expect(runtime!.env.P2F_NCBI_RPS).toBe(rps);
+    expect(runtime!.rateLimiter).toBeDefined();
     throw new Error('合成Gemini秘密 と 合成NCBI秘密');
   });
   expect(await main(s.args, s.runtime)).toBe(0); expect(spy).toHaveBeenCalledTimes(1);
   expect(JSON.stringify(s.bodies[2])).toContain('[終了コード 1]');
   expect(JSON.stringify(s.bodies[2])).not.toMatch(/合成Gemini秘密|合成NCBI秘密/);
+});
+
+test.each([false, true])('複数関数への応答は順序と識別子を保ち、後続の道具と書き込みは実行しない: %s', async (withId) => {
+  const first = { name: 'tool', args: { command: 'submit' }, ...(withId ? { id: '合成呼出1' } : {}) };
+  for (const second of [
+    { name: 'tool', args: { command: 'submit' }, ...(withId ? { id: '合成呼出2' } : {}) },
+    { name: 'write_formula', args: { content: '上書きしない式' }, ...(withId ? { id: '合成呼出2' } : {}) },
+  ]) {
+    const s = setup([call('write_formula', { content: formula }), reply({ functionCall: first }, { functionCall: second }), done()]);
+    const spy = jest.spyOn(tool, 'main');
+    expect(await main(s.args, s.runtime)).toBe(0);
+    const contents = s.bodies[2]!.contents as { parts: unknown[] }[];
+    expect(contents[contents.length - 1]!.parts).toEqual([
+      { functionResponse: { name: first.name, ...(withId ? { id: first.id } : {}), response: { result: expect.stringContaining('提出 1 を受け付けました') } } },
+      { functionResponse: { name: second.name, ...(withId ? { id: second.id } : {}), response: { result: '未実行: 関数は 1 回の応答で 1 つずつ呼んでください。' } } },
+    ]);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(s.read('budget.json'))).toEqual({ measurements: 0, submissions: 1 });
+    expect(s.read('formula.md')).toBe(formula);
+    spy.mockRestore();
+  }
+});
+
+test.each([undefined, '4'])('並行する二実行の全道具呼び出しが共有レートの間隔を守る: %s', async (rps) => {
+  const s = setup([], 2, 2);
+  delete s.runtime.env.NCBI_API_KEY;
+  s.runtime.env.P2F_NCBI_RPS = rps;
+  let now = Date.parse('2026-01-01T00:00:00Z');
+  const start = now;
+  const times: number[] = [];
+  let initial = 0;
+  s.runtime.now = () => new Date(now);
+  s.runtime.sleep = jest.fn(async (ms) => {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    now += ms;
+  });
+  s.runtime.fetchImpl = jest.fn(async (input, init) => {
+    if (String(input) === url) {
+      const body = JSON.parse(String(init?.body)) as { contents: unknown[] };
+      if (body.contents.length === 1) {
+        initial++;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(initial).toBe(2);
+      }
+      return json(body.contents.length < 5 ? call('tool', { command: 'mesh', argument: '合成語' }) : done());
+    }
+    const request = new URL(String(input));
+    if (request.origin !== 'https://eutils.ncbi.nlm.nih.gov' || request.pathname !== '/entrez/eutils/esearch.fcgi'
+      || request.searchParams.get('db') !== 'mesh') throw new Error('想定外の通信です');
+    times.push(now - start);
+    return json({ esearchresult: { count: '0', idlist: [] } });
+  });
+  expect(await main(s.args, s.runtime)).toBe(0);
+  const interval = 1000 / Number(rps ?? 2);
+  expect(times).toEqual(Array.from({ length: 8 }, (_, i) => interval * i));
+  expect(s.runtime.sleep).toHaveBeenCalledTimes(7);
+  for (const dir of [s.dir, join(dirname(s.dir), 'run-2')]) {
+    expect(JSON.parse(readFileSync(join(dir, 'budget.json'), 'utf8'))).toEqual({ measurements: 2, submissions: 0 });
+  }
+});
+
+test.each(['', ' ', '0', '-1', 'NaN', 'Infinity'])('共有レートの不正値を通信前に拒否する: %s', async (rps) => {
+  const s = setup();
+  s.runtime.env.P2F_NCBI_RPS = rps;
+  await expect(main(s.args, s.runtime)).rejects.toThrow('P2F_NCBI_RPS は正の有限数が必要です');
+  expect(s.fetchImpl).not.toHaveBeenCalled();
 });
 
 test('保存する式、説明、モデル版、外へ投げる例外にもキーを残さない', async () => {

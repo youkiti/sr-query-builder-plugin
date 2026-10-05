@@ -1,5 +1,5 @@
 import { EutilsError, type EutilsDeps } from '../../../src/lib/ncbi/eutils';
-import { TokenBucket } from '../../../src/lib/ncbi/rateLimit';
+import { TokenBucket, type RateLimiter } from '../../../src/lib/ncbi/rateLimit';
 import { createEvalFetch, type ApiEvent } from '../../query-optimization-bench/ncbiEval';
 
 export function isQueryRejection(error: unknown): boolean {
@@ -37,12 +37,13 @@ export function timeoutFetch(fetchImpl: typeof fetch, timeoutMs = REQUEST_TIMEOU
 export interface DepsOptions {
   env: NodeJS.ProcessEnv; fetchImpl: typeof fetch; cutoffDate?: string; onCall?: (event: ApiEvent) => void;
   sleep?: EutilsDeps['sleep']; timeoutMs?: number; now?: () => number;
+  rateLimiter?: RateLimiter;
 }
-export function createDeps({ env, fetchImpl, cutoffDate, onCall = () => undefined, sleep, timeoutMs, now }: DepsOptions): EutilsDeps {
+export function createDeps({ env, fetchImpl, cutoffDate, onCall = () => undefined, sleep, timeoutMs, now, rateLimiter }: DepsOptions): EutilsDeps {
   const apiKey = env.NCBI_API_KEY;
   const rate = ncbiRate(env);
   const limited = timeoutFetch(fetchImpl, timeoutMs);
   return { apiKey, strictCounts: true, sleep,
-    rateLimiter: new TokenBucket({ ratePerSecond: rate, capacity: 1, sleep, now }),
+    rateLimiter: rateLimiter ?? new TokenBucket({ ratePerSecond: rate, capacity: 1, sleep, now }),
     fetch: cutoffDate ? createEvalFetch(cutoffDate, limited, onCall, [apiKey ?? ''], 'edat') : limited };
 }

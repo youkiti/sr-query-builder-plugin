@@ -1,10 +1,12 @@
 import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { config } from 'dotenv';
+import { TokenBucket } from '../../../src/lib/ncbi/rateLimit';
 import { redact } from '../../query-optimization-bench/ncbiEval';
 import { casesDir } from './cases';
 import { loadConditions, type Command } from './conditions';
 import { procedureBody } from './leakCheck';
+import { ncbiRate } from './ncbi';
 import { createRun, readRun, runPath } from './runDir';
 import { parseRunOptions, targetReviews, type RunRuntime } from './startRuns';
 import { defaultRuntime, main as toolMain } from './tool';
@@ -23,7 +25,7 @@ interface Agent {
   status: Status; model: string; modelVersion: string | null; turns: number; startedAt: string; finishedAt: string;
   promptTokens: number; outputTokens: number; note?: string;
 }
-interface FunctionCall { name: string; args?: Record<string, unknown> }
+interface FunctionCall { name: string; args?: Record<string, unknown>; id?: string }
 interface Part { text?: string; functionCall?: FunctionCall }
 interface Content { role?: string; parts?: Part[] }
 interface Reply {
@@ -133,7 +135,10 @@ async function runAgent(dir: string, procedure: string, runtime: RunRuntime): Pr
         if (call) {
           result = await callFunction(call, dir, conditions.tools, runtime);
           if (calls.length > 1) result += '\n複数の関数が指定されたため、最初の 1 つだけ実行しました。';
-          contents.push(content, { role: 'user', parts: [{ functionResponse: { name: call.name, response: { result } } }] });
+          contents.push(content, { role: 'user', parts: calls.map((item, index) => ({ functionResponse: {
+            name: item.name, ...(item.id === undefined ? {} : { id: item.id }),
+            response: { result: index === 0 ? result : '未実行: 関数は 1 回の応答で 1 つずつ呼んでください。' },
+          } })) });
           empty = false;
         } else if (text) {
           writeFileSync(join(dir, 'final.txt'), safeText(runtime, text)); agent.status = 'completed';
@@ -169,7 +174,8 @@ async function execute(args: string[], runtime: RunRuntime): Promise<number> {
   const jobs = reviews.flatMap((review) => Array.from({ length: options.runsPerReview }, (_, i) => ({ review, runIndex: i + 1 })));
   const counts = { completed: 0, max_turns: 0, error: 0 };
   let skipped = 0, rebuilt = 0, executed = 0, promptTokens = 0, outputTokens = 0, next = 0;
-  const toolRuntime = { ...runtime, env: { ...runtime.env, P2F_NCBI_RPS: String(Number(runtime.env.P2F_NCBI_RPS ?? 8) / options.concurrency) } };
+  const toolRuntime = { ...runtime, rateLimiter: new TokenBucket({ ratePerSecond: ncbiRate(runtime.env), capacity: 1,
+    now: () => runtime.now().getTime(), sleep: runtime.sleep }) };
   await Promise.all(Array.from({ length: options.concurrency }, async () => {
     while (next < jobs.length) {
       const { review, runIndex } = jobs[next++]!;
