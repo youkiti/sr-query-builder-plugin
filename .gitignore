@@ -62,6 +62,8 @@ video/tools/
 video/build/
 
 experiments/query-optimization-bench/results/
+experiments/protocol-to-formula-loop/cases/
+experiments/protocol-to-formula-loop/results/
 
 # Agent ツールの worktree 隔離（isolation: worktree）が作るチェックアウト。リポジトリの
 # 作業コピーそのものなのでコミットしない。
