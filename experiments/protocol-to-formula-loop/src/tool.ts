@@ -6,6 +6,7 @@ import { fetchMeshTreeNumbers, resolveMeshDescriptors } from '../../../src/lib/n
 import { expandFormula } from '../../../src/features/validation/expandFormula';
 import { redact, seedTitles } from '../../query-optimization-bench/ncbiEval';
 import { COMMANDS, type Command } from './conditions';
+import { requiredUnits } from './formulaUnits';
 import { createDeps, isQueryRejection, type DepsOptions } from './ncbi';
 import { readBudget, readRun, recordToolCall, writeJson, withRunLock, type LockOptions, type ToolResult } from './runDir';
 import { validateFormulaMd } from './submission';
@@ -31,20 +32,20 @@ export async function main(args: string[], runtime: Runtime = defaultRuntime()):
     const budget = readBudget(dir);
     const finish = (result: ToolResult, code: number, message: string): number => {
       recordToolCall(dir, budget, { at: now().toISOString(), command: safe(command),
-        args: argument === undefined ? '引数なし' : command === 'mesh' ? `語の長さ: ${argument.length}` : '式ファイル 1 件', result,
+        args: argument === undefined ? '引数なし' : command === 'mesh' ? `語の長さ: ${argument.length}` : command === 'outside' ? '式ファイル 1 件・単位 1 件' : '式ファイル 1 件', result,
         remaining: { measurements: run.conditions.maxMeasurements - budget.measurements, submissions: run.conditions.maxSubmissions - budget.submissions } });
       (code === 0 ? stdout : stderr)(safe(message) + '\n');
       return code;
     };
     if (!COMMANDS.includes(command as Command) || !run.conditions.tools.includes(command as Command)) return finish('使えないコマンド', 2, 'この版では使えないコマンドです');
-    const measuring = ['count', 'mesh', 'titles'].includes(command);
+    const measuring = ['count', 'mesh', 'titles', 'outside'].includes(command);
     if ((measuring && budget.measurements >= run.conditions.maxMeasurements)
       || (command === 'submit' && budget.submissions >= run.conditions.maxSubmissions)) return finish('上限超過', 2, '呼び出し回数の上限に達しています');
     let md = '';
     let validated: ReturnType<typeof validateFormulaMd> | undefined;
     if (command !== 'mesh') {
       try {
-        if (!argument || args.length !== 4) throw new Error('式ファイルを 1 件指定してください');
+        if (!argument || args.length !== (command === 'outside' ? 5 : 4)) throw new Error(command === 'outside' ? '式ファイルと単位の ID を 1 件ずつ指定してください' : '式ファイルを 1 件指定してください');
         md = readFileSync(argument, 'utf8');
         validated = validateFormulaMd(md);
       } catch (error) { validated = { ok: false, reasons: [String(error)] }; }
@@ -82,11 +83,27 @@ export async function main(args: string[], runtime: Runtime = defaultRuntime()):
       } else if (validated?.ok && command === 'titles') {
         const result = await esearch(validated.query, deps, { retmax: 10 });
         message = result.pmids.length ? (await seedTitles(result.pmids, deps)).map((row, i) => `${i + 1}. ${row.title}`).join('\n') : '0 件です';
+      } else if (validated?.ok && command === 'outside') {
+        const { units, undetermined } = requiredUnits(validated.formula);
+        if (undetermined) return finish('検査不合格', 1, 'この式の形では使えません（最後の行を、ブロックの AND 結合にしてください）');
+        const target = units.find((unit) => unit.id === args[4]);
+        if (!target) return finish('検査不合格', 1, `指定した単位がありません。使える ID: ${units.filter((unit) => !unit.negative).map((unit) => unit.id).join(', ')}`);
+        if (target.negative) return finish('検査不合格', 1, '否定の単位（NOT の右側）には使えません');
+        const remaining = units.filter((unit) => unit.id !== target.id);
+        if (!remaining.some((unit) => !unit.negative)) return finish('検査不合格', 1, '指定した単位のほかに肯定の単位がありません');
+        const query = remaining.filter((unit) => !unit.negative).map((unit) => `(${unit.expression})`).join(' AND ')
+          + remaining.filter((unit) => unit.negative).map((unit) => ` NOT (${unit.expression})`).join('')
+          + ` NOT (${target.expression})`;
+        const result = await esearch(query, deps, { retmax: 15, sort: 'relevance' });
+        if (result.pmids.length !== Math.min(result.count, 15) || new Set(result.pmids).size !== result.pmids.length) throw new Error('検索結果の一覧が不完全です');
+        const titles = result.count ? (await seedTitles(result.pmids, deps)).map((row, i) => `${i + 1}. ${row.title}`).join('\n') : '0 件です';
+        message = `#${target.id} を外すと拾えるのに、#${target.id} があるために入っていない文献: ${result.count} 件\n${titles}`;
       } else throw new Error('コマンドの引数が不正です');
       budget.measurements++;
       return finish('成功', 0, message);
     } catch (error) {
-      if (['count', 'titles'].includes(command) && isQueryRejection(error)) return finish('検査不合格', 1, (error as Error).message);
+      if (['count', 'titles', 'outside'].includes(command) && isQueryRejection(error)) return finish('検査不合格', 1, (error as Error).message);
+      if (command === 'outside') return finish('測定失敗（結果不明）', 3, '測定に失敗しました。回数は消費していません');
       return finish('測定失敗（結果不明）', 3, `測定に失敗しました。回数は消費していません\n${safe(String(error))}`);
     }
   }, runtime.lockOptions);
