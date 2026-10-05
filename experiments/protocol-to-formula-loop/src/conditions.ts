@@ -6,7 +6,7 @@ export type Command = typeof COMMANDS[number];
 export interface Conditions {
   version: string; model: string; generationSettings: string; inputs: string[]; tools: Command[];
   maxMeasurements: number; maxSubmissions: number; costLimit: string; finalSelection: string;
-  combine?: { from: string; k: number };
+  combine?: { from: string; k: number } | { versions: string[] };
 }
 
 export function validateConditions(value: unknown, version: string): Conditions {
@@ -17,9 +17,18 @@ export function validateConditions(value: unknown, version: string): Conditions 
   if (![c.maxMeasurements, c.maxSubmissions].every((n) => Number.isSafeInteger(n) && n > 0)) throw new Error('上限は正の整数が必要です');
   if (!Array.isArray(c.inputs) || c.inputs.some((s) => typeof s !== 'string')
     || [c.generationSettings, c.costLimit, c.finalSelection].some((s) => typeof s !== 'string' || !s.trim())) throw new Error('生成条件の記述が不正です');
-  if (c.combine !== undefined && (!c.combine || typeof c.combine.from !== 'string'
-    || !/^[A-Za-z0-9_-]+$/.test(c.combine.from) || c.combine.from === version
-    || !Number.isInteger(c.combine.k) || c.combine.k < 2 || c.combine.k > 10)) throw new Error('束ねる条件の元の版または本数が不正です');
+  if (c.combine !== undefined) {
+    const combine = c.combine;
+    if (!combine || typeof combine !== 'object') throw new Error('束ねる条件の元の版または本数が不正です');
+    if ('versions' in combine) {
+      if ('from' in combine || 'k' in combine || !Array.isArray(combine.versions)
+        || combine.versions.length < 2 || combine.versions.length > 10
+        || combine.versions.some((source) => typeof source !== 'string' || !/^[A-Za-z0-9_-]+$/.test(source) || source === version)
+        || new Set(combine.versions).size !== combine.versions.length) throw new Error('束ねる条件の元の版または本数が不正です');
+    } else if (!('from' in combine) || typeof combine.from !== 'string'
+      || !/^[A-Za-z0-9_-]+$/.test(combine.from) || combine.from === version
+      || !Number.isInteger(combine.k) || combine.k < 2 || combine.k > 10) throw new Error('束ねる条件の元の版または本数が不正です');
+  }
   return c;
 }
 

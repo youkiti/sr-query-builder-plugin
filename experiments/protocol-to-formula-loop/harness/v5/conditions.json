@@ -1,0 +1,26 @@
+{
+  "version": "v5",
+  "model": "claude-haiku-4-5-20251001",
+  "generationSettings": "サブエージェントの既定（温度などは変更不可のため既定のまま）",
+  "inputs": [
+    "protocol.md",
+    "procedure.md"
+  ],
+  "tools": [
+    "check",
+    "count",
+    "mesh",
+    "submit"
+  ],
+  "maxMeasurements": 20,
+  "maxSubmissions": 4,
+  "costLimit": "1 本あたりの道具の呼び出し回数の上限は v1 と同じ。成果物 1 つに生成 3 本を使う（費用は v1 の 3 倍、v4 と同じ）",
+  "finalSelection": "v1・v5b・v5c の手順で 1 本ずつ作った式それぞれの「最後に受け付けられた提出」を OR で束ねた 1 本。採点結果による選び直しはしない",
+  "combine": {
+    "versions": [
+      "v1",
+      "v5b",
+      "v5c"
+    ]
+  }
+}

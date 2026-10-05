@@ -14,16 +14,20 @@ export function main(args: string[], runtime: RunRuntime = defaultRuntime()): nu
   const options = parseRunOptions(args, '--runs');
   const conditions = loadConditions(options.version, runtime.harnessDir);
   if (!conditions.combine) throw new Error('束ねる条件がありません');
-  const { from, k } = conditions.combine;
+  const combine = conditions.combine;
+  const k = 'versions' in combine ? combine.versions.length : combine.k;
   const reviews = targetReviews(options, runtime);
   const all = reviews.flatMap((review) => Array.from({ length: options.runsPerReview }, (_, i) => ({
     review, runIndex: i + 1, dir: runPath(options.root, options.version, review.pmcid, i + 1),
-    sources: Array.from({ length: k }, (_, offset) => {
+    sources: 'versions' in combine ? combine.versions.map((version) => ({
+      combinedFrom: version, dir: runPath(options.root, version, review.pmcid, i + 1),
+    })) : Array.from({ length: k }, (_, offset) => {
       const runIndex = i * k + offset + 1;
-      return { runIndex, dir: runPath(options.root, from, review.pmcid, runIndex) };
+      return { combinedFrom: runIndex, dir: runPath(options.root, combine.from, review.pmcid, runIndex) };
     }),
   })));
-  const missing = all.flatMap((run) => run.sources).filter(({ dir }) => !existsSync(dir) || !statSync(dir).isDirectory()).length;
+  const missing = all.flatMap<{ combinedFrom: string | number; dir: string }>((run) => run.sources)
+    .filter(({ dir }) => !existsSync(dir) || !statSync(dir).isDirectory()).length;
   const existing = all.filter(({ dir }) => existsSync(dir)).length;
   if (missing) throw new Error(`元の実行フォルダが ${missing} 件不足しています`);
   if (existing) throw new Error(`束ねた版の実行フォルダが ${existing} 件既にあります`);
@@ -32,7 +36,7 @@ export function main(args: string[], runtime: RunRuntime = defaultRuntime()): nu
   for (const { review, runIndex, sources } of all) {
     const available = sources.flatMap((source) => {
       const { submission } = readSubmissionState(source.dir);
-      return submission ? [{ runIndex: source.runIndex, query: submission.query }] : [];
+      return submission ? [{ combinedFrom: source.combinedFrom, query: submission.query }] : [];
     });
     const queries = [...new Set(available.map((source) => source.query))];
     const md = '## PubMed/MEDLINE\n\n```\n#1 ' + queries.map((query) => `(${query})`).join(' OR ') + '\n```\n';
@@ -47,7 +51,7 @@ export function main(args: string[], runtime: RunRuntime = defaultRuntime()): nu
       mkdirSync(join(dir, 'submissions'));
       writeFileSync(join(dir, 'submissions', '1.md'), md);
       writeJson(join(dir, 'submission.json'), { number: 1, submittedAt, query: validated.query,
-        combinedFrom: available.map((source) => source.runIndex) });
+        combinedFrom: available.map((source) => source.combinedFrom) });
       recordToolCall(dir, { measurements: 0, submissions: 1 }, { at: submittedAt, command: 'submit', args: '束ねた式 1 件',
         result: '成功', remaining: { measurements: conditions.maxMeasurements, submissions: conditions.maxSubmissions - 1 } });
       submitted++;
