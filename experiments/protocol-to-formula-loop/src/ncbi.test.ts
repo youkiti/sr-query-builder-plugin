@@ -1,5 +1,6 @@
 /** @jest-environment node */
-import { createDeps, ncbiRate, timeoutFetch } from './ncbi';
+import { EutilsError } from '../../../src/lib/ncbi/eutils';
+import { isQueryRejection, createDeps, ncbiRate, timeoutFetch } from './ncbi';
 
 test('既定・分割したレートを読み、不正値を拒否する', () => {
   expect(ncbiRate({})).toBe(2);
@@ -36,4 +37,28 @@ test('時間超過で中断し、元の中断シグナルも保持する', async
     await expect(timeoutFetch(network)('https://example.invalid', { signal: controller.signal })).rejects.toThrow('中断');
     expect(jest.getTimerCount()).toBe(0);
   } finally { jest.useRealTimers(); }
+});
+
+test('式への恒久的な拒否だけを区別する', () => {
+  for (const message of ['構文エラー: 不明なフィールドタグ tiabb', '構文エラー: phrase not found 合成句', 'esearch エラー: 合成拒否', 'esearch in-band エラー']) {
+    expect(isQueryRejection(new EutilsError(message, 200, true))).toBe(true);
+    expect(isQueryRejection(new EutilsError(message, 200))).toBe(false);
+    expect(isQueryRejection(new Error(message))).toBe(false);
+  }
+  for (const error of [new EutilsError('esearch の件数が欠落しています', 200, true),
+    new EutilsError('esearch の PMID 一覧が不正です', 200, true), new EutilsError('HTTP 503', 503),
+    new DOMException('制限時間超過', 'TimeoutError'), new Error('一般の例外'), null]) expect(isQueryRejection(error)).toBe(false);
+});
+test('連続取得の2回目以降は補充を待つ', async () => {
+  let now = 0;
+  const sleep = jest.fn(async (ms: number) => { now += ms; });
+  const deps = createDeps({ env: { P2F_NCBI_RPS: '3' }, fetchImpl: jest.fn(), now: () => now, sleep });
+  await deps.rateLimiter!.acquire();
+  expect(sleep).not.toHaveBeenCalled();
+  await deps.rateLimiter!.acquire();
+  expect(now).toBeGreaterThanOrEqual(1000 / 3);
+  const second = now;
+  await deps.rateLimiter!.acquire();
+  expect(now - second).toBeGreaterThanOrEqual(1000 / 3);
+  expect(sleep).toHaveBeenCalledTimes(2);
 });

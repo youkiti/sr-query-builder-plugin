@@ -15,6 +15,8 @@ export interface EvaluableReview extends BenchReview {
   nonexistentReports: number;
   afterCutoffReports: number;
   evaluable: boolean;
+  originalSearchEmpty: boolean;
+  eligible: boolean;
 }
 
 export function applyEvaluable(review: BenchReview, record: EvaluableRecord): EvaluableReview {
@@ -30,7 +32,7 @@ export function applyEvaluable(review: BenchReview, record: EvaluableRecord): Ev
   return { ...review, studies, evaluablePmids, excludedReports: included.size - within.size,
     excludedStudies: review.studies.length - studies.length,
     nonexistentReports: included.size - existing.size, afterCutoffReports: existing.size - within.size,
-    evaluable: studies.length > 0 };
+    evaluable: studies.length > 0, originalSearchEmpty: review.n_records === 0, eligible: studies.length > 0 && review.n_records !== 0 };
 }
 
 export function loadEvaluable(casesDir: string): Map<string, EvaluableRecord> {

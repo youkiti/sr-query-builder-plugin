@@ -30,7 +30,7 @@ test('ラベル欠落・件数不足・不正な抽出件数を拒否し、評�
   expect(() => selectSubsets(dev, new Map())).toThrow('ラベル');
   expect(() => selectSubsets(dev.slice(0, 19), labels)).toThrow('足りません');
   expect(() => selectSubsets(dev, labels, { fixed: 5, smoke: 6 })).toThrow('抽出件数');
-  const rows = dev.map((row, i) => i === 0 ? { ...row, evaluable: false, studies: [] } : row);
+  const rows = dev.map((row, i) => i === 0 ? { ...row, evaluable: false, eligible: false, studies: [] } : row);
   expect(selectSubsets(rows, labels).fixed).not.toContain(dev[0]!.pmcid);
 });
 test('抽出ファイルは既存内容を上書きしない', () => {
@@ -59,4 +59,9 @@ test('CLI は合成開発群を凍結し、標準出力には層の件数だけ�
     expect(output).not.toContain('PMC');
     expect(() => main(dir, dir)).toThrow();
   } finally { stdout.mockRestore(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('原著式0件のレビューを抽出しない', () => {
+  const rows = dev.map((row, i) => i === 0 ? applyEvaluable({ ...row, n_records: 0 }, record(row)) : row);
+  expect(selectSubsets(rows, labels, { fixed: 24, smoke: 5 }).fixed).not.toContain(rows[0]!.pmcid);
 });

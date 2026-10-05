@@ -37,7 +37,7 @@ export async function main(args: string[], runtime: Runtime & { casesDir?: strin
     }
   }
   stdout(`対象: ${reviews.length} 件／今回取得: ${fetched} 件／既存で省略: ${skipped} 件／失敗: ${failed} 件\n`);
-  stdout('ティア\tレビュー数\t外した報告数\t外した研究数\t外したレビュー数\t残るレビュー数\t存在しない\t検索日より後\n');
+  stdout('ティア\tレビュー数\t外した報告数\t外した研究数\t評価可能な研究なし\t原著式 0 件\t残るレビュー数\t存在しない\t検索日より後\n');
   for (const tier of TIERS) {
     const rows = reviews.filter((review) => review.tier === tier);
     const measured = rows.flatMap((review) => {
@@ -46,7 +46,7 @@ export async function main(args: string[], runtime: Runtime & { casesDir?: strin
     });
     const sum = (key: 'excludedReports' | 'excludedStudies' | 'nonexistentReports' | 'afterCutoffReports') => measured.reduce((n, row) => n + row[key], 0);
     stdout([tier, rows.length, sum('excludedReports'), sum('excludedStudies'), measured.filter((r) => !r.evaluable).length,
-      measured.filter((r) => r.evaluable).length, sum('nonexistentReports'), sum('afterCutoffReports')].join('\t') + '\n');
+      measured.filter((r) => r.evaluable && r.originalSearchEmpty).length, measured.filter((r) => r.eligible).length, sum('nonexistentReports'), sum('afterCutoffReports')].join('\t') + '\n');
   }
   const complete = records.size === reviews.length && reviews.every((review) => records.has(review.pmcid));
   return failed || !complete ? 1 : 0;

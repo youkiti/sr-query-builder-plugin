@@ -1,4 +1,4 @@
-import { appendFileSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, mkdirSync, readFileSync, rmdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { validateConditions, type Conditions } from './conditions';
 
@@ -41,4 +41,26 @@ export function readBudget(dir: string): Budget {
 export function recordToolCall(dir: string, budget: Budget, log: ToolLog): void {
   writeJson(join(dir, 'budget.json'), budget);
   appendFileSync(join(dir, 'tool-log.jsonl'), JSON.stringify(log) + '\n');
+}
+
+export interface LockOptions { timeoutMs?: number; now?: () => number; sleep?: (ms: number) => Promise<void> }
+export async function withRunLock<T>(dir: string, action: () => Promise<T>, options: LockOptions = {}): Promise<T | null> {
+  const { timeoutMs = 120_000, now = Date.now, sleep = (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)) } = options;
+  const path = join(dir, '.lock');
+  const start = now();
+  let recovered = false;
+  for (;;) {
+    try { mkdirSync(path); break; }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      if (!recovered) {
+        try {
+          if (now() - statSync(path).mtimeMs > 600_000) { rmdirSync(path); recovered = true; continue; }
+        } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+      }
+      if (now() - start >= timeoutMs) return null;
+      await sleep(200);
+    }
+  }
+  try { return await action(); } finally { rmdirSync(path); }
 }

@@ -25,3 +25,8 @@ test('追記の最終行を採り、欠落ファイルを拒否する', () => {
     expect(loadEvaluable(dir).get(review().pmcid)!.withinCutoff).toEqual([]);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('原著式0件でも評価可能性は保ち、対象からは外す', () => {
+  expect(applyEvaluable({ ...review(), n_records: 0 }, record())).toMatchObject({ evaluable: true, originalSearchEmpty: true, eligible: false });
+  expect(applyEvaluable(review(), record())).toMatchObject({ evaluable: true, originalSearchEmpty: false, eligible: true });
+});

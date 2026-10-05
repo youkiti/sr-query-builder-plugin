@@ -39,9 +39,9 @@ test('実行フォルダ不足と試験群の未開封を通信前に拒否す�
 });
 test('4区分を保存し、不明を集計せず、再開で不明だけ測り直す', async () => {
   const s = setup();
-  writeJson(join(s.dirs[0]!, 'submission.json'), { query: 'a[tiab]' });
+  writeJson(join(s.dirs[0]!, 'submission.json'), { number: 1, query: 'a[tiab]' });
   writeFileSync(join(s.dirs[1]!, 'tool-log.jsonl'), JSON.stringify({ command: 'submit', result: '検査不合格' }) + '\n');
-  writeJson(join(s.dirs[3]!, 'submission.json'), { query: 'b[tiab]' });
+  writeJson(join(s.dirs[3]!, 'submission.json'), { number: 1, query: 'b[tiab]' });
   let failure = true;
   s.runtime.fetchImpl = jest.fn(async (input) => {
     const url = new URL(String(input));
@@ -69,4 +69,102 @@ test('4区分を保存し、不明を集計せず、再開で不明だけ測り�
   (s.runtime.fetchImpl as jest.Mock).mockClear();
   expect(await main(s.args, s.runtime)).toBe(0);
   expect(s.runtime.fetchImpl).not.toHaveBeenCalled();
+});
+
+test('式の拒否と0件は失敗として集計し、0件の捕捉通信は行わない', async () => {
+  const s = setup();
+  writeJson(join(s.dirs[0]!, 'submission.json'), { number: 1, query: 'a[tiabb]' });
+  writeJson(join(s.dirs[1]!, 'submission.json'), { number: 1, query: 'zero[tiab]' });
+  s.runtime.fetchImpl = jest.fn(async (input) => {
+    const params = new URL(String(input)).searchParams;
+    expect(params.get('retmax')).toBe('0');
+    return new Response(JSON.stringify({ esearchresult: params.get('term')!.includes('tiabb')
+      ? { errorlist: { fieldsnotfound: ['tiabb FAKE_SECRET'] } } : { count: '0' } }));
+  });
+  expect(await main(s.args, s.runtime)).toBe(0);
+  expect(s.runtime.fetchImpl).toHaveBeenCalledTimes(2);
+  const scores = s.dirs.map((dir) => JSON.parse(readFileSync(join(dir, 'score.json'), 'utf8')));
+  expect(scores[0]).toMatchObject({ status: 'scored', failure: 'invalid_submission', outcome: { status: 'invalid_submission' } });
+  expect(scores[1]).toMatchObject({ status: 'scored', failure: 'zero_hits', outcome: { status: 'measured', hits: 0 } });
+  expect(JSON.stringify(scores)).not.toContain('FAKE_SECRET');
+  expect(JSON.parse(readFileSync(join(s.runtime.reportsDir!, 'v0-smoke.json'), 'utf8')).summary.failures)
+    .toEqual({ zeroHits: 0.25, invalidSubmission: 0.25, noSubmission: 0.5 });
+});
+test('捕捉の段階でも拒否と応答破損を区別する', async () => {
+  const s = setup();
+  writeJson(join(s.dirs[0]!, 'submission.json'), { number: 1, query: 'a[tiab]' });
+  let rejected = true;
+  s.runtime.fetchImpl = jest.fn(async (input) => {
+    const params = new URL(String(input)).searchParams;
+    return new Response(JSON.stringify({ esearchresult: params.get('retmax') === '0' ? { count: '1' }
+      : rejected ? { ERROR: '合成の拒否' } : { count: '1' } }));
+  });
+  expect(await main(s.args, s.runtime)).toBe(0);
+  const path = join(s.dirs[0]!, 'score.json');
+  expect(JSON.parse(readFileSync(path, 'utf8')).failure).toBe('invalid_submission');
+  rejected = false;
+  writeJson(join(s.dirs[0]!, 'submission.json'), { number: 2, query: 'b[tiab]' });
+  expect(await main(s.args, s.runtime)).toBe(1);
+  expect(JSON.parse(readFileSync(path, 'utf8')).status).toBe('unknown');
+});
+test('捕捉数が総件数より多ければ未確定にする', async () => {
+  const s = setup();
+  const rows = Array.from({ length: 5 }, (_, i) => review(i + 1));
+  writeLines(join(s.root, 'data/processed/cc-by/gold/task2_search_screen.jsonl'), rows.map((row) => ({ pmcid: row.pmcid,
+    included_pmids: ['11111111', '11111112'], pmid_to_study_id: {} })));
+  writeLines(join(s.runtime.casesDir!, 'evaluable.jsonl'), rows.map((row) => ({ pmcid: row.pmcid, cutoffDate: row.cutoffDate,
+    existing: ['11111111', '11111112'], withinCutoff: ['11111111', '11111112'] })));
+  writeJson(join(s.dirs[0]!, 'submission.json'), { number: 1, query: 'a[tiab]' });
+  s.runtime.fetchImpl = jest.fn(async (input) => new Response(JSON.stringify({ esearchresult:
+    new URL(String(input)).searchParams.get('retmax') === '0' ? { count: '1' } : { count: '2', idlist: ['11111111', '11111112'] } })));
+  expect(await main(s.args, s.runtime)).toBe(1);
+  expect(JSON.parse(readFileSync(join(s.dirs[0]!, 'score.json'), 'utf8'))).toMatchObject({ status: 'unknown', error: '捕捉数が総件数を超えています' });
+  expect(existsSync(s.runtime.reportsDir!)).toBe(false);
+});
+test('提出番号・式・試行数の一致時だけ再利用し、旧記録は再測定する', async () => {
+  const s = setup();
+  const dir = s.dirs[0]!;
+  const scorePath = join(dir, 'score.json');
+  const submit = (number: number, query: string) => writeJson(join(dir, 'submission.json'), { number, query });
+  submit(1, 'a[tiab]');
+  s.runtime.fetchImpl = jest.fn(async () => new Response(JSON.stringify({ esearchresult: { count: '0' } })));
+  expect(await main(s.args, s.runtime)).toBe(0);
+  const saved = JSON.parse(readFileSync(scorePath, 'utf8'));
+  expect(saved).toMatchObject({ submission: { number: 1, querySha256: expect.stringMatching(/^[a-f0-9]{64}$/) }, submitAttempts: 0 });
+  expect(await main(s.args, s.runtime)).toBe(0);
+  expect(s.runtime.fetchImpl).toHaveBeenCalledTimes(1);
+  submit(1, 'b[tiab]');
+  expect(await main(s.args, s.runtime)).toBe(0);
+  expect(s.runtime.fetchImpl).toHaveBeenCalledTimes(2);
+  submit(2, 'b[tiab]');
+  expect(await main(s.args, s.runtime)).toBe(0);
+  expect(s.runtime.fetchImpl).toHaveBeenCalledTimes(3);
+  writeFileSync(join(dir, 'tool-log.jsonl'), JSON.stringify({ command: 'submit' }) + '\n');
+  expect(await main(s.args, s.runtime)).toBe(0);
+  expect(s.runtime.fetchImpl).toHaveBeenCalledTimes(4);
+  const old = JSON.parse(readFileSync(scorePath, 'utf8'));
+  delete old.submission;
+  writeJson(scorePath, old);
+  expect(await main(s.args, s.runtime)).toBe(0);
+  expect(s.runtime.fetchImpl).toHaveBeenCalledTimes(5);
+  const absent = s.dirs[1]!;
+  writeFileSync(join(absent, 'tool-log.jsonl'), JSON.stringify({ command: 'submit' }) + '\n');
+  expect(await main(s.args, s.runtime)).toBe(0);
+  expect(JSON.parse(readFileSync(join(absent, 'score.json'), 'utf8'))).toMatchObject({ failure: 'invalid_submission', submission: null, submitAttempts: 1 });
+});
+test('再利用した採点の測定範囲とレポート生成時刻を分ける', async () => {
+  const s = setup();
+  expect(await main(s.args, s.runtime)).toBe(0);
+  const first = s.runtime.now().toISOString();
+  s.runtime.now = () => new Date('2026-01-02T00:00:00Z');
+  writeJson(join(s.dirs[0]!, 'submission.json'), { number: 1, query: 'a[tiab]' });
+  s.runtime.fetchImpl = jest.fn(async () => new Response(JSON.stringify({ esearchresult: { count: '0' } })));
+  expect(await main(s.args, s.runtime)).toBe(0);
+  const last = s.runtime.now().toISOString();
+  s.runtime.now = () => new Date('2026-01-03T00:00:00Z');
+  expect(await main(s.args, s.runtime)).toBe(0);
+  const report = JSON.parse(readFileSync(join(s.runtime.reportsDir!, 'v0-smoke.json'), 'utf8'));
+  expect(report).toMatchObject({ generatedAt: s.runtime.now().toISOString(), measuredFrom: first, measuredTo: last });
+  expect(report).not.toHaveProperty('measuredAt');
+  expect(s.runtime.fetchImpl).toHaveBeenCalledTimes(1);
 });

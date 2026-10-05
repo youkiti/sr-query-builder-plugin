@@ -35,3 +35,17 @@ test('評価可能な指定群の入力だけから実行を作り、上書き�
   expect(() => targetReviews({ ...options, subset: 'test' }, runtime)).toThrow('--open-test-set');
   expect(runtime.fetchImpl).not.toHaveBeenCalled();
 });
+
+test('分割を保ったまま原著式0件だけ実行対象から除く', () => {
+  const root = mkdtempSync(join(tmpdir(), 'p2f-start-empty-'));
+  const rows = Array.from({ length: 20 }, (_, i) => review(i + 1));
+  const before = splitReviews(rows);
+  const excluded = rows.find((row) => before.get(row.pmcid) === 'development')!;
+  excluded.n_records = 0;
+  fixture(root, rows);
+  writeLines(join(root, 'evaluable.jsonl'), rows.map((row) => record(row)));
+  const runtime: RunRuntime = { casesDir: root, env: { COCHRANE_BENCH_DIR: root }, now: () => new Date(), stdout: jest.fn(), stderr: jest.fn(), fetchImpl: jest.fn() };
+  const selected = targetReviews({ root, version: 'v0', subset: 'development', runsPerReview: 1, openTestSet: false }, runtime);
+  expect(splitReviews(rows)).toEqual(before);
+  expect(selected.map((row) => row.pmcid)).toEqual(rows.filter((row) => before.get(row.pmcid) === 'development' && row !== excluded).map((row) => row.pmcid));
+});

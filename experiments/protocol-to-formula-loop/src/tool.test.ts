@@ -1,5 +1,5 @@
 /** @jest-environment node */
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import ts from 'typescript';
@@ -156,4 +156,65 @@ test('道具から辿れる静的・動的 import と再公開に正解集合の
   };
   walk(join(__dirname, 'tool.ts'));
   expect(visited.size).toBeGreaterThan(5);
+});
+
+test.each(['count', 'titles'])('PubMedの拒否は検査不合格で予算を使わない: %s', async (command) => {
+  const s = setup(true);
+  s.runtime.fetchImpl = jest.fn(async () => json({ esearchresult: { errorlist: { fieldsnotfound: ['tiabb FAKE_SECRET'] } } }));
+  expect(await s.call(command)).toBe(1);
+  expect(readBudget(s.dir).measurements).toBe(0);
+  expect(JSON.parse(readFileSync(join(s.dir, 'tool-log.jsonl'), 'utf8')).result).toBe('検査不合格');
+  expect(String((s.runtime.stderr as jest.Mock).mock.calls)).toContain('不明なフィールドタグ');
+  expect(String((s.runtime.stderr as jest.Mock).mock.calls)).not.toContain('FAKE_SECRET');
+  expect(existsSync(join(s.dir, '.lock'))).toBe(false);
+});
+test.each(['count', 'submit'])('ロックの上限では予算・提出・ログに書かない: %s', async (command) => {
+  const s = setup();
+  mkdirSync(join(s.dir, '.lock'));
+  const before = readFileSync(join(s.dir, 'budget.json'), 'utf8');
+  let now = Date.now();
+  s.runtime.lockOptions = { timeoutMs: 400, now: () => now, sleep: async (ms) => { now += ms; } };
+  expect(await s.call(command)).toBe(3);
+  expect(readFileSync(join(s.dir, 'budget.json'), 'utf8')).toBe(before);
+  expect(existsSync(join(s.dir, 'submission.json'))).toBe(false);
+  expect(existsSync(join(s.dir, 'submissions'))).toBe(false);
+  expect(existsSync(join(s.dir, 'tool-log.jsonl'))).toBe(false);
+  expect(s.runtime.fetchImpl).not.toHaveBeenCalled();
+  expect(String((s.runtime.stderr as jest.Mock).mock.calls)).toContain('同じ実行フォルダ');
+});
+test('同時の測定と提出を直列化し、両方の予算を保つ', async () => {
+  const s = setup();
+  let release!: () => void;
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => { entered = resolve; });
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  s.runtime.fetchImpl = jest.fn(async () => { entered(); await gate; return search(0); });
+  const count = s.call('count');
+  await started;
+  const sleep = jest.fn(async () => { expect(existsSync(join(s.dir, 'submission.json'))).toBe(false); release(); await count; });
+  s.runtime.lockOptions = { sleep };
+  const submit = s.call('submit');
+  expect(await count).toBe(0);
+  expect(await submit).toBe(0);
+  expect(sleep).toHaveBeenCalledWith(200);
+  expect(readBudget(s.dir)).toEqual({ measurements: 1, submissions: 1 });
+  expect(readFileSync(join(s.dir, 'tool-log.jsonl'), 'utf8').trim().split('\n')).toHaveLength(2);
+});
+
+test('残り1回の測定が競合しても20回目だけ通す', async () => {
+  const s = setup();
+  writeJson(join(s.dir, 'budget.json'), { measurements: 19, submissions: 0 });
+  let release!: () => void;
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => { entered = resolve; });
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  s.runtime.fetchImpl = jest.fn(async () => { entered(); await gate; return search(0); });
+  const first = s.call('count');
+  await started;
+  s.runtime.lockOptions = { sleep: async () => { release(); await first; } };
+  const second = s.call('count');
+  expect(await first).toBe(0);
+  expect(await second).toBe(2);
+  expect(readBudget(s.dir).measurements).toBe(20);
+  expect(s.runtime.fetchImpl).toHaveBeenCalledTimes(4);
 });

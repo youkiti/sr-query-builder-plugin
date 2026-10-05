@@ -33,14 +33,14 @@ export function reconcileWithBench(reviews: BenchReview[], summaries: Record<Tie
   return { count: mismatches.length, fields: [...new Set(mismatches.map((row) => row.field))], mismatches };
 }
 
-export function originalBaseline(reviews: BenchReview[], evaluable: Map<string, EvaluableRecord>): { summary: VersionSummary; excludedReviews: number } {
-  let excludedReviews = 0;
+export function originalBaseline(reviews: BenchReview[], evaluable: Map<string, EvaluableRecord>): { summary: VersionSummary; excludedReviews: { noEvaluableStudy: number; originalSearchEmpty: number } } {
+  const excludedReviews = { noEvaluableStudy: 0, originalSearchEmpty: 0 };
   const runs: ReviewRuns[] = [];
   for (const review of reviews) {
     const record = evaluable.get(review.pmcid);
     if (!record) throw new Error(`評価可能性の記録がありません: ${review.pmcid}`);
     const filtered = applyEvaluable(review, record);
-    if (!filtered.evaluable) { excludedReviews++; continue; }
+    if (!filtered.eligible) { excludedReviews[filtered.evaluable ? 'originalSearchEmpty' : 'noEvaluableStudy']++; continue; }
     const outcome = originalFormulaOutcome(review);
     outcome.capturedPmids = outcome.capturedPmids.filter((pmid) => filtered.evaluablePmids.includes(pmid));
     runs.push({ pmcid: review.pmcid, tier: review.tier, runs: [scoreSubmission(filtered.studies, filtered.evaluablePmids, outcome)] });

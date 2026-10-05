@@ -1,12 +1,16 @@
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { config } from 'dotenv';
-import { evaluateSearch, redact } from '../../query-optimization-bench/ncbiEval';
+import { esearch } from '../../../src/lib/ncbi/eutils';
+import { capturedGold, redact } from '../../query-optimization-bench/ncbiEval';
 import { aggregateVersion, scoreSubmission, type ReviewRuns, type RunScore, type SubmissionOutcome } from './metrics';
-import { createDeps } from './ncbi';
+import { createDeps, isQueryRejection } from './ncbi';
 import { readRun, runPath, writeJson } from './runDir';
 import { parseRunOptions, targetReviews, type RunRuntime } from './startRuns';
 import { defaultRuntime } from './tool';
+
+type StoredScore = RunScore & { measuredAt: string; submission: { number: number; querySha256: string } | null; submitAttempts: number };
 
 export async function main(args: string[], runtime: RunRuntime = defaultRuntime()): Promise<number> {
   const options = parseRunOptions(args, '--runs');
@@ -18,6 +22,7 @@ export async function main(args: string[], runtime: RunRuntime = defaultRuntime(
   const { env, fetchImpl, sleep, now, stdout } = runtime;
   const base = createDeps({ env, fetchImpl, sleep });
   const perReview: ReviewRuns[] = [];
+  const measuredDates: string[] = [];
   for (const { review, dirs } of all) {
     const runs: RunScore[] = [];
     for (const [index, dir] of dirs.entries()) {
@@ -25,33 +30,50 @@ export async function main(args: string[], runtime: RunRuntime = defaultRuntime(
       if (info.version !== options.version || info.pmcid !== review.pmcid || info.runIndex !== index + 1
         || info.cutoffDate !== review.cutoffDate) throw new Error('実行条件が採点対象と一致しません');
       const scorePath = join(dir, 'score.json');
+      const submissionPath = join(dir, 'submission.json');
+      const submission = existsSync(submissionPath) ? JSON.parse(readFileSync(submissionPath, 'utf8')) as { number: number; query: string } : null;
+      const fingerprint = submission ? { number: submission.number, querySha256: createHash('sha256').update(submission.query).digest('hex') } : null;
+      const logPath = join(dir, 'tool-log.jsonl');
+      const submitAttempts = existsSync(logPath) ? readFileSync(logPath, 'utf8').split(/\r?\n/).filter(Boolean)
+        .filter((line) => (JSON.parse(line) as { command: string }).command === 'submit').length : 0;
       if (existsSync(scorePath)) {
-        const saved = JSON.parse(readFileSync(scorePath, 'utf8')) as RunScore;
-        if (saved.status === 'scored') { runs.push(saved); continue; }
-        if (saved.status !== 'unknown') throw new Error('採点記録の状態が不正です');
+        const saved = JSON.parse(readFileSync(scorePath, 'utf8')) as StoredScore;
+        if (saved.status !== 'scored' && saved.status !== 'unknown') throw new Error('採点記録の状態が不正です');
+        if (saved.status === 'scored' && saved.submitAttempts === submitAttempts
+          && (fingerprint === null ? saved.submission === null : saved.submission?.number === fingerprint.number
+            && saved.submission?.querySha256 === fingerprint.querySha256)) {
+          runs.push(saved); measuredDates.push(saved.measuredAt); continue;
+        }
       }
       let outcome: SubmissionOutcome;
-      if (existsSync(join(dir, 'submission.json'))) {
-        const submission = JSON.parse(readFileSync(join(dir, 'submission.json'), 'utf8')) as { query: string };
-        const result = await evaluateSearch(submission.query, review.evaluablePmids,
-          { ...createDeps({ env, fetchImpl, sleep, cutoffDate: info.cutoffDate }), rateLimiter: base.rateLimiter });
-        outcome = result.status === 'success' ? { ...result, status: 'measured' } : { status: 'measurement_failed', error: result.error };
+      if (submission) {
+        const deps = { ...createDeps({ env, fetchImpl, sleep, cutoffDate: info.cutoffDate }), rateLimiter: base.rateLimiter };
+        try {
+          const { count: hits } = await esearch(submission.query, deps, { retmax: 0 });
+          const capturedPmids = hits ? await capturedGold(submission.query, review.evaluablePmids, deps) : [];
+          if (capturedPmids.length > hits) throw new Error('捕捉数が総件数を超えています');
+          outcome = { status: 'measured', hits, capturedPmids };
+        } catch (error) {
+          const message = redact(error instanceof Error ? error.message : String(error), [env.NCBI_API_KEY ?? '']);
+          outcome = isQueryRejection(error) ? { status: 'invalid_submission', reason: message } : { status: 'measurement_failed', error: message };
+        }
       } else {
-        const logPath = join(dir, 'tool-log.jsonl');
-        const submitted = existsSync(logPath) && readFileSync(logPath, 'utf8').split(/\r?\n/).filter(Boolean)
-          .some((line) => (JSON.parse(line) as { command: string }).command === 'submit');
-        outcome = submitted ? { status: 'invalid_submission', reason: '受け付けられた提出がありません' } : { status: 'no_submission' };
+        outcome = submitAttempts ? { status: 'invalid_submission', reason: '受け付けられた提出がありません' } : { status: 'no_submission' };
       }
       const score = scoreSubmission(review.studies, review.evaluablePmids, outcome);
-      writeJson(scorePath, { ...score, outcome, measuredAt: now().toISOString() });
+      const measuredAt = now().toISOString();
+      writeJson(scorePath, { ...score, outcome, measuredAt, submission: fingerprint, submitAttempts });
+      measuredDates.push(measuredAt);
       runs.push(score);
     }
     perReview.push({ pmcid: review.pmcid, tier: review.tier, runs });
   }
   const unknown = perReview.reduce((n, review) => n + review.runs.filter((run) => run.status === 'unknown').length, 0);
   if (unknown) { stdout(`未確定: ${unknown} 件。集計しません\n`); return 1; }
+  measuredDates.sort((a, b) => Date.parse(a) - Date.parse(b));
   const report = { version: options.version, subset: options.subset, reviews: reviews.length,
-    runsPerReview: options.runsPerReview, measuredAt: now().toISOString(), summary: aggregateVersion(perReview) };
+    runsPerReview: options.runsPerReview, generatedAt: now().toISOString(),
+    measuredFrom: measuredDates[0] ?? null, measuredTo: measuredDates[measuredDates.length - 1] ?? null, summary: aggregateVersion(perReview) };
   const reportsDir = runtime.reportsDir ?? resolve(__dirname, '../reports');
   mkdirSync(reportsDir, { recursive: true });
   writeJson(join(reportsDir, `${options.version}-${options.subset}.json`), report);

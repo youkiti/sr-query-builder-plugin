@@ -15,7 +15,7 @@ const spaced = <T>(rows: T[], count: number): T[] => Array.from({ length: count 
 export function selectSubsets(devReviews: EvaluableReview[], labels: Map<string, ReviewLabel>, sizes = { smoke: 5, fixed: 20 }): Subsets {
   if (![sizes.smoke, sizes.fixed].every((size) => Number.isSafeInteger(size) && size > 0) || sizes.smoke > sizes.fixed) throw new Error('抽出件数は正整数で、smoke は fixed 以下が必要です');
   for (const review of devReviews) if (!labels.has(review.pmcid)) throw new Error(`開発群のラベルがありません: ${review.pmcid}`);
-  const rows = devReviews.filter((review) => review.evaluable).map((review) => {
+  const rows = devReviews.filter((review) => review.eligible).map((review) => {
     const label = labels.get(review.pmcid)!;
     return { pmcid: review.pmcid, key: [review.tier, label.reviewType, label.domain, studyBand(review.studies.length),
       createHash('sha256').update(`${SUBSET_SALT}:${review.pmcid}`).digest('hex')] };

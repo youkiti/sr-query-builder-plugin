@@ -63,3 +63,17 @@ test('失敗は記録せず次へ進み、終了コード1とマスクした要�
   expect(errors).not.toContain('FAKE_SECRET');
   expect(String((s.runtime.stdout as jest.Mock).mock.calls)).toContain('失敗: 1 件');
 });
+
+test('集計表は評価不能と原著式0件を分け、残る対象だけ数える', async () => {
+  const s = setup();
+  const rows = [review(1), { ...review(2), n_records: 0 }, { ...review(3), n_records: 0 }];
+  fixture(s.root, rows);
+  writeLines(join(s.casesDir, 'evaluable.jsonl'), rows.map((row, i) => ({ pmcid: row.pmcid, cutoffDate: row.cutoffDate,
+    measuredAt: s.runtime.now().toISOString(), existing: row.includedPmids, withinCutoff: i === 2 ? [] : row.includedPmids })));
+  expect(await main([], s.runtime)).toBe(0);
+  const output = (s.runtime.stdout as jest.Mock).mock.calls.map(([text]) => String(text)).join('');
+  expect(output).toContain('評価可能な研究なし\t原著式 0 件\t残るレビュー数');
+  const columns = output.split('\n').find((line) => line.startsWith('cc-by\t'))!.split('\t');
+  expect(columns.slice(4, 7)).toEqual(['1', '1', '1']);
+  expect(s.runtime.fetchImpl).not.toHaveBeenCalled();
+});

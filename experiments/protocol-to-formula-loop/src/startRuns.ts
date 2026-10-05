@@ -41,7 +41,7 @@ export function targetReviews(options: RunOptions, runtime: RunRuntime): Evaluab
     const record = records.get(review.pmcid);
     if (!record) throw new Error('評価可能性の記録が不足しています');
     return applyEvaluable(review, record);
-  }).filter((review) => review.evaluable);
+  }).filter((review) => review.eligible);
   if (options.subset === 'smoke' || options.subset === 'fixed') {
     const subsets = JSON.parse(readFileSync(join(runtime.casesDir ?? casesDir(), 'subsets.json'), 'utf8')) as Record<string, unknown>;
     const ids = subsets[options.subset];

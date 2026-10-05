@@ -21,7 +21,7 @@ test('F7 の2例を研究単位の再現率から計算する', () => {
 test.each<SubmissionOutcome>([{ status: 'invalid_submission', reason: '括弧不正' }, { status: 'no_submission' },
   { status: 'measured', hits: 0, capturedPmids: [] }])('提出失敗と0件は分母に残す: %j', (outcome) => {
   expect(score(outcome)).toEqual({ status: 'scored', hits: 0, studyRecall: 0, pmidRecall: 0, missedStudies: 4,
-    allCaptured: false, precision: 0, f7: 0, failed: true });
+    allCaptured: false, precision: 0, f7: 0, failed: true, failure: outcome.status === 'measured' ? 'zero_hits' : outcome.status });
 });
 test('通信失敗は数値を持たず、未知の捕捉と件数超過は拒否する', () => {
   expect(score({ status: 'measurement_failed', error: '合成通信失敗' })).toEqual({ status: 'unknown', error: '合成通信失敗' });
@@ -48,4 +48,14 @@ test('未確定と空 run は拒否し、空ティアの平均は null にする
   expect(() => aggregateVersion([{ pmcid: 'PMC0000001', tier: 'cc-by', runs: [score({ status: 'measurement_failed', error: '不明' })] }])).toThrow('1 件');
   expect(() => aggregateVersion([{ pmcid: 'PMC0000001', tier: 'cc-by', runs: [] }])).toThrow('空');
   expect(aggregateVersion([])).toMatchObject({ reviews: 0, studyRecall: null, medianHits: null });
+});
+
+test('失敗の内訳もレビュー内平均の合計として数える', () => {
+  const zero = score({ status: 'measured', hits: 0, capturedPmids: [] });
+  const invalid = score({ status: 'invalid_submission', reason: '合成拒否' });
+  const absent = score({ status: 'no_submission' });
+  const summary = aggregateVersion([{ pmcid: 'PMC0000001', tier: 'cc-by', runs: [zero, invalid, absent, absent] },
+    { pmcid: 'PMC0000002', tier: 'cc-by-nc', runs: [zero] }]);
+  expect(summary.failures).toEqual({ zeroHits: 1.25, invalidSubmission: 0.25, noSubmission: 0.5 });
+  expect(summary.tiers['cc-by'].failures).toEqual({ zeroHits: 0.25, invalidSubmission: 0.25, noSubmission: 0.5 });
 });
