@@ -85,6 +85,20 @@ test('三本を概念ごとに束ね、提出と集計を記録し、完了済�
   expect(f.runtime.stdout).toHaveBeenCalledWith('既にあり飛ばした: 1 件\n');
   expect(f.runtime.stdout).toHaveBeenCalledWith('測定: 新規 0 回、キャッシュ 0 回\n');
 });
+test('別のしきい値で作った完成済みがあれば、飛ばさずに止める', async () => {
+  const f = setup();
+  await main(f.args, f.runtime);
+  const before = readFileSync(join(f.output(), 'combine.json'), 'utf8');
+  const report = readFileSync(join(f.runtime.reportsDir!, 'combine-v6-smoke.json'), 'utf8');
+  const combine = f.conditions.combine as { from: string; k: number; blocks: { minOverlap: number; minMargin: number; maxConcepts: number } };
+  writeJson(join(f.runtime.harnessDir!, 'v6', 'conditions.json'), { ...f.conditions,
+    combine: { ...combine, blocks: { ...combine.blocks, minOverlap: 0.9 } } });
+  (f.runtime.fetchImpl as jest.Mock).mockClear();
+  await expect(main(f.args, f.runtime)).rejects.toThrow('束ねた版の実行フォルダが 1 件、別のしきい値で作られています');
+  expect(f.runtime.fetchImpl).not.toHaveBeenCalled();
+  expect(readFileSync(join(f.output(), 'combine.json'), 'utf8')).toBe(before);
+  expect(readFileSync(join(f.runtime.reportsDir!, 'combine-v6-smoke.json'), 'utf8')).toBe(report);
+});
 test('署名の違う一本は完成式のまま残す', async () => {
   const f = setup(['a1 AND b1', 'a2 AND b2', 'a3 AND b3 AND english[la]']);
   await main(f.args, f.runtime);

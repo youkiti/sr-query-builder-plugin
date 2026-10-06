@@ -69,6 +69,13 @@ async function combine(args: string[], runtime: RunRuntime): Promise<number> {
   const unfinished = all.filter(({ dir }) => existsSync(dir) && !existsSync(join(dir, 'combine.json'))).length;
   if (missing) throw new Error(`元の実行フォルダが ${missing} 件不足しています`);
   if (unfinished) throw new Error(`束ねた版の実行フォルダが ${unfinished} 件、作りかけで残っています`);
+  // 完成済みを飛ばす前に、作ったときのしきい値が今の条件と同じかを確かめる（違う条件の成果物を混ぜない）。
+  const mismatched = all.filter(({ dir }) => existsSync(dir)).filter(({ dir }) => {
+    const saved = (JSON.parse(readFileSync(join(dir, 'combine.json'), 'utf8')) as Partial<CombineRecord>).thresholds;
+    return !saved || saved.minOverlap !== thresholds.minOverlap || saved.minMargin !== thresholds.minMargin
+      || saved.maxConcepts !== thresholds.maxConcepts;
+  }).length;
+  if (mismatched) throw new Error(`束ねた版の実行フォルダが ${mismatched} 件、別のしきい値で作られています（版を分けるか、作り直してください）`);
   const { env, fetchImpl, sleep, now, stdout } = runtime;
   const base = createDeps({ env, fetchImpl, sleep });
   let measured = 0, cached = 0, created = 0, skipped = 0, submitted = 0;
