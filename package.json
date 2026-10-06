@@ -40,6 +40,7 @@
     "p2f:start-runs": "tsx experiments/protocol-to-formula-loop/src/startRuns.ts",
     "p2f:gemini": "tsx experiments/protocol-to-formula-loop/src/geminiRun.ts",
     "p2f:combine": "tsx experiments/protocol-to-formula-loop/src/combineRuns.ts",
+    "p2f:combine-blocks": "tsx experiments/protocol-to-formula-loop/src/combineBlocks.ts",
     "p2f:compare": "tsx experiments/protocol-to-formula-loop/src/compare.ts",
     "p2f:leak-check": "tsx experiments/protocol-to-formula-loop/src/leakCheck.ts",
     "dev": "webpack --mode development",

@@ -15,6 +15,20 @@ const score = (recall = 1, hits = 100, extra: Partial<ScoredRun> = {}): ScoredRu
 const row = (index: number, runs: ScoredRun[], tier: ReviewRuns['tier'] = 'cc-by'): ReviewRuns => ({ pmcid: review(index).pmcid, tier, runs });
 const compare = (base: ReviewRuns[], candidate: ReviewRuns[]) => comparePaired(base, candidate, { resamples: 200, seed: 7 });
 
+test('全捕捉で絞らない件数比の中央値を全体とティア別に示す', () => {
+  const base = [row(1, [score(0.5, 100)]), row(2, [score(1, 200)]), row(3, [score(0.5, 100)], 'cc-by-nc')];
+  const candidate = [row(1, [score(0.5, 50)]), row(2, [score(1, 400)]), row(3, [score(0.5, 100)], 'cc-by-nc')];
+  const result = compare(base, candidate);
+  expect(result.hitsRatioAll).toEqual({ reviews: 3, median: 1 });
+  expect(result.tiers['cc-by'].hitsRatioAll).toEqual({ reviews: 2, median: 1.25 });
+  expect(result.tiers['cc-by-nc'].hitsRatioAll).toEqual({ reviews: 1, median: 1 });
+  expect(result.hitsRatio).toMatchObject({ reviews: 1, ratio: 2 });
+  const failed = [row(1, [score(0, 0, { failed: true, failure: 'zero_hits' })])];
+  expect(compare(failed, failed).hitsRatioAll).toEqual({ reviews: 0, median: null });
+  expect(compare(base.slice(0, 1), failed).hitsRatioAll).toEqual({ reviews: 0, median: null });
+  expect(compare([row(1, [score(0.5, 0)])], [row(1, [score(0.5, 10)])]).hitsRatioAll).toEqual({ reviews: 0, median: null });
+});
+
 test('レビュー内の平均を先に取り、失敗を件数から除き、レビューを等しく重み付けする', () => {
   const base = [row(1, [score(1, 100), score(0, 0, { failed: true, failure: 'zero_hits' })]), row(2, [score(1, 400)])];
   const candidate = [row(2, [score(1, 200)]), row(1, [score(1, 80), score(1, 120)])];

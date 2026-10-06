@@ -167,6 +167,14 @@ function setupVersions(queries: (string | null | undefined)[][] = [['alpha', 'be
   return f;
 }
 
+test('概念ごとに束ねる版を完成式の束ね方で実行しない', () => {
+  const f = setup();
+  f.conditions.combine = { from: 'source', k: 3, blocks: { minOverlap: 0.3, minMargin: 0.1, maxConcepts: 3 } };
+  writeJson(join(f.runtime.harnessDir!, 'combined', 'conditions.json'), f.conditions);
+  expect(() => main(f.args, f.runtime)).toThrow('この版は概念ごとに束ねる版です（combineBlocks を使ってください）');
+  expect(existsSync(join(f.runs, 'combined'))).toBe(false);
+});
+
 test('別々の版の同じ実行番号を束ね、提出元を版名で記録する', () => {
   const f = setupVersions();
   expect(main(f.args, f.runtime)).toBe(0);

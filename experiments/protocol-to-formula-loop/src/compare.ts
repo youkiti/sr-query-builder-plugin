@@ -20,6 +20,7 @@ export interface PairedSummary {
   missedStudies: Difference;
   failureRate: Difference;
   hitsRatio: { reviews: number; ratio: number | null; confidenceInterval: Interval | null };
+  hitsRatioAll: { reviews: number; median: number | null };
   medianHits: { base: number | null; candidate: number | null };
 }
 export interface Comparison extends PairedSummary {
@@ -102,10 +103,14 @@ export function comparePaired(base: ReviewRuns[], candidate: ReviewRuns[], optio
       return Math.log(row.candidate.medianHits!) - Math.log(row.base.medianHits!);
     });
     const logInterval = bootstrap(logs, resamples, random);
+    const ratios = rows.flatMap((row) => row.base.medianHits !== null && row.base.medianHits > 0
+      && row.candidate.medianHits !== null ? [row.candidate.medianHits / row.base.medianHits] : []).sort((a, b) => a - b);
     return { reviews: rows.length, allCapturedRate: difference('allCapturedRate'),
       studyRecall: { ...difference('studyRecall'), confidenceInterval: recallInterval }, missedStudies: difference('missedStudies', true),
       failureRate: difference('failureRate'), hitsRatio: { reviews: logs.length, ratio: logs.length ? Math.exp(mean(logs)) : null,
         confidenceInterval: logInterval ? [Math.exp(logInterval[0]), Math.exp(logInterval[1])] : null },
+      hitsRatioAll: { reviews: ratios.length, median: ratios.length
+        ? (ratios[Math.floor((ratios.length - 1) / 2)]! + ratios[Math.floor(ratios.length / 2)]!) / 2 : null },
       medianHits: { base: median('base'), candidate: median('candidate') } };
   };
   const overall = summarize(pairs);

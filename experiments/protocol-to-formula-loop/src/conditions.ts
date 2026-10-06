@@ -6,7 +6,7 @@ export type Command = typeof COMMANDS[number];
 export interface Conditions {
   version: string; model: string; generationSettings: string; inputs: string[]; tools: Command[];
   maxMeasurements: number; maxSubmissions: number; costLimit: string; finalSelection: string;
-  combine?: { from: string; k: number } | { versions: string[] };
+  combine?: { from: string; k: number; blocks?: { minOverlap: number; minMargin: number; maxConcepts: number } } | { versions: string[] };
   runner?: 'claude-subagent' | 'gemini-api';
 }
 
@@ -23,13 +23,21 @@ export function validateConditions(value: unknown, version: string): Conditions 
     const combine = c.combine;
     if (!combine || typeof combine !== 'object') throw new Error('束ねる条件の元の版または本数が不正です');
     if ('versions' in combine) {
-      if ('from' in combine || 'k' in combine || !Array.isArray(combine.versions)
+      if ('from' in combine || 'k' in combine || 'blocks' in combine || !Array.isArray(combine.versions)
         || combine.versions.length < 2 || combine.versions.length > 10
         || combine.versions.some((source) => typeof source !== 'string' || !/^[A-Za-z0-9_-]+$/.test(source) || source === version)
         || new Set(combine.versions).size !== combine.versions.length) throw new Error('束ねる条件の元の版または本数が不正です');
     } else if (!('from' in combine) || typeof combine.from !== 'string'
       || !/^[A-Za-z0-9_-]+$/.test(combine.from) || combine.from === version
       || !Number.isInteger(combine.k) || combine.k < 2 || combine.k > 10) throw new Error('束ねる条件の元の版または本数が不正です');
+    if ('blocks' in combine) {
+      const blocks = combine.blocks;
+      if (!blocks || typeof blocks !== 'object'
+        || ![blocks.minOverlap, blocks.minMargin].every((n) => Number.isFinite(n) && n >= 0 && n <= 1)
+        || !Number.isInteger(blocks.maxConcepts) || blocks.maxConcepts < 1 || blocks.maxConcepts > 4) {
+        throw new Error('束ねる条件の元の版または本数が不正です');
+      }
+    }
   }
   return c;
 }
