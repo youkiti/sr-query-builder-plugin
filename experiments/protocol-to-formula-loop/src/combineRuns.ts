@@ -15,6 +15,7 @@ export function main(args: string[], runtime: RunRuntime = defaultRuntime()): nu
   const conditions = loadConditions(options.version, runtime.harnessDir);
   if (!conditions.combine) throw new Error('束ねる条件がありません');
   const combine = conditions.combine;
+  if ('blocks' in combine) throw new Error('この版は概念ごとに束ねる版です（combineBlocks を使ってください）');
   const k = 'versions' in combine ? combine.versions.length : combine.k;
   const reviews = targetReviews(options, runtime);
   const all = reviews.flatMap((review) => Array.from({ length: options.runsPerReview }, (_, i) => ({

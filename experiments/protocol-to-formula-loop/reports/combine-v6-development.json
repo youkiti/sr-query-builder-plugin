@@ -1,0 +1,59 @@
+{
+  "version": "v6",
+  "subset": "development",
+  "reviews": 53,
+  "runsPerReview": 2,
+  "generatedAt": "2026-10-05T23:08:13.643Z",
+  "thresholds": {
+    "minOverlap": 0.3,
+    "minMargin": 0.1,
+    "maxConcepts": 3
+  },
+  "outcomes": {
+    "no_submission": 0,
+    "merged_all": 46,
+    "merged_partial": 45,
+    "formula_or": 15
+  },
+  "sources": {
+    "total": 318,
+    "usable": 318,
+    "reasons": {
+      "invalid": 0,
+      "query_mismatch": 0,
+      "undetermined": 0,
+      "no_concept": 0,
+      "too_many_concepts": 0
+    }
+  },
+  "alignments": {
+    "attempted": 154,
+    "accepted": 137,
+    "rejected": {
+      "below_min_overlap": 13,
+      "below_min_margin": 4,
+      "query_rejected": 0
+    }
+  },
+  "scoreQuantiles": {
+    "min": 0.4386262450686115,
+    "q1": 0.8204333450650705,
+    "median": 0.947126237277874,
+    "q3": 0.9957730720577206,
+    "max": 1
+  },
+  "marginQuantiles": {
+    "min": 0.0182910998543081,
+    "q1": 0.5348118311652648,
+    "median": 0.7772250008871178,
+    "q3": 0.8920665254180643,
+    "max": 0.9942064352390317
+  },
+  "minPairQuantiles": {
+    "min": 0.03466904683609715,
+    "q1": 0.6968967369967418,
+    "median": 0.9041784364912286,
+    "q3": 0.9917152419390486,
+    "max": 1
+  }
+}

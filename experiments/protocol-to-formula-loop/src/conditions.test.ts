@@ -1,6 +1,23 @@
 /** @jest-environment node */
 import { loadConditions, validateConditions } from './conditions';
 
+test('概念の束ね方のしきい値と境界値を受け付ける', () => {
+  for (const blocks of [{ minOverlap: 0, minMargin: 1, maxConcepts: 1 }, { minOverlap: 1, minMargin: 0, maxConcepts: 4 }]) {
+    const value = { ...loadConditions('v0'), combine: { from: 'v1', k: 3, blocks } };
+    expect(validateConditions(value, 'v0')).toEqual(value);
+  }
+  expect(loadConditions('v6').combine).toEqual({ from: 'v1', k: 3, blocks: { minOverlap: 0.3, minMargin: 0.1, maxConcepts: 3 } });
+});
+test.each([null, {}, { minOverlap: -0.1 }, { minOverlap: 1.1 }, { minOverlap: Infinity }, { minOverlap: NaN },
+  { minOverlap: '0.3' }, { minMargin: -0.1 }, { minMargin: 1.1 }, { minMargin: Infinity }, { minMargin: NaN },
+  { maxConcepts: 0 }, { maxConcepts: 5 }, { maxConcepts: 1.5 }])('不正な概念のしきい値を拒否する: %j', (change) => {
+  const blocks = change === null ? null : Object.keys(change).length ? { minOverlap: 0.3, minMargin: 0.1, maxConcepts: 3, ...change } : {};
+  expect(() => validateConditions({ ...loadConditions('v0'), combine: { from: 'v1', k: 3, blocks } }, 'v0')).toThrow('束ねる条件');
+});
+test('版の一覧に概念のしきい値を付けると拒否する', () => {
+  expect(() => validateConditions({ ...loadConditions('v0'), combine: { versions: ['v1', 'v2'], blocks: { minOverlap: 0.3, minMargin: 0.1, maxConcepts: 3 } } }, 'v0')).toThrow('束ねる条件');
+});
+
 test('日付の接尾辞のない固定モデルと実行役の正常値を受け付ける', () => {
   for (const runner of [undefined, 'claude-subagent', 'gemini-api']) {
     expect(validateConditions({ ...loadConditions('v0'), model: 'gemini-2.5-flash', runner }, 'v0').runner).toBe(runner);
