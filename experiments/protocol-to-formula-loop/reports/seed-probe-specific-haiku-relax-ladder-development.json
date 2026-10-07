@@ -1,0 +1,286 @@
+{
+  "source": "v1",
+  "label": "specific-haiku",
+  "subset": "development",
+  "reviews": 53,
+  "generatedAt": "2026-10-07T04:02:17.444Z",
+  "measuredFrom": "2026-10-07T04:00:53.394Z",
+  "measuredTo": "2026-10-07T04:02:17.440Z",
+  "states": {
+    "measured": 51,
+    "zero_hits": 2,
+    "design_failed": 0,
+    "rejected": 0
+  },
+  "hitsQuantiles": {
+    "min": 0,
+    "q1": 0,
+    "median": 11,
+    "q3": 41.5,
+    "max": 1806
+  },
+  "top5": {
+    "goldReportsTotal": 75,
+    "goldStudiesTotal": 76,
+    "reviewsWithAtLeast1": 34,
+    "reviewsWithAtLeast2": 19,
+    "reviewsWithAtLeast1Rate": 0.6415094339622641,
+    "reviewsWithAtLeast2Rate": 0.3584905660377358,
+    "goldStudiesQuantiles": {
+      "min": 0,
+      "q1": 0,
+      "median": 1,
+      "q3": 3,
+      "max": 5
+    }
+  },
+  "top10": {
+    "goldReportsTotal": 125,
+    "goldStudiesTotal": 123,
+    "reviewsWithAtLeast1": 36,
+    "reviewsWithAtLeast2": 26,
+    "reviewsWithAtLeast1Rate": 0.6792452830188679,
+    "reviewsWithAtLeast2Rate": 0.49056603773584906,
+    "goldStudiesQuantiles": {
+      "min": 0,
+      "q1": 0,
+      "median": 1,
+      "q3": 4,
+      "max": 8
+    }
+  },
+  "top20": {
+    "goldReportsTotal": 203,
+    "goldStudiesTotal": 193,
+    "reviewsWithAtLeast1": 37,
+    "reviewsWithAtLeast2": 32,
+    "reviewsWithAtLeast1Rate": 0.6981132075471698,
+    "reviewsWithAtLeast2Rate": 0.6037735849056604,
+    "goldStudiesQuantiles": {
+      "min": 0,
+      "q1": 0,
+      "median": 3,
+      "q3": 5,
+      "max": 15
+    }
+  },
+  "top50": {
+    "goldReportsTotal": 338,
+    "goldStudiesTotal": 319,
+    "reviewsWithAtLeast1": 38,
+    "reviewsWithAtLeast2": 35,
+    "reviewsWithAtLeast1Rate": 0.7169811320754716,
+    "reviewsWithAtLeast2Rate": 0.660377358490566,
+    "goldStudiesQuantiles": {
+      "min": 0,
+      "q1": 0,
+      "median": 4,
+      "q3": 8,
+      "max": 41
+    }
+  },
+  "byStudyCount": {
+    "1-3": {
+      "reviews": 6,
+      "top5": {
+        "goldReportsTotal": 3,
+        "goldStudiesTotal": 3,
+        "reviewsWithAtLeast1": 3,
+        "reviewsWithAtLeast2": 0,
+        "reviewsWithAtLeast1Rate": 0.5,
+        "reviewsWithAtLeast2Rate": 0,
+        "goldStudiesQuantiles": {
+          "min": 0,
+          "q1": 0,
+          "median": 0.5,
+          "q3": 1,
+          "max": 1
+        }
+      },
+      "top10": {
+        "goldReportsTotal": 4,
+        "goldStudiesTotal": 4,
+        "reviewsWithAtLeast1": 3,
+        "reviewsWithAtLeast2": 1,
+        "reviewsWithAtLeast1Rate": 0.5,
+        "reviewsWithAtLeast2Rate": 0.16666666666666666,
+        "goldStudiesQuantiles": {
+          "min": 0,
+          "q1": 0,
+          "median": 0.5,
+          "q3": 1,
+          "max": 2
+        }
+      },
+      "top20": {
+        "goldReportsTotal": 4,
+        "goldStudiesTotal": 4,
+        "reviewsWithAtLeast1": 3,
+        "reviewsWithAtLeast2": 1,
+        "reviewsWithAtLeast1Rate": 0.5,
+        "reviewsWithAtLeast2Rate": 0.16666666666666666,
+        "goldStudiesQuantiles": {
+          "min": 0,
+          "q1": 0,
+          "median": 0.5,
+          "q3": 1,
+          "max": 2
+        }
+      },
+      "top50": {
+        "goldReportsTotal": 6,
+        "goldStudiesTotal": 5,
+        "reviewsWithAtLeast1": 4,
+        "reviewsWithAtLeast2": 1,
+        "reviewsWithAtLeast1Rate": 0.6666666666666666,
+        "reviewsWithAtLeast2Rate": 0.16666666666666666,
+        "goldStudiesQuantiles": {
+          "min": 0,
+          "q1": 0.25,
+          "median": 1,
+          "q3": 1,
+          "max": 2
+        }
+      }
+    },
+    "4-10": {
+      "reviews": 12,
+      "top5": {
+        "goldReportsTotal": 17,
+        "goldStudiesTotal": 19,
+        "reviewsWithAtLeast1": 8,
+        "reviewsWithAtLeast2": 4,
+        "reviewsWithAtLeast1Rate": 0.6666666666666666,
+        "reviewsWithAtLeast2Rate": 0.3333333333333333,
+        "goldStudiesQuantiles": {
+          "min": 0,
+          "q1": 0,
+          "median": 1,
+          "q3": 2.5,
+          "max": 5
+        }
+      },
+      "top10": {
+        "goldReportsTotal": 24,
+        "goldStudiesTotal": 26,
+        "reviewsWithAtLeast1": 8,
+        "reviewsWithAtLeast2": 6,
+        "reviewsWithAtLeast1Rate": 0.6666666666666666,
+        "reviewsWithAtLeast2Rate": 0.5,
+        "goldStudiesQuantiles": {
+          "min": 0,
+          "q1": 0,
+          "median": 1.5,
+          "q3": 3.5,
+          "max": 7
+        }
+      },
+      "top20": {
+        "goldReportsTotal": 27,
+        "goldStudiesTotal": 29,
+        "reviewsWithAtLeast1": 8,
+        "reviewsWithAtLeast2": 7,
+        "reviewsWithAtLeast1Rate": 0.6666666666666666,
+        "reviewsWithAtLeast2Rate": 0.5833333333333334,
+        "goldStudiesQuantiles": {
+          "min": 0,
+          "q1": 0,
+          "median": 2.5,
+          "q3": 3.5,
+          "max": 7
+        }
+      },
+      "top50": {
+        "goldReportsTotal": 37,
+        "goldStudiesTotal": 39,
+        "reviewsWithAtLeast1": 8,
+        "reviewsWithAtLeast2": 8,
+        "reviewsWithAtLeast1Rate": 0.6666666666666666,
+        "reviewsWithAtLeast2Rate": 0.6666666666666666,
+        "goldStudiesQuantiles": {
+          "min": 0,
+          "q1": 0,
+          "median": 3,
+          "q3": 5,
+          "max": 9
+        }
+      }
+    },
+    "11+": {
+      "reviews": 35,
+      "top5": {
+        "goldReportsTotal": 55,
+        "goldStudiesTotal": 54,
+        "reviewsWithAtLeast1": 23,
+        "reviewsWithAtLeast2": 15,
+        "reviewsWithAtLeast1Rate": 0.6571428571428571,
+        "reviewsWithAtLeast2Rate": 0.42857142857142855,
+        "goldStudiesQuantiles": {
+          "min": 0,
+          "q1": 0,
+          "median": 1,
+          "q3": 3,
+          "max": 4
+        }
+      },
+      "top10": {
+        "goldReportsTotal": 97,
+        "goldStudiesTotal": 93,
+        "reviewsWithAtLeast1": 25,
+        "reviewsWithAtLeast2": 19,
+        "reviewsWithAtLeast1Rate": 0.7142857142857143,
+        "reviewsWithAtLeast2Rate": 0.5428571428571428,
+        "goldStudiesQuantiles": {
+          "min": 0,
+          "q1": 0,
+          "median": 2,
+          "q3": 4.5,
+          "max": 8
+        }
+      },
+      "top20": {
+        "goldReportsTotal": 172,
+        "goldStudiesTotal": 160,
+        "reviewsWithAtLeast1": 26,
+        "reviewsWithAtLeast2": 24,
+        "reviewsWithAtLeast1Rate": 0.7428571428571429,
+        "reviewsWithAtLeast2Rate": 0.6857142857142857,
+        "goldStudiesQuantiles": {
+          "min": 0,
+          "q1": 0.5,
+          "median": 3,
+          "q3": 7,
+          "max": 15
+        }
+      },
+      "top50": {
+        "goldReportsTotal": 295,
+        "goldStudiesTotal": 275,
+        "reviewsWithAtLeast1": 26,
+        "reviewsWithAtLeast2": 26,
+        "reviewsWithAtLeast1Rate": 0.7428571428571429,
+        "reviewsWithAtLeast2Rate": 0.7428571428571429,
+        "goldStudiesQuantiles": {
+          "min": 0,
+          "q1": 1,
+          "median": 6,
+          "q3": 11.5,
+          "max": 41
+        }
+      }
+    }
+  },
+  "relax": "ladder",
+  "listSizeQuantiles": {
+    "min": 0,
+    "q1": 50,
+    "median": 50,
+    "q3": 50,
+    "max": 50
+  },
+  "reviewsRelaxed": 42,
+  "levelsUsedTotal": 101,
+  "levelsRejectedTotal": 0,
+  "reviewsOriginalZero": 16,
+  "reviewsOriginalZeroRecovered": 14
+}
