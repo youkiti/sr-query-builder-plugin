@@ -14,6 +14,33 @@ import { validateFormulaMd } from './submission';
 import { fixture, review, writeJson, writeLines } from './testFixtures';
 
 installDomParser();
+
+test('緩和候補を結果と対で保存し、旧指紋・一覧欠落・指紋不一致だけを測り直す', async () => {
+  const s = setup(); await s.prepare();
+  const args = ['measure', ...s.args, '--relax', 'ladder'];
+  await main(args, s.runtime);
+  const path = join(s.dir(), 'candidates-relax-ladder.json');
+  const resultPath = join(s.dir(), 'result-relax-ladder.json');
+  const result = JSON.parse(readFileSync(resultPath, 'utf8'));
+  expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ pmids: s.pool, fingerprint: result.fingerprint, measuredAt: result.measuredAt });
+  expect(result.pmids).toBeUndefined();
+  expect(readFileSync(join(s.runtime.reportsDir!, 'seed-probe-probe-relax-ladder-smoke.json'), 'utf8')).not.toContain(s.pool[0]!);
+  s.fetchImpl.mockClear(); await main(args, s.runtime); expect(s.fetchImpl).not.toHaveBeenCalled();
+  for (const mode of ['旧指紋', '欠落', '不一致']) {
+    if (mode === '旧指紋') writeJson(resultPath, { ...result, fingerprint: '旧版の指紋' });
+    else if (mode === '欠落') unlinkSync(path);
+    else writeJson(path, { pmids: s.pool, fingerprint: '別の指紋' });
+    s.fetchImpl.mockClear(); await main(args, s.runtime); expect(s.fetchImpl).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(readFileSync(path, 'utf8')).fingerprint).toBe(result.fingerprint);
+  }
+});
+
+test('緩和なしでは候補ファイルを作らず、従来の結果だけをキャッシュする', async () => {
+  const s = setup(); await s.prepare(); await main(['measure', ...s.args], s.runtime);
+  expect(existsSync(join(s.dir(), 'candidates-relax-ladder.json'))).toBe(false);
+  expect(JSON.parse(readFileSync(join(s.dir(), 'result.json'), 'utf8')).pmids).toBeUndefined();
+  s.fetchImpl.mockClear(); await main(['measure', ...s.args], s.runtime); expect(s.fetchImpl).not.toHaveBeenCalled();
+});
 const gold = Array.from({ length: 12 }, (_, i) => String(90000001 + i));
 function setup() {
   const root = mkdtempSync(join(tmpdir(), 'p2f-seed-probe-')), runs = join(root, 'runs'), casesDir = join(root, 'cases');

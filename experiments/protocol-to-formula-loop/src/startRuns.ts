@@ -56,6 +56,7 @@ export function main(args: string[], runtime: RunRuntime = defaultRuntime()): nu
   const options = parseRunOptions(args, '--out');
   const reviews = targetReviews(options, runtime);
   const conditions = loadConditions(options.version, runtime.harnessDir);
+  if (conditions.seeds) throw new Error('この版はシードを使います（startSeededRuns を使ってください）');
   for (const review of reviews) for (let i = 1; i <= options.runsPerReview; i++) {
     if (existsSync(runPath(options.root, options.version, review.pmcid, i))) throw new Error('実行フォルダが既にあります');
   }

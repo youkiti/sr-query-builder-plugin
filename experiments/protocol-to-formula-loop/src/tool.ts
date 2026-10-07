@@ -4,7 +4,7 @@ import { config } from 'dotenv';
 import { esearch } from '../../../src/lib/ncbi/eutils';
 import { fetchMeshTreeNumbers, resolveMeshDescriptors } from '../../../src/lib/ncbi/mesh';
 import { expandFormula } from '../../../src/features/validation/expandFormula';
-import { redact, seedTitles } from '../../query-optimization-bench/ncbiEval';
+import { capturedGold, redact, seedTitles } from '../../query-optimization-bench/ncbiEval';
 import { COMMANDS, type Command } from './conditions';
 import { requiredUnits } from './formulaUnits';
 import { createDeps, isQueryRejection, type DepsOptions } from './ncbi';
@@ -39,7 +39,18 @@ export async function main(args: string[], runtime: Runtime = defaultRuntime()):
       return code;
     };
     if (!COMMANDS.includes(command as Command) || !run.conditions.tools.includes(command as Command)) return finish('使えないコマンド', 2, 'この版では使えないコマンドです');
-    const measuring = ['count', 'mesh', 'titles', 'outside'].includes(command);
+    let seedPmids: string[] = [];
+    if (command === 'seeds') {
+      if (!argument || args.length !== 4) return finish('検査不合格', 1, '式ファイルを 1 件指定してください');
+      try {
+        const value = JSON.parse(readFileSync(join(dir, 'seeds.json'), 'utf8')) as { pmids?: string[] } | null;
+        if (!value || !Array.isArray(value.pmids) || value.pmids.some((pmid) => typeof pmid !== 'string' || !/^[1-9]\d*$/.test(pmid))
+          || new Set(value.pmids).size !== value.pmids.length) throw new Error();
+        seedPmids = value.pmids;
+      } catch { return finish('測定失敗（結果不明）', 3, 'シードの記録を読み込めません。回数は消費していません'); }
+      if (!seedPmids.length) return finish('成功', 0, 'シード論文はありません');
+    }
+    const measuring = ['count', 'mesh', 'titles', 'outside', 'seeds'].includes(command);
     if ((measuring && budget.measurements >= run.conditions.maxMeasurements)
       || (command === 'submit' && budget.submissions >= run.conditions.maxSubmissions)) return finish('上限超過', 2, '呼び出し回数の上限に達しています');
     let md = '';
@@ -49,10 +60,10 @@ export async function main(args: string[], runtime: Runtime = defaultRuntime()):
         if (!argument || args.length !== (command === 'outside' ? 5 : 4)) throw new Error(command === 'outside' ? '式ファイルと単位の ID を 1 件ずつ指定してください' : '式ファイルを 1 件指定してください');
         md = readFileSync(argument, 'utf8');
         validated = validateFormulaMd(md);
-      } catch (error) { validated = { ok: false, reasons: [String(error)] }; }
+      } catch (error) { validated = { ok: false, reasons: [command === 'seeds' ? '式ファイルを読み込めません' : String(error)] }; }
       if (!validated.ok) {
         if (command === 'submit') budget.submissions++;
-        return finish('検査不合格', 1, validated.reasons.join('\n'));
+        return finish('検査不合格', 1, command === 'seeds' ? '式の検査に通りませんでした' : validated.reasons.join('\n'));
       }
     }
     if (command === 'check') return finish('成功', 0, '検査に通りました');
@@ -81,6 +92,18 @@ export async function main(args: string[], runtime: Runtime = defaultRuntime()):
         const lines = [`全体: ${(await esearch(validated.query, deps, { retmax: 0 })).count} 件`];
         for (const block of validated.formula.blocks) lines.push(`#${block.id}: ${(await esearch(expandFormula(validated.formula, block.id), deps, { retmax: 0 })).count} 件`);
         message = lines.join('\n');
+      } else if (validated?.ok && command === 'seeds') {
+        const captured = new Set(await capturedGold(validated.query, seedPmids, deps));
+        const blocks: { id: string; captured: Set<string> }[] = [];
+        for (const block of validated.formula.blocks.filter((block) => !block.isCombination)) {
+          blocks.push({ id: block.id, captured: new Set(await capturedGold(expandFormula(validated.formula, block.id), seedPmids, deps)) });
+        }
+        message = seedPmids.map((pmid, i) => {
+          const prefix = `シード ${i + 1}（${pmid}）: `;
+          if (captured.has(pmid)) return prefix + '式に入っています';
+          const missed = blocks.filter((block) => !block.captured.has(pmid)).map((block) => `#${block.id}`);
+          return prefix + `式に入っていません。当てはまらない行: ${missed.join(', ') || 'なし（行の組み合わせで外れています）'}`;
+        }).join('\n');
       } else if (validated?.ok && command === 'titles') {
         const result = await esearch(validated.query, deps, { retmax: 10 });
         message = result.pmids.length ? (await seedTitles(result.pmids, deps)).map((row, i) => `${i + 1}. ${row.title}`).join('\n') : '0 件です';
@@ -103,8 +126,8 @@ export async function main(args: string[], runtime: Runtime = defaultRuntime()):
       budget.measurements++;
       return finish('成功', 0, message);
     } catch (error) {
-      if (['count', 'titles', 'outside'].includes(command) && isQueryRejection(error)) return finish('検査不合格', 1, (error as Error).message);
-      if (command === 'outside') return finish('測定失敗（結果不明）', 3, '測定に失敗しました。回数は消費していません');
+      if (['count', 'titles', 'outside', 'seeds'].includes(command) && isQueryRejection(error)) return finish('検査不合格', 1, command === 'seeds' ? '検索式が拒否されました' : (error as Error).message);
+      if (command === 'outside' || command === 'seeds') return finish('測定失敗（結果不明）', 3, '測定に失敗しました。回数は消費していません');
       return finish('測定失敗（結果不明）', 3, `測定に失敗しました。回数は消費していません\n${safe(String(error))}`);
     }
   }, runtime.lockOptions);

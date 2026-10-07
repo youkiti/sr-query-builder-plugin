@@ -2,9 +2,10 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { config } from 'dotenv';
 import { TIERS, type Tier } from './bench';
-import { aggregateVersion, type ReviewRuns, type RunScore } from './metrics';
+import { aggregateVersion, scoreSubmission, type ReviewRuns, type RunScore, type SubmissionOutcome } from './metrics';
 import { runPath, writeJson } from './runDir';
 import { readSubmissionState, scoreMatchesSubmission, type StoredScore } from './scoreRuns';
+import { readSeedSelection } from './seedSelect';
 import { parseRunOptions, targetReviews, type RunRuntime } from './startRuns';
 import { defaultRuntime } from './tool';
 
@@ -164,18 +165,42 @@ export function parseCompareOptions(args: string[]) {
   const versions = new Map<string, string>();
   for (let i = 0; i < args.length; i++) {
     const key = args[i]!;
-    if (key !== '--base' && key !== '--candidate') { remaining.push(key); continue; }
+    if (key !== '--base' && key !== '--candidate' && key !== '--exclude-seeds') { remaining.push(key); continue; }
     if (versions.has(key) || !args[i + 1] || !/^[A-Za-z0-9_-]+$/.test(args[i + 1]!)) throw new Error('比較する版の指定が不正です');
     versions.set(key, args[++i]!);
   }
   if (!versions.has('--base') || !versions.has('--candidate') || remaining.includes('--version')) throw new Error('比較する版の指定が不足しているか不正です');
   const base = versions.get('--base')!, candidate = versions.get('--candidate')!;
-  return { ...parseRunOptions([...remaining, '--version', base], '--runs'), base, candidate };
+  return { ...parseRunOptions([...remaining, '--version', base], '--runs'), base, candidate,
+    ...(versions.has('--exclude-seeds') ? { excludeSeeds: versions.get('--exclude-seeds')! } : {}) };
 }
 
 export function main(args: string[], runtime: RunRuntime = defaultRuntime()): number {
   const options = parseCompareOptions(args);
-  const reviews = targetReviews(options, runtime);
+  let reviews: ReturnType<typeof targetReviews>;
+  try { reviews = targetReviews(options, runtime); }
+  catch (error) {
+    if (options.excludeSeeds) throw new Error('対象レビューの記録の読み込みに失敗しました');
+    throw error;
+  }
+  const selections = new Map<string, ReturnType<typeof readSeedSelection>>();
+  const removedPmids = new Map<string, Set<string>>();
+  let droppedReviews = 0;
+  if (options.excludeSeeds) {
+    const paths = reviews.map((review) => ({ review, path: join(options.root, '_seeds', options.excludeSeeds!, `${review.pmcid}.json`) }));
+    const missing = paths.filter(({ path }) => !existsSync(path)).length;
+    if (missing) throw new Error(`シードの選定が ${missing} 件不足しています`);
+    for (const { review, path } of paths) selections.set(review.pmcid, readSeedSelection(path));
+    reviews = reviews.flatMap((review) => {
+      const excluded = new Set(selections.get(review.pmcid)!.studyIds);
+      const studies = review.studies.filter((study) => !excluded.has(study.id));
+      if (!studies.length) { droppedReviews++; return []; }
+      const retained = new Set(studies.flatMap((study) => study.pmids));
+      const removed = new Set(review.studies.filter((study) => excluded.has(study.id)).flatMap((study) => study.pmids).filter((pmid) => !retained.has(pmid)));
+      removedPmids.set(review.pmcid, removed);
+      return [{ ...review, studies, evaluablePmids: review.evaluablePmids.filter((pmid) => !removed.has(pmid)) }];
+    });
+  }
   let missing = 0, unscored = 0, invalidDates = 0;
   const load = (version: string) => {
     const dates = new Set<string>();
@@ -194,7 +219,14 @@ export function main(args: string[], runtime: RunRuntime = defaultRuntime()): nu
         const date = typeof score.measuredAt === 'string' ? Date.parse(score.measuredAt) : NaN;
         if (!Number.isFinite(date)) invalidDates++;
         else dates.add(new Date(date).toISOString().slice(0, 10));
-        runs.push(score);
+        if (options.excludeSeeds) {
+          const outcome = (score as StoredScore & { outcome?: SubmissionOutcome }).outcome;
+          if (!outcome || !['measured', 'invalid_submission', 'no_submission', 'measurement_failed'].includes(outcome.status)) { unscored++; continue; }
+          try {
+            runs.push(scoreSubmission(review.studies, review.evaluablePmids, outcome.status === 'measured'
+              ? { ...outcome, capturedPmids: outcome.capturedPmids.filter((pmid) => !removedPmids.get(review.pmcid)!.has(pmid)) } : outcome));
+          } catch { unscored++; }
+        } else runs.push(score);
       }
       return { pmcid: review.pmcid, tier: review.tier, runs };
     });
@@ -203,12 +235,22 @@ export function main(args: string[], runtime: RunRuntime = defaultRuntime()): nu
   const base = load(options.base), candidate = load(options.candidate);
   if (missing || unscored || invalidDates) throw new Error(`採点記録の不足 ${missing} 件、未採点 ${unscored} 件、測定日不正 ${invalidDates} 件`);
   const sameDay = base.dates.length === 1 && candidate.dates.length === 1 && base.dates[0] === candidate.dates[0];
+  const seeded = (row: ReviewRuns) => !!selections.get(row.pmcid)?.pmids.length;
+  const seededReviews = base.rows.filter(seeded).length;
   const report = { base: options.base, candidate: options.candidate, subset: options.subset, reviews: reviews.length,
     runsPerReview: options.runsPerReview, generatedAt: runtime.now().toISOString(), sameDay,
-    measuredDates: { base: base.dates, candidate: candidate.dates }, comparison: comparePaired(base.rows, candidate.rows) };
+    measuredDates: { base: base.dates, candidate: candidate.dates },
+    comparison: options.excludeSeeds && !reviews.length ? null : comparePaired(base.rows, candidate.rows),
+    ...(options.excludeSeeds ? { excludeSeeds: options.excludeSeeds, seededReviews, unseededReviews: reviews.length - seededReviews, droppedReviews,
+      seededOnly: seededReviews ? comparePaired(base.rows.filter(seeded), candidate.rows.filter(seeded)) : null } : {}) };
   const reportsDir = runtime.reportsDir ?? resolve(__dirname, '../reports');
-  mkdirSync(reportsDir, { recursive: true });
-  writeJson(join(reportsDir, `compare-${options.base}-${options.candidate}-${options.subset}.json`), report);
+  try {
+    mkdirSync(reportsDir, { recursive: true });
+    writeJson(join(reportsDir, `compare-${options.base}-${options.candidate}-${options.subset}${options.excludeSeeds ? `-noseed-${options.excludeSeeds}` : ''}.json`), report);
+  } catch (error) {
+    if (options.excludeSeeds) throw new Error('比較のレポートの書き込みに失敗しました');
+    throw error;
+  }
   if (!sameDay) runtime.stdout('警告: 両版の測定日が同じ UTC 日に収まっていません\n');
   runtime.stdout(JSON.stringify(report, null, 2) + '\n');
   return 0;
