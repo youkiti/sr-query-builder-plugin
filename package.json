@@ -44,6 +44,7 @@
     "p2f:sample-yield": "tsx experiments/protocol-to-formula-loop/src/sampleYield.ts",
     "p2f:seed-probe": "tsx experiments/protocol-to-formula-loop/src/seedProbe.ts",
     "p2f:overlap": "tsx experiments/protocol-to-formula-loop/src/overlap.ts",
+    "p2f:original-diff": "tsx experiments/protocol-to-formula-loop/src/originalDiff.ts",
     "p2f:seed-select": "tsx experiments/protocol-to-formula-loop/src/seedSelect.ts",
     "p2f:start-seeded-runs": "tsx experiments/protocol-to-formula-loop/src/startSeededRuns.ts",
     "p2f:compare": "tsx experiments/protocol-to-formula-loop/src/compare.ts",

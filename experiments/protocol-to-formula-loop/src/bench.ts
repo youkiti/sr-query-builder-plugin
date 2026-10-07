@@ -6,6 +6,8 @@ export const TIERS = ['cc-by', 'cc-by-nc'] as const;
 export type Tier = typeof TIERS[number];
 export interface Study { id: string; pmids: string[] }
 export interface BenchRow {
+  units?: { count: number; database: string; query: string; result_set: string; segment: string;
+    strategy_index: number; translation_sha: string; translator: string }[];
   pmcid: string;
   cochrane_id: string | null;
   tier: Tier;
