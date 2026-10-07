@@ -4,11 +4,45 @@ import { join } from 'node:path';
 import { buildFormulaMd, inspectTable, rowQueries, type ConceptTable } from './conceptTable';
 import { classifyLine, requiredUnits } from './formulaUnits';
 import { validateFormulaMd } from './submission';
+import { rowContextQueries } from './conceptTable';
 
 const row = () => ({ kind: 'specific' as const, label: '名称', mesh: ['Heading'], terms: ['word'] });
 const concept = () => ({ name: '概念名', rows: [row()] });
 const table = (): ConceptTable => ({ concepts: [concept()] });
 const inspect = (value: unknown) => inspectTable(JSON.stringify(value));
+
+test.each([null, 1, false, [], {}])('件数超過の理由は文字列以外を拒否する: %j', (largeResultReason) => {
+  expect(inspect({ ...table(), largeResultReason }).report.blocking).toEqual(['表: largeResultReason は文字列にしてください']);
+});
+test.each([undefined, '', '  ', '適格な研究を落とすため'])('件数超過の理由を受け付け、式には含めない: %j', (largeResultReason) => {
+  const value = { ...table(), largeResultReason };
+  expect(inspect(value).report.blocking).toEqual([]);
+  expect(buildFormulaMd(value)).toBe(buildFormulaMd(table()));
+});
+test('行の寄与を測る式は、他の概念の全行を括弧で束ねる', () => {
+  const value: ConceptTable = { concepts: [concept(), { name: '別の概念', rows: [
+    { ...row(), mesh: [], terms: ['alpha', 'beta'] }, { ...row(), mesh: [], terms: ['gamma'] },
+  ] }] };
+  expect(rowContextQueries(value)).toEqual([
+    { concept: 1, row: 1, query: '("Heading"[Mesh] OR word[tiab]) AND (alpha[tiab] OR beta[tiab] OR gamma[tiab])' },
+    { concept: 2, row: 1, query: '(alpha[tiab] OR beta[tiab]) AND ("Heading"[Mesh] OR word[tiab])' },
+    { concept: 2, row: 2, query: '(gamma[tiab]) AND ("Heading"[Mesh] OR word[tiab])' },
+  ]);
+});
+test('概念１個でフィルタがなければ行そのものの式を返す', () => {
+  expect(rowContextQueries(table())).toEqual([{ concept: 1, row: 1, query: rowQueries(table())[0]!.query }]);
+});
+test.each([false, true])('概念１個でも年代と RCT フィルタ全体を括弧で囲む: %j', (rctFilter) => {
+  const value = { ...table(), rctFilter, dateRange: { from: '2000', to: '2020' } };
+  const rct = '(randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh]))';
+  expect(rowContextQueries(value)[0]!.query).toBe('("Heading"[Mesh] OR word[tiab])' + (rctFilter ? ` AND (${rct})` : '') + ' AND (("2000"[dp] : "2020"[dp]))');
+});
+test('件数を見直す手順書の例は、そのまま検査に通る', () => {
+  const procedure = readFileSync(join(__dirname, '../harness/v13/procedure.md'), 'utf8');
+  const examples = [...procedure.matchAll(/```json\s*\n([\s\S]*?)```/g)];
+  expect(examples).toHaveLength(1);
+  expect(inspectTable(examples[0]![1]!).report.blocking).toEqual([]);
+});
 
 test.each(['{', 'null', '[]', '1'])('JSON と最上位の形を検査する: %s', (text) => {
   expect(inspectTable(text).report.blocking.length).toBeGreaterThan(0);
