@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
+import { config } from 'dotenv';
 import { redact } from '../../query-optimization-bench/ncbiEval';
 import { loadConditions } from './conditions';
 import { procedureBody } from './leakCheck';
@@ -47,6 +48,7 @@ export function main(args: string[], runtime: RunRuntime = defaultRuntime()): nu
   return 0;
 }
 if (require.main === module) {
+  config();
   try { process.exitCode = main(process.argv.slice(2)); }
   catch (error) { process.stderr.write(redact(String(error), [process.env.NCBI_API_KEY ?? '']) + '\n'); process.exitCode = 1; }
 }
