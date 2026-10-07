@@ -1,0 +1,229 @@
+{
+  "subset": "development",
+  "single": "v1",
+  "singleRuns": 6,
+  "bundle": "v4",
+  "bundleRuns": 2,
+  "otherSingle": "v1g",
+  "otherBundle": "v4g",
+  "generatedAt": "2026-10-07T12:29:59.915Z",
+  "reviews": 53,
+  "studies": 2132,
+  "originalVsBundle": {
+    "both": 1461,
+    "neither": 131,
+    "reviewsNeither": 23,
+    "reviewsAllByUnion": 30,
+    "unionStudyRecall": 0.9484981778171202,
+    "originalOnly": 294,
+    "bundleOnly": 246,
+    "reviewsOriginalOnly": 25,
+    "reviewsBundleOnly": 22.5,
+    "reviewsAllByOriginal": 23,
+    "reviewsAllByBundle": 23,
+    "originalStudyRecall": 0.8802258875868514,
+    "bundleStudyRecall": 0.8562591160901458
+  },
+  "singleCaptureCounts": {
+    "studiesByCaptureCount": [
+      307,
+      171,
+      123,
+      126,
+      151,
+      309,
+      945
+    ],
+    "byOriginal": {
+      "captured": [
+        192,
+        147,
+        109,
+        112,
+        122,
+        225,
+        848
+      ],
+      "missed": [
+        115,
+        24,
+        14,
+        14,
+        29,
+        84,
+        97
+      ]
+    }
+  },
+  "otherModel": {
+    "single": {
+      "both": 1760,
+      "singleOnly": 65,
+      "otherOnly": 95,
+      "neither": 212
+    },
+    "bundle": {
+      "both": 1640.5,
+      "neither": 263.5,
+      "reviewsNeither": 26.5,
+      "reviewsAllByUnion": 26.5,
+      "unionStudyRecall": 0.9109680695418204,
+      "bundleOnly": 66.5,
+      "otherOnly": 161.5,
+      "reviewsBundleOnly": 15.5,
+      "reviewsOtherOnly": 21.5,
+      "reviewsAllByBundle": 23,
+      "reviewsAllByOther": 24,
+      "bundleStudyRecall": 0.8562591160901458,
+      "otherStudyRecall": 0.8835278807822955
+    }
+  },
+  "tiers": {
+    "cc-by": {
+      "reviews": 13,
+      "studies": 798,
+      "originalVsBundle": {
+        "both": 501,
+        "neither": 69,
+        "reviewsNeither": 4.5,
+        "reviewsAllByUnion": 8.5,
+        "unionStudyRecall": 0.9651530819230296,
+        "originalOnly": 33,
+        "bundleOnly": 195,
+        "reviewsOriginalOnly": 5.5,
+        "reviewsBundleOnly": 5.5,
+        "reviewsAllByOriginal": 7,
+        "reviewsAllByBundle": 6.5,
+        "originalStudyRecall": 0.8544347695274647,
+        "bundleStudyRecall": 0.922466607578797
+      },
+      "singleCaptureCounts": {
+        "studiesByCaptureCount": [
+          70,
+          46,
+          45,
+          64,
+          57,
+          170,
+          346
+        ],
+        "byOriginal": {
+          "captured": [
+            10,
+            30,
+            39,
+            54,
+            38,
+            92,
+            271
+          ],
+          "missed": [
+            60,
+            16,
+            6,
+            10,
+            19,
+            78,
+            75
+          ]
+        }
+      },
+      "otherModel": {
+        "single": {
+          "both": 723,
+          "singleOnly": 5,
+          "otherOnly": 17,
+          "neither": 53
+        },
+        "bundle": {
+          "both": 683.5,
+          "neither": 59,
+          "reviewsNeither": 5,
+          "reviewsAllByUnion": 8,
+          "unionStudyRecall": 0.9733506726895248,
+          "bundleOnly": 12.5,
+          "otherOnly": 43,
+          "reviewsBundleOnly": 2.5,
+          "reviewsOtherOnly": 5.5,
+          "reviewsAllByBundle": 6.5,
+          "reviewsAllByOther": 7.5,
+          "bundleStudyRecall": 0.922466607578797,
+          "otherStudyRecall": 0.9541332364210847
+        }
+      }
+    },
+    "cc-by-nc": {
+      "reviews": 40,
+      "studies": 1334,
+      "originalVsBundle": {
+        "both": 960,
+        "neither": 62,
+        "reviewsNeither": 18.5,
+        "reviewsAllByUnion": 21.5,
+        "unionStudyRecall": 0.9430853339826996,
+        "originalOnly": 261,
+        "bundleOnly": 51,
+        "reviewsOriginalOnly": 19.5,
+        "reviewsBundleOnly": 17,
+        "reviewsAllByOriginal": 16,
+        "reviewsAllByBundle": 16.5,
+        "originalStudyRecall": 0.8886080009561519,
+        "bundleStudyRecall": 0.8347416813563344
+      },
+      "singleCaptureCounts": {
+        "studiesByCaptureCount": [
+          237,
+          125,
+          78,
+          62,
+          94,
+          139,
+          599
+        ],
+        "byOriginal": {
+          "captured": [
+            182,
+            117,
+            70,
+            58,
+            84,
+            133,
+            577
+          ],
+          "missed": [
+            55,
+            8,
+            8,
+            4,
+            10,
+            6,
+            22
+          ]
+        }
+      },
+      "otherModel": {
+        "single": {
+          "both": 1037,
+          "singleOnly": 60,
+          "otherOnly": 78,
+          "neither": 159
+        },
+        "bundle": {
+          "both": 957,
+          "neither": 204.5,
+          "reviewsNeither": 21.5,
+          "reviewsAllByUnion": 18.5,
+          "unionStudyRecall": 0.8906937235188167,
+          "bundleOnly": 54,
+          "otherOnly": 118.5,
+          "reviewsBundleOnly": 13,
+          "reviewsOtherOnly": 16,
+          "reviewsAllByBundle": 16.5,
+          "reviewsAllByOther": 16.5,
+          "bundleStudyRecall": 0.8347416813563344,
+          "otherStudyRecall": 0.860581140199689
+        }
+      }
+    }
+  }
+}
