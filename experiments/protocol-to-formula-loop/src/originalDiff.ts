@@ -193,7 +193,7 @@ async function originalDiff(args: string[], runtime: RunRuntime): Promise<number
       if (!parsed.determined) exclusions.undeterminedElements++;
       await measure(formula, true);
       exclusions.excludedElements += Number(formula.excluded);
-      if (formula.determined) addStructure(originalStructure, formula, review.studies);
+      addStructure(originalStructure, formula, review.studies);
       originals.push(formula);
     }
     for (const formula of sources) {

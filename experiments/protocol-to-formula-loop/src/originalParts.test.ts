@@ -27,3 +27,13 @@ test.each(['alpha OR beta', 'alpha AND beta OR gamma', 'alpha', '"alpha AND beta
 test.each(['(alpha', 'alpha)', '"alpha', '', 'alpha AND'])('壊れた式は分解できない: %s', (expression) => {
   expect(originalRequiredParts(expression)).toEqual({ determined: false, parts: [] });
 });
+
+test('入れ子の括弧に入った肯定の AND も必須の単位まで分け、OR と否定の中は分けない', () => {
+  const nested = originalRequiredParts('(alpha[Mesh] AND beta[tiab]) AND trial[pt]');
+  expect(nested.determined).toBe(true);
+  expect(nested.parts.map((part) => [part.expression, part.kind, part.negative])).toEqual([
+    ['alpha[Mesh]', 'concept', false], ['beta[tiab]', 'concept', false], ['trial[pt]', 'filter', false]]);
+  const mixed = originalRequiredParts('((a[tiab] AND b[tiab]) OR c[tiab]) AND (d[tiab] NOT (e[tiab] AND f[tiab]))');
+  expect(mixed.parts.map((part) => [part.expression, part.negative])).toEqual([
+    ['(a[tiab] AND b[tiab]) OR c[tiab]', false], ['d[tiab]', false], ['(e[tiab] AND f[tiab])', true]]);
+});

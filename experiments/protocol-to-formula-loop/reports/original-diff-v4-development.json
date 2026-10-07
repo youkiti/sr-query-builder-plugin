@@ -6,12 +6,12 @@
   "source": "v1",
   "k": 3,
   "reviews": 53,
-  "generatedAt": "2026-10-07T21:30:30.445Z",
-  "measuredFrom": "2026-10-07T21:20:55.185Z",
-  "measuredTo": "2026-10-07T21:30:30.163Z",
+  "generatedAt": "2026-10-07T21:46:33.890Z",
+  "measuredFrom": "2026-10-07T21:20:57.025Z",
+  "measuredTo": "2026-10-07T21:46:33.265Z",
   "measurements": {
-    "measured": 943,
-    "cached": 201
+    "measured": 276,
+    "cached": 980
   },
   "translators": {
     "rules": 61,
@@ -21,7 +21,7 @@
     "undeterminedRuns": 0,
     "undeterminedElements": 0,
     "unmeasurableParts": 13,
-    "rejectedUnits": 12,
+    "rejectedUnits": 15,
     "excludedRuns": 0,
     "excludedElements": 24
   },
@@ -76,28 +76,28 @@
       "undetermined": 0,
       "determined": 122,
       "conceptCounts": {
-        "0": 13,
-        "1": 52,
-        "2": 49,
-        "3": 6,
-        "4+": 2
+        "0": 11,
+        "1": 26,
+        "2": 45,
+        "3": 28,
+        "4+": 12
       },
       "withFilter": 76,
-      "withNegative": 6,
+      "withNegative": 46,
       "filterRate": 0.6229508196721312,
-      "negativeRate": 0.04918032786885246,
+      "negativeRate": 0.3770491803278688,
       "meshTerms": {
         "min": 0,
         "q1": 1,
-        "median": 3,
-        "q3": 6,
+        "median": 2,
+        "q3": 4,
         "max": 257
       },
       "freewordTerms": {
         "min": 0,
-        "q1": 7,
-        "median": 16.5,
-        "q3": 41.75,
+        "q1": 4,
+        "median": 13,
+        "q3": 33.5,
         "max": 16881
       },
       "plainTerms": {
@@ -105,16 +105,16 @@
         "q1": 0,
         "median": 0,
         "q3": 0,
-        "max": 19
+        "max": 13
       },
       "conceptRecall": {
         "min": 0,
-        "q1": 0.9493421052631579,
-        "median": 0.9883720930232558,
+        "q1": 0.9627329192546584,
+        "median": 1,
         "q3": 1,
         "max": 1
       },
-      "measuredConcepts": 160
+      "measuredConcepts": 228
     },
     "hitsRatio": {
       "min": 0.033976510067114093,
@@ -143,18 +143,18 @@
   },
   "bundleOnly": {
     "pairs": {
-      "single_concept": 201,
-      "single_filter": 634,
-      "multiple": 65,
+      "single_concept": 193,
+      "single_filter": 632,
+      "multiple": 75,
       "none": 0,
       "no_lines": 8,
       "excluded": 80
     },
     "studies": {
-      "all_single_concept": 78,
-      "all_single_filter": 315,
-      "all_multiple": 17,
-      "mixed": 4,
+      "all_single_concept": 74,
+      "all_single_filter": 313,
+      "all_multiple": 21,
+      "mixed": 6,
       "incomplete": 78
     }
   }
