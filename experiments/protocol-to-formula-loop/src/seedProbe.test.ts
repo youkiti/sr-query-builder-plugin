@@ -7,6 +7,7 @@ import { installDomParser } from '../../query-optimization-bench/domParser';
 import { loadConditions } from './conditions';
 import { createRun, runPath } from './runDir';
 import { main } from './seedProbe';
+import { relaxationLadder } from './relaxQuery';
 import { splitReviews } from './split';
 import type { RunRuntime } from './startRuns';
 import { validateFormulaMd } from './submission';
@@ -210,4 +211,97 @@ test('別の版から用意した下調べを、同じ名前で作り足した�
   const inputPath = join(f.dir(), 'input.json'), input = JSON.parse(readFileSync(inputPath, 'utf8'));
   writeJson(inputPath, { ...input, source: 'v2' });
   await expect(main(['prepare', ...f.args], f.runtime)).rejects.toThrow('この名前の下調べは別の版から用意されています');
+});
+
+const relaxedQuery = 'a[majr] AND b[ti] AND c[ti] AND trial[pt]';
+async function relaxedSetup() {
+  const f = setup(); await f.prepare();
+  f.response(0, relaxedQuery); f.response(1, 'zero[ti]');
+  const terms: string[] = [];
+  const reply = (ids: string[], count = ids.length) => new Response(JSON.stringify({ esearchresult: { count: String(count), idlist: ids } }));
+  const search = (handler: (term: string) => Response | Promise<Response>) => f.fetchImpl.mockImplementation(async (input, init) => {
+    const params = init?.method === 'POST' ? new URLSearchParams(String(init.body)) : new URL(String(input)).searchParams;
+    expect(params.get('retmax')).toBe('50'); expect(params.get('sort')).toBe('relevance');
+    expect(params.get('maxdate')).toBe('2020/01/31');
+    const term = params.get('term')!; terms.push(term);
+    if (term === 'reject[ti]') return new Response(JSON.stringify({ esearchresult: { ERROR: '拒否 PMC9999999 FAKE_SECRET' } }));
+    if (term.startsWith('zero')) return reply([]);
+    return handler(term);
+  });
+  const resultPath = join(f.dir(), 'result-relax-ladder.json');
+  const reportPath = join(f.runtime.reportsDir!, 'seed-probe-probe-relax-ladder-smoke.json');
+  return { ...f, terms, reply, search, resultPath, relaxedReportPath: reportPath,
+    result: () => JSON.parse(readFileSync(resultPath, 'utf8')),
+    relaxedReport: () => JSON.parse(readFileSync(reportPath, 'utf8')),
+    measure: () => main(['measure', ...f.args, '--relax', 'ladder'], f.runtime) };
+}
+
+test('元が０件でも補い、拒否した段を飛ばし、別名で保存してキャッシュを再利用する', async () => {
+  const f = await relaxedSetup(), ladder = relaxationLadder(relaxedQuery);
+  f.response(0, '(narrow[ti])');
+  await main(['measure', ...f.args], f.runtime);
+  const original = readFileSync(join(f.dir(), 'result.json'), 'utf8'), report = readFileSync(f.reportPath, 'utf8');
+  expect((f.runtime.stdout as jest.Mock).mock.calls.slice(-3).map((call) => call[0])).toEqual([
+    '対象のレビュー: 4 件\n', '測ったレビュー: 新規 4 件、保存済み 0 件、測り直し 0 件\n',
+    '状態: measured 1 件、zero_hits 1 件、design_failed 1 件、rejected 1 件\n',
+  ]);
+  f.response(0, relaxedQuery);
+  f.search((term) => term === ladder[0]
+    ? new Response(JSON.stringify({ esearchresult: { ERROR: '拒否 PMC9999999 90000001 FAKE_SECRET' } }))
+    : f.reply(term === relaxedQuery ? [] : [gold[0]!]));
+  await f.measure();
+  expect(f.result()).toMatchObject({ status: 'measured', hits: 0, originalHits: 0, listSize: 1, levelsUsed: 4, levelsRejected: 1,
+    top5: { goldReports: 1, goldStudies: 1 } });
+  expect(f.result().fingerprint).not.toBe(JSON.parse(original).fingerprint);
+  for (const index of [2, 3]) expect(JSON.parse(readFileSync(join(f.dir(index), 'result-relax-ladder.json'), 'utf8')))
+    .toMatchObject({ originalHits: 0, listSize: 0, levelsUsed: 0, levelsRejected: 0 });
+  expect(f.relaxedReport()).toMatchObject({ relax: 'ladder', reviewsRelaxed: 2, levelsUsedTotal: 5, levelsRejectedTotal: 1,
+    reviewsOriginalZero: 2, reviewsOriginalZeroRecovered: 1, listSizeQuantiles: { min: 0, max: 1 },
+    states: { measured: 1, zero_hits: 1, design_failed: 1, rejected: 1 } });
+  expect(f.terms).not.toContain('reject[tiab]');
+  expect(readFileSync(join(f.dir(), 'result.json'), 'utf8')).toBe(original);
+  expect(readFileSync(f.reportPath, 'utf8')).toBe(report);
+  expect(f.runtime.stdout).toHaveBeenLastCalledWith('ゆるめたレビュー: 2 件、元の式が 0 件: 2 件（うち候補を補えた 1 件）\n');
+  expect(readFileSync(f.relaxedReportPath, 'utf8') + JSON.stringify((f.runtime.stdout as jest.Mock).mock.calls))
+    .not.toMatch(/PMC|90000001|FAKE_SECRET|\[majr\]|\[ti\]/);
+  f.fetchImpl.mockClear(); await f.measure(); expect(f.fetchImpl).not.toHaveBeenCalled();
+});
+
+test('元の順位と段内の順位を保ち、重複を除き、５０件で打ち切る', async () => {
+  const f = await relaxedSetup(), ladder = relaxationLadder(relaxedQuery);
+  const initial = ['70000001', '70000002', '70000003', '70000004', gold[0]!];
+  const next = [...initial.slice(0, 4), gold[1]!, ...Array.from({ length: 45 }, (_, i) => String(60000001 + i))];
+  f.search((term) => f.reply(term === relaxedQuery ? initial : next));
+  await f.measure();
+  expect(f.result()).toMatchObject({ hits: 5, originalHits: 5, listSize: 50, levelsUsed: 1, levelsRejected: 0,
+    top5: { goldReports: 1 }, top10: { goldReports: 2 }, top50: { goldReports: 2 } });
+  expect(f.terms).toContain(ladder[0]); expect(f.terms).not.toContain(ladder[1]);
+});
+
+test('元の一覧が５０件なら緩和しない', async () => {
+  const f = await relaxedSetup(); f.search(() => f.reply(f.pool, 80)); await f.measure();
+  expect(f.result()).toMatchObject({ hits: 80, listSize: 50, levelsUsed: 0 });
+  expect(f.terms).not.toContain(relaxationLadder(relaxedQuery)[0]);
+});
+
+test.each(['通信', '認証', '件数不足', '重複'])('緩和中の結果不明でも停止し機微情報を出さない（%s）', async (kind) => {
+  const f = await relaxedSetup();
+  f.search((term) => {
+    if (term === relaxedQuery) return f.reply([]);
+    if (kind === '通信') throw new Error('PMC9999999 90000001 a[majr] FAKE_SECRET');
+    if (kind === '認証') return new Response('FAKE_SECRET', { status: 401 });
+    return f.reply(kind === '重複' ? [gold[0]!, gold[0]!] : [], 2);
+  });
+  let caught: unknown;
+  try { await f.measure(); } catch (error) { caught = error; }
+  expect(String(caught)).toContain('結果不明'); expect(String(caught)).not.toMatch(/PMC|90000001|majr|FAKE_SECRET/);
+  expect(existsSync(f.resultPath)).toBe(false); expect(existsSync(f.relaxedReportPath)).toBe(false);
+});
+
+test('緩和指定は測定時の ladder だけを受け付ける', async () => {
+  const f = setup();
+  for (const args of [['prepare', ...f.args, '--relax', 'ladder'], ['measure', ...f.args, '--relax', 'other'], ['measure', ...f.args, '--relax']]) {
+    await expect(main(args, f.runtime)).rejects.toThrow('不正');
+  }
+  expect(f.fetchImpl).not.toHaveBeenCalled();
 });

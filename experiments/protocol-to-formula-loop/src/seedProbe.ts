@@ -12,6 +12,7 @@ import { loadParsed, resolveBenchDir } from './bench';
 import { quantile } from './diagnose';
 import type { EvaluableReview } from './evaluable';
 import { createDeps, isQueryRejection } from './ncbi';
+import { relaxationLadder } from './relaxQuery';
 import { readRun, runPath, writeJson } from './runDir';
 import { parseRunOptions, targetReviews, type RunRuntime } from './startRuns';
 import { validateFormulaMd } from './submission';
@@ -22,7 +23,8 @@ const statuses = ['measured', 'zero_hits', 'design_failed', 'rejected'] as const
 type Status = typeof statuses[number];
 type Top = `top${typeof limits[number]}`;
 interface Counts { goldReports: number; goldStudies: number }
-type Result = { status: Status; hits: number; fingerprint: string; measuredAt: string } & Record<Top, Counts>;
+interface RelaxCounts { originalHits: number; listSize: number; levelsUsed: number; levelsRejected: number }
+type Result = { status: Status; hits: number; fingerprint: string; measuredAt: string } & Record<Top, Counts> & Partial<RelaxCounts>;
 type Input = DesignSpecificQueryInput & { query: string; cutoffDate: string; source: string };
 class ProbeError extends Error {}
 const readJson = (path: string): unknown => JSON.parse(readFileSync(path, 'utf8'));
@@ -37,15 +39,17 @@ function parseOptions(args: string[]) {
     if (key === '--subset' && ['validation', 'test'].includes(args[i + 1] ?? '')) {
       throw new ProbeError('シードの下調べは開発群でだけ実行できます');
     }
-    if (!['--runs', '--source', '--label', '--subset'].includes(key) || values.has(key)
+    if (!['--runs', '--source', '--label', '--subset', ...(command === 'measure' ? ['--relax'] : [])].includes(key) || values.has(key)
       || !args[i + 1] || args[i + 1]!.startsWith('--')) throw new ProbeError('実行引数が不正です');
     values.set(key, args[++i]!);
   }
   const source = values.get('--source'), label = values.get('--label');
+  const relax = values.get('--relax');
+  if (relax !== undefined && relax !== 'ladder') throw new ProbeError('緩和方法の指定が不正です');
   if (!source || !label || !/^[A-Za-z0-9_-]+$/.test(label)) throw new ProbeError('版または名前の指定が不正です');
   try {
     return { ...parseRunOptions(['--runs', values.get('--runs') ?? '', '--version', source,
-      '--subset', values.get('--subset') ?? '', '--runs-per-review', '1'], '--runs'), command, source, label };
+      '--subset', values.get('--subset') ?? '', '--runs-per-review', '1'], '--runs'), command, source, label, relax };
   } catch { throw new ProbeError('実行引数が不足しているか不正です'); }
 }
 
@@ -73,43 +77,71 @@ function readInput(path: string): Input {
   return input;
 }
 
-function readResult(path: string, fingerprint: string): Result | null {
+function readResult(path: string, fingerprint: string, relax = false): Result | null {
   const value = readJson(path) as Result | null;
   if (value?.fingerprint !== fingerprint) return null;
   const count = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0;
+  if (relax && (!count(value.originalHits) || value.originalHits !== value.hits
+    || !count(value.listSize) || value.listSize > 50 || value.listSize < Math.min(value.hits, 50)
+    || !count(value.levelsUsed) || value.levelsUsed > 4 || !count(value.levelsRejected) || value.levelsRejected > value.levelsUsed
+    || (value.status === 'measured' ? value.listSize === 0 : value.listSize !== 0)
+    || (['design_failed', 'rejected'].includes(value.status) && (value.hits !== 0 || value.levelsUsed !== 0)))) {
+    throw new ProbeError('シードのキャッシュが不正です');
+  }
   if (!statuses.includes(value.status) || !count(value.hits)
-    || (value.status === 'measured' ? value.hits === 0 : value.hits !== 0)
+    || (!relax && (value.status === 'measured' ? value.hits === 0 : value.hits !== 0))
     || typeof value.measuredAt !== 'string' || !Number.isFinite(Date.parse(value.measuredAt))
     || limits.some((k) => {
       const row = value[`top${k}`];
-      return !row || !count(row.goldReports) || !count(row.goldStudies) || row.goldReports > Math.min(k, value.hits)
+      return !row || !count(row.goldReports) || !count(row.goldStudies) || row.goldReports > Math.min(k, relax ? value.listSize! : value.hits)
         || (row.goldReports === 0 && row.goldStudies !== 0);
     })) throw new ProbeError('シードのキャッシュが不正です');
   return value;
 }
 
-async function measure(input: Input, response: string, review: EvaluableReview, deps: EutilsDeps) {
+async function measure(input: Input, response: string, review: EvaluableReview, deps: EutilsDeps, relax = false) {
   let status: Status = 'design_failed', hits = 0, pmids: string[] = [];
+  let levelsUsed = 0, levelsRejected = 0;
+  const outcome = () => ({ status, hits, ...topCounts(pmids, review),
+    ...(relax ? { originalHits: hits, listSize: pmids.length, levelsUsed, levelsRejected } : {}) });
   let query: string;
   try {
     ({ query } = await designSpecificQuery(input, provider(async () => ({ text: response, tokensIn: null, tokensOut: null, raw: null }))));
   } catch (error) {
     // 記録済み応答の null や不正なプロパティ型も、通信を伴わない設計失敗として数える。
     if (!(error instanceof SkillResponseError) && !(error instanceof TypeError)) throw new ProbeError('絞り込み式の応答の処理に失敗しました（結果不明）');
-    return { status, hits, ...topCounts(pmids, review) };
+    return outcome();
   }
-  try {
+  const search = async (query: string) => {
     const result = await esearch(query, deps, { retmax: 50, sort: 'relevance' });
     if (result.pmids.length !== Math.min(result.count, 50) || new Set(result.pmids).size !== result.pmids.length) {
       throw new ProbeError('シードの測定に失敗しました（結果不明）: 検索結果の一覧が不完全です');
     }
+    return result;
+  };
+  try {
+    const result = await search(query);
     hits = result.count; pmids = result.pmids; status = hits ? 'measured' : 'zero_hits';
+    if (relax) {
+      for (const expression of relaxationLadder(query)) {
+        if (pmids.length >= 50) break;
+        levelsUsed++;
+        try {
+          const next = await search(expression);
+          pmids = [...new Set([...pmids, ...next.pmids])].slice(0, 50);
+        } catch (error) {
+          if (isQueryRejection(error)) { levelsRejected++; continue; }
+          throw error;
+        }
+      }
+      status = pmids.length ? 'measured' : 'zero_hits';
+    }
   } catch (error) {
     if (isQueryRejection(error)) status = 'rejected';
     else if (error instanceof ProbeError) throw error;
     else throw new ProbeError('シードの測定に失敗しました（結果不明）: 通信または応答の処理に失敗しました');
   }
-  return { status, hits, ...topCounts(pmids, review) };
+  return outcome();
 }
 
 function topCounts(pmids: string[], review: EvaluableReview): Record<Top, Counts> {
@@ -187,14 +219,14 @@ async function seedProbe(args: string[], runtime: RunRuntime): Promise<number> {
     if (input.source !== options.source) throw new ProbeError('この名前の下調べは別の版から用意されています');
     // 用意したあとでベンチの検索日が変わっていたら、古い日付で測らずに用意し直しを求める。
     if (input.cutoffDate !== review.cutoffDate) throw new ProbeError('用意した指示文の検索日が現在の対象と一致しません（用意し直してください）');
-    const fingerprint = createHash('sha256').update(['seed-probe-v1', response, input.cutoffDate,
+    const fingerprint = createHash('sha256').update([options.relax ? 'seed-probe-relax-ladder-v1' : 'seed-probe-v1', response, input.cutoffDate,
       [...review.evaluablePmids].sort().join('\n'), review.studies.map((study) => JSON.stringify([study.id, [...study.pmids].sort()])).sort().join('\n')].join('\n')).digest('hex');
-    const path = join(dir, 'result.json'), existed = existsSync(path), saved = existed ? readResult(path, fingerprint) : null;
+    const path = join(dir, options.relax ? 'result-relax-ladder.json' : 'result.json'), existed = existsSync(path), saved = existed ? readResult(path, fingerprint, !!options.relax) : null;
     let result: Result;
     if (saved) { result = saved; cached++; }
     else {
       const deps = createDeps({ env, fetchImpl, sleep, cutoffDate: input.cutoffDate, rateLimiter: base.rateLimiter, timeoutMs: runtime.timeoutMs });
-      result = { ...await measure(input, response, review, deps), fingerprint, measuredAt: now().toISOString() };
+      result = { ...await measure(input, response, review, deps, !!options.relax), fingerprint, measuredAt: now().toISOString() };
       writeJson(path, result);
       if (existed) remeasured++; else measured++;
     }
@@ -207,15 +239,23 @@ async function seedProbe(args: string[], runtime: RunRuntime): Promise<number> {
     return [band, { reviews: selected.length, ...summarize(selected.map((row) => row.result)) }];
   }));
   const reportsDir = runtime.reportsDir ?? resolve(__dirname, '../reports');
+  const originalZero = results.filter((row) => ['measured', 'zero_hits'].includes(row.status) && row.originalHits === 0);
+  const relaxed = { relax: 'ladder', listSizeQuantiles: quantiles(results.map((row) => row.listSize ?? 0)),
+    reviewsRelaxed: results.filter((row) => (row.levelsUsed ?? 0) > 0).length,
+    levelsUsedTotal: results.reduce((sum, row) => sum + (row.levelsUsed ?? 0), 0),
+    levelsRejectedTotal: results.reduce((sum, row) => sum + (row.levelsRejected ?? 0), 0),
+    reviewsOriginalZero: originalZero.length, reviewsOriginalZeroRecovered: originalZero.filter((row) => row.listSize! > 0).length };
   mkdirSync(reportsDir, { recursive: true });
-  writeJson(join(reportsDir, `seed-probe-${options.label}-${options.subset}.json`), {
+  writeJson(join(reportsDir, `seed-probe-${options.label}${options.relax ? '-relax-ladder' : ''}-${options.subset}.json`), {
     source: options.source, label: options.label, subset: options.subset, reviews: reviews.length, generatedAt: now().toISOString(),
     measuredFrom: dates[0] ?? null, measuredTo: dates[dates.length - 1] ?? null, states,
     hitsQuantiles: quantiles(results.filter((row) => row.status === 'measured').map((row) => row.hits)), ...summarize(results), byStudyCount,
+    ...(options.relax ? relaxed : {}),
   });
   stdout(`対象のレビュー: ${reviews.length} 件\n`);
   stdout(`測ったレビュー: 新規 ${measured} 件、保存済み ${cached} 件、測り直し ${remeasured} 件\n`);
   stdout(`状態: ${statuses.map((status) => `${status} ${states[status]} 件`).join('、')}\n`);
+  if (options.relax) stdout(`ゆるめたレビュー: ${relaxed.reviewsRelaxed} 件、元の式が 0 件: ${relaxed.reviewsOriginalZero} 件（うち候補を補えた ${relaxed.reviewsOriginalZeroRecovered} 件）\n`);
   return 0;
 }
 
