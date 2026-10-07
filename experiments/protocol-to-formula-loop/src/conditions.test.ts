@@ -1,6 +1,23 @@
 /** @jest-environment node */
 import { loadConditions, validateConditions } from './conditions';
 
+test.each([undefined, 1, 10000, Number.MAX_SAFE_INTEGER])('表の件数の目安を受け付ける: %j', (hitsLimit) => {
+  expect(validateConditions({ ...loadConditions('v11'), hitsLimit }, 'v11').hitsLimit).toBe(hitsLimit);
+});
+test.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, Infinity, NaN, null, '10000'])('不正な件数の目安を拒否する: %j', (hitsLimit) => {
+  expect(() => validateConditions({ ...loadConditions('v11'), hitsLimit }, 'v11')).toThrow('件数の目安の条件が不正です');
+});
+test.each([undefined, false, 'true'])('表以外に件数の目安を付けると拒否する: %j', (table) => {
+  expect(() => validateConditions({ ...loadConditions('v11'), table, hitsLimit: 1 }, 'v11')).toThrow('件数の目安の条件が不正です');
+});
+test('件数を見直す版と、それを束ねる版の条件を読み込む', () => {
+  expect(loadConditions('v13')).toEqual({ ...loadConditions('v11'), version: 'v13', hitsLimit: 10000,
+    costLimit: '道具の呼び出し回数の上限で代替する（v11 と同じ回数。count は行ごとに 2 つの件数を返し、submit は全体の件数を 1 回測る）' });
+  const source = loadConditions('v12');
+  expect(loadConditions('v14')).toEqual({ ...source, version: 'v14', combine: { from: 'v13', k: 3 },
+    costLimit: source.costLimit.replace(/v11/g, 'v13'), finalSelection: source.finalSelection.replace(/v11/g, 'v13') });
+});
+
 test.each([undefined, false, true])('表の指定を省略または真偽値にできる: %j', (table) => {
   const conditions = { ...loadConditions('v1'), table };
   expect(validateConditions(conditions, 'v1')).toEqual(conditions);

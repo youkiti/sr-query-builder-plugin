@@ -10,7 +10,7 @@ import { requiredUnits } from './formulaUnits';
 import { createDeps, isQueryRejection, type DepsOptions } from './ncbi';
 import { readBudget, readRun, recordToolCall, writeJson, withRunLock, type LockOptions, type ToolResult } from './runDir';
 import { validateFormulaMd } from './submission';
-import { inspectTable, buildFormulaMd, rowQueries, type ConceptTable } from './conceptTable';
+import { inspectTable, buildFormulaMd, rowQueries, rowContextQueries, type ConceptTable } from './conceptTable';
 
 export interface Runtime {
   env: NodeJS.ProcessEnv; fetchImpl: typeof fetch; now: () => Date;
@@ -80,16 +80,23 @@ export async function main(args: string[], runtime: Runtime = defaultRuntime()):
     }
     if (command === 'check') return finish('成功', 0, '検査に通りました' + (notes.length ? '\n\n気づき:\n' + notes.join('\n') : ''));
     try {
+      const hitsLimit = run.conditions.table ? run.conditions.hitsLimit : undefined;
+      const makeDeps = () => createDeps({ env, fetchImpl, cutoffDate: run.cutoffDate, sleep, timeoutMs: runtime.timeoutMs, rateLimiter: runtime.rateLimiter });
       if (command === 'submit' && validated?.ok) {
+        const count = hitsLimit ? (await esearch(validated.query, makeDeps(), { retmax: 0 })).count : undefined;
+        if (hitsLimit && count !== undefined && count > hitsLimit && !table?.largeResultReason?.trim()) {
+          budget.submissions++;
+          return finish('検査不合格', 1, `全体が ${count} 件で、目安の ${hitsLimit} 件を超えています。count で見直す点を確かめてください。見直しても超えるときは、largeResultReason に理由を書いて提出してください。`);
+        }
         const number = budget.submissions + 1;
         mkdirSync(join(dir, 'submissions'), { recursive: true });
         writeFileSync(join(dir, 'submissions', `${number}.md`), safe(md), { flag: 'wx' });
         if (table) writeFileSync(join(dir, 'submissions', `${number}.table.json`), safe(tableText), { flag: 'wx' });
         writeJson(join(dir, 'submission.json'), { number, submittedAt: now().toISOString(), query: safe(validated.query) });
         budget.submissions++;
-        return finish('成功', 0, `提出 ${number} を受け付けました`);
+        return finish('成功', 0, `提出 ${number} を受け付けました` + (count !== undefined ? `（全体 ${count} 件）` : ''));
       }
-      const deps = createDeps({ env, fetchImpl, cutoffDate: run.cutoffDate, sleep, timeoutMs: runtime.timeoutMs, rateLimiter: runtime.rateLimiter });
+      const deps = makeDeps();
       let message: string;
       if (command === 'mesh') {
         if (!argument?.trim() || args.length !== 4) throw new Error('MeSH の語を 1 つ指定してください');
@@ -102,9 +109,25 @@ export async function main(args: string[], runtime: Runtime = defaultRuntime()):
           message = resolution.headings.map((heading) => `正式な見出し: ${heading}\ntree number: ${lookup.trees.get(heading)?.join(', ') ?? lookup.reasons.get(heading) ?? 'なし'}`).join('\n');
         }
       } else if (validated?.ok && command === 'count') {
-        const lines = [`全体: ${(await esearch(validated.query, deps, { retmax: 0 })).count} 件`];
+        const count = (await esearch(validated.query, deps, { retmax: 0 })).count;
+        const lines = [`全体: ${count} 件`];
         for (const block of validated.formula.blocks) lines.push(`#${block.id}: ${(await esearch(expandFormula(validated.formula, block.id), deps, { retmax: 0 })).count} 件`);
-        if (table) for (const row of rowQueries(table)) lines.push(`#${row.concept} 行 ${row.row}（${row.kind === 'general' ? '総称' : '個別の名称'}: ${row.label}）: ${(await esearch(row.query, deps, { retmax: 0 })).count} 件`);
+        const contributions: { concept: number; row: number; label: string; count: number }[] = [];
+        const contexts = table && hitsLimit ? rowContextQueries(table) : [];
+        if (table) for (const [i, row] of rowQueries(table).entries()) {
+          const rowCount = (await esearch(row.query, deps, { retmax: 0 })).count;
+          const contextCount = hitsLimit ? (await esearch(contexts[i]!.query, deps, { retmax: 0 })).count : undefined;
+          lines.push(`#${row.concept} 行 ${row.row}（${row.kind === 'general' ? '総称' : '個別の名称'}: ${row.label}）: ${rowCount} 件` + (contextCount !== undefined ? `（式全体のうち ${contextCount} 件）` : ''));
+          if (contextCount !== undefined) contributions.push({ ...row, count: contextCount });
+        }
+        if (table && hitsLimit && count > hitsLimit) {
+          lines.push('', `件数の見直し: 全体が ${count} 件で、目安の ${hitsLimit} 件を超えています。`);
+          if (table.concepts.length === 1) lines.push('- 概念が 1 個だけです。このレビューを区別する中心の概念がもう 1 つ無いか、手順 1 に戻って確かめてください。');
+          for (const row of contributions.filter((row) => row.count >= count / 2).sort((a, b) => b.count - a.count).slice(0, 5)) {
+            lines.push(`- #${row.concept} 行 ${row.row}（${row.label}）が、式全体の ${Math.round(row.count / count * 100)}% を持ち込んでいます。その概念に属さない文献まで拾う広すぎる語（一般的な 1 語、類が広すぎる語の組、短すぎる語幹）が無いか確かめてください。その概念を正しく指す語や、個別の名称の行は削らないでください。`);
+          }
+          lines.push('- 見直しても超えるときは、largeResultReason に「これ以上絞ると、どういう適格な研究を落とすか」を書いて提出してください。');
+        }
         message = lines.join('\n');
       } else if (validated?.ok && command === 'seeds') {
         const captured = new Set(await capturedGold(validated.query, seedPmids, deps));
@@ -140,6 +163,8 @@ export async function main(args: string[], runtime: Runtime = defaultRuntime()):
       budget.measurements++;
       return finish('成功', 0, message);
     } catch (error) {
+      // 提出時の件数の測定で式が拒否されたら、直す必要のある提出として数える（通信の失敗とは区別する）。
+      if (command === 'submit' && isQueryRejection(error)) { budget.submissions++; return finish('検査不合格', 1, (error as Error).message); }
       if (['count', 'titles', 'outside', 'seeds'].includes(command) && isQueryRejection(error)) return finish('検査不合格', 1, command === 'seeds' ? '検索式が拒否されました' : (error as Error).message);
       if (command === 'outside' || command === 'seeds') return finish('測定失敗（結果不明）', 3, '測定に失敗しました。回数は消費していません');
       return finish('測定失敗（結果不明）', 3, `測定に失敗しました。回数は消費していません\n${safe(String(error))}`);

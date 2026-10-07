@@ -3,7 +3,7 @@ export type TableTerm = string | { all: string[][] };
 export interface ConceptRow { kind: 'general' | 'specific'; label: string; mesh: string[]; terms: TableTerm[] }
 export interface ConceptTable {
   concepts: { name: string; rows: ConceptRow[]; noSpecificReason?: string }[];
-  thirdConceptReason?: string; rctFilter?: boolean; dateRange?: { from: string; to: string } | null;
+  thirdConceptReason?: string; largeResultReason?: string; rctFilter?: boolean; dateRange?: { from: string; to: string } | null;
 }
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const nonempty = (value: unknown): value is string => typeof value === 'string' && !!value.trim();
@@ -25,7 +25,8 @@ export function inspectTable(text: string): { report: TableReport; table: Concep
   let value: unknown;
   try { value = JSON.parse(text); } catch { bad('表', 'JSON として読めません'); return { report, table: null }; }
   if (!object(value)) { bad('表', '最上位はオブジェクトにしてください'); return { report, table: null }; }
-  keys(value, ['concepts', 'thirdConceptReason', 'rctFilter', 'dateRange'], '表');
+  keys(value, ['concepts', 'thirdConceptReason', 'largeResultReason', 'rctFilter', 'dateRange'], '表');
+  if (value.largeResultReason !== undefined && typeof value.largeResultReason !== 'string') bad('表', 'largeResultReason は文字列にしてください');
   if (!Array.isArray(value.concepts) || value.concepts.length < 1 || value.concepts.length > 3) bad('表', 'concepts は 1〜3 個の配列にしてください');
   if (value.rctFilter !== undefined && typeof value.rctFilter !== 'boolean') bad('表', 'rctFilter は真偽値にしてください');
   if (value.dateRange !== undefined && value.dateRange !== null) {
@@ -100,14 +101,24 @@ const firstUnique = (items: string[]): string[] => { const seen = new Set<string
 export function rowQueries(table: ConceptTable): { concept: number; row: number; label: string; kind: 'general' | 'specific'; query: string }[] {
   return table.concepts.flatMap((concept, i) => concept.rows.map((row, j) => ({ concept: i + 1, row: j + 1, label: row.label, kind: row.kind, query: firstUnique(rowItems(row)).join(' OR ') })));
 }
+const rctQuery = '(randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh]))';
+const dateQuery = (date: NonNullable<ConceptTable['dateRange']>): string => `("${date.from}"[dp] : "${date.to}"[dp])`;
+export function rowContextQueries(table: ConceptTable): { concept: number; row: number; query: string }[] {
+  const concepts = table.concepts.map((concept) => firstUnique(concept.rows.flatMap(rowItems)).join(' OR '));
+  const filters = [...(table.rctFilter ? [rctQuery] : []), ...(table.dateRange ? [dateQuery(table.dateRange)] : [])];
+  return rowQueries(table).map(({ concept, row, query }) => {
+    const others = [...concepts.filter((_, i) => i !== concept - 1), ...filters];
+    return { concept, row, query: others.length ? [query, ...others].map((part) => `(${part})`).join(' AND ') : query };
+  });
+}
 export function buildFormulaMd(table: ConceptTable): string {
   const lines = table.concepts.map((concept, i) => `#${i + 1} ${firstUnique(concept.rows.flatMap(rowItems)).join(' OR ')}`);
   const refs = table.concepts.map((_, i) => `#${i + 1}`);
   if (table.rctFilter) {
-    lines.push('#RCTfilter (randomized controlled trial[pt] OR controlled clinical trial[pt] OR randomized[tiab] OR placebo[tiab] OR drug therapy[sh] OR randomly[tiab] OR trial[tiab] OR groups[tiab]) NOT (animals[mh] NOT (humans[mh] AND animals[mh]))');
+    lines.push(`#RCTfilter ${rctQuery}`);
     refs.push('#RCTfilter');
   }
-  if (table.dateRange) { lines.push(`#Date ("${table.dateRange.from}"[dp] : "${table.dateRange.to}"[dp])`); refs.push('#Date'); }
+  if (table.dateRange) { lines.push(`#Date ${dateQuery(table.dateRange)}`); refs.push('#Date'); }
   lines.push(`#${table.concepts.length + 1} ${refs.join(' AND ')}`);
   return '## PubMed/MEDLINE\n\n```\n' + lines.join('\n') + '\n```\n';
 }

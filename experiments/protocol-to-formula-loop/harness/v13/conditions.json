@@ -1,0 +1,13 @@
+{
+  "version": "v13",
+  "model": "claude-haiku-5-5",
+  "generationSettings": "サブエージェントの既定（温度などは変更不可のため既定のまま）",
+  "inputs": ["protocol.md", "procedure.md"],
+  "tools": ["check", "count", "mesh", "submit"],
+  "table": true,
+  "hitsLimit": 10000,
+  "maxMeasurements": 20,
+  "maxSubmissions": 4,
+  "costLimit": "道具の呼び出し回数の上限で代替する（v11 と同じ回数。count は行ごとに 2 つの件数を返し、submit は全体の件数を 1 回測る）",
+  "finalSelection": "最後に受け付けられた提出（概念の表）からコードが組んだ式 1 本。採点結果による選び直しはしない"
+}
