@@ -1,0 +1,13 @@
+{
+  "label": "specific-haiku",
+  "subset": "fixed",
+  "reviews": 20,
+  "max": 2,
+  "generatedAt": "2026-10-07T05:09:27.357Z",
+  "reviewsBySeedCount": [
+    4,
+    1,
+    15
+  ],
+  "seedsTotal": 31
+}

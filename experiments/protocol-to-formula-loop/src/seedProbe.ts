@@ -102,7 +102,7 @@ function readResult(path: string, fingerprint: string, relax = false): Result | 
 async function measure(input: Input, response: string, review: EvaluableReview, deps: EutilsDeps, relax = false) {
   let status: Status = 'design_failed', hits = 0, pmids: string[] = [];
   let levelsUsed = 0, levelsRejected = 0;
-  const outcome = () => ({ status, hits, ...topCounts(pmids, review),
+  const outcome = () => ({ pmids, status, hits, ...topCounts(pmids, review),
     ...(relax ? { originalHits: hits, listSize: pmids.length, levelsUsed, levelsRejected } : {}) });
   let query: string;
   try {
@@ -219,14 +219,19 @@ async function seedProbe(args: string[], runtime: RunRuntime): Promise<number> {
     if (input.source !== options.source) throw new ProbeError('この名前の下調べは別の版から用意されています');
     // 用意したあとでベンチの検索日が変わっていたら、古い日付で測らずに用意し直しを求める。
     if (input.cutoffDate !== review.cutoffDate) throw new ProbeError('用意した指示文の検索日が現在の対象と一致しません（用意し直してください）');
-    const fingerprint = createHash('sha256').update([options.relax ? 'seed-probe-relax-ladder-v1' : 'seed-probe-v1', response, input.cutoffDate,
+    const fingerprint = createHash('sha256').update([options.relax ? 'seed-probe-relax-ladder-v2' : 'seed-probe-v1', response, input.cutoffDate,
       [...review.evaluablePmids].sort().join('\n'), review.studies.map((study) => JSON.stringify([study.id, [...study.pmids].sort()])).sort().join('\n')].join('\n')).digest('hex');
     const path = join(dir, options.relax ? 'result-relax-ladder.json' : 'result.json'), existed = existsSync(path), saved = existed ? readResult(path, fingerprint, !!options.relax) : null;
     let result: Result;
-    if (saved) { result = saved; cached++; }
+    const candidatesPath = join(dir, 'candidates-relax-ladder.json');
+    const candidatesMatch = !options.relax || (fileExists(candidatesPath)
+      && (readJson(candidatesPath) as { fingerprint?: string } | null)?.fingerprint === fingerprint);
+    if (saved && candidatesMatch) { result = saved; cached++; }
     else {
       const deps = createDeps({ env, fetchImpl, sleep, cutoffDate: input.cutoffDate, rateLimiter: base.rateLimiter, timeoutMs: runtime.timeoutMs });
-      result = { ...await measure(input, response, review, deps, !!options.relax), fingerprint, measuredAt: now().toISOString() };
+      const { pmids, ...measurement } = await measure(input, response, review, deps, !!options.relax);
+      result = { ...measurement, fingerprint, measuredAt: now().toISOString() };
+      if (options.relax) writeJson(candidatesPath, { pmids, fingerprint, measuredAt: result.measuredAt });
       writeJson(path, result);
       if (existed) remeasured++; else measured++;
     }

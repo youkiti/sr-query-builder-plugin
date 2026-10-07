@@ -3,9 +3,9 @@
   "label": "specific-haiku",
   "subset": "development",
   "reviews": 53,
-  "generatedAt": "2026-10-07T04:49:17.062Z",
-  "measuredFrom": "2026-10-07T04:47:59.937Z",
-  "measuredTo": "2026-10-07T04:49:17.057Z",
+  "generatedAt": "2026-10-07T05:09:22.438Z",
+  "measuredFrom": "2026-10-07T05:08:22.779Z",
+  "measuredTo": "2026-10-07T05:09:22.433Z",
   "states": {
     "measured": 51,
     "zero_hits": 2,
@@ -61,7 +61,7 @@
       "q1": 0,
       "median": 3,
       "q3": 5,
-      "max": 16
+      "max": 15
     }
   },
   "top50": {
@@ -249,8 +249,8 @@
           "min": 0,
           "q1": 0.5,
           "median": 3,
-          "q3": 7,
-          "max": 16
+          "q3": 7.5,
+          "max": 15
         }
       },
       "top50": {
