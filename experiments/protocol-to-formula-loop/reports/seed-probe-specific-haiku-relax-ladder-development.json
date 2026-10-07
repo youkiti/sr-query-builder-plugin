@@ -3,9 +3,9 @@
   "label": "specific-haiku",
   "subset": "development",
   "reviews": 53,
-  "generatedAt": "2026-10-07T04:02:17.444Z",
-  "measuredFrom": "2026-10-07T04:00:53.394Z",
-  "measuredTo": "2026-10-07T04:02:17.440Z",
+  "generatedAt": "2026-10-07T04:49:17.062Z",
+  "measuredFrom": "2026-10-07T04:47:59.937Z",
+  "measuredTo": "2026-10-07T04:49:17.057Z",
   "states": {
     "measured": 51,
     "zero_hits": 2,
@@ -35,8 +35,8 @@
     }
   },
   "top10": {
-    "goldReportsTotal": 125,
-    "goldStudiesTotal": 123,
+    "goldReportsTotal": 126,
+    "goldStudiesTotal": 124,
     "reviewsWithAtLeast1": 36,
     "reviewsWithAtLeast2": 26,
     "reviewsWithAtLeast1Rate": 0.6792452830188679,
@@ -50,8 +50,8 @@
     }
   },
   "top20": {
-    "goldReportsTotal": 203,
-    "goldStudiesTotal": 193,
+    "goldReportsTotal": 206,
+    "goldStudiesTotal": 196,
     "reviewsWithAtLeast1": 37,
     "reviewsWithAtLeast2": 32,
     "reviewsWithAtLeast1Rate": 0.6981132075471698,
@@ -61,12 +61,12 @@
       "q1": 0,
       "median": 3,
       "q3": 5,
-      "max": 15
+      "max": 16
     }
   },
   "top50": {
-    "goldReportsTotal": 338,
-    "goldStudiesTotal": 319,
+    "goldReportsTotal": 339,
+    "goldStudiesTotal": 320,
     "reviewsWithAtLeast1": 38,
     "reviewsWithAtLeast2": 35,
     "reviewsWithAtLeast1Rate": 0.7169811320754716,
@@ -224,8 +224,8 @@
         }
       },
       "top10": {
-        "goldReportsTotal": 97,
-        "goldStudiesTotal": 93,
+        "goldReportsTotal": 98,
+        "goldStudiesTotal": 94,
         "reviewsWithAtLeast1": 25,
         "reviewsWithAtLeast2": 19,
         "reviewsWithAtLeast1Rate": 0.7142857142857143,
@@ -234,13 +234,13 @@
           "min": 0,
           "q1": 0,
           "median": 2,
-          "q3": 4.5,
+          "q3": 5,
           "max": 8
         }
       },
       "top20": {
-        "goldReportsTotal": 172,
-        "goldStudiesTotal": 160,
+        "goldReportsTotal": 175,
+        "goldStudiesTotal": 163,
         "reviewsWithAtLeast1": 26,
         "reviewsWithAtLeast2": 24,
         "reviewsWithAtLeast1Rate": 0.7428571428571429,
@@ -250,12 +250,12 @@
           "q1": 0.5,
           "median": 3,
           "q3": 7,
-          "max": 15
+          "max": 16
         }
       },
       "top50": {
-        "goldReportsTotal": 295,
-        "goldStudiesTotal": 275,
+        "goldReportsTotal": 296,
+        "goldStudiesTotal": 276,
         "reviewsWithAtLeast1": 26,
         "reviewsWithAtLeast2": 26,
         "reviewsWithAtLeast1Rate": 0.7428571428571429,

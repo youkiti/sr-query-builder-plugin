@@ -24,9 +24,11 @@ function topLevel(expression: string): ReturnType<typeof splitTopLevel> {
 }
 
 function publicationOnly(expression: string): boolean {
-  const tags = [...expression.matchAll(/"[^"]*(?:"|$)|\[([^\]]+)\]/g)]
-    .flatMap((match) => match[1] === undefined ? [] : [match[1]]);
-  return tags.length > 0 && tags.every((tag) => /^(pt|publication type)$/i.test(tag));
+  // 引用符の中を伏せてから演算子と括弧で語に分け、すべての語が出版タイプのタグで終わるときだけ該当とする
+  // （タグの無い語が混じる部分は、概念を含むかもしれないので外さない）。
+  const operands = expression.replace(/"[^"]*(?:"|$)/g, (quoted) => 'x'.repeat(quoted.length))
+    .split(/\b(?:AND|OR|NOT)\b|[()]/i).map((operand) => operand.trim()).filter(Boolean);
+  return operands.length > 0 && operands.every((operand) => /\[\s*(?:pt|publication type)\s*\]$/i.test(operand));
 }
 
 export function relaxationLadder(query: string): string[] {

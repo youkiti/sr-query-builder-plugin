@@ -52,3 +52,10 @@ test('変化のない段を省き、引用符内のタグや混合タグを出�
   expect(relaxationLadder('a AND "b[pt]"')).toEqual([]);
   expect(relaxationLadder('a AND (b[pt] OR c[tiab])')).toEqual([]);
 });
+
+test('タグの無い語が混じる部分は、出版タイプだけの条件として外さない', () => {
+  const ladder = relaxationLadder('a[tiab] AND (b AND trial[pt])');
+  expect(ladder.some((query) => !query.includes('b'))).toBe(false);
+  expect(relaxationLadder('a[tiab] AND ("x AND y"[pt] OR trial[Publication Type])')).toContain('(a[tiab])');
+  expect(relaxationLadder('a[tiab] AND ("clinical trial" OR trial[pt])').some((query) => query === '(a[tiab])')).toBe(false);
+});
