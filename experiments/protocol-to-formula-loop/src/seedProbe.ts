@@ -23,7 +23,7 @@ type Status = typeof statuses[number];
 type Top = `top${typeof limits[number]}`;
 interface Counts { goldReports: number; goldStudies: number }
 type Result = { status: Status; hits: number; fingerprint: string; measuredAt: string } & Record<Top, Counts>;
-type Input = DesignSpecificQueryInput & { query: string; cutoffDate: string };
+type Input = DesignSpecificQueryInput & { query: string; cutoffDate: string; source: string };
 class ProbeError extends Error {}
 const readJson = (path: string): unknown => JSON.parse(readFileSync(path, 'utf8'));
 const fileExists = (path: string) => existsSync(path) && statSync(path).isFile();
@@ -63,7 +63,7 @@ async function capturePrompt(input: Input): Promise<string> {
 
 function readInput(path: string): Input {
   const input = readJson(path) as Input | null;
-  if (!input || !['researchQuestion', 'inclusionCriteria', 'exclusionCriteria', 'query', 'cutoffDate']
+  if (!input || !['researchQuestion', 'inclusionCriteria', 'exclusionCriteria', 'query', 'cutoffDate', 'source']
     .every((key) => typeof input[key as keyof Input] === 'string')
     || !/^\d{4}-\d{2}-\d{2}$/.test(input.cutoffDate) || !Number.isFinite(Date.parse(input.cutoffDate))
     || (input.studyDesign !== undefined && typeof input.studyDesign !== 'string')
@@ -153,7 +153,11 @@ async function seedProbe(args: string[], runtime: RunRuntime): Promise<number> {
     if (missing) throw new ProbeError(`実行フォルダまたは提出が ${missing} 件不足しています`);
     let created = 0, skipped = 0;
     for (const { review, dir, sourceDir, submission } of prepared) {
-      if (existsSync(join(dir, 'prompt.md'))) { skipped++; continue; }
+      if (existsSync(join(dir, 'prompt.md'))) {
+        // 同じ名前の下調べを別の版から作り足さない（測定で版が混ざるのを防ぐ）。
+        if (readInput(join(dir, 'input.json')).source !== options.source) throw new ProbeError('この名前の下調べは別の版から用意されています');
+        skipped++; continue;
+      }
       const validated = validateFormulaMd(readFileSync(join(sourceDir, 'submissions', `${submission!.number}.md`), 'utf8'));
       if (!validated.ok || validated.query !== submission!.query) throw new ProbeError('元の提出の式が不正か記録と一致しません');
       const info = readRun(sourceDir);
@@ -164,7 +168,7 @@ async function seedProbe(args: string[], runtime: RunRuntime): Promise<number> {
           .map((field) => `## ${field}\n${parsed.eligibility[field] ?? ''}`).join('\n\n'),
         exclusionCriteria: '', studyDesign: parsed.eligibility.types_of_studies ?? '',
         blocks: validated.formula.blocks.filter((block) => !block.isCombination).map(({ id, expression }) => ({ id, expression })),
-        query: submission!.query, cutoffDate: info.cutoffDate };
+        query: submission!.query, cutoffDate: info.cutoffDate, source: options.source };
       const prompt = await capturePrompt(input);
       mkdirSync(dir, { recursive: true });
       writeJson(join(dir, 'input.json'), input); writeFileSync(join(dir, 'prompt.md'), prompt); created++;
@@ -180,6 +184,9 @@ async function seedProbe(args: string[], runtime: RunRuntime): Promise<number> {
   let measured = 0, cached = 0, remeasured = 0;
   for (const { review, dir } of all) {
     const input = readInput(join(dir, 'input.json')), response = readFileSync(join(dir, 'response.json'), 'utf8');
+    if (input.source !== options.source) throw new ProbeError('この名前の下調べは別の版から用意されています');
+    // 用意したあとでベンチの検索日が変わっていたら、古い日付で測らずに用意し直しを求める。
+    if (input.cutoffDate !== review.cutoffDate) throw new ProbeError('用意した指示文の検索日が現在の対象と一致しません（用意し直してください）');
     const fingerprint = createHash('sha256').update(['seed-probe-v1', response, input.cutoffDate,
       [...review.evaluablePmids].sort().join('\n'), review.studies.map((study) => JSON.stringify([study.id, [...study.pmids].sort()])).sort().join('\n')].join('\n')).digest('hex');
     const path = join(dir, 'result.json'), existed = existsSync(path), saved = existed ? readResult(path, fingerprint) : null;

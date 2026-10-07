@@ -196,10 +196,18 @@ test('日付・正解・研究対応の変更を指紋に反映し、並び順�
   f.fetchImpl.mockClear();
   const inputPath = join(f.dir(), 'input.json'), input = JSON.parse(readFileSync(inputPath, 'utf8'));
   input.cutoffDate = '2019-01-31'; writeJson(inputPath, input);
-  f.fetchImpl.mockImplementation(async (url, init) => {
-    const params = init?.method === 'POST' ? new URLSearchParams(String(init.body)) : new URL(String(url)).searchParams;
-    expect(params.get('maxdate')).toBe('2019/01/31');
-    return new Response(JSON.stringify({ esearchresult: { count: '0', idlist: [] } }));
-  });
-  await measure(); expect(f.fetchImpl).toHaveBeenCalledTimes(1);
+  await expect(measure()).rejects.toThrow('用意した指示文の検索日が現在の対象と一致しません');
+  expect(f.fetchImpl).not.toHaveBeenCalled();
+});
+
+test('別の版から用意した下調べを、同じ名前で作り足したり測ったりしない', async () => {
+  const f = setup(); await f.prepare();
+  expect(JSON.parse(readFileSync(join(f.dir(), 'input.json'), 'utf8')).source).toBe('v1');
+  const other = f.args.map((value) => value === 'v1' ? 'v2' : value);
+  await expect(main(['measure', ...other], f.runtime)).rejects.toThrow('この名前の下調べは別の版から用意されています');
+  expect(f.fetchImpl).not.toHaveBeenCalled();
+  expect(existsSync(f.reportPath)).toBe(false);
+  const inputPath = join(f.dir(), 'input.json'), input = JSON.parse(readFileSync(inputPath, 'utf8'));
+  writeJson(inputPath, { ...input, source: 'v2' });
+  await expect(main(['prepare', ...f.args], f.runtime)).rejects.toThrow('この名前の下調べは別の版から用意されています');
 });
