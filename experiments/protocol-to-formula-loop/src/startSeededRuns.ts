@@ -41,6 +41,8 @@ async function startSeededRuns(args: string[], runtime: RunRuntime): Promise<num
   const deps = createDeps({ env: runtime.env, fetchImpl: runtime.fetchImpl, sleep: runtime.sleep,
     rateLimiter: runtime.rateLimiter, timeoutMs: runtime.timeoutMs });
   let count = 0, seeded = 0;
+  // 書誌はすべて取得し終えてから実行フォルダを作る（途中で通信が失敗しても、作りかけを残さず同じコマンドでやり直せる）。
+  const prepared: { review: (typeof all)[number]['review']; pmids: string[]; md: string }[] = [];
   for (const { review, selection } of all) {
     const pmids = selection!.pmids;
     let articles: EfetchArticle[] = [];
@@ -53,7 +55,9 @@ async function startSeededRuns(args: string[], runtime: RunRuntime): Promise<num
       }
       seeded++;
     }
-    const md = seedsMarkdown(pmids.map((pmid) => articles.find((article) => article.pmid === pmid)!));
+    prepared.push({ review, pmids, md: seedsMarkdown(pmids.map((pmid) => articles.find((article) => article.pmid === pmid)!)) });
+  }
+  for (const { review, pmids, md } of prepared) {
     for (let runIndex = 1; runIndex <= options.runsPerReview; runIndex++) {
       const dir = createRun({ root: options.root, version: options.version, pmcid: review.pmcid, runIndex,
         cutoffDate: review.cutoffDate, protocolPath: join(runtime.casesDir ?? casesDir(), review.pmcid, 'protocol.md'), conditions, now: runtime.now });

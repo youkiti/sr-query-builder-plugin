@@ -65,6 +65,23 @@ test.each(['欠落', '余分', '通信失敗'])('取得が不明なら実行フ�
   expect(existsSync(join(s.runs, 'v0'))).toBe(false);
 });
 
+test('二件目のレビューの取得が失敗しても作りかけを残さず、同じコマンドでやり直せる', async () => {
+  const s = setup(), original = s.runtime.fetchImpl as jest.Mock;
+  writeJson(s.seedPath(1), s.selection);
+  let calls = 0;
+  s.runtime.fetchImpl = jest.fn(async (input, init) => {
+    // 二件目のレビューの取得は、自動の再試行も含めてすべて失敗させる。
+    if (++calls >= 2) throw new Error('通信失敗');
+    return original(input, init);
+  });
+  await expect(main(s.args, s.runtime)).rejects.toThrow('結果不明');
+  expect(calls).toBeGreaterThanOrEqual(2);
+  expect(existsSync(join(s.runs, 'v0'))).toBe(false);
+  s.runtime.fetchImpl = original;
+  expect(await main(s.args, s.runtime)).toBe(0);
+  expect(existsSync(join(s.dir(1, 2), 'seeds.md'))).toBe(true);
+});
+
 test.each(['なし', '上限違い'])('全体の選定不足を先に検査する: %s', async (mode) => {
   const s = setup();
   if (mode === 'なし') unlinkSync(s.seedPath(1)); else writeJson(s.seedPath(1), { ...s.selection, max: 3 });
