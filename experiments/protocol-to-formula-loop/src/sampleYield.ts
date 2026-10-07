@@ -1,15 +1,19 @@
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { config } from 'dotenv';
-import { efetchArticles, esearch, type EutilsDeps } from '../../../src/lib/ncbi/eutils';
+import { efetchArticles, esearch, EutilsError, EUTILS_DEFAULT_MAX_RETRIES, resolveRateLimiter, shouldRetryEutils, type EutilsDeps } from '../../../src/lib/ncbi/eutils';
+import { retryWithBackoff } from '../../../src/lib/ncbi/rateLimit';
 import { installDomParser } from '../../query-optimization-bench/domParser';
 import { capturedGold, redact } from '../../query-optimization-bench/ncbiEval';
 import { loadConditions } from './conditions';
 import { quantile } from './diagnose';
 import { classifyLine, requiredUnits } from './formulaUnits';
+import type { SubmissionOutcome } from './metrics';
 import { createDeps, isQueryRejection } from './ncbi';
 import { diversify, outsideQueries } from './outsideSample';
 import { readRun, runPath, writeJson } from './runDir';
+import { readSubmissionState, scoreMatchesSubmission, type StoredScore } from './scoreRuns';
 import { parseRunOptions, targetReviews, type RunRuntime } from './startRuns';
 import { validateFormulaMd } from './submission';
 import { defaultRuntime } from './tool';
@@ -18,6 +22,7 @@ const methods = ['current', 'narrowed', 'narrowed_diverse', 'beyond_bundle_diver
 type Method = typeof methods[number];
 interface Counts { sampleSize: number; sampleGold: number; poolHits: number; poolGold: number }
 type Result = { status: 'rejected' } | { status: 'measured'; missedGold: number; methods: Record<Method, Counts> };
+type CachedResult = Result & { fingerprint: string; measuredAt: string };
 
 export function parseSampleOptions(args: string[]) {
   const remaining: string[] = [], versions = new Map<string, string>();
@@ -44,10 +49,12 @@ function readSubmission(dir: string): { number: number; query: string } {
   }
   return value;
 }
-function readResult(path: string): Result {
-  const value = readJson(path) as Result | null;
+function readResult(path: string, fingerprint: string): CachedResult | null {
+  const value = readJson(path) as CachedResult | null;
+  if (value?.fingerprint !== fingerprint) return null;
+  if (typeof value.measuredAt !== 'string' || !Number.isFinite(Date.parse(value.measuredAt))) throw new Error('見本のキャッシュが不正です');
   const count = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0;
-  if (value?.status === 'rejected') return { status: 'rejected' };
+  if (value?.status === 'rejected') return value;
   if (value?.status !== 'measured' || !count(value.missedGold) || methods.some((method) => {
     const row = value.methods?.[method];
     return !row || ![row.sampleSize, row.sampleGold, row.poolHits, row.poolGold].every(count)
@@ -56,9 +63,26 @@ function readResult(path: string): Result {
   return value;
 }
 
-// 書籍の章など、論文の記録（PubmedArticle）として返らない PMID がある。欠けた分だけを取り直し、
-// それでも無いものは MeSH なしとして扱う。欠けが多いときは取得の失敗とみなして止める。
-const MAX_MISSING_PER_CHUNK = 5;
+// 論文として返らない PMID は、書籍の記録を確認できた場合だけ MeSH なしとして扱う。
+async function fetchBookPmids(pmids: string[], deps: EutilsDeps): Promise<Set<string>> {
+  const params = new URLSearchParams({ db: 'pubmed', retmode: 'xml', id: pmids.join(','), tool: deps.tool ?? 'sr-query-builder-plugin' });
+  if (deps.apiKey) params.set('api_key', deps.apiKey);
+  if (deps.email) params.set('email', deps.email);
+  const rateLimiter = resolveRateLimiter(deps);
+  const xml = await retryWithBackoff(async () => {
+    await rateLimiter.acquire();
+    const response = await deps.fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?${params.toString()}`);
+    if (!response.ok) throw new EutilsError(`efetch failed: HTTP ${response.status}`, response.status);
+    return await response.text();
+  }, { sleep: deps.sleep, maxRetries: deps.maxRetries ?? EUTILS_DEFAULT_MAX_RETRIES, shouldRetry: shouldRetryEutils });
+  const doc = new DOMParser().parseFromString(xml, 'text/xml');
+  if (doc.getElementsByTagName('parsererror').length || doc.getElementsByTagName('ERROR').length) {
+    throw new Error('書誌の取得件数が一致しません');
+  }
+  return new Set(Array.from(doc.getElementsByTagName('PubmedBookArticle')).flatMap((article) =>
+    Array.from(article.getElementsByTagName('BookDocument')).flatMap((book) => Array.from(book.children)
+      .filter((child) => child.tagName === 'PMID').map((child) => child.textContent?.trim() ?? ''))));
+}
 async function diverseSample(pmids: string[], deps: EutilsDeps): Promise<string[]> {
   const headings = new Map<string, string[]>();
   for (let offset = 0; offset < pmids.length; offset += 100) {
@@ -70,11 +94,10 @@ async function diverseSample(pmids: string[], deps: EutilsDeps): Promise<string[
       for (const article of articles) headings.set(article.pmid, article.meshDetails.filter((heading) => heading.majorTopic).map((heading) => heading.descriptor));
     };
     await fetchChunk(chunk);
-    let missing = chunk.filter((pmid) => !headings.has(pmid));
+    const missing = chunk.filter((pmid) => !headings.has(pmid));
     if (missing.length) {
-      await fetchChunk(missing);
-      missing = missing.filter((pmid) => !headings.has(pmid));
-      if (missing.length > MAX_MISSING_PER_CHUNK) throw new Error('書誌の取得件数が一致しません');
+      const books = await fetchBookPmids(missing, deps);
+      if (missing.some((pmid) => !books.has(pmid))) throw new Error('書誌の取得件数が一致しません');
       for (const pmid of missing) headings.set(pmid, []);
     }
   }
@@ -133,14 +156,19 @@ async function sampleYield(args: string[], runtime: RunRuntime): Promise<number>
       const available = existsSync(dir) && statSync(dir).isDirectory() && existsSync(join(dir, 'submission.json'));
       const scorePath = join(dir, 'score.json');
       if (!available || (dir === run.sourceDir && !existsSync(scorePath))) { missing++; continue; }
-      if (dir === run.sourceDir && (readJson(scorePath) as { outcome?: { status?: string } } | null)?.outcome?.status !== 'measured') missing++;
+      if (dir === run.sourceDir) {
+        const saved = readJson(scorePath) as StoredScore & { outcome?: SubmissionOutcome };
+        const state = readSubmissionState(dir);
+        if (!saved || !scoreMatchesSubmission(saved, state) || saved.status !== 'scored' || saved.outcome?.status !== 'measured') missing++;
+      }
     }
     return run;
   });
   if (missing) throw new Error(`実行フォルダまたは提出が ${missing} 件不足しています`);
   const { env, fetchImpl, sleep, now, stdout } = runtime;
   const base = createDeps({ env, fetchImpl, sleep, rateLimiter: runtime.rateLimiter });
-  let measured = 0, cached = 0, skippedTargets = 0, rejectedTargets = 0;
+  let measured = 0, cached = 0, remeasured = 0, skippedTargets = 0, rejectedTargets = 0;
+  const measuredDates: string[] = [], runMissed = new Map<string, number>();
   const skippedRuns = { undetermined: 0 };
   const records: { review: string; result: Extract<Result, { status: 'measured' }> }[] = [];
   for (const { review, runIndex, sourceDir, bundleDir } of prepared) {
@@ -158,23 +186,31 @@ async function sampleYield(args: string[], runtime: RunRuntime): Promise<number>
       const queries = outsideQueries(units, unit.id, bundle.query);
       if (!queries) { skippedTargets++; continue; }
       const path = join(options.root, '_cache', 'sample-yield', `${options.source}-${options.bundle}`, review.pmcid, `run-${runIndex}`, `${unit.id}.json`);
-      let result: Result;
-      if (existsSync(path)) { result = readResult(path); cached++; }
+      const fingerprint = createHash('sha256').update(['sample-yield-v2', submission.query, bundle.query, unit.expression,
+        info.cutoffDate, [...review.evaluablePmids].sort().join('\n'), [...score.outcome.capturedPmids].sort().join('\n')].join('\n')).digest('hex');
+      const existed = existsSync(path), saved = existed ? readResult(path, fingerprint) : null;
+      let result: CachedResult;
+      if (saved) { result = saved; cached++; }
       else {
-        try { result = await measure(queries, review.evaluablePmids, missedGold, deps); }
+        let outcome: Result;
+        try { outcome = await measure(queries, review.evaluablePmids, missedGold, deps); }
         catch (error) {
-          if (isQueryRejection(error)) result = { status: 'rejected' };
+          if (isQueryRejection(error)) outcome = { status: 'rejected' };
           else throw new Error('見本の測定に失敗しました（結果不明）: ' + safeCause(error, env.NCBI_API_KEY ?? ''));
         }
+        result = { ...outcome, fingerprint, measuredAt: now().toISOString() };
         mkdirSync(dirname(path), { recursive: true });
         writeJson(path, result);
-        measured++;
+        if (existed) remeasured++;
+        else measured++;
       }
+      measuredDates.push(result.measuredAt);
       if (result.status === 'rejected') rejectedTargets++;
-      else records.push({ review: review.pmcid, result });
+      else { records.push({ review: review.pmcid, result }); runMissed.set(sourceDir, result.missedGold); }
     }
   }
-  const missedGold = records.reduce((sum, row) => sum + row.result.missedGold, 0);
+  const missedGold = [...runMissed.values()].reduce((sum, value) => sum + value, 0);
+  measuredDates.sort((a, b) => Date.parse(a) - Date.parse(b));
   const summaries = Object.fromEntries(methods.map((method) => {
     const rows = records.map((row) => row.result.methods[method]);
     const total = (key: keyof Counts) => rows.reduce((sum, row) => sum + row[key], 0);
@@ -193,9 +229,10 @@ async function sampleYield(args: string[], runtime: RunRuntime): Promise<number>
   writeJson(join(reportsDir, `sample-yield-${options.source}-${options.bundle}-${options.subset}.json`), {
     source: options.source, bundle: options.bundle, subset: options.subset, reviews: reviews.length, runsPerReview: options.runsPerReview,
     generatedAt: now().toISOString(), targets: records.length, skippedRuns, skippedTargets, rejectedTargets, missedGold, methods: summaries,
+    runs: runMissed.size, measuredFrom: measuredDates[0] ?? null, measuredTo: measuredDates[measuredDates.length - 1] ?? null,
   });
   stdout(`対象のレビュー × 回: ${all.length} 件\n`);
-  stdout(`測った対象: 新規 ${measured} 件、保存済み ${cached} 件\n`);
+  stdout(`測った対象: 新規 ${measured} 件、保存済み ${cached} 件、測り直し ${remeasured} 件\n`);
   stdout(`対象外の実行: ${skippedRuns.undetermined} 件\n`);
   stdout(`対象外の対象: ${skippedTargets} 件\n`);
   stdout(`拒否された対象: ${rejectedTargets} 件\n`);

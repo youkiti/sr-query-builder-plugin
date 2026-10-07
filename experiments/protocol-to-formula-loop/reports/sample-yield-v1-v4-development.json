@@ -4,25 +4,25 @@
   "subset": "development",
   "reviews": 53,
   "runsPerReview": 2,
-  "generatedAt": "2026-10-07T01:25:48.886Z",
+  "generatedAt": "2026-10-07T02:45:09.510Z",
   "targets": 216,
   "skippedRuns": {
     "undetermined": 0
   },
   "skippedTargets": 2,
   "rejectedTargets": 2,
-  "missedGold": 4051,
+  "missedGold": 1872,
   "methods": {
     "current": {
       "samples": 215,
-      "sampleGoldTotal": 3,
+      "sampleGoldTotal": 2,
       "sampleSizeTotal": 3197,
-      "precision": 0.0009383797309978105,
+      "precision": 0.0006255864873318737,
       "targetsWithGold": 2,
       "targetsWithGoldRate": 0.009259259259259259,
       "reviewsWithGold": 2,
       "poolGoldTotal": 1381,
-      "poolGoldPerMissed": 0.3409034806220686,
+      "poolGoldPerMissed": 0.7377136752136753,
       "poolHitsQuantiles": {
         "min": 0,
         "q1": 3237.75,
@@ -33,14 +33,14 @@
     },
     "narrowed": {
       "samples": 213,
-      "sampleGoldTotal": 5,
+      "sampleGoldTotal": 6,
       "sampleSizeTotal": 3164,
-      "precision": 0.0015802781289506952,
-      "targetsWithGold": 4,
-      "targetsWithGoldRate": 0.018518518518518517,
-      "reviewsWithGold": 4,
+      "precision": 0.0018963337547408343,
+      "targetsWithGold": 5,
+      "targetsWithGoldRate": 0.023148148148148147,
+      "reviewsWithGold": 5,
       "poolGoldTotal": 994,
-      "poolGoldPerMissed": 0.24537151320661565,
+      "poolGoldPerMissed": 0.530982905982906,
       "poolHitsQuantiles": {
         "min": 0,
         "q1": 1138.75,
@@ -51,14 +51,14 @@
     },
     "narrowed_diverse": {
       "samples": 213,
-      "sampleGoldTotal": 5,
+      "sampleGoldTotal": 6,
       "sampleSizeTotal": 3164,
-      "precision": 0.0015802781289506952,
-      "targetsWithGold": 5,
-      "targetsWithGoldRate": 0.023148148148148147,
-      "reviewsWithGold": 4,
+      "precision": 0.0018963337547408343,
+      "targetsWithGold": 6,
+      "targetsWithGoldRate": 0.027777777777777776,
+      "reviewsWithGold": 5,
       "poolGoldTotal": 994,
-      "poolGoldPerMissed": 0.24537151320661565,
+      "poolGoldPerMissed": 0.530982905982906,
       "poolHitsQuantiles": {
         "min": 0,
         "q1": 1138.75,
@@ -76,7 +76,7 @@
       "targetsWithGoldRate": 0,
       "reviewsWithGold": 0,
       "poolGoldTotal": 469,
-      "poolGoldPerMissed": 0.11577388299185386,
+      "poolGoldPerMissed": 0.25053418803418803,
       "poolHitsQuantiles": {
         "min": 0,
         "q1": 1032.25,
@@ -85,5 +85,8 @@
         "max": 2269005
       }
     }
-  }
+  },
+  "runs": 104,
+  "measuredFrom": "2026-10-07T01:58:40.254Z",
+  "measuredTo": "2026-10-07T02:45:09.498Z"
 }

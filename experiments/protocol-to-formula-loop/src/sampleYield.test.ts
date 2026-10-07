@@ -6,6 +6,7 @@ import { installDomParser } from '../../query-optimization-bench/domParser';
 import { loadConditions } from './conditions';
 import { createRun, runPath, writeJson } from './runDir';
 import { main } from './sampleYield';
+import { readSubmissionState } from './scoreRuns';
 import { splitReviews } from './split';
 import type { RunRuntime } from './startRuns';
 import { validateFormulaMd } from './submission';
@@ -41,7 +42,9 @@ function setup(expression = 'alpha[tiab] AND beta[Mesh]') {
     mkdirSync(join(dir, 'submissions'));
     writeFileSync(join(dir, 'submissions', '1.md'), text);
     writeJson(join(dir, 'submission.json'), { number: 1, query: validated.query });
-    writeJson(join(dir, 'score.json'), { outcome: { status: 'measured', capturedPmids: [gold[2]] } });
+    const state = readSubmissionState(dir);
+    writeJson(join(dir, 'score.json'), { status: 'scored', submission: state.fingerprint, submitAttempts: state.submitAttempts,
+      outcome: { status: 'measured', capturedPmids: [gold[2]] } });
   };
   create('v1', 1, expression); create('bundle', 1, 'bundled[tiab]');
   const pool = Array.from({ length: 200 }, (_, i) => i === 199 ? gold[0]! : String(80000001 + i));
@@ -79,10 +82,10 @@ function setup(expression = 'alpha[tiab] AND beta[Mesh]') {
 test('四手法の件数・分母・四分位を集計し、再開時には通信しない', async () => {
   const f = setup();
   expect(await main(f.args, f.runtime)).toBe(0);
-  expect(f.report()).toMatchObject({ targets: 2, missedGold: 4, skippedRuns: { undetermined: 0 }, rejectedTargets: 0,
+  expect(f.report()).toMatchObject({ targets: 2, runs: 1, missedGold: 2, skippedRuns: { undetermined: 0 }, rejectedTargets: 0,
     methods: {
       current: { samples: 2, sampleGoldTotal: 2, sampleSizeTotal: 30, precision: 2 / 30, targetsWithGold: 2,
-        targetsWithGoldRate: 1, reviewsWithGold: 1, poolGoldTotal: 4, poolGoldPerMissed: 1,
+        targetsWithGoldRate: 1, reviewsWithGold: 1, poolGoldTotal: 4, poolGoldPerMissed: 2,
         poolHitsQuantiles: { min: 500, q1: 500, median: 500, q3: 500, max: 500 } },
       narrowed: { sampleGoldTotal: 0, sampleSizeTotal: 30, targetsWithGoldRate: 0, reviewsWithGold: 0, poolGoldTotal: 4 },
       narrowed_diverse: { sampleGoldTotal: 2, sampleSizeTotal: 30, reviewsWithGold: 1, poolGoldTotal: 4 },
@@ -95,7 +98,7 @@ test('四手法の件数・分母・四分位を集計し、再開時には通�
   f.fetchImpl.mockClear();
   await main(f.args, f.runtime);
   expect(f.fetchImpl).not.toHaveBeenCalled();
-  expect(f.runtime.stdout).toHaveBeenCalledWith('測った対象: 新規 0 件、保存済み 2 件\n');
+  expect(f.runtime.stdout).toHaveBeenCalledWith('測った対象: 新規 0 件、保存済み 2 件、測り直し 0 件\n');
 });
 
 test('拒否された対象も保存し、集計の分母から除く', async () => {
@@ -109,13 +112,14 @@ test('拒否された対象も保存し、集計の分母から除く', async ()
   expect(f.fetchImpl).not.toHaveBeenCalled();
 });
 
-test('論文の記録が返らない少数の PMID は取り直し、それでも無ければ MeSH なしとして数える', async () => {
+test('論文の記録が返らない PMID は書籍の記録を確認して MeSH なしとして数える', async () => {
   const f = setup(), original = f.fetchImpl.getMockImplementation()!;
   f.fetchImpl.mockImplementation(async (input, init) => {
     const response = await original(input, init);
     if (!String(input).includes('efetch')) return response;
-    // 80000001 だけを、書籍の章のように論文の記録として返さない。
-    return new Response((await response.text()).replace(/<PubmedArticle><MedlineCitation><PMID>80000001<\/PMID>[\s\S]*?<\/PubmedArticle>/, ''));
+    // 80000001 だけを、書籍の章として返す。
+    return new Response((await response.text()).replace(/<PubmedArticle><MedlineCitation><PMID>80000001<\/PMID>[\s\S]*?<\/PubmedArticle>/,
+      '<PubmedBookArticle><BookDocument><PMID>80000001</PMID></BookDocument></PubmedBookArticle>'));
   });
   expect(await main(f.args, f.runtime)).toBe(0);
   expect(f.report()).toMatchObject({ targets: 2, methods: { narrowed_diverse: { sampleSizeTotal: 30, sampleGoldTotal: 2 } } });
@@ -163,7 +167,7 @@ test('次の束では元の四回目を選ぶ', async () => {
   f.create('v1', 4, 'alpha[tiab] AND beta[Mesh]'); f.create('bundle', 2, 'bundled[tiab]');
   f.args[f.args.length - 1] = '2';
   await main(f.args, f.runtime);
-  expect(f.report()).toMatchObject({ targets: 4, missedGold: 8, methods: { current: { reviewsWithGold: 1 } } });
+  expect(f.report()).toMatchObject({ targets: 4, runs: 2, missedGold: 4, methods: { current: { reviewsWithGold: 1 } } });
 });
 test.each([['alpha OR beta', 1, 0], ['alpha AND trial[pt]', 0, 1]] as const)('対象外を区分する（%s）', async (expression, runs, targets) => {
   const f = setup(expression);
@@ -182,4 +186,82 @@ test('ファイルの失敗はパスや内容を含まない固定文言にす�
   const f = setup();
   writeFileSync(join(f.source(), 'score.json'), 'PMC123 FAKE_SECRET');
   await expect(main(f.args, f.runtime)).rejects.toThrow('見本の下調べのファイルの読み書きに失敗しました');
+});
+
+test('後続の実行で採点後に提出が変わった場合も通信前に不足として止める', async () => {
+  const f = setup();
+  f.create('v1', 4, 'alpha[tiab] AND beta[Mesh]'); f.create('bundle', 2, 'bundled[tiab]');
+  writeJson(join(f.source(4), 'submission.json'), { number: 1, query: 'changed[tiab]' });
+  f.args[f.args.length - 1] = '2';
+  await expect(main(f.args, f.runtime)).rejects.toThrow('実行フォルダまたは提出が 1 件不足しています');
+  expect(f.fetchImpl).not.toHaveBeenCalled();
+});
+
+test.each(['束の式', '古い形式'])('キャッシュの入力が異なる場合（%s）は測り直して上書きする', async (change) => {
+  const f = setup();
+  await main(f.args, f.runtime);
+  const path = join(f.cacheDir, 'inline-1.json');
+  const before = JSON.parse(readFileSync(path, 'utf8'));
+  expect(before.fingerprint).toMatch(/^[0-9a-f]{64}$/);
+  if (change === '束の式') writeJson(join(f.bundle(), 'submission.json'), { number: 1, query: 'bundled_changed[tiab]' });
+  else {
+    for (const id of ['inline-1', 'inline-2']) {
+      const cachePath = join(f.cacheDir, `${id}.json`), saved = JSON.parse(readFileSync(cachePath, 'utf8'));
+      delete saved.fingerprint; delete saved.measuredAt;
+      writeJson(cachePath, saved);
+    }
+  }
+  f.fetchImpl.mockClear();
+  f.runtime.now = () => new Date('2026-02-01');
+  await main(f.args, f.runtime);
+  expect(f.fetchImpl).toHaveBeenCalled();
+  expect(f.runtime.stdout).toHaveBeenCalledWith('測った対象: 新規 0 件、保存済み 0 件、測り直し 2 件\n');
+  const after = JSON.parse(readFileSync(path, 'utf8'));
+  expect(after.fingerprint).toMatch(/^[0-9a-f]{64}$/);
+  if (change === '束の式') expect(after.fingerprint).not.toBe(before.fingerprint);
+  expect(after.measuredAt).toBe('2026-02-01T00:00:00.000Z');
+});
+
+test.each([
+  '<PubmedArticleSet/>',
+  '<eFetchResult><ERROR>PMC123 alpha 90000002 FAKE_SECRET</ERROR></eFetchResult>',
+  '<PubmedArticleSet><PubmedBookArticle><BookDocument><ReferenceList><PMID>90000002</PMID></ReferenceList></BookDocument></PubmedBookArticle></PubmedArticleSet>',
+  '<PubmedArticleSet><PubmedBookArticle><BookDocument><PMID>99999999</PMID></BookDocument></PubmedBookArticle></PubmedArticleSet>',
+])('最後の一件でも書籍の記録が確認できない応答（%s）は結果不明で止める', async (xml) => {
+  const f = setup(), original = f.fetchImpl.getMockImplementation()!;
+  f.fetchImpl.mockImplementation(async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith('/efetch.fcgi') && url.searchParams.get('id') === gold[1]) return new Response(xml);
+    return original(input, init);
+  });
+  await expect(main(f.args, f.runtime)).rejects.toThrow('見本の測定に失敗しました（結果不明）: 書誌の取得件数が一致しません');
+  expect(existsSync(f.reportPath)).toBe(false);
+});
+
+test('測定日時の範囲には拒否された対象と再利用したキャッシュを含める', async () => {
+  const f = setup(), original = f.fetchImpl.getMockImplementation()!;
+  f.fetchImpl.mockImplementationOnce(async () => new Response(JSON.stringify({ esearchresult: { ERROR: '拒否' } })));
+  f.runtime.now = jest.fn().mockReturnValueOnce(new Date('2026-02-01')).mockReturnValueOnce(new Date('2026-01-01'))
+    .mockReturnValue(new Date('2026-03-01'));
+  await main(f.args, f.runtime);
+  expect(f.report()).toMatchObject({ targets: 1, runs: 1, rejectedTargets: 1, missedGold: 2,
+    measuredFrom: '2026-01-01T00:00:00.000Z', measuredTo: '2026-02-01T00:00:00.000Z' });
+  expect(JSON.parse(readFileSync(join(f.cacheDir, 'inline-1.json'), 'utf8'))).toMatchObject({
+    status: 'rejected', fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/), measuredAt: '2026-02-01T00:00:00.000Z',
+  });
+  f.fetchImpl.mockClear();
+  await main(f.args, f.runtime);
+  expect(f.fetchImpl).not.toHaveBeenCalled();
+  expect(f.report()).toMatchObject({ measuredFrom: '2026-01-01T00:00:00.000Z', measuredTo: '2026-02-01T00:00:00.000Z' });
+  writeJson(join(f.bundle(), 'submission.json'), { number: 1, query: 'bundled_changed[tiab]' });
+  f.fetchImpl.mockImplementation(original);
+  await main(f.args, f.runtime);
+  expect(f.report()).toMatchObject({ targets: 2, rejectedTargets: 0,
+    measuredFrom: '2026-03-01T00:00:00.000Z', measuredTo: '2026-03-01T00:00:00.000Z' });
+});
+
+test('対象がない場合は実行数と未捕捉数をゼロ、測定日時を未設定にする', async () => {
+  const f = setup('alpha OR beta');
+  await main(f.args, f.runtime);
+  expect(f.report()).toMatchObject({ targets: 0, runs: 0, missedGold: 0, measuredFrom: null, measuredTo: null });
 });

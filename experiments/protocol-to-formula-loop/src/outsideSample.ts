@@ -20,7 +20,8 @@ export function outsideQueries(units: RequiredUnit[], targetId: string, bundledQ
   if (!remaining.some((unit) => !unit.negative)
     || !remaining.some((unit) => !unit.negative && classifyLine(unit, false) === 'concept')) return null;
   const build = (narrow: boolean) => remaining.filter((unit) => !unit.negative)
-    .map((unit) => `(${narrow && classifyLine(unit, false) === 'concept' ? narrowExpression(unit.expression) : unit.expression})`).join(' AND ')
+    .map((unit) => narrow && classifyLine(unit, false) === 'concept'
+      ? `((${narrowExpression(unit.expression)}) AND (${unit.expression}))` : `(${unit.expression})`).join(' AND ')
     + remaining.filter((unit) => unit.negative).map((unit) => ` NOT (${unit.expression})`).join('')
     + ` NOT (${target.expression})`;
   const current = build(false), narrowed = build(true);
