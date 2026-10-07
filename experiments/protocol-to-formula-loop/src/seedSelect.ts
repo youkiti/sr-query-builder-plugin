@@ -73,7 +73,9 @@ function missedCandidates(review: ReturnType<typeof targetReviews>[number], opti
   const studies = review.studies.filter((study) => !study.pmids.some((pmid) => captured.has(pmid)))
     .map((study) => ({ study, rank: sha256(`${missedVersion}\n${review.pmcid}\n${study.id}`) }))
     .sort((a, b) => compareText(a.rank, b.rank));
+  // 捕捉の集合も入れる（同じ式を採点し直して捕捉が変わると、選ぶ候補も変わるため）。
   const fingerprint = sha256([missedVersion, options.base!, String(options.runsPerReview), ...fingerprints,
+    JSON.stringify([...captured].sort(comparePmids)),
     JSON.stringify([...review.evaluablePmids].sort(comparePmids)),
     ...[...review.studies].sort((a, b) => compareText(a.id, b.id)).map((study) => JSON.stringify([study.id, [...study.pmids].sort(comparePmids)])),
   ].join('\n'));

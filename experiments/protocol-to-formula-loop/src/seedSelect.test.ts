@@ -100,6 +100,18 @@ function setupMissed() {
   return { ...s, dir, score, args: [...s.args, '--from', 'missed', '--base', 'baseline', '--runs-per-review', '2'] };
 }
 
+test('同じ式を採点し直して捕捉が変わったら、保存済みの選定を黙って使い回さない', async () => {
+  const s = setupMissed();
+  s.score([pmids[0]!]); s.score([pmids[2]!], 0, 2);
+  expect(await main(s.args, s.runtime)).toBe(0);
+  const before = s.read().pmids;
+  expect(await main(s.args, s.runtime)).toBe(0);
+  expect(s.read().pmids).toEqual(before);
+  s.score([pmids[0]!, pmids[3]!]);
+  await expect(main(s.args, s.runtime)).rejects.toThrow('別の条件で作られています');
+  expect(s.read().pmids).toEqual(before);
+});
+
 test('全実行で未捕捉の研究だけを選び、全捕捉のレビューは空として匿名集計する', async () => {
   const s = setupMissed();
   s.score([pmids[0]!]); s.score([pmids[2]!], 0, 2);
