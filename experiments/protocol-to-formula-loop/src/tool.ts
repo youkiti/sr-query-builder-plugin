@@ -10,6 +10,7 @@ import { requiredUnits } from './formulaUnits';
 import { createDeps, isQueryRejection, type DepsOptions } from './ncbi';
 import { readBudget, readRun, recordToolCall, writeJson, withRunLock, type LockOptions, type ToolResult } from './runDir';
 import { validateFormulaMd } from './submission';
+import { inspectTable, buildFormulaMd, rowQueries, type ConceptTable } from './conceptTable';
 
 export interface Runtime {
   env: NodeJS.ProcessEnv; fetchImpl: typeof fetch; now: () => Date;
@@ -33,7 +34,7 @@ export async function main(args: string[], runtime: Runtime = defaultRuntime()):
     const budget = readBudget(dir);
     const finish = (result: ToolResult, code: number, message: string): number => {
       recordToolCall(dir, budget, { at: now().toISOString(), command: safe(command),
-        args: argument === undefined ? '引数なし' : command === 'mesh' ? `語の長さ: ${argument.length}` : command === 'outside' ? '式ファイル 1 件・単位 1 件' : '式ファイル 1 件', result,
+        args: argument === undefined ? '引数なし' : command === 'mesh' ? `語の長さ: ${argument.length}` : run.conditions.table ? '表のファイル 1 件' : command === 'outside' ? '式ファイル 1 件・単位 1 件' : '式ファイル 1 件', result,
         remaining: { measurements: run.conditions.maxMeasurements - budget.measurements, submissions: run.conditions.maxSubmissions - budget.submissions } });
       (code === 0 ? stdout : stderr)(safe(message) + '\n');
       return code;
@@ -54,24 +55,36 @@ export async function main(args: string[], runtime: Runtime = defaultRuntime()):
     if ((measuring && budget.measurements >= run.conditions.maxMeasurements)
       || (command === 'submit' && budget.submissions >= run.conditions.maxSubmissions)) return finish('上限超過', 2, '呼び出し回数の上限に達しています');
     let md = '';
+    let table: ConceptTable | null = null;
+    let tableText = '';
+    let notes: string[] = [];
     let validated: ReturnType<typeof validateFormulaMd> | undefined;
     if (command !== 'mesh') {
       try {
         if (!argument || args.length !== (command === 'outside' ? 5 : 4)) throw new Error(command === 'outside' ? '式ファイルと単位の ID を 1 件ずつ指定してください' : '式ファイルを 1 件指定してください');
         md = readFileSync(argument, 'utf8');
-        validated = validateFormulaMd(md);
+        if (run.conditions.table) {
+          tableText = md;
+          const inspected = inspectTable(tableText);
+          table = inspected.table;
+          notes = inspected.report.notes;
+          if (!table) validated = { ok: false, reasons: ['未対応の点:', ...inspected.report.blocking, ...(notes.length ? ['気づき:', ...notes] : [])] };
+          else md = buildFormulaMd(table);
+        }
+        if (!validated) validated = validateFormulaMd(md);
       } catch (error) { validated = { ok: false, reasons: [command === 'seeds' ? '式ファイルを読み込めません' : String(error)] }; }
       if (!validated.ok) {
         if (command === 'submit') budget.submissions++;
         return finish('検査不合格', 1, command === 'seeds' ? '式の検査に通りませんでした' : validated.reasons.join('\n'));
       }
     }
-    if (command === 'check') return finish('成功', 0, '検査に通りました');
+    if (command === 'check') return finish('成功', 0, '検査に通りました' + (notes.length ? '\n\n気づき:\n' + notes.join('\n') : ''));
     try {
       if (command === 'submit' && validated?.ok) {
         const number = budget.submissions + 1;
         mkdirSync(join(dir, 'submissions'), { recursive: true });
         writeFileSync(join(dir, 'submissions', `${number}.md`), safe(md), { flag: 'wx' });
+        if (table) writeFileSync(join(dir, 'submissions', `${number}.table.json`), safe(tableText), { flag: 'wx' });
         writeJson(join(dir, 'submission.json'), { number, submittedAt: now().toISOString(), query: safe(validated.query) });
         budget.submissions++;
         return finish('成功', 0, `提出 ${number} を受け付けました`);
@@ -91,6 +104,7 @@ export async function main(args: string[], runtime: Runtime = defaultRuntime()):
       } else if (validated?.ok && command === 'count') {
         const lines = [`全体: ${(await esearch(validated.query, deps, { retmax: 0 })).count} 件`];
         for (const block of validated.formula.blocks) lines.push(`#${block.id}: ${(await esearch(expandFormula(validated.formula, block.id), deps, { retmax: 0 })).count} 件`);
+        if (table) for (const row of rowQueries(table)) lines.push(`#${row.concept} 行 ${row.row}（${row.kind === 'general' ? '総称' : '個別の名称'}: ${row.label}）: ${(await esearch(row.query, deps, { retmax: 0 })).count} 件`);
         message = lines.join('\n');
       } else if (validated?.ok && command === 'seeds') {
         const captured = new Set(await capturedGold(validated.query, seedPmids, deps));

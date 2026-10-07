@@ -1,6 +1,21 @@
 /** @jest-environment node */
 import { loadConditions, validateConditions } from './conditions';
 
+test.each([undefined, false, true])('表の指定を省略または真偽値にできる: %j', (table) => {
+  const conditions = { ...loadConditions('v1'), table };
+  expect(validateConditions(conditions, 'v1')).toEqual(conditions);
+});
+test.each([{ table: 'true' }, { table: null }, { table: true, tools: ['submit', 'seeds'] },
+  { table: true, tools: ['submit', 'titles'] }, { table: true, tools: ['submit', 'outside'] },
+  { table: true, seeds: { label: 'seed', max: 1 } }])('不正な表の条件を拒否する: %j', (override) => {
+  expect(() => validateConditions({ ...loadConditions('v1'), ...override }, 'v1')).toThrow('表の条件が不正です');
+});
+test('表の版と表から作った式を束ねる版を読み込む', () => {
+  expect(loadConditions('v11')).toMatchObject({ table: true, model: 'claude-haiku-5-5' });
+  expect(loadConditions('v12')).toMatchObject({ combine: { from: 'v11', k: 3 }, model: 'claude-haiku-5-5' });
+  expect(loadConditions('v12').table).toBeUndefined();
+});
+
 test('概念の束ね方のしきい値と境界値を受け付ける', () => {
   for (const blocks of [{ minOverlap: 0, minMargin: 1, maxConcepts: 1 }, { minOverlap: 1, minMargin: 0, maxConcepts: 4 }]) {
     const value = { ...loadConditions('v0'), combine: { from: 'v1', k: 3, blocks } };
