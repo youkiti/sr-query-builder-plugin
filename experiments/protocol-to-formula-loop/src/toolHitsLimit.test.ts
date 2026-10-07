@@ -135,6 +135,15 @@ test.each([false, true])('寄与件数の測定失敗とクエリ拒否は従来
   expect(readBudget(s.dir)).toEqual({ measurements: 0, submissions: 0 });
   expect(s.log().result).toBe(rejected ? '検査不合格' : '測定失敗（結果不明）');
 });
+test('提出時に式が拒否されたら検査不合格とし、提出を１回消費して何も保存しない', async () => {
+  const s = setup();
+  s.runtime.fetchImpl = jest.fn(async () => new Response(JSON.stringify({ esearchresult: { ERROR: '検索式が不正です' } })));
+  expect(await s.call('submit')).toBe(1);
+  expect(readBudget(s.dir)).toEqual({ measurements: 0, submissions: 1 });
+  expect(existsSync(join(s.dir, 'submissions'))).toBe(false);
+  expect(existsSync(join(s.dir, 'submission.json'))).toBe(false);
+  expect(s.log().result).toBe('検査不合格');
+});
 test('目安のある表でも check は通信しない', async () => {
   const s = setup();
   expect(await s.call('check')).toBe(0);

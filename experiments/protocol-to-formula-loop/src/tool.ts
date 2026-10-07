@@ -163,6 +163,8 @@ export async function main(args: string[], runtime: Runtime = defaultRuntime()):
       budget.measurements++;
       return finish('成功', 0, message);
     } catch (error) {
+      // 提出時の件数の測定で式が拒否されたら、直す必要のある提出として数える（通信の失敗とは区別する）。
+      if (command === 'submit' && isQueryRejection(error)) { budget.submissions++; return finish('検査不合格', 1, (error as Error).message); }
       if (['count', 'titles', 'outside', 'seeds'].includes(command) && isQueryRejection(error)) return finish('検査不合格', 1, command === 'seeds' ? '検索式が拒否されました' : (error as Error).message);
       if (command === 'outside' || command === 'seeds') return finish('測定失敗（結果不明）', 3, '測定に失敗しました。回数は消費していません');
       return finish('測定失敗（結果不明）', 3, `測定に失敗しました。回数は消費していません\n${safe(String(error))}`);
