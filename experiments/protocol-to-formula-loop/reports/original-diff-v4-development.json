@@ -1,0 +1,161 @@
+{
+  "bundle": "v4",
+  "subset": "development",
+  "bundleRuns": 2,
+  "label": "v4",
+  "source": "v1",
+  "k": 3,
+  "reviews": 53,
+  "generatedAt": "2026-10-07T21:30:30.445Z",
+  "measuredFrom": "2026-10-07T21:20:55.185Z",
+  "measuredTo": "2026-10-07T21:30:30.163Z",
+  "measurements": {
+    "measured": 943,
+    "cached": 201
+  },
+  "translators": {
+    "rules": 61,
+    "model-opus": 61
+  },
+  "exclusions": {
+    "undeterminedRuns": 0,
+    "undeterminedElements": 0,
+    "unmeasurableParts": 13,
+    "rejectedUnits": 12,
+    "excludedRuns": 0,
+    "excludedElements": 24
+  },
+  "structure": {
+    "ai": {
+      "formulas": 318,
+      "undetermined": 0,
+      "determined": 318,
+      "conceptCounts": {
+        "0": 0,
+        "1": 4,
+        "2": 287,
+        "3": 27,
+        "4+": 0
+      },
+      "withFilter": 205,
+      "withNegative": 34,
+      "filterRate": 0.6446540880503144,
+      "negativeRate": 0.1069182389937107,
+      "meshTerms": {
+        "min": 0,
+        "q1": 1,
+        "median": 1,
+        "q3": 2,
+        "max": 6
+      },
+      "freewordTerms": {
+        "min": 0,
+        "q1": 3,
+        "median": 4,
+        "q3": 6,
+        "max": 17
+      },
+      "plainTerms": {
+        "min": 0,
+        "q1": 0,
+        "median": 0,
+        "q3": 0,
+        "max": 9
+      },
+      "conceptRecall": {
+        "min": 0,
+        "q1": 0.8333333333333334,
+        "median": 0.9692307692307692,
+        "q3": 1,
+        "max": 1
+      },
+      "measuredConcepts": 659
+    },
+    "original": {
+      "formulas": 122,
+      "undetermined": 0,
+      "determined": 122,
+      "conceptCounts": {
+        "0": 13,
+        "1": 52,
+        "2": 49,
+        "3": 6,
+        "4+": 2
+      },
+      "withFilter": 76,
+      "withNegative": 6,
+      "filterRate": 0.6229508196721312,
+      "negativeRate": 0.04918032786885246,
+      "meshTerms": {
+        "min": 0,
+        "q1": 1,
+        "median": 3,
+        "q3": 6,
+        "max": 257
+      },
+      "freewordTerms": {
+        "min": 0,
+        "q1": 7,
+        "median": 16.5,
+        "q3": 41.75,
+        "max": 16881
+      },
+      "plainTerms": {
+        "min": 0,
+        "q1": 0,
+        "median": 0,
+        "q3": 0,
+        "max": 19
+      },
+      "conceptRecall": {
+        "min": 0,
+        "q1": 0.9493421052631579,
+        "median": 0.9883720930232558,
+        "q3": 1,
+        "max": 1
+      },
+      "measuredConcepts": 160
+    },
+    "hitsRatio": {
+      "min": 0.033976510067114093,
+      "q1": 0.5125278396436526,
+      "median": 1.0372549019607844,
+      "q3": 2.5889284893078868,
+      "max": 200.03787878787878
+    }
+  },
+  "originalOnly": {
+    "pairs": {
+      "single_concept": 1338,
+      "single_filter": 14,
+      "multiple": 395,
+      "none": 12,
+      "no_lines": 5,
+      "excluded": 0
+    },
+    "studies": {
+      "all_single_concept": 351,
+      "all_single_filter": 4,
+      "all_multiple": 57,
+      "mixed": 176,
+      "incomplete": 0
+    }
+  },
+  "bundleOnly": {
+    "pairs": {
+      "single_concept": 201,
+      "single_filter": 634,
+      "multiple": 65,
+      "none": 0,
+      "no_lines": 8,
+      "excluded": 80
+    },
+    "studies": {
+      "all_single_concept": 78,
+      "all_single_filter": 315,
+      "all_multiple": 17,
+      "mixed": 4,
+      "incomplete": 78
+    }
+  }
+}
