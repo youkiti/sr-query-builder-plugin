@@ -330,6 +330,20 @@ describe('harness contract > options', () => {
     }
   }
 
+  test('使用モデルのラベルの外にベンチマークへのリンクがある', async () => {
+    const container = buildOptionsDoc();
+    const link = container.querySelector('.options__help-link') as HTMLAnchorElement;
+    expect(link.textContent).toBe('?');
+    expect(link.href).toBe('https://github.com/youkiti/sr-query-builder-plugin#benchmark');
+    expect(link.target).toBe('_blank');
+    expect(link.rel).toBe('noreferrer');
+    expect(link.getAttribute('aria-label')).toBe('モデルごとの成績（ベンチマーク）を GitHub の README で開く');
+    expect(link.title).toBe(link.getAttribute('aria-label'));
+    expect(link.closest('label')).toBeNull();
+    const label = container.querySelector('label[for="llm-model-select"]') as HTMLLabelElement;
+    expect(label.control).toBe(container.querySelector('#llm-model-select'));
+  });
+
   contractTest('options.provider-cards-and-save-status', async () => {
     const doc = buildOptionsDoc();
     const deps = buildOptionsDeps();

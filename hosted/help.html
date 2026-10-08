@@ -225,23 +225,23 @@
           <p>
             <span class="ja" lang="ja"
               >拡張アイコンを右クリック →「オプション」で設定画面を開き、ご自身の API キーを保存します（BYOK = Bring
-              Your Own Key）。検索式ドラフトの生成には LLM プロバイダの API キーが必須です。既定は Gemini
-              なので Gemini API キーが必要ですが、設定画面の「使用モデル」で OpenRouter 系のモデルへ切り替えた場合は
-              OpenRouter の API キーが必要になります。Anthropic の Claude を選んだ場合は Anthropic の API キーが必要です。NCBI API キーは任意で、NCBI E-utilities
+              Your Own Key）。検索式ドラフトの生成には LLM プロバイダの API キーが必須です。既定のモデルは Anthropic の Claude Opus 5.5 で、Anthropic の API キーが必要です。
+              設定画面の「使用モデル」で Gemini のモデルを選んだ場合は Gemini の API キー、OpenRouter 系のモデルを選んだ場合は OpenRouter の API キーが必要です。
+              モデルを選ばずに Gemini の API キーだけを保存した場合は、Gemini 3.5 Flash Lite で動きます。NCBI API キーは任意で、NCBI E-utilities
               のレート制限を緩和したい場合に設定します。</span
             >
             <span class="en" lang="en"
               >Right-click the extension icon → “Options” to open the settings screen and save your own API keys
               (BYOK = Bring Your Own Key). Drafting the search strategy requires an API key for whichever LLM
-              provider is selected. The default is Gemini, so a Gemini API key is needed by default — but if you
-              switch to an OpenRouter model in “Model” on the settings screen, an OpenRouter API key is required
-              instead. Selecting Claude from Anthropic requires an Anthropic API key. An NCBI API key is optional and eases the rate limit on NCBI E-utilities.</span
+              provider is selected. The default model is Claude Opus 5.5 from Anthropic, which requires an Anthropic API key.
+              Selecting a Gemini model in “Model” on the settings screen requires a Gemini API key; selecting an OpenRouter model requires an OpenRouter API key.
+              If you save only a Gemini API key without selecting a model, Gemini 3.5 Flash Lite is used. An NCBI API key is optional and eases the rate limit on NCBI E-utilities.</span
             >
           </p>
           <div class="note">
             <p>
               <span class="ja" lang="ja"
-                >研究プロトコルの本文が外部へ送信されるのは、選択した LLM プロバイダ（既定は Gemini。OpenRouter・Anthropic
+                >研究プロトコルの本文が外部へ送信されるのは、選択した LLM プロバイダ（既定は Anthropic の Claude。Gemini・OpenRouter
                 も選択可）へのドラフト生成リクエストと、NCBI E-utilities
                 への検索式検証リクエストのときだけです。開発者が運用するサーバーは存在しません（<a
                   href="privacy-policy.html"
@@ -250,7 +250,7 @@
               >
               <span class="en" lang="en"
                 >Your protocol text leaves your browser only in drafting requests to your selected LLM provider
-                (Gemini by default; OpenRouter or Anthropic can also be selected) and validation requests to NCBI E-utilities.
+                (Anthropic's Claude by default; Gemini or OpenRouter can also be selected) and validation requests to NCBI E-utilities.
                 There is no developer-operated server (see the <a href="privacy-policy.html">privacy policy</a>).</span
               >
             </p>
@@ -605,12 +605,11 @@
             <p>
               <span class="ja" lang="ja"
                 >Bring Your Own Key の略で、利用者自身が契約・取得した API キーを Options 画面に保存して使う方式です。検索式ドラフトの生成には選択した
-                LLM プロバイダ（既定は Gemini。OpenRouter・Anthropic への切替も可）のキーが必要で、NCBI API キーは任意です。キーはブラウザ内にのみ保存され、開発者へ送信されることはありません。</span
+                LLM プロバイダ（既定は Anthropic の Claude。Gemini・OpenRouter への切替も可）のキーが必要で、NCBI API キーは任意です。キーはブラウザ内にのみ保存され、開発者へ送信されることはありません。</span
               >
               <span class="en" lang="en"
                 >BYOK stands for Bring Your Own Key: you save the API keys you obtained yourself in the Options
-                screen. Drafting the search strategy needs a key for whichever LLM provider is selected (Gemini by
-                default; you can switch to OpenRouter or Anthropic), and an NCBI API key is optional. Keys stay in your browser
+                screen. Drafting the search strategy needs a key for whichever LLM provider is selected (Anthropic's Claude by default; you can switch to Gemini or OpenRouter), and an NCBI API key is optional. Keys stay in your browser
                 and are never sent to the developer.</span
               >
             </p>

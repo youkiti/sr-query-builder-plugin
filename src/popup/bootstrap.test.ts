@@ -1,5 +1,10 @@
 import { SHEET_HEADERS } from '@/domain/sheetsSchema';
 import { STORAGE_KEY_GEMINI } from '@/app/services';
+import {
+  STORAGE_KEY_ANTHROPIC,
+  STORAGE_KEY_LLM_MODEL,
+  STORAGE_KEY_OPENROUTER,
+} from '@/app/services/llmProviderService';
 import { PICKER_GRANT_MESSAGE, type PickerGrantResult } from '@/background/pickerGrant';
 import {
   STORAGE_KEY_PENDING_APP_TAB,
@@ -108,6 +113,50 @@ function makeDeps(
 async function flushAsync(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
+
+describe('startPopup / 選択モデルの API キー', () => {
+  test.each([
+    [undefined, 'a', undefined, undefined, 'Anthropic', 'a'],
+    [undefined, 'a', 'g', undefined, 'Anthropic', 'a'],
+    [undefined, undefined, 'g', undefined, 'Gemini', 'g'],
+    [undefined, undefined, undefined, undefined, 'Anthropic', null],
+    [undefined, undefined, undefined, 'or', 'Anthropic', null],
+    ['gemini-3.5-flash', 'a', 'g', 'or', 'Gemini', 'g'],
+    ['gemini-3.5-flash', 'a', undefined, 'or', 'Gemini', null],
+    ['qwen/qwen3-235b-a22b-2507', 'a', 'g', 'or', 'OpenRouter', 'or'],
+    ['qwen/qwen3-235b-a22b-2507', 'a', 'g', undefined, 'OpenRouter', null],
+    ['claude-sonnet-5-5', 'a', 'g', 'or', 'Anthropic', 'a'],
+    ['claude-sonnet-5-5', undefined, 'g', 'or', 'Anthropic', null],
+  ])('保存モデル=%s Anthropic=%s Gemini=%s OpenRouter=%s', async (
+    savedModel, anthropic, gemini, openrouter, providerName, apiKey
+  ) => {
+    const doc = buildDocument();
+    const { deps, data } = makeDeps({
+      [STORAGE_KEY_LLM_MODEL]: savedModel,
+      [STORAGE_KEY_ANTHROPIC]: anthropic,
+      [STORAGE_KEY_GEMINI]: gemini,
+      [STORAGE_KEY_OPENROUTER]: openrouter,
+      recentProjects: [
+        { projectId: 'p', spreadsheetId: 's', driveFolderId: 'd', title: 'A' },
+      ],
+    });
+    await startPopup(doc, deps);
+    doc.querySelector<HTMLButtonElement>('#popup-recent button')!.click();
+    await flushAsync();
+    if (apiKey !== null) {
+      expect(deps.openAppTab).toHaveBeenCalledTimes(1);
+      expect(deps.openOptions).not.toHaveBeenCalled();
+      expect(data[STORAGE_KEY_PENDING_APP_TAB]).toBeUndefined();
+    } else {
+      expect(deps.openAppTab).not.toHaveBeenCalled();
+      expect(deps.openOptions).toHaveBeenCalledTimes(1);
+      expect(data[STORAGE_KEY_PENDING_APP_TAB]).toBe('1');
+      expect(doc.getElementById('popup-status')?.textContent).toBe(
+        `${providerName} APIキーが未設定です。設定画面で入力すると、保存後にトップ画面に戻ります。`
+      );
+    }
+  });
+});
 
 describe('startPopup / 未ログイン', () => {
   test('未ログイン時はログイン画面を表示し、プロジェクト選択は隠す', async () => {
@@ -507,7 +556,7 @@ describe('startPopup / ログイン済', () => {
     expect(btn.disabled).toBe(false);
   });
 
-  test('Gemini キー未設定で recent を開くと Options へ誘導し、pending フラグを立てる', async () => {
+  test('モデル未保存・キー未設定で recent を開くと Options へ誘導し、pending フラグを立てる', async () => {
     const doc = buildDocument();
     const { deps, data } = makeDeps({
       [STORAGE_KEY_GEMINI]: '',
@@ -523,10 +572,12 @@ describe('startPopup / ログイン済', () => {
     expect(deps.openAppTab).not.toHaveBeenCalled();
     expect(deps.openOptions).toHaveBeenCalledTimes(1);
     expect(data[STORAGE_KEY_PENDING_APP_TAB]).toBe('1');
-    expect(doc.getElementById('popup-status')?.textContent).toContain('APIキー');
+    expect(doc.getElementById('popup-status')?.textContent).toBe(
+      'Anthropic APIキーが未設定です。設定画面で入力すると、保存後にトップ画面に戻ります。'
+    );
   });
 
-  test('Gemini キー未設定で新規作成すると Options に誘導し、pending フラグを立てる', async () => {
+  test('モデル未保存・キー未設定で新規作成すると Options に誘導し、pending フラグを立てる', async () => {
     const doc = buildDocument();
     const { deps, fetchMock, data } = makeDeps({ [STORAGE_KEY_GEMINI]: '' });
     fetchMock.mockImplementation(async (url: string, init: RequestInit) => {
@@ -551,7 +602,7 @@ describe('startPopup / ログイン済', () => {
     expect(data[STORAGE_KEY_PENDING_APP_TAB]).toBe('1');
   });
 
-  test('Gemini キー未設定で既存スプレッドシートを開くと Options に誘導する', async () => {
+  test('モデル未保存・キー未設定で既存スプレッドシートを開くと Options に誘導する', async () => {
     const doc = buildDocument();
     const { deps, data, fetchMock } = makeDeps({ [STORAGE_KEY_GEMINI]: '' });
     fetchMock.mockResolvedValue(

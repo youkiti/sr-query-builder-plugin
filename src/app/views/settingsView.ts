@@ -1,6 +1,8 @@
 import {
   BUILTIN_MODELS,
   DEFAULT_MODEL,
+  MODEL_BENCHMARK_URL,
+  resolveEffectiveModel,
   MAX_CUSTOM_MODELS,
   resolveProviderId as resolveProvider,
   type CustomModel,
@@ -358,13 +360,26 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
     llmSection.appendChild(anthropicCard);
 
     // 使用モデル選択
-    const modelLabel = doc.createElement('label');
+    const modelLabel = doc.createElement('div');
     modelLabel.className = 'settings__field';
-    const modelLabelText = doc.createElement('span');
+    const modelHead = doc.createElement('div');
+    modelHead.className = 'settings__field-head';
+    const modelLabelText = doc.createElement('label');
+    modelLabelText.htmlFor = 'settings-llm-model';
     modelLabelText.textContent = '使用モデル';
     const modelSelect = doc.createElement('select');
     modelSelect.id = 'settings-llm-model';
-    modelLabel.appendChild(modelLabelText);
+    const modelHelp = doc.createElement('a');
+    modelHelp.className = 'settings__help-link';
+    modelHelp.href = MODEL_BENCHMARK_URL;
+    modelHelp.target = '_blank';
+    modelHelp.rel = 'noreferrer';
+    modelHelp.title = 'モデルごとの成績（ベンチマーク）を GitHub の README で開く';
+    modelHelp.setAttribute('aria-label', modelHelp.title);
+    modelHelp.textContent = '?';
+    modelHead.appendChild(modelLabelText);
+    modelHead.appendChild(modelHelp);
+    modelLabel.appendChild(modelHead);
     modelLabel.appendChild(modelSelect);
     llmSection.appendChild(modelLabel);
     container.appendChild(llmSection);
@@ -432,7 +447,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
       if (anthropic) anthropicInput.value = anthropic;
       if (ncbi) ncbiInput.value = ncbi;
 
-      const selectedModel = rawModel ?? DEFAULT_MODEL;
+      const selectedModel = resolveEffectiveModel(rawModel, { anthropic, gemini });
       const customModels = parseCustomModels(rawCustom);
       populateModelSelect(modelSelect, customModels, selectedModel);
       renderCustomModelsList(customModelsList, customModels, handleRemoveCustomModel);
@@ -511,18 +526,25 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
 
     saveBtn.addEventListener('click', () => {
       void (async () => {
+        const savedModel = await callbacks.readKey(KEY_LLM_MODEL);
         const geminiVal = geminiInput.value;
         const orVal = orInput.value;
         const anthropicVal = anthropicInput.value;
         const ncbiVal = ncbiInput.value;
-        const selectedModel = modelSelect.value ?? DEFAULT_MODEL;
+        let selectedModel = modelSelect.value ?? DEFAULT_MODEL;
+        const shouldSaveModel = !!savedModel || !!anthropicVal.trim() || !!geminiVal.trim();
+        if (!savedModel && shouldSaveModel) {
+          selectedModel = resolveEffectiveModel(undefined, { anthropic: anthropicVal, gemini: geminiVal });
+          modelSelect.value = selectedModel;
+          refreshProviderCards(doc, selectedModel);
+        }
 
         await Promise.all([
           callbacks.writeKey(KEY_GEMINI, geminiVal),
           callbacks.writeKey(KEY_OPENROUTER, orVal),
           callbacks.writeKey(KEY_ANTHROPIC, anthropicVal),
           callbacks.writeKey(KEY_NCBI, ncbiVal),
-          callbacks.writeKey(KEY_LLM_MODEL, selectedModel),
+          ...(shouldSaveModel ? [callbacks.writeKey(KEY_LLM_MODEL, selectedModel)] : []),
         ]);
 
         // Gemini キーが設定されており Gemini モデルが選択されている場合にプラン自動判定

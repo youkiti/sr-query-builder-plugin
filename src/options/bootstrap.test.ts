@@ -15,6 +15,8 @@ describe('startOptions', () => {
     const doc = document.implementation.createHTMLDocument('test');
     doc.body.innerHTML = `
       <p id="options-status"></p>
+      <div id="anthropic-card"></div>
+      <input id="anthropic-api-key" />
       <div id="gemini-card"></div>
       <input id="gemini-api-key" />
       <div id="openrouter-card"></div>
@@ -38,6 +40,51 @@ describe('startOptions', () => {
       openAppTab: jest.fn(),
     };
   }
+
+  test.each([
+    ['a', '', 'claude-opus-5-5'],
+    ['', 'g', 'gemini-3.5-flash-lite'],
+    ['a', 'g', 'claude-opus-5-5'],
+    ['', '', 'claude-opus-5-5'],
+  ])('モデル未保存の初期表示: Anthropic=%s Gemini=%s → %s', async (anthropic, gemini, model) => {
+    const store: Record<string, string> = { 'apiKeys.anthropic': anthropic, 'apiKeys.gemini': gemini };
+    const container = buildDocument();
+    const deps = readStoredValues(store);
+    await startOptions(container, deps);
+    expect((container.querySelector('#llm-model-select') as HTMLSelectElement).value).toBe(model);
+    expect(deps.writeKey).not.toHaveBeenCalledWith('llm.selectedModel', expect.anything());
+  });
+
+  test.each([
+    ['gemini-3.5-flash', '', '', 'gemini-3.5-flash'],
+    ['qwen/qwen3-235b-a22b-2507', 'a', 'g', 'qwen/qwen3-235b-a22b-2507'],
+    [undefined, '', '', undefined],
+    ['', '  ', '  ', undefined],
+    [undefined, '', 'g', 'gemini-3.5-flash-lite'],
+    [undefined, 'a', '', 'claude-opus-5-5'],
+    [undefined, 'a', 'g', 'claude-opus-5-5'],
+  ])('保存モデル=%s 入力 Anthropic=%s Gemini=%s → %s', async (saved, anthropic, gemini, model) => {
+    const store: Record<string, string> = { 'apiKeys.openrouter': 'or' };
+    if (saved !== undefined) store['llm.selectedModel'] = saved;
+    const container = buildDocument();
+    const deps = readStoredValues(store);
+    await startOptions(container, deps);
+    const select = container.querySelector('#llm-model-select') as HTMLSelectElement;
+    const initialModel = select.value;
+    (container.querySelector('#anthropic-api-key') as HTMLInputElement).value = anthropic;
+    (container.querySelector('#gemini-api-key') as HTMLInputElement).value = gemini;
+    (container.querySelector('#save-keys') as HTMLButtonElement).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    if (model === undefined) {
+      expect(deps.writeKey).not.toHaveBeenCalledWith('llm.selectedModel', expect.anything());
+      expect(select.value).toBe(initialModel);
+    } else {
+      expect(deps.writeKey).toHaveBeenCalledWith('llm.selectedModel', model);
+      expect(select.value).toBe(model);
+      const provider = model.includes('/') ? 'openrouter' : model.startsWith('claude-') ? 'anthropic' : 'gemini';
+      expect(container.querySelector(`#${provider}-card`)?.classList.contains('options__provider-card--active')).toBe(true);
+    }
+  });
 
   test('全キーが既存なら input を復元し、status に「保存済み」を並べる', async () => {
     const doc = buildDocument();
@@ -94,12 +141,12 @@ describe('startOptions', () => {
     expect(groups).toContain('OpenRouter');
   });
 
-  test('モデル未保存なら既定で gemini-3.5-flash-lite が選択される', async () => {
+  test('モデル未保存なら既定で claude-opus-5-5 が選択される', async () => {
     const doc = buildDocument();
     const deps = readStoredValues({});
     await startOptions(doc, deps);
     const select = doc.getElementById('llm-model-select') as HTMLSelectElement;
-    expect(select.value).toBe('gemini-3.5-flash-lite');
+    expect(select.value).toBe('claude-opus-5-5');
   });
 
   test('既存モデルとして gemini-3.5-flash が保存済みなら選択値は維持され、保存しても書き換わらない', async () => {
@@ -122,12 +169,12 @@ describe('startOptions', () => {
     expect(store[STORAGE_KEY_LLM_MODEL]).toBe('gemini-3.5-flash');
   });
 
-  test('既定のモデル（Gemini）が選択されていると Gemini カードが active', async () => {
+  test('既定のモデル（Anthropic）が選択されていると Anthropic カードが active', async () => {
     const doc = buildDocument();
     const deps = readStoredValues({});
     await startOptions(doc, deps);
     expect(
-      doc.getElementById('gemini-card')?.classList.contains('options__provider-card--active')
+      doc.getElementById('anthropic-card')?.classList.contains('options__provider-card--active')
     ).toBe(true);
     expect(
       doc.getElementById('openrouter-card')?.classList.contains('options__provider-card--active')

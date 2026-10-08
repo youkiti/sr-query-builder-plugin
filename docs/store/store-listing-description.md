@@ -13,13 +13,13 @@ Chrome ウェブストア デベロッパーダッシュボードの「掲載情
 1. 研究プロトコル（リサーチクエスチョン・PICO 等の組入/除外基準）を手入力するか、Markdown（.md）／Word（.docx）ファイルから取り込みます。
 2. AI がプロトコルから 1〜5 個の検索式ブロック（PICO の各要素に固定されない汎用モデル）を抽出します。内容を確認し、必要であれば編集してから承認します。
 3. 該当することが分かっている論文があれば、PMID をシード論文として登録します（任意）。
-4. 生成 AI（既定は Gemini。OpenRouter 経由のモデルや Anthropic の Claude へ切り替えることも可能です）が、承認済みのブロックから PubMed 検索式のドラフトを作成します。
+4. 生成 AI（既定は Anthropic の Claude。Gemini や OpenRouter 経由のモデルへ切り替えることも可能です）が、承認済みのブロックから PubMed 検索式のドラフトを作成します。
 5. NCBI E-utilities を使い、ブロックごとのヒット数・シード論文の捕捉率・MeSH 用語をライブで検証します。
 6. （実験的機能）現在の検索式の境界にありそうなシード論文候補を対話的に提示し、include / exclude の判定を通じて検索式の更新案を得られます。
 7. 最終的な検索式を CENTRAL / Embase(Dialog) / ClinicalTrials.gov / ICTRP 向けに変換して出力し、PubMed の nbib ダウンロードなど各データベースでの操作先へご案内します。
 
 ■ご用意いただくもの
-- 生成 AI の API キー（Gemini、または切り替えた場合は OpenRouter・Anthropic）。ご自身で取得したキーを拡張の設定画面に保存して使う BYOK（Bring Your Own Key）方式で、本拡張が API キーを提供することはありません。
+- 生成 AI の API キー（Anthropic、または切り替えた場合は Gemini・OpenRouter）。ご自身で取得したキーを拡張の設定画面に保存して使う BYOK（Bring Your Own Key）方式で、本拡張が API キーを提供することはありません。
 - NCBI API キー（任意）。検証時のレート制限を緩和したい場合に設定します。
 - Google アカウント。プロトコル・検索式・検証結果などのデータは、開発者のサーバーではなく、利用者ご自身の Google アカウントの Google スプレッドシートと Google Drive に保存されます。
 
@@ -38,13 +38,13 @@ How it works
 1. Enter your research protocol (research question, PICO-style eligibility criteria, etc.) by hand, or import it from a Markdown (.md) or Word (.docx) file.
 2. AI extracts 1-5 search blocks from the protocol (a generic model, not fixed to PICO's elements). Review the terms, edit them if needed, and approve.
 3. If you already know of studies that should be included, register their PMIDs as seed papers (optional).
-4. Generative AI (Gemini by default; you can switch to other models via OpenRouter or to Claude via Anthropic) drafts a PubMed search strategy from the approved blocks.
+4. Generative AI (Anthropic's Claude by default; you can switch to Gemini or other models via OpenRouter) drafts a PubMed search strategy from the approved blocks.
 5. NCBI E-utilities validate the draft live: per-block hit counts, seed-paper capture rate, and MeSH terms.
 6. (Experimental) Borderline seed-paper candidates near the edge of the current query are presented interactively; your include/exclude decisions produce suggested updates to the query.
 7. The finalized query is converted for CENTRAL, Embase (Dialog), ClinicalTrials.gov, and ICTRP, with guidance to each database's own download steps (e.g., PubMed's nbib download).
 
 What you'll need
-- An API key for the generative AI provider (Gemini, or OpenRouter or Anthropic if you switch). This extension uses a BYOK (Bring Your Own Key) model: you obtain and save your own key in the options screen, and the extension does not supply one.
+- An API key for the generative AI provider (Anthropic, or Gemini or OpenRouter if you switch). This extension uses a BYOK (Bring Your Own Key) model: you obtain and save your own key in the options screen, and the extension does not supply one.
 - An NCBI API key (optional), to raise the rate limit during validation.
 - A Google account. Your protocol, search strategy, and validation results are stored in your own Google Sheets and Google Drive, not on a developer-operated server.
 

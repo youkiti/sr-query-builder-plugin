@@ -10,7 +10,7 @@ import {
 import {
   createProvider,
   resolveProviderId,
-  DEFAULT_MODEL,
+  resolveEffectiveModel,
   withLogging,
   withRetry,
   withSignalDeadline,
@@ -96,16 +96,42 @@ export async function getAnthropicApiKey(store: ProjectStoreDeps): Promise<strin
   return value === undefined || value === '' ? null : value;
 }
 
+/** 保存済みモデルと登録済みキーから、選択モデルのプロバイダと API キーを解決する。 */
+export async function resolveSelectedModelKey(store: ProjectStoreDeps): Promise<{
+  model: string;
+  providerId: LlmProviderId;
+  providerName: 'Gemini' | 'OpenRouter' | 'Anthropic';
+  apiKey: string | null;
+}> {
+  const model = resolveEffectiveModel(await store.read<string>(STORAGE_KEY_LLM_MODEL), {
+    anthropic: await getAnthropicApiKey(store),
+    gemini: await getGeminiApiKey(store),
+  });
+  const providerId = resolveProviderId(model);
+  const apiKey =
+    providerId === 'openrouter'
+      ? await getOpenRouterApiKey(store)
+      : providerId === 'anthropic'
+        ? await getAnthropicApiKey(store)
+        : await getGeminiApiKey(store);
+  const providerName = providerId === 'openrouter' ? 'OpenRouter'
+    : providerId === 'anthropic' ? 'Anthropic' : 'Gemini';
+  return { model, providerId, providerName, apiKey };
+}
+
 /**
  * Drive ロガー付きの LLMProvider ファクトリを生成する。
  *
- * 選択モデル（`deps.model` の上書き → chrome.storage → `DEFAULT_MODEL`）から
+ * 選択モデル（`deps.model` の上書き → 保存済みモデル → 登録済みキーに応じたモデル）から
  * プロバイダを解決し、対応する API キーを取得して `createProvider` で生成する。
  * @throws {LlmApiKeyMissingError} 解決したプロバイダの API キーが chrome.storage に無いとき
  */
 export async function buildLlmProviderFactory(deps: LlmFactoryDeps): Promise<LlmProviderFactory> {
   const selectedModel =
-    deps.model ?? (await deps.store.read<string>(STORAGE_KEY_LLM_MODEL)) ?? DEFAULT_MODEL;
+    deps.model ?? resolveEffectiveModel(await deps.store.read<string>(STORAGE_KEY_LLM_MODEL), {
+      anthropic: await getAnthropicApiKey(deps.store),
+      gemini: await getGeminiApiKey(deps.store),
+    });
   const providerId = resolveProviderId(selectedModel);
   const apiKey =
     providerId === 'openrouter'

@@ -6,6 +6,7 @@ import {
   STORAGE_KEY_OPENROUTER,
   buildLlmProviderFactory,
   getGeminiApiKey,
+  resolveSelectedModelKey,
   getOpenRouterApiKey,
   getAnthropicApiKey,
   STORAGE_KEY_ANTHROPIC,
@@ -65,6 +66,34 @@ describe('getOpenRouterApiKey', () => {
   });
 });
 
+describe('resolveSelectedModelKey', () => {
+  test.each([
+    [undefined, 'a', undefined, undefined, 'claude-opus-5-5', 'anthropic', 'Anthropic', 'a'],
+    [undefined, 'a', 'g', undefined, 'claude-opus-5-5', 'anthropic', 'Anthropic', 'a'],
+    [undefined, undefined, 'g', undefined, 'gemini-3.5-flash-lite', 'gemini', 'Gemini', 'g'],
+    [undefined, undefined, undefined, undefined, 'claude-opus-5-5', 'anthropic', 'Anthropic', null],
+    [undefined, undefined, undefined, 'or', 'claude-opus-5-5', 'anthropic', 'Anthropic', null],
+    ['gemini-3.5-flash', 'a', 'g', 'or', 'gemini-3.5-flash', 'gemini', 'Gemini', 'g'],
+    ['gemini-3.5-flash', 'a', undefined, 'or', 'gemini-3.5-flash', 'gemini', 'Gemini', null],
+    ['qwen/qwen3-235b-a22b-2507', 'a', 'g', 'or', 'qwen/qwen3-235b-a22b-2507', 'openrouter', 'OpenRouter', 'or'],
+    ['qwen/qwen3-235b-a22b-2507', 'a', 'g', undefined, 'qwen/qwen3-235b-a22b-2507', 'openrouter', 'OpenRouter', null],
+    ['claude-sonnet-5-5', 'a', 'g', 'or', 'claude-sonnet-5-5', 'anthropic', 'Anthropic', 'a'],
+    ['claude-sonnet-5-5', undefined, 'g', 'or', 'claude-sonnet-5-5', 'anthropic', 'Anthropic', null],
+  ])('保存モデル=%s Anthropic=%s Gemini=%s OpenRouter=%s', async (
+    savedModel, anthropic, gemini, openrouter, model, providerId, providerName, apiKey
+  ) => {
+    const { store } = memoryStore({
+      [STORAGE_KEY_LLM_MODEL]: savedModel,
+      [STORAGE_KEY_ANTHROPIC]: anthropic,
+      [STORAGE_KEY_GEMINI]: gemini,
+      [STORAGE_KEY_OPENROUTER]: openrouter,
+    });
+    await expect(resolveSelectedModelKey(store)).resolves.toEqual({
+      model, providerId, providerName, apiKey,
+    });
+  });
+});
+
 describe('buildLlmProviderFactory', () => {
   const stubGoogle = () =>
     ({
@@ -72,7 +101,7 @@ describe('buildLlmProviderFactory', () => {
       getAccessToken: jest.fn().mockResolvedValue('t'),
     }) as unknown as Parameters<typeof buildLlmProviderFactory>[0]['google'];
 
-  test('Gemini モデル選択時に Gemini キーが無いと LlmApiKeyMissingError(Gemini)', async () => {
+  test('モデル未保存でキーが無いと LlmApiKeyMissingError(Anthropic)', async () => {
     const { store } = memoryStore();
     await expect(
       buildLlmProviderFactory({
@@ -83,8 +112,32 @@ describe('buildLlmProviderFactory', () => {
       })
     ).rejects.toMatchObject({
       name: 'LlmApiKeyMissingError',
-      message: expect.stringContaining('Gemini API キー'),
+      message: expect.stringContaining('Anthropic API キー'),
     });
+  });
+
+  test.each([
+    ['a', undefined, 'claude-opus-5-5', 'anthropic'],
+    [undefined, 'g', 'gemini-3.5-flash-lite', 'gemini'],
+    ['a', 'g', 'claude-opus-5-5', 'anthropic'],
+  ])('モデル未保存で Anthropic=%s Gemini=%s なら %s / %s', async (anthropic, gemini, model, providerId) => {
+    const { store } = memoryStore({
+      [STORAGE_KEY_ANTHROPIC]: anthropic,
+      [STORAGE_KEY_GEMINI]: gemini,
+    });
+    const factory = await buildLlmProviderFactory({
+      google: stubGoogle(), store, llmLogFolderId: 'F', spreadsheetId: 'S',
+    });
+    expect(factory.model).toBe(model);
+    expect(factory.providerId).toBe(providerId);
+    expect(factory.forPurpose('extract_protocol')).toMatchObject({ model, providerId });
+  });
+
+  test('OpenRouter キーだけでモデル未保存なら Anthropic キー不足になる', async () => {
+    const { store } = memoryStore({ [STORAGE_KEY_OPENROUTER]: 'or' });
+    await expect(buildLlmProviderFactory({
+      google: stubGoogle(), store, llmLogFolderId: 'F', spreadsheetId: 'S',
+    })).rejects.toThrow(new LlmApiKeyMissingError('Anthropic'));
   });
 
   test('OpenRouter モデル選択時に OpenRouter キーが無いと LlmApiKeyMissingError(OpenRouter)', async () => {

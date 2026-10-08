@@ -13,6 +13,7 @@ export {
   LlmApiKeyMissingError,
   buildLlmProviderFactory,
   getGeminiApiKey,
+  resolveSelectedModelKey,
   type LlmFactoryDeps,
   type LlmProviderFactory,
 } from './llmProviderService';

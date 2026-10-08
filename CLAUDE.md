@@ -187,7 +187,7 @@ src/
 - **自動調整の目安件数は固定値**: 既定は 2,000 件（自動調整専用。過大ヒット時フィルタ提案の 10,000 件とは別）。初期式の実測件数に対する比率で目安件数を決める相対目標は未実装で、評価ハーネスで同一初期式の対比較ができるようになってから判断する（[docs/query-optimization-plan.md](docs/query-optimization-plan.md)）
 - **自動調整の復元と再開**: リロード後はチェックポイントを中断／完了済みの記録として表示する。入力（研究基準・承認ブロック・シード・目安件数）が一致し、通信・時間・評価試行の残予算がある中断記録だけ、利用者の操作で最良候補を初期式にした新しい run を開始できる。実測はすべてやり直し、過去の却下式・理由・fingerprint は未再検証の AI 文脈だけに使う。予算は元の上限から累積消費分を引く。復元したログは state に保持し、再開した run の最初の試行が届くまでは画面で読める。バックグラウンドでの自動再開や復元ログからの採用保存は行わない。旧形式で再開情報が不足する記録はログ表示に留める。シード 0 件では「目安件数と既知シードの捕捉を満たしました」とは表示しない。設計・実装状況は [docs/query-optimization-plan.md](docs/query-optimization-plan.md) を参照
 - **P1 の画面接続は実装済み**: `editView` はチップ編集部品を使用し、`blockInspector` が語の寄与と MeSH 文脈を表示する。自動調整も語別計測・MeSH の追加取得を利用する。NCBI 通信は `eutils.ts` の共有レート制御を通る。画面未接続・レート制御未実装という旧記述は解消済み
-- **Anthropic Claude への直接連携は実装済み、OpenAI への直接連携は未実装**: Gemini・OpenRouter・Anthropic の 3 プロバイダ（`src/lib/llm/GeminiProvider.ts` / `OpenRouterProvider.ts` / `AnthropicProvider.ts`）が使える。既定モデルは `gemini-3.5-flash-lite`。Options とアプリ内設定で各 API キーとカスタムモデル ID（最大 20 件）を登録できる。
+- **Anthropic Claude への直接連携は実装済み、OpenAI への直接連携は未実装**: Gemini・OpenRouter・Anthropic の 3 プロバイダ（`src/lib/llm/GeminiProvider.ts` / `OpenRouterProvider.ts` / `AnthropicProvider.ts`）が使える。既定モデルは `claude-opus-5-5`。モデルを保存していない利用者は、Anthropic のキーがあれば `claude-opus-5-5`、無くて Gemini のキーがあれば従来の `gemini-3.5-flash-lite` で動く（`resolveEffectiveModel`、`src/lib/llm/modelRegistry.ts`）。保存ボタンは、保存済みモデルが無いときに入力されたキーから同じ規則でモデルを決めて書く。Options とアプリ内設定で各 API キーとカスタムモデル ID（最大 20 件）を登録できる。
 - E2E ジャーニー J1（新規作成→export 貫通）は draft 生成〜検証の主要経路を journey-draft-generate.spec.ts で回帰確認済み。J4（expand の i/e/m 判定・n/p 移動・Sheets append 録音）と J5（expand 取得時の Sheets 403 / NCBI 429 / LLM 500 の分類つき案内・再取得）は実装済み。Phase E の表で残っているのは OAuth 失効のモーダルと、エラー分類の他ビューへの展開（[docs/ui-deep-test-plan.md](docs/ui-deep-test-plan.md) Phase D/E）
 
 ## 目的（ゴール）
@@ -261,7 +261,7 @@ MIT ライセンスの OSS Chrome 拡張 **sr-query-builder-plugin**。ユーザ
 - Chrome Extension Manifest V3（メインビューは `chrome.tabs.create` で開くフルページ。Side Panel API は使わない。補助的に Popup + Background）
 - TypeScript / HTML / CSS（vanilla、フレームワーク不使用）+ webpack
 - Google OAuth 2.0（`chrome.identity`）+ Google Sheets / Drive API
-- LLM: Gemini API + OpenRouter API + Anthropic Messages API（`LLMProvider` 抽象経由。既定モデルは Gemini）
+- LLM: Gemini API + OpenRouter API + Anthropic Messages API（`LLMProvider` 抽象経由。既定モデルは Claude Opus 5.5）
 - テスト: jest（jsdom）+ Playwright（実 Chromium）+ `@axe-core/playwright`
 - Node.js ≥ 18
 

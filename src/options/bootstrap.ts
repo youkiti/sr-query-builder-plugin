@@ -22,6 +22,7 @@ import {
   DEFAULT_MODEL as DEFAULT_MODEL_ID,
   MAX_CUSTOM_MODELS as MAX_CUSTOM_MODELS_LIMIT,
   resolveProviderId,
+  resolveEffectiveModel,
   type CustomModel as CustomModelEntry,
 } from '@/lib/llm/modelRegistry';
 import { detectGeminiTier, FREE_TIER_MODEL_ID } from '@/lib/llm/geminiTierDetector';
@@ -241,7 +242,10 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
   const existingOpenRouter = await deps.readKey(STORAGE_KEY_OPENROUTER);
   const existingAnthropic = await deps.readKey(STORAGE_KEY_ANTHROPIC);
   const existingNcbi = await deps.readKey(STORAGE_KEY_NCBI);
-  const existingModel = (await deps.readKey(STORAGE_KEY_LLM_MODEL)) ?? DEFAULT_MODEL_ID;
+  const existingModel = resolveEffectiveModel(await deps.readKey(STORAGE_KEY_LLM_MODEL), {
+    anthropic: existingAnthropic,
+    gemini: existingGemini,
+  });
   const customModels = parseCustomModels(await deps.readKey(STORAGE_KEY_CUSTOM_MODELS));
   const savedTier = await deps.readKey(STORAGE_KEY_GEMINI_TIER);
 
@@ -354,18 +358,25 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
     const openrouterVal = openrouterInput?.value ?? '';
     const anthropicVal = anthropicInput?.value ?? '';
     const ncbiVal = ncbiInput?.value ?? '';
-    const selectedModel = selectEl?.value ?? DEFAULT_MODEL_ID;
+    let selectedModel = selectEl?.value ?? DEFAULT_MODEL_ID;
 
     if (status) status.textContent = '保存中...';
 
     void (async () => {
       try {
+        const savedModel = await deps.readKey(STORAGE_KEY_LLM_MODEL);
+        const shouldSaveModel = !!savedModel || !!anthropicVal.trim() || !!geminiVal.trim();
+        if (!savedModel && shouldSaveModel) {
+          selectedModel = resolveEffectiveModel(undefined, { anthropic: anthropicVal, gemini: geminiVal });
+          if (selectEl) selectEl.value = selectedModel;
+          refreshProviderCards(doc, selectedModel);
+        }
         await Promise.all([
           deps.writeKey(STORAGE_KEY_GEMINI, geminiVal),
           deps.writeKey(STORAGE_KEY_OPENROUTER, openrouterVal),
           deps.writeKey(STORAGE_KEY_ANTHROPIC, anthropicVal),
           deps.writeKey(STORAGE_KEY_NCBI, ncbiVal),
-          deps.writeKey(STORAGE_KEY_LLM_MODEL, selectedModel),
+          ...(shouldSaveModel ? [deps.writeKey(STORAGE_KEY_LLM_MODEL, selectedModel)] : []),
         ]);
 
         // Gemini キーが設定されており Gemini モデルが選択されている場合にプラン自動判定
