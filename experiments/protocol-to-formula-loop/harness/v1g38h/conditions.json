@@ -1,0 +1,22 @@
+{
+  "version": "v1g38h",
+  "model": "gemini-3.8-flash",
+  "generationSettings": "Gemini API。推論の強さは high（thinkingLevel。温度などの生成設定は指定しない）",
+  "inputs": [
+    "protocol.md",
+    "procedure.md",
+    "道具の呼び方を関数呼び出しに読み替える設定の節（geminiRun.ts）"
+  ],
+  "tools": [
+    "check",
+    "count",
+    "mesh",
+    "submit"
+  ],
+  "maxMeasurements": 20,
+  "maxSubmissions": 4,
+  "costLimit": "道具の呼び出し回数の上限で代替する（サブエージェントの費用は直接制限できない）",
+  "finalSelection": "最後に受け付けられた提出 1 本。採点結果による選び直しはしない",
+  "runner": "gemini-api",
+  "thinkingLevel": "high"
+}

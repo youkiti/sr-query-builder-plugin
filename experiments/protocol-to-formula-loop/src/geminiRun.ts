@@ -23,10 +23,10 @@ const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/';
 type Status = 'completed' | 'max_turns' | 'error';
 interface Agent {
   status: Status; model: string; modelVersion: string | null; turns: number; startedAt: string; finishedAt: string;
-  promptTokens: number; outputTokens: number; note?: string;
+  promptTokens: number; outputTokens: number; thinkingLevel: string | null; thoughtsTokens: number; note?: string;
 }
 interface FunctionCall { name: string; args?: Record<string, unknown>; id?: string }
-interface Part { text?: string; functionCall?: FunctionCall }
+interface Part { text?: string; thought?: boolean; functionCall?: FunctionCall }
 interface Content { role?: string; parts?: Part[] }
 interface Reply {
   candidates?: { content?: Content; finishReason?: string }[]; modelVersion?: string;
@@ -102,7 +102,7 @@ async function callFunction(call: FunctionCall, dir: string, commands: Command[]
 async function runAgent(dir: string, procedure: string, runtime: RunRuntime): Promise<Agent> {
   const { conditions } = readRun(dir);
   const agent: Agent = { status: 'max_turns', model: conditions.model, modelVersion: null, turns: 0,
-    startedAt: runtime.now().toISOString(), finishedAt: '', promptTokens: 0, outputTokens: 0 };
+    startedAt: runtime.now().toISOString(), finishedAt: '', promptTokens: 0, outputTokens: 0, thinkingLevel: conditions.thinkingLevel ?? null, thoughtsTokens: 0 };
   const save = (name: string, value: unknown) => writeFileSync(join(dir, name), safeText(runtime, JSON.stringify(value, null, 2)) + '\n');
   const log = (value: unknown) => appendFileSync(join(dir, 'agent-log.jsonl'), safeText(runtime, JSON.stringify(value)) + '\n');
   const contents: unknown[] = [{ role: 'user', parts: [{ text: '次の研究プロトコルについて、手順書に従って検索式を作り、提出してください。\n\n'
@@ -119,17 +119,18 @@ async function runAgent(dir: string, procedure: string, runtime: RunRuntime): Pr
       agent.turns = turn;
       const { reply, attempt } = await generate(`${ENDPOINT}${conditions.model}:generateContent`, {
         systemInstruction: { parts: [{ text: `${procedure}\n\n${SETTINGS}` }] }, contents, tools: [{ functionDeclarations }],
+        ...(conditions.thinkingLevel === undefined ? {} : { generationConfig: { thinkingConfig: { thinkingLevel: conditions.thinkingLevel } } }),
       }, runtime, (attempt) => log({ turn, attempt, at: runtime.now().toISOString(), type: 'error', resultLength: 0 }));
       if (typeof reply.modelVersion === 'string') agent.modelVersion = safeText(runtime, reply.modelVersion);
       const usage = { promptTokenCount: tokens(reply.usageMetadata?.promptTokenCount),
         candidatesTokenCount: tokens(reply.usageMetadata?.candidatesTokenCount), totalTokenCount: tokens(reply.usageMetadata?.totalTokenCount),
         thoughtsTokenCount: tokens(reply.usageMetadata?.thoughtsTokenCount) };
-      agent.promptTokens += usage.promptTokenCount; agent.outputTokens += usage.candidatesTokenCount;
+      agent.promptTokens += usage.promptTokenCount; agent.outputTokens += usage.candidatesTokenCount; agent.thoughtsTokens += usage.thoughtsTokenCount;
       const content = reply.candidates?.[0]?.content;
       const parts = Array.isArray(content?.parts) ? content.parts : [];
       const calls = parts.flatMap((part) => part.functionCall ? [part.functionCall] : []);
       const call = calls[0];
-      const text = parts.map((part) => typeof part.text === 'string' ? part.text : '').join('');
+      const text = parts.filter((part) => part.thought !== true).map((part) => typeof part.text === 'string' ? part.text : '').join('');
       let result = '';
       try {
         if (call) {
@@ -173,7 +174,7 @@ async function execute(args: string[], runtime: RunRuntime): Promise<number> {
   const reviews = targetReviews(options, runtime);
   const jobs = reviews.flatMap((review) => Array.from({ length: options.runsPerReview }, (_, i) => ({ review, runIndex: i + 1 })));
   const counts = { completed: 0, max_turns: 0, error: 0 };
-  let skipped = 0, rebuilt = 0, executed = 0, promptTokens = 0, outputTokens = 0, next = 0;
+  let skipped = 0, rebuilt = 0, executed = 0, promptTokens = 0, outputTokens = 0, thoughtsTokens = 0, next = 0;
   const toolRuntime = { ...runtime, rateLimiter: new TokenBucket({ ratePerSecond: ncbiRate(runtime.env), capacity: 1,
     now: () => runtime.now().getTime(), sleep: runtime.sleep }) };
   await Promise.all(Array.from({ length: options.concurrency }, async () => {
@@ -198,12 +199,12 @@ async function execute(args: string[], runtime: RunRuntime): Promise<number> {
         protocolPath: join(runtime.casesDir ?? casesDir(), review.pmcid, 'protocol.md'), conditions, now: runtime.now });
       executed++;
       const agent = await runAgent(dir, procedure, toolRuntime);
-      counts[agent.status]++; promptTokens += agent.promptTokens; outputTokens += agent.outputTokens;
+      counts[agent.status]++; promptTokens += agent.promptTokens; outputTokens += agent.outputTokens; thoughtsTokens += agent.thoughtsTokens;
     }
   }));
   for (const line of [`対象: ${jobs.length} 件`, `今回実行: ${executed} 件`, `済みで省略: ${skipped} 件`, `作り直し: ${rebuilt} 件`,
     `completed: ${counts.completed} 件`, `max_turns: ${counts.max_turns} 件`, `error: ${counts.error} 件`,
-    `入力トークン: ${promptTokens}`, `出力トークン: ${outputTokens}`]) runtime.stdout(line + '\n');
+    `入力トークン: ${promptTokens}`, `出力トークン: ${outputTokens}`, `推論トークン: ${thoughtsTokens}`]) runtime.stdout(line + '\n');
   return counts.error ? 1 : 0;
 }
 

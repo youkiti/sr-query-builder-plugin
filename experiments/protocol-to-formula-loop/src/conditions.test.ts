@@ -1,4 +1,7 @@
 /** @jest-environment node */
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { procedureBody } from './leakCheck';
 import { loadConditions, validateConditions } from './conditions';
 
 test.each([undefined, 1, 10000, Number.MAX_SAFE_INTEGER])('表の件数の目安を受け付ける: %j', (hitsLimit) => {
@@ -110,3 +113,48 @@ test.each([{ versions: ['v1'] }, { versions: Array.from({ length: 11 }, (_, i) =
   '不正な別々の版の束ねる条件を拒否する: %j', (combine) => {
     expect(() => validateConditions({ ...loadConditions('v0'), combine }, 'v0')).toThrow('束ねる条件');
   });
+
+test.each([undefined, 'claude-subagent', 'gemini-api'])('推論の強さを省略した版は実行役によらず受け付ける: %j', (runner) => {
+  const conditions = { ...loadConditions('v0'), runner, thinkingLevel: undefined };
+  expect(validateConditions(conditions, 'v0')).toEqual(conditions);
+});
+
+test.each(['low', 'medium', 'high'])('Gemini の推論の強さは束ねる条件によらず受け付ける: %s', (thinkingLevel) => {
+  for (const combine of [undefined, { from: 'v1', k: 3 }]) {
+    const conditions = { ...loadConditions('v0'), runner: 'gemini-api', thinkingLevel, combine };
+    expect(validateConditions(conditions, 'v0')).toEqual(conditions);
+  }
+});
+
+test.each(['low', 'medium', 'high'])('Gemini 以外の推論の強さを拒否する: %s', (thinkingLevel) => {
+  for (const runner of [undefined, 'claude-subagent']) {
+    expect(() => validateConditions({ ...loadConditions('v0'), runner, thinkingLevel }, 'v0')).toThrow('推論の強さの指定が不正です');
+  }
+});
+
+test.each(['', 'HIGH', 'minimal', null, 1, true, false, {}, []])('不正な推論の強さを実行役によらず拒否する: %j', (thinkingLevel) => {
+  for (const runner of [undefined, 'claude-subagent', 'gemini-api']) {
+    expect(() => validateConditions({ ...loadConditions('v0'), runner, thinkingLevel }, 'v0')).toThrow('推論の強さの指定が不正です');
+  }
+});
+
+test('全ての版の読み込みで定義をそのまま保つ', () => {
+  const harness = join(__dirname, '../harness');
+  for (const entry of readdirSync(harness, { withFileTypes: true }).filter((entry) => entry.isDirectory())) {
+    expect(loadConditions(entry.name)).toEqual(JSON.parse(readFileSync(join(harness, entry.name, 'conditions.json'), 'utf8')));
+  }
+});
+
+test('Gemini の推論を強くした版と三本を束ねる版を読み込み、手順の本文を保つ', () => {
+  const single = loadConditions('v1g38h');
+  const combined = loadConditions('v4g38h');
+  for (const conditions of [single, combined]) {
+    expect(conditions).toMatchObject({ model: 'gemini-3.8-flash', runner: 'gemini-api', thinkingLevel: 'high',
+      tools: ['check', 'count', 'mesh', 'submit'], maxMeasurements: 20, maxSubmissions: 4 });
+  }
+  expect(single.combine).toBeUndefined();
+  expect(combined.combine).toEqual({ from: 'v1g38h', k: 3 });
+  const body = (version: string) => procedureBody(readFileSync(join(__dirname, '../harness', version, 'procedure.md'), 'utf8'));
+  expect(body('v1g38h')).toBe(body('v1'));
+  expect(body('v4g38h')).toBe(body('v1'));
+});

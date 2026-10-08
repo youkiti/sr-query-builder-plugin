@@ -8,6 +8,7 @@ export interface Conditions {
   maxMeasurements: number; maxSubmissions: number; costLimit: string; finalSelection: string;
   combine?: { from: string; k: number; blocks?: { minOverlap: number; minMargin: number; maxConcepts: number } } | { versions: string[] };
   runner?: 'claude-subagent' | 'gemini-api';
+  thinkingLevel?: 'low' | 'medium' | 'high';
   seeds?: { label: string; max: number };
   table?: boolean;
   hitsLimit?: number;
@@ -18,6 +19,7 @@ export function validateConditions(value: unknown, version: string): Conditions 
   if (!/^[A-Za-z0-9_-]+$/.test(version) || !c || c.version !== version) throw new Error('版とフォルダ名が一致しません');
   if (typeof c.model !== 'string' || !/^[A-Za-z0-9.-]+$/.test(c.model) || c.model.includes('latest')) throw new Error('モデルは固定 ID が必要です');
   if (c.runner !== undefined && c.runner !== 'claude-subagent' && c.runner !== 'gemini-api') throw new Error('実行役の指定が不正です');
+  if (c.thinkingLevel !== undefined && (!['low', 'medium', 'high'].includes(c.thinkingLevel) || c.runner !== 'gemini-api')) throw new Error('推論の強さの指定が不正です');
   if (c.hitsLimit !== undefined && (!Number.isSafeInteger(c.hitsLimit) || c.hitsLimit < 1 || c.table !== true)) throw new Error('件数の目安の条件が不正です');
   if ((c.table !== undefined && typeof c.table !== 'boolean') || (c.table === true
     && (c.seeds !== undefined || !Array.isArray(c.tools) || c.tools.some((tool) => !['check', 'count', 'mesh', 'submit'].includes(tool))))) throw new Error('表の条件が不正です');

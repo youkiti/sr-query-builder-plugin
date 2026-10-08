@@ -331,3 +331,69 @@ test('道具の通信は Gemini 用の再試行を通さず例外のキーだけ
   expect(JSON.stringify(s.bodies[1])).toContain('[REDACTED]');
   expect(JSON.stringify(s.bodies[1])).not.toMatch(/合成Gemini秘密|合成NCBI秘密/);
 });
+
+test('全ての往復に推論の強さを送り、署名付きの応答をそのまま返して推論トークンを集計する', async () => {
+  const first = { ...call('write_formula', { content: formula }), usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 3, thoughtsTokenCount: 7 } };
+  const second = call('tool', { command: 'check' });
+  const last = { ...done(), usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 5, thoughtsTokenCount: 11 } };
+  const s = setup([first, second, last]);
+  writeJson(s.conditionFile, { ...s.conditions, thinkingLevel: 'high' });
+  expect(await main(s.args, s.runtime)).toBe(0);
+  expect(s.bodies).toHaveLength(3);
+  for (const body of s.bodies) expect(body.generationConfig).toEqual({ thinkingConfig: { thinkingLevel: 'high' } });
+  expect((s.bodies[1]!.contents as unknown[])[1]).toEqual(first.candidates[0]!.content);
+  expect((s.bodies[2]!.contents as unknown[])[1]).toEqual(first.candidates[0]!.content);
+  expect((s.bodies[2]!.contents as unknown[])[3]).toEqual(second.candidates[0]!.content);
+  expect(s.agent()).toMatchObject({ thinkingLevel: 'high', thoughtsTokens: 18, promptTokens: 40, outputTokens: 10 });
+  expect(s.runtime.stdout).toHaveBeenCalledWith('推論トークン: 18\n');
+});
+
+test('推論の強さと推論トークンがない版も記録する', async () => {
+  const s = setup();
+  expect(await main(s.args, s.runtime)).toBe(0);
+  expect(s.agent()).toMatchObject({ thinkingLevel: null, thoughtsTokens: 0 });
+});
+
+test('推論の指定がなくても複数の実行の推論トークンを合計する', async () => {
+  const s = setup([
+    { ...done(), usageMetadata: { thoughtsTokenCount: 7 } },
+    { ...done(), usageMetadata: { thoughtsTokenCount: 11 } },
+  ], 2);
+  expect(await main(s.args, s.runtime)).toBe(0);
+  expect(s.agent()).toMatchObject({ thinkingLevel: null, thoughtsTokens: 7 });
+  expect(s.runtime.stdout).toHaveBeenCalledWith('推論トークン: 18\n');
+});
+
+test.each([-1, 1.5, '7', null])('不正な推論トークンはゼロとして記録する: %j', async (thoughtsTokenCount) => {
+  const s = setup([{ ...done(), usageMetadata: { thoughtsTokenCount } }]);
+  expect(await main(s.args, s.runtime)).toBe(0);
+  expect(s.agent().thoughtsTokens).toBe(0);
+});
+
+test('推論の文章を除き通常の文章だけを最終説明に保存する', async () => {
+  const s = setup([reply({ text: '内部の推論', thought: true }, { text: '通常の説明', thought: false }, { text: 'の続き' })]);
+  expect(await main(s.args, s.runtime)).toBe(0);
+  expect(s.read('final.txt')).toBe('通常の説明の続き');
+});
+
+test('推論の文章だけなら空応答として一度促し、通常の文章で完了する', async () => {
+  const s = setup([reply({ text: '内部の推論', thought: true }), done()]);
+  expect(await main(s.args, s.runtime)).toBe(0);
+  expect(s.fetchImpl).toHaveBeenCalledTimes(2);
+  expect(s.bodies[1]!.contents).toEqual([
+    (s.bodies[0]!.contents as unknown[])[0],
+    { role: 'user', parts: [{ text: '応答が空でした。続けてください。' }] },
+  ]);
+  expect(s.agent()).toMatchObject({ status: 'completed', turns: 2 });
+  expect(s.read('final.txt')).toBe('提出した式の説明');
+  expect(s.read('agent-log.jsonl').trim().split('\n').map((line) => JSON.parse(line).type)).toEqual(['empty', 'text']);
+});
+
+test('推論の文章だけの応答が二回続いたら空応答として終了する', async () => {
+  const s = setup([reply({ text: '内部の推論', thought: true }), reply({ text: '続きの推論', thought: true })]);
+  expect(await main(s.args, s.runtime)).toBe(0);
+  expect(s.fetchImpl).toHaveBeenCalledTimes(2);
+  expect(s.agent()).toMatchObject({ status: 'completed', note: '応答が 2 回続けて空でした' });
+  expect(existsSync(join(s.dir, 'final.txt'))).toBe(false);
+  expect(s.read('agent-log.jsonl').trim().split('\n').map((line) => JSON.parse(line).type)).toEqual(['empty', 'empty']);
+});
