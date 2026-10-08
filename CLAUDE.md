@@ -160,6 +160,7 @@ src/
 │                   # blocksDraftBackup / queryOptimizationCheckpoint / 各 API キー / llm.selectedModel）
 │   ├── guards.ts   # 前提条件ガード（プロトコル未入力なら #/blocks へ入れない等）
 │   ├── bootstrap.ts# DI 配線（views × services × navigate）
+│   ├── guide/      # ヘルプツアー（起動・ランナー・一覧・提案帯。定義と進捗は lib/guide/）
 │   ├── services/   # 画面とドメインロジックの仲介（protocolService / blocksService / ...）
 │   ├── styles/     # ビュー単位に分割した CSS（app.html が <link> で個別に読み込む）
 │   └── views/      # 各ルートの描画関数（DOM 直組み。RenderView 型）
@@ -167,7 +168,7 @@ src/
 │                   # にあり、views/formulaDisplay.ts はそれを再公開しているだけ（features
 │                   # から views を import させないため。import 元は formulaDisplay のままでよい）
 ├── features/       # ドメインロジック（protocol / seeds / formula / validation / conversion / project）
-├── lib/            # 横断ライブラリ（google: OAuth+Sheets+Drive / llm: LLMProvider 抽象+Gemini / ncbi: E-utilities / api-error: 外部 API 失敗の分類 / combination-expression / search-formula-md）
+├── lib/            # 横断ライブラリ（google: OAuth+Sheets+Drive / llm: LLMProvider 抽象+Gemini / ncbi: E-utilities / api-error: 外部 API 失敗の分類 / combination-expression / search-formula-md / guide: ツアー定義と進捗の純関数 / i18n: ツアーの文面だけの日英辞書）
 ├── popup/          # 認証・プロジェクト作成/選択の入口
 ├── options/        # BYOK 設定（Gemini API キー / NCBI API キー）
 ├── background/     # service-worker + Picker 許可フロー（pickerGrant.ts）
@@ -179,6 +180,7 @@ src/
 - CSS: メインビューのスタイルは [src/app/styles/](src/app/styles/) にビュー単位で分割してある（`shell.css` が共通の外枠、以降は `#/draft` → `draft.css` のようにルートと 1:1）。**新しいスタイルは対応するビューのファイルへ書くこと。** 単一の `app.css` から分割したのは、複数の作業が並行するときに同じファイルの末尾へ追記し合って衝突するのを避けるため。ファイルを新設したら `app.html` に `<link>` を足す（webpack はディレクトリごとコピーするので `webpack.config.js` の編集は不要）。読み込み順＝カスケード順なので、`app.html` の `<link>` の並びを入れ替えないこと
 - 状態管理: [store.ts](src/app/store.ts) の `AppState` が単一の真実。`protocolDraft` / `blocksDraft` 等は in-memory のみで、リロードで消える（Sheets が永続層）
 - E2E hook: [app.ts](src/app/app.ts) は `window.__E2E_PRELOADED_STATE__` があればストアのシードに使う（テスト用 seam。本番動作には影響しない）
+- ヘルプツアー: ヘッダーの「ツアー」ボタンから始める。`#/home` には未完了のときだけ提案帯が出る。**E2E の共通スタブ（[appStub.ts](tests/e2e/fixtures/appStub.ts)）は既定で提案帯を止めている**（ストレージの `guide_progress` に `suppressSuggestions: true` を入れる）。提案帯を検証する spec だけが `extraStorage` で `guide_progress` を明示的に渡す。撮影（`tests/shots/`）も同じスタブを使い、デモビルドは `src/demo/app-entry.ts` が同じ値を書く。構成と、ツアーを 1 本足す手順は [docs/architecture.md](docs/architecture.md) の「2.4 ヘルプツアー」
 - テスト戦略は [docs/ui-review-strategy.md](docs/ui-review-strategy.md)（Tier 0〜3）と [docs/ui-deep-test-plan.md](docs/ui-deep-test-plan.md) を参照。E2E は LLM / Google / NCBI をすべて `page.route()` + chrome stub でモックする
 - [docs/ui-states.md](docs/ui-states.md) は一部 target spec（実装より先行）。spec をテストに固定化する前に必ず実装と照合し、乖離は同ドキュメントの ⚠️ drift 注記へ
 

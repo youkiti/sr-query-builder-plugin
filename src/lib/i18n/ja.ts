@@ -1,0 +1,32 @@
+// UI 文言辞書（日本語。キー集合の正典）。
+// 現在はツアー関連（guide.*）の文言だけを持つ。アプリ本体の既存の文言はここへ移していない。
+// en.ts は Record<MessageKey, string> で全キーの網羅を型強制する。
+export const ja = {
+  // ツアー共通
+  'guide.openTours': 'ツアー',
+  'guide.suggest': '操作ツアーで、画面の流れを確かめましょう。',
+  'guide.startSuggested': 'ツアーで進める',
+  'guide.postpone': 'あとで',
+  'guide.suppress': '今後表示しない',
+  'guide.closeList': '一覧を閉じる',
+  'guide.done': '済み',
+  'guide.start': '始める',
+  'guide.waiting': '対象が表示されるのを待っています。',
+  'guide.goRoute': 'この画面へ移動',
+  'guide.skip': '押さずに次へ',
+  'guide.complete': '完了',
+  'guide.next': '次へ',
+  'guide.end': 'ツアーを終える',
+  'guide.language': '表示言語',
+  'guide.languageJa': '日本語',
+  'guide.languageEn': 'English',
+  // ツアー: getting-started（手順の本文は、この区画の Desc の直後に足す）
+  'guide.tourGettingStartedTitle': 'はじめての流れ',
+  'guide.tourGettingStartedDesc': '画面の構成と、最初に開くプロトコル入力までを順に案内します。',
+  'guide.tourGettingStartedStepWelcome': '左の一覧が作業の順番です。上から順に進めると、検索式ができあがります。',
+  'guide.tourGettingStartedStepOpenProtocol': 'プロトコル入力を開いてください。研究の目的と組入・除外基準を入力する画面です。',
+  'guide.tourGettingStartedStepFinish': 'ツアーはここからいつでも始め直せます。',
+} as const;
+
+/** 辞書キー（ja が正典。en は同一キー集合を型強制される） */
+export type MessageKey = keyof typeof ja;

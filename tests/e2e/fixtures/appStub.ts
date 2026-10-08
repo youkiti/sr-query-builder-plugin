@@ -50,6 +50,12 @@ export interface AppScenario {
 
 const DEFAULT_EMAIL = 'tester@example.com';
 
+/**
+ * ヘルプツアーの進行状態の既定。#/home の提案帯を止めておき、既存の spec の画面を変えない。
+ * 提案帯を検証する spec だけが extraStorage で guide_progress を明示的に渡す（そちらを優先する）。
+ */
+export const GUIDE_PROGRESS_SUPPRESSED = { tours: {}, active: null, suppressSuggestions: true };
+
 export const PROJECT_FIXTURE: CurrentProjectEntry = {
   projectId: 'pid-fixture-1',
   spreadsheetId: 'sheet-fixture-1',
@@ -71,6 +77,7 @@ export async function injectAppStub(page: Page, scenario: AppScenario = {}): Pro
       currentProject: CurrentProjectEntry | null;
       extraStorage: Record<string, unknown>;
       preloadedState: Partial<AppState> | null;
+      guideProgress: unknown;
     }) => {
       if (args.preloadedState) {
         (
@@ -79,6 +86,7 @@ export async function injectAppStub(page: Page, scenario: AppScenario = {}): Pro
       }
 
       const data: Record<string, unknown> = {
+        guide_progress: args.guideProgress,
         ...args.extraStorage,
       };
       if (args.currentProject !== null) {
@@ -183,6 +191,7 @@ export async function injectAppStub(page: Page, scenario: AppScenario = {}): Pro
       currentProject,
       extraStorage,
       preloadedState,
+      guideProgress: GUIDE_PROGRESS_SUPPRESSED,
     }
   );
 

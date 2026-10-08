@@ -21,6 +21,7 @@
     <link rel="stylesheet" href="styles/settings.css" />
     <link rel="stylesheet" href="styles/export.css" />
     <link rel="stylesheet" href="styles/blockInspector.css" />
+    <link rel="stylesheet" href="styles/guide.css" />
   </head>
   <body>
     <header class="app__header">
@@ -40,6 +41,14 @@
       <div class="app__header-right">
         <button
           type="button"
+          id="app-open-tours"
+          class="app__settings-btn"
+          data-tour="tour-list"
+        >
+          ツアー
+        </button>
+        <button
+          type="button"
           id="app-settings-link"
           class="app__settings-btn"
           title="設定（APIキー・モデル選択）"
@@ -54,7 +63,7 @@
     </header>
     <main class="app__main">
       <aside class="app__sidebar" id="app-sidebar">
-        <nav class="app__nav" aria-label="ステップナビ"></nav>
+        <nav class="app__nav" aria-label="ステップナビ" data-tour="nav"></nav>
       </aside>
       <section class="app__content" id="app-content"></section>
     </main>
