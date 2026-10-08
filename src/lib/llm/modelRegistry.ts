@@ -32,7 +32,20 @@ export const BUILTIN_MODELS: readonly ModelDef[] = [
   { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', provider: 'anthropic' },
 ] as const;
 
-export const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
+export const DEFAULT_MODEL = 'claude-opus-5-5';
+export const LEGACY_DEFAULT_MODEL = 'gemini-3.5-flash-lite';
+export const MODEL_BENCHMARK_URL = 'https://github.com/youkiti/sr-query-builder-plugin#benchmark';
+
+/** 保存済みモデルを優先し、未選択なら登録済みキーからモデルを決める。 */
+export function resolveEffectiveModel(
+  savedModel: string | null | undefined,
+  keys: { anthropic?: string | null; gemini?: string | null },
+): string {
+  if (savedModel) return savedModel;
+  if (keys.anthropic?.trim()) return DEFAULT_MODEL;
+  if (keys.gemini?.trim()) return LEGACY_DEFAULT_MODEL;
+  return DEFAULT_MODEL;
+}
 
 export const MAX_CUSTOM_MODELS = 20;
 

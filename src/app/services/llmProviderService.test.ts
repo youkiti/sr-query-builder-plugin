@@ -72,7 +72,7 @@ describe('buildLlmProviderFactory', () => {
       getAccessToken: jest.fn().mockResolvedValue('t'),
     }) as unknown as Parameters<typeof buildLlmProviderFactory>[0]['google'];
 
-  test('Gemini モデル選択時に Gemini キーが無いと LlmApiKeyMissingError(Gemini)', async () => {
+  test('モデル未保存でキーが無いと LlmApiKeyMissingError(Anthropic)', async () => {
     const { store } = memoryStore();
     await expect(
       buildLlmProviderFactory({
@@ -83,8 +83,32 @@ describe('buildLlmProviderFactory', () => {
       })
     ).rejects.toMatchObject({
       name: 'LlmApiKeyMissingError',
-      message: expect.stringContaining('Gemini API キー'),
+      message: expect.stringContaining('Anthropic API キー'),
     });
+  });
+
+  test.each([
+    ['a', undefined, 'claude-opus-5-5', 'anthropic'],
+    [undefined, 'g', 'gemini-3.5-flash-lite', 'gemini'],
+    ['a', 'g', 'claude-opus-5-5', 'anthropic'],
+  ])('モデル未保存で Anthropic=%s Gemini=%s なら %s / %s', async (anthropic, gemini, model, providerId) => {
+    const { store } = memoryStore({
+      [STORAGE_KEY_ANTHROPIC]: anthropic,
+      [STORAGE_KEY_GEMINI]: gemini,
+    });
+    const factory = await buildLlmProviderFactory({
+      google: stubGoogle(), store, llmLogFolderId: 'F', spreadsheetId: 'S',
+    });
+    expect(factory.model).toBe(model);
+    expect(factory.providerId).toBe(providerId);
+    expect(factory.forPurpose('extract_protocol')).toMatchObject({ model, providerId });
+  });
+
+  test('OpenRouter キーだけでモデル未保存なら Anthropic キー不足になる', async () => {
+    const { store } = memoryStore({ [STORAGE_KEY_OPENROUTER]: 'or' });
+    await expect(buildLlmProviderFactory({
+      google: stubGoogle(), store, llmLogFolderId: 'F', spreadsheetId: 'S',
+    })).rejects.toThrow(new LlmApiKeyMissingError('Anthropic'));
   });
 
   test('OpenRouter モデル選択時に OpenRouter キーが無いと LlmApiKeyMissingError(OpenRouter)', async () => {

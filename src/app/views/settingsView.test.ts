@@ -43,6 +43,66 @@ describe('createSettingsView - Gemini プラン判定', () => {
     document.body.innerHTML = '';
   });
 
+  test.each([
+    ['a', '', 'claude-opus-5-5'],
+    ['', 'g', 'gemini-3.5-flash-lite'],
+    ['a', 'g', 'claude-opus-5-5'],
+    ['', '', 'claude-opus-5-5'],
+  ])('モデル未保存の初期表示: Anthropic=%s Gemini=%s → %s', async (anthropic, gemini, model) => {
+    const store: Record<string, string> = { 'apiKeys.anthropic': anthropic, 'apiKeys.gemini': gemini };
+    const deps = buildDeps(store, jest.fn(async () => 'paid' as const));
+    const container = render(deps);
+    await flush();
+    expect((container.querySelector('#settings-llm-model') as HTMLSelectElement).value).toBe(model);
+    expect(deps.writeKey).not.toHaveBeenCalledWith('llm.selectedModel', expect.anything());
+  });
+
+  test.each([
+    ['gemini-3.5-flash', '', '', 'gemini-3.5-flash'],
+    ['qwen/qwen3-235b-a22b-2507', 'a', 'g', 'qwen/qwen3-235b-a22b-2507'],
+    [undefined, '', '', undefined],
+    ['', '  ', '  ', undefined],
+    [undefined, '', 'g', 'gemini-3.5-flash-lite'],
+    [undefined, 'a', '', 'claude-opus-5-5'],
+    [undefined, 'a', 'g', 'claude-opus-5-5'],
+  ])('保存モデル=%s 入力 Anthropic=%s Gemini=%s → %s', async (saved, anthropic, gemini, model) => {
+    const store: Record<string, string> = { 'apiKeys.openrouter': 'or' };
+    if (saved !== undefined) store['llm.selectedModel'] = saved;
+    const deps = buildDeps(store, jest.fn(async () => 'paid' as const));
+    const container = render(deps);
+    await flush();
+    const select = container.querySelector('#settings-llm-model') as HTMLSelectElement;
+    const initialModel = select.value;
+    (container.querySelector('#settings-anthropic-key') as HTMLInputElement).value = anthropic;
+    (container.querySelector('#settings-gemini-key') as HTMLInputElement).value = gemini;
+    (container.querySelector('#settings-save') as HTMLButtonElement).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    if (model === undefined) {
+      expect(deps.writeKey).not.toHaveBeenCalledWith('llm.selectedModel', expect.anything());
+      expect(select.value).toBe(initialModel);
+    } else {
+      expect(deps.writeKey).toHaveBeenCalledWith('llm.selectedModel', model);
+      expect(select.value).toBe(model);
+      const provider = model.includes('/') ? 'openrouter' : model.startsWith('claude-') ? 'anthropic' : 'gemini';
+      expect(container.querySelector(`#settings-${provider}-card`)?.classList.contains('settings__provider-card--active')).toBe(true);
+    }
+  });
+
+  test('使用モデルのラベルの外にベンチマークへのリンクがある', async () => {
+    const container = render(buildDeps({}));
+    await flush();
+    const link = container.querySelector('.settings__help-link') as HTMLAnchorElement;
+    expect(link.textContent).toBe('?');
+    expect(link.href).toBe('https://github.com/youkiti/sr-query-builder-plugin#benchmark');
+    expect(link.target).toBe('_blank');
+    expect(link.rel).toBe('noreferrer');
+    expect(link.getAttribute('aria-label')).toBe('モデルごとの成績（ベンチマーク）を GitHub の README で開く');
+    expect(link.title).toBe(link.getAttribute('aria-label'));
+    expect(link.closest('label')).toBeNull();
+    const label = container.querySelector('label[for="settings-llm-model"]') as HTMLLabelElement;
+    expect(label.control).toBe(container.querySelector('#settings-llm-model'));
+  });
+
   test('保存済み tier があれば描画時にバッジへ復元され、再判定はしない', async () => {
     const detect = jest.fn(async () => 'free' as const);
     const container = render(
@@ -197,11 +257,11 @@ describe('createSettingsView - Gemini プラン判定', () => {
     expect(values).toContain('gemini-3.5-flash-lite');
   });
 
-  test('モデル未保存なら既定で gemini-3.5-flash-lite が選択される', async () => {
+  test('モデル未保存なら既定で claude-opus-5-5 が選択される', async () => {
     const container = render(buildDeps({}));
     await flush();
     const select = container.querySelector('#settings-llm-model') as HTMLSelectElement;
-    expect(select.value).toBe('gemini-3.5-flash-lite');
+    expect(select.value).toBe('claude-opus-5-5');
   });
 
   test('既存モデルとして gemini-3.5-flash が保存済みなら選択値は維持され、保存しても書き換わらない', async () => {

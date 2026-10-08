@@ -1,6 +1,8 @@
 import {
   BUILTIN_MODELS,
   DEFAULT_MODEL,
+  LEGACY_DEFAULT_MODEL,
+  resolveEffectiveModel,
   MAX_CUSTOM_MODELS,
   resolveProviderId,
 } from './modelRegistry';
@@ -24,8 +26,8 @@ describe('resolveProviderId', () => {
 });
 
 describe('modelRegistry の定数', () => {
-  test('DEFAULT_MODEL は gemini-3.5-flash-lite', () => {
-    expect(DEFAULT_MODEL).toBe('gemini-3.5-flash-lite');
+  test('DEFAULT_MODEL は claude-opus-5-5', () => {
+    expect(DEFAULT_MODEL).toBe('claude-opus-5-5');
   });
 
   test('BUILTIN_MODELS には Gemini モデルと OpenRouter モデルが含まれる', () => {
@@ -56,4 +58,23 @@ test.each([
 test('Anthropic の組み込みモデルの表示名', () => {
   expect(BUILTIN_MODELS.filter((m) => m.provider === 'anthropic').map((m) => m.label))
     .toEqual(['Claude Opus 5.5', 'Claude Sonnet 5.5', 'Claude Haiku 5.5']);
+});
+
+describe('resolveEffectiveModel', () => {
+  test.each([undefined, null, ''])('保存モデル %s は登録済みキーから解決する', (saved) => {
+    expect(resolveEffectiveModel(saved, { anthropic: 'a', gemini: 'g' })).toBe(DEFAULT_MODEL);
+    expect(resolveEffectiveModel(saved, { anthropic: 'a' })).toBe(DEFAULT_MODEL);
+    expect(resolveEffectiveModel(saved, { gemini: 'g' })).toBe(LEGACY_DEFAULT_MODEL);
+    expect(resolveEffectiveModel(saved, {})).toBe(DEFAULT_MODEL);
+    expect(resolveEffectiveModel(saved, { anthropic: '  ', gemini: ' g ' })).toBe(LEGACY_DEFAULT_MODEL);
+    expect(resolveEffectiveModel(saved, { anthropic: null, gemini: '  ' })).toBe(DEFAULT_MODEL);
+  });
+
+  test.each(['gemini-3.5-flash', 'claude-sonnet-5-5', 'org/custom', '  '])(
+    '保存モデル %s はキーに関係なくそのまま返す', (saved) => {
+      for (const keys of [{}, { anthropic: 'a' }, { gemini: 'g' }, { anthropic: 'a', gemini: 'g' }]) {
+        expect(resolveEffectiveModel(saved, keys)).toBe(saved);
+      }
+    }
+  );
 });

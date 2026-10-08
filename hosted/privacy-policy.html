@@ -56,7 +56,7 @@
         </h1>
         <p class="last-updated">
           <span class="ja" lang="ja"
-            >最終更新: 2026-08-15 / 対象バージョン: v0.3.0<br />
+            >最終更新: 2026-10-08 / 対象バージョン: v0.3.0<br />
             対象: Chrome 拡張機能「SR Query Builder」（sr-query-builder-plugin）<br />
             配布元: 本拡張は MIT ライセンス（<a
               href="https://github.com/youkiti/sr-query-builder-plugin/blob/master/LICENSE"
@@ -64,7 +64,7 @@
             >）の OSS です。</span
           >
           <span class="en" lang="en"
-            >Last updated: 2026-08-15 / Covers v0.3.0<br />
+            >Last updated: 2026-10-08 / Covers v0.3.0<br />
             Applies to: the Chrome extension “SR Query Builder” (sr-query-builder-plugin)<br />
             Distribution: this extension is open-source software under the
             <a href="https://github.com/youkiti/sr-query-builder-plugin/blob/master/LICENSE">MIT licence</a>.</span
@@ -115,12 +115,10 @@
             </li>
             <li>
               <span class="ja" lang="ja"
-                >利用者が自分の API キー（BYOK: Bring Your Own Key）で契約する LLM API（Gemini、OpenRouter、または Anthropic。既定は
-                Gemini）、NCBI E-utilities、および NLM MeSH RDF（MeSH 階層情報の取得。API キー不要の公開エンドポイント）</span
+                >利用者が自分の API キー（BYOK: Bring Your Own Key）で契約する LLM API（Gemini、OpenRouter、または Anthropic。既定は Anthropic の Claude）、NCBI E-utilities、および NLM MeSH RDF（MeSH 階層情報の取得。API キー不要の公開エンドポイント）</span
               >
               <span class="en" lang="en"
-                >The LLM API the user contracts with using their own key (BYOK: Gemini, OpenRouter, or Anthropic; Gemini is the
-                default), NCBI E-utilities, and NLM MeSH RDF (used to fetch MeSH hierarchy data; a public endpoint
+                >The LLM API the user contracts with using their own key (BYOK: Gemini, OpenRouter, or Anthropic; Anthropic's Claude is the default), NCBI E-utilities, and NLM MeSH RDF (used to fetch MeSH hierarchy data; a public endpoint
                 that needs no API key)</span
               >
             </li>
@@ -193,10 +191,10 @@
                   </td>
                   <td>
                     <span class="ja" lang="ja"
-                      >利用者が選択した LLM プロバイダ（Gemini、OpenRouter、または Anthropic。既定は Gemini）の API（BYOK）</span
+                      >利用者が選択した LLM プロバイダ（Gemini、OpenRouter、または Anthropic。既定は Anthropic の Claude）の API（BYOK）</span
                     >
                     <span class="en" lang="en"
-                      >The LLM provider the user selected (Gemini, OpenRouter, or Anthropic; Gemini is the default), via its API
+                      >The LLM provider the user selected (Gemini, OpenRouter, or Anthropic; Anthropic's Claude is the default), via its API
                       (BYOK)</span
                     >
                   </td>
@@ -431,13 +429,13 @@
           <ul>
             <li>
               <span class="ja" lang="ja"
-                ><strong>LLM プロバイダ（Gemini、OpenRouter、または Anthropic。既定は Gemini）</strong>:
+                ><strong>LLM プロバイダ（Gemini、OpenRouter、または Anthropic。既定は Anthropic の Claude）</strong>:
                 検索式のドラフト生成や検証結果の解釈補助を実行すると、研究プロトコルの本文・検索式ブロック定義・検索式ドラフトなどが、利用者が選択した
                 LLM プロバイダの API キー（BYOK）を用いて、そのプロバイダ（Google の Gemini API、OpenRouter、または Anthropic の API）へ送信されます。送信先によるデータの取り扱いは、各プロバイダ自身のプライバシーポリシー・利用規約に従います。本拡張はプロバイダを仲介せず、利用者のブラウザから直接
                 API を呼び出します。</span
               >
               <span class="en" lang="en"
-                ><strong>LLM provider (Gemini, OpenRouter, or Anthropic; Gemini is the default)</strong>: running search-strategy
+                ><strong>LLM provider (Gemini, OpenRouter, or Anthropic; Anthropic's Claude is the default)</strong>: running search-strategy
                 drafting or getting help interpreting validation results sends the protocol text, search block
                 definitions and search draft to the LLM provider the user selected — Google’s Gemini API, OpenRouter, or Anthropic’s API — using that provider’s API key (BYOK). How that destination handles the data is governed
                 by that provider’s own privacy policy and terms. The extension does not proxy the request: the call

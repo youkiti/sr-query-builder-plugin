@@ -1,6 +1,6 @@
 # プライバシーポリシー — SR Query Builder（sr-query-builder-plugin）
 
-- **最終更新**: 2026-08-15
+- **最終更新**: 2026-10-08
 - **対象バージョン**: v0.3.0
 - **対象**: Chrome 拡張機能「SR Query Builder」（sr-query-builder-plugin）
 - **配布元**: 本拡張は MIT ライセンス（[LICENSE](../../LICENSE)）の OSS です。
@@ -13,7 +13,7 @@
 
 1. **利用者のブラウザ**（本拡張の実行環境。`chrome.storage` を含む）
 2. **利用者の Google アカウント**（Google Sheets = プロジェクト DB、Google Drive = LLM API ログなどの実体保管）
-3. **利用者が自分の API キー（BYOK: Bring Your Own Key）で契約する LLM API（Gemini、OpenRouter、または Anthropic。既定は Gemini）、NCBI E-utilities、および NLM MeSH RDF（MeSH 階層情報の取得。API キー不要の公開エンドポイント）**
+3. **利用者が自分の API キー（BYOK: Bring Your Own Key）で契約する LLM API（Gemini、OpenRouter、または Anthropic。既定は Anthropic の Claude）、NCBI E-utilities、および NLM MeSH RDF（MeSH 階層情報の取得。API キー不要の公開エンドポイント）**
 
 ## 取り扱うデータと送信先
 
@@ -21,7 +21,7 @@
 |---|---|---|
 | 研究プロトコル（RQ・PICO 等）・検索式ブロック定義・シード論文（PMID）・検索式ドラフト・検証結果・LLM API ログ | 利用者の Google Sheets（プロジェクトのスプレッドシート内の各タブ） | プロジェクト DB。監査ログ・バージョニング目的 |
 | LLM API ログのフル payload | 利用者の Google Drive（プロジェクトの Drive フォルダ配下 `logs/llm/*.json`） | Sheets のセル文字数制限を超える内容の退避 |
-| 研究プロトコル本文・検索式ブロック定義・検索式ドラフトなど | 利用者が選択した LLM プロバイダ（Gemini、OpenRouter、または Anthropic。既定は Gemini）の API（BYOK） | AI による検索式ドラフト生成・MeSH 提案・シノニム展開等。本文が外部へ送信されるのはこの経路と NCBI E-utilities のみ（NLM MeSH RDF へは研究プロトコル本文を送信せず、descriptor 名・tree number のみを送信します） |
+| 研究プロトコル本文・検索式ブロック定義・検索式ドラフトなど | 利用者が選択した LLM プロバイダ（Gemini、OpenRouter、または Anthropic。既定は Anthropic の Claude）の API（BYOK） | AI による検索式ドラフト生成・MeSH 提案・シノニム展開等。本文が外部へ送信されるのはこの経路と NCBI E-utilities のみ（NLM MeSH RDF へは研究プロトコル本文を送信せず、descriptor 名・tree number のみを送信します） |
 | 検索式・PMID | NCBI E-utilities（`eutils.ncbi.nlm.nih.gov`） | ヒット数検証・MeSH 用語の取得・シード論文の捕捉率計算 |
 | ブロック内の MeSH 用語（descriptor 名・tree number） | NLM MeSH RDF（`id.nlm.nih.gov` の SPARQL エンドポイント） | MeSH 階層（親子関係）の解析。ブロック内の用語重複・カテゴリ分散の検出（次回の拡張機能更新から適用。現在配信中の v0.3.0 はこの通信を行いません） |
 | 開こうとした共有スプレッドシートの ID・サインイン中のメールアドレス | 本拡張の公開ページ（`youkiti.github.io` の `picker.html`）。URL フラグメント（`#` 以降）で渡すため、HTTP リクエストとしては送信されません | Google ピッカーで対象ファイルを選択し、そのファイルだけにアクセスを許可するため（次回の拡張機能更新から適用。現在配信中の v0.3.0 はこの画面を使いません） |
@@ -48,7 +48,7 @@
 
 ## LLM API・NCBI API への送信について
 
-- **LLM プロバイダ（Gemini、OpenRouter、または Anthropic。既定は Gemini）**: 検索式のドラフト生成や検証結果の解釈補助を実行すると、研究プロトコルの本文・検索式ブロック定義・検索式ドラフトなどが、利用者が選択した LLM プロバイダの API キー（BYOK）を用いて、そのプロバイダ（Google の Gemini API、OpenRouter、または Anthropic の API）へ送信されます。送信先によるデータの取り扱いは、各プロバイダ自身のプライバシーポリシー・利用規約に従います。本拡張はプロバイダを仲介せず、利用者のブラウザから直接 API を呼び出します。
+- **LLM プロバイダ（Gemini、OpenRouter、または Anthropic。既定は Anthropic の Claude）**: 検索式のドラフト生成や検証結果の解釈補助を実行すると、研究プロトコルの本文・検索式ブロック定義・検索式ドラフトなどが、利用者が選択した LLM プロバイダの API キー（BYOK）を用いて、そのプロバイダ（Google の Gemini API、OpenRouter、または Anthropic の API）へ送信されます。送信先によるデータの取り扱いは、各プロバイダ自身のプライバシーポリシー・利用規約に従います。本拡張はプロバイダを仲介せず、利用者のブラウザから直接 API を呼び出します。
 - **NCBI E-utilities**: 検索式の検証（ブロックごとのヒット数、シード論文捕捉率、MeSH 用語抽出）のため、検索式や PMID を NCBI の E-utilities（`eutils.ncbi.nlm.nih.gov`）へ送信します。NCBI API キーは任意で BYOK として設定でき、レート制限緩和のために使用します。
 - **NLM MeSH RDF（SPARQL エンドポイント）**: ブロック内の MeSH 用語について、MeSH ツリー上の親子関係（祖先・子ノードの名称）を取得するため、descriptor 名や tree number を NLM の MeSH RDF エンドポイント（`id.nlm.nih.gov/mesh/sparql`）へ SPARQL クエリとして送信します。PMID や研究プロトコルの本文は送信されません。認証や API キーは不要です。
 

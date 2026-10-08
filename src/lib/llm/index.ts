@@ -18,6 +18,9 @@ export { OpenRouterProvider, type OpenRouterProviderOptions } from './OpenRouter
 export {
   BUILTIN_MODELS,
   DEFAULT_MODEL,
+  LEGACY_DEFAULT_MODEL,
+  MODEL_BENCHMARK_URL,
+  resolveEffectiveModel,
   resolveProviderId,
   MAX_CUSTOM_MODELS,
   type ModelDef,

@@ -33,11 +33,11 @@ describe('createProvider', () => {
     expect(provider.providerId).toBe('gemini');
   });
 
-  test('model も provider も省略すると DEFAULT_MODEL の GeminiProvider が返る', () => {
+  test('model も provider も省略すると DEFAULT_MODEL の AnthropicProvider が返る', () => {
     const provider = createProvider({ apiKey: 'k' });
-    expect(provider).toBeInstanceOf(GeminiProvider);
-    expect(provider.providerId).toBe('gemini');
-    expect(provider.model).toBe('gemini-3.5-flash-lite');
+    expect(provider).toBeInstanceOf(AnthropicProvider);
+    expect(provider.providerId).toBe('anthropic');
+    expect(provider.model).toBe('claude-opus-5-5');
   });
 
   test('model / fetch オプションを渡せる', () => {

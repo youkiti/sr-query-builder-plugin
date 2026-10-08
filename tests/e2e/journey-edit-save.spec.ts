@@ -91,7 +91,7 @@ async function setupEditScenario(
   await registerDriveStub(page);
 
   // トークン数は累積コストの変化が目視できる大きさにする
-  // （既定モデル gemini-3.5-flash-lite: in $0.3 / out $2.5 per 1M → 1000/1000 で +$0.0028）。
+  // （Gemini のキーだけのときに使われる gemini-3.5-flash-lite: in $0.3 / out $2.5 per 1M → 1000/1000 で +$0.0028）。
   await registerGeminiStub(page, {
     responses: { 'improve-block': IMPROVE_BLOCK_RESPONSE },
     usage: { promptTokenCount: 1000, candidatesTokenCount: 1000 },
