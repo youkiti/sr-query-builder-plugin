@@ -123,6 +123,7 @@ import { buildViews, type BuildViewsOptions, type ViewContext } from './views';
 import { formatDraftProgress, formatValidationProgress } from './views/draftView';
 import { resolveInstructionDraft } from './views/editView';
 import { formatFormulaVersionShort } from './views/formatHelpers';
+import { initGuide } from './guide';
 
 export interface AppBootstrapOptions {
   getHash: () => string;
@@ -240,9 +241,35 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
   const unlistenHash = opts.onHashChange(render);
   const unsubscribe = store.subscribe(render);
 
+  // ヘルプツアー。拡張の実行環境（runtime あり）で入口のボタンがある文書だけで起動し、
+  // 失敗してもアプリの起動は止めない。
+  let disposed = false;
+  let disposeGuide: (() => void) | null = null;
+  if (runtime) {
+    initGuide({
+      store,
+      win: doc.defaultView ?? window,
+      doc,
+      navigate,
+      getHash: opts.getHash,
+      onHashChange: opts.onHashChange,
+    })
+      .then((dispose) => {
+        // 起動完了前に dispose された場合は、その場で片づける。
+        if (disposed) dispose();
+        else disposeGuide = dispose;
+      })
+      .catch((error: unknown) => {
+        console.warn('[guide] 起動に失敗:', error);
+      });
+  }
+
   return {
     store,
     dispose: () => {
+      disposed = true;
+      disposeGuide?.();
+      disposeGuide = null;
       unlistenHash();
       unsubscribe();
     },
@@ -1913,6 +1940,8 @@ function renderSidebar(
     const btn = nav.ownerDocument.createElement('button');
     btn.type = 'button';
     btn.textContent = ROUTE_LABELS[route];
+    // ヘルプツアーが枠を付ける対象。
+    btn.dataset.tour = `nav-${route}`;
     const guard = guards[route];
     const classes: string[] = [];
     if (route === current) classes.push('is-active');

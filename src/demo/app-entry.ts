@@ -32,7 +32,20 @@ import { applyDemoSeed } from './seeds';
 installDemoIdentity();
 installDemoFetch();
 
+/**
+ * ヘルプツアーの提案帯を止める。収録・撮影の画面にホームの提案帯が混ざらないようにするため、
+ * 保存済みの進行状態が無いときだけ「提案を止めた」状態を書く（明示的に用意された値は残す）。
+ */
+async function suppressGuideSuggestions(): Promise<void> {
+  const key = 'guide_progress';
+  const stored = await chrome.storage.local.get(key);
+  if (stored[key] === undefined) {
+    await chrome.storage.local.set({ [key]: { tours: {}, active: null, suppressSuggestions: true } });
+  }
+}
+
 async function boot(): Promise<void> {
+  await suppressGuideSuggestions();
   const search = window.location.search;
   const demoSeed = new URLSearchParams(search).get('demoSeed');
   // seed 投入はレイテンシ 0（既定）のまま一気に流す

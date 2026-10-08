@@ -242,6 +242,30 @@ startApp(document);
 
 実処理は `bootstrap.ts` 等に切り出して jsdom でテストできるようにする。これによりエントリ自体を coverage 対象から外さずに済ませる（§4.4 参照）。
 
+### 2.4 ヘルプツアー
+
+画面の実物に枠を付け、案内カードを出して手順を進める。外部ライブラリは使わず、暗幕も出さない。ヘッダーの「ツアー」ボタン（`#app-open-tours`）から始める。挙動の仕様は [ui-states.md](ui-states.md) の「操作ツアー」。
+
+| 場所 | 役割 |
+|---|---|
+| `src/lib/guide/tours/` | ツアーと手順の型（`types.ts`）、文言キーの生成（`keys.ts`）、ツアーの定義（`<名前>.ts`）、登録（`index.ts` の `GUIDE_TOURS`。登録順が一覧の表示順） |
+| `src/lib/guide/tourProgress.ts` | 進捗の型・解析・状態遷移・提案の判定（純関数）。保存キーは `guide_progress` |
+| `src/lib/guide/guideProgressStore.ts` | 進捗を `chrome.storage.local` へ保存・読込し、他タブの変更を購読する |
+| `src/app/guide/` | 画面側。`index.ts`（`initGuide`。`bootstrap.ts` の `startApp` が呼ぶ）、`tourRunner.ts`（カード・枠・進行）、`placement.ts`（カードの配置）、`tourEntry.ts`（一覧と表示言語の切り替え）、`suggestBand.ts`（提案帯）、`tourConditions.ts` / `guideEvents.ts`（条件とイベント）、`adapters/<名前>.ts`（ツアー固有の条件とイベント） |
+| `src/lib/i18n/` | ツアーの文面だけの日英辞書（`ja.ts` がキー集合の正典、`en.ts` は同じキー集合を型で強制）。`t(key)` で現在の言語の文言を引く。表示言語は `uiLanguageStore.ts` が `chrome.storage.local` の `uiLanguage` に保存する。アプリ本体の既存の文言は辞書に入れていない |
+| `src/app/styles/guide.css` | ツアーのスタイル。z-index は枠が 2001、カード・一覧・提案帯が 2002 |
+
+画面側の要素には `data-tour="<対象名>"` を付けて手順の `target` から指す。サイドバーのボタンは `nav-<ルート名>`（`bootstrap.ts` の `renderSidebar` が付ける）、サイドバー全体は `nav`、ヘッダーの「ツアー」ボタンは `tour-list`。
+
+ツアーを 1 本足す手順:
+
+1. `src/lib/guide/tours/types.ts` の `GuideTourId` に ID を足し、`src/lib/guide/tours/<名前>.ts` に定義を書く（ツアー固有のイベント・条件があればそのファイルで型を `export` する）。
+2. `tours/index.ts` の `GuideEventName` / `GuideCondition` に固有の型を足し、`GUIDE_TOURS` に登録する。
+3. 固有の条件・イベントがあれば `src/app/guide/adapters/<名前>.ts` に書き、`adapters/index.ts` と `tourConditions.ts` に合成する。
+4. 手順の対象になる要素に `data-tour` を付ける。実行時に組み立てる値は、`src/lib/guide/tours/tours.test.ts` の「定義と実装の照合」に規則を足す。
+5. `src/lib/i18n/ja.ts` と `en.ts` に文言を足す。見出しは `guide.tour<ID>Title`、説明は `guide.tour<ID>Desc`、手順の本文は `guide.tour<ID>Step<手順ID>`（`keys.ts` が生成する形）。
+6. テスト（定義の照合・単体・E2E）を足す。E2E の共通スタブは既定で提案帯を止めているので、提案帯を検証する spec だけが `guide_progress` を明示的に渡す。
+
 ## 3. ビルド構成
 
 ### 3.1 webpack エントリ
