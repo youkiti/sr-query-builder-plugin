@@ -50,6 +50,7 @@ video/
 │   ├── record.mjs       収録（シーン → video/build/scenes/<NN-slug>/）
 │   ├── tts.mjs           音声合成（原稿 → video/build/audio/<NN-slug>/）
 │   ├── assemble.mjs      合成（build/ 一式 → 最終動画・チャプター・字幕・説明文・サムネイル）
+│   ├── tour-videos.mjs   ヘルプツアーごとの短い解説動画（通し検査の画像 + 辞書の文面 → build/tours/）
 │   ├── setup.sh          環境セットアップ（冪等）
 │   └── lib/              パーサ・ffmpeg ラッパー等の共通ユーティリティ
 ├── tools/              ffmpeg / VOICEVOX の実体（git 管理外。setup.sh が展開）
@@ -604,6 +605,31 @@ CONTRACT の全文と ctx API の詳細は `video/scripts/record.mjs` の先頭�
 - ナレーション音声の合計がシーン映像より長くなった場合は、映像の最終フレームを複製して
   引き伸ばす（`tpad`）。逆に映像がナレーションより長い場合は、映像の自然な尺がそのまま使われる。
 
+## 操作ツアーの解説動画（`npm run video:tours`）
+
+ヘルプツアー 1 本につき、短い解説動画を 1 本作る。映像は通し検査（`npm run check:tours`、`tools/guide-tour-check/`）が手順ごとに残す画像、原稿は `src/lib/i18n/ja.ts` / `en.ts` のツアーのカード文言を使う。手書きのシーン・原稿から作る長編（`record` → `tts` → `assemble`）とは別の経路で、ツアーの画面や文言を変えたら再生成で追従する。
+
+```bash
+npm run build:demo
+npm run video:tours
+npm run video:tours -- expand-seeds
+npm run video:tours -- --skip-capture expand-seeds
+npm run video:tours -- --silent expand-seeds
+npm run video:tours -- --lang en --silent expand-seeds
+```
+
+- 既定は `getting-started`・`draft-and-optimize`・`expand-seeds`・`edit-and-export` の 4 本。複数 ID も指定できる。
+- 撮影にはデモビルド（`dist-demo/`）と、拡張を読み込める窓つきの Chromium（Playwright の Chromium。指定は `PLAYWRIGHT_CHROMIUM_PATH`）、動画生成には ffmpeg（指定は `FFMPEG_PATH`）が要る。**撮影中は本物のブラウザの窓が開く**。撮影時の画面は 1600x900 とし、各手順の画像は 1.5 秒待ってから撮る。
+- 日本語の読み上げには起動済みの **VOICEVOX** が必要。接続先・話者は `VOICEVOX_URL`（既定 `http://127.0.0.1:50021`）/ `VOICEVOX_SPEAKER` で設定する。接続できなければ失敗し、無音版には切り替えない。同じ文言・話者の音声はハッシュ付き WAV として保存し、再利用する。
+- **Windows でのエンジンの用意**: `video/scripts/setup.sh` は Linux 向けなので、Windows では VOICEVOX エンジンの Windows 版（`voicevox_engine-windows-cpu-<版>.7z.001` など。VOICEVOX ENGINE のリリースページから取得する）を 7-Zip で展開し、展開先の `run.exe` を起動しておく。起動すると `http://127.0.0.1:50021` で待ち受ける（`/version` が返れば準備完了）。
+- `--silent` は確認用で、公開する動画には使わない。日本語は毎秒 6 文字、英語は毎秒 15 文字、最短 3 秒で画面を表示し、無音の音声トラックを付ける。英語は日本語エンジンでは読ませないため、`--lang en` には `--silent` が必須。
+- 題の画面のあと、手順ごとの最初の 1 枚（連番が最小の画像）を、辞書（ツアーの定義）の手順の順に並べる。辞書にない補助画像・失敗画像は除き、画像のない手順は警告する。ツアーは、前提が足りず開けない画面の手順を飛ばしたり、すでにその画面にいる移動の手順を飛ばしたりするため、通し検査のシナリオは全手順が出るよう、必要なら同じツアーを 2 周して撮る。画面は 1920×1080 で、上に画像、下にツアー名・原文・手順番号を置く。読み上げ版の表示時間は音声長 + 前 0.5 秒・後 0.9 秒（フレーム境界に切り上げ）。
+- 英字・記号は `video/scripts/tour-videos.mjs` の `READINGS` で音声だけ読み替え、字幕と画面は原文を保つ。**ツアーの ja の文面に新しい英字・記号が入ったら `READINGS` に足すこと**（`video/scripts/tour-videos.test.mjs` が、読み替え後に英字・記号が残らないこと、文面に出てこない登録が残っていないことを確かめる）。長い語から適用する。
+- 撮影画像は `video/build/tours/<ID>/capture-ja/`・`capture-en/` に退避する。`--skip-capture` は指定言語の退避済み画像を優先する。退避前の既存画像は、日本語のみ `.tmp/guide-tour-check/` から利用できる（言語記録がなければ日本語として扱うため、日本語の画像であることを確認する）。英語は一度このコマンドで撮影してから再利用する。`check:tours` を別途再実行した後など、新しい画像に更新する際は `--skip-capture` を外す。
+- 完成品は `video/build/tours/<ID>.mp4`・`<ID>.srt`・`<ID>-chapters.txt`。英語は `-en`、無音版は `-silent` を ID の後ろに付ける（例: `expand-seeds-en-silent.mp4`）。字幕は各画面の開始から終了まで、章は `0:00 題` の形式。途中の PNG・MP4・WAV は `video/build/tours/<ID>/` に残す。
+- 読み上げつきでは、`<ID>-chapters.txt` の末尾に空行を挟んで `ナレーション: VOICEVOX:<話者名>` が自動で入る。VOICEVOX の話者の利用条件でクレジットの記載が必要なため、**説明欄にはこのファイルの中身をそのまま貼ること**。話者名はエンジンの話者情報から取得するので、`VOICEVOX_SPEAKER` を変えた場合は名前も自動で変わる。話者情報を取得できない・一致する話者がいない場合は動画生成前に停止する。`--silent` ではクレジットを付けない。
+- `check:tours` が落ちる変更は動画の撮り直しも要る合図。各段階のログでツアー・手順・コマンド・失敗出力を確認できる。**YouTube への公開は人の操作**で行う。
+
 ## 生成物一覧（`video/build/`, git 管理外）
 
 | パス | 内容 |
@@ -619,6 +645,7 @@ CONTRACT の全文と ctx API の詳細は `video/scripts/record.mjs` の先頭�
 | `subtitles-en.srt` | 英語字幕（YouTube の字幕トラックとしてアップロード） |
 | `description.txt` | YouTube 説明欄用テキスト（チャプター・リンク・クレジット込み） |
 | `thumbnail.png` | サムネイル（`video/assets/thumbnail.html` を撮影） |
+| `tours/<ID>[-en][-silent].mp4` / `.srt` / `-chapters.txt` | ヘルプツアーごとの短い解説動画・字幕・章（`tour-videos.mjs`。途中生成物は `tours/<ID>/`） |
 
 これらはすべて `video/build/` から再生成可能なため git 管理しない
 （`.gitignore` の `video/build/` / `video/tools/` を参照）。

@@ -43,6 +43,8 @@ npm run video:setup  # 操作解説動画の環境構築（ffmpeg / VOICEVOX / �
 npm run video:record # シーン収録（video/scenes/ → video/build/scenes/。Linux は xvfb 経由）
 npm run video:tts    # ナレーション音声合成（video/narration/ → video/build/audio/）
 npm run video:assemble # 合成（build/ 一式 → final.mp4 / chapters.txt / 字幕 / 説明文）
+npm run check:tours  # ヘルプツアーの通し検査（dist-demo を本物の Chromium に読み込み、全ツアーを 1 手順ずつ実行。先に build:demo。CI 外）
+npm run video:tours  # ヘルプツアーごとの短い解説動画（.tmp の通し検査画像 + 辞書の文面 → video/build/tours/。--silent で無音の確認版）
 ```
 
 **CI**: [.github/workflows/ci.yml](.github/workflows/ci.yml) を追加。`pull_request` と `master` への `push` で発火し、`verify` ジョブ（typecheck → lint → lint:css → test → test:tools → dev ビルド）と `e2e` ジョブ（Playwright Chromium 導入 → test:e2e）を並列実行する。本番ビルド（`npm run build`）は `.env` の `OAUTH_CLIENT_ID` を要求するため CI では回さない。E2E 失敗時は `test-results/`（trace・スクリーンショット）が artifact として 7 日間保持される。
