@@ -1,0 +1,178 @@
+{
+  "base": "v1s",
+  "candidate": "v1q27",
+  "subset": "fixed",
+  "reviews": 20,
+  "runsPerReview": 3,
+  "generatedAt": "2026-10-08T04:58:59.079Z",
+  "sameDay": true,
+  "measuredDates": {
+    "base": [
+      "2026-10-08"
+    ],
+    "candidate": [
+      "2026-10-08"
+    ]
+  },
+  "comparison": {
+    "reviews": 20,
+    "allCapturedRate": {
+      "base": 0.55,
+      "candidate": 0.4333333333333333,
+      "difference": -0.11666666666666675
+    },
+    "studyRecall": {
+      "base": 0.9054482661338369,
+      "candidate": 0.8122117668160881,
+      "difference": -0.0932364993177488,
+      "confidenceInterval": [
+        -0.15542755044459738,
+        -0.04254858797019451
+      ]
+    },
+    "missedStudies": {
+      "base": 203.66666666666669,
+      "candidate": 371.3333333333333,
+      "difference": 167.66666666666663
+    },
+    "failureRate": {
+      "base": 0,
+      "candidate": 0,
+      "difference": 0
+    },
+    "hitsRatio": {
+      "reviews": 8,
+      "ratio": 0.7309596154931006,
+      "confidenceInterval": [
+        0.5482067811419089,
+        0.9290897753956715
+      ]
+    },
+    "hitsRatioAll": {
+      "reviews": 20,
+      "median": 0.7147563486616335
+    },
+    "medianHits": {
+      "base": 1297.3333333333335,
+      "candidate": 717.6666666666667
+    },
+    "tiers": {
+      "cc-by": {
+        "reviews": 5,
+        "allCapturedRate": {
+          "base": 0.8,
+          "candidate": 0.7333333333333333,
+          "difference": -0.06666666666666676
+        },
+        "studyRecall": {
+          "base": 0.9694158075601376,
+          "candidate": 0.9340969835815196,
+          "difference": -0.035318823978617964,
+          "confidenceInterval": [
+            -0.09854906452844603,
+            0
+          ]
+        },
+        "missedStudies": {
+          "base": 59.333333333333336,
+          "candidate": 121.33333333333334,
+          "difference": 62.00000000000001
+        },
+        "failureRate": {
+          "base": 0,
+          "candidate": 0,
+          "difference": 0
+        },
+        "hitsRatio": {
+          "reviews": 3,
+          "ratio": 0.8983181218918002,
+          "confidenceInterval": [
+            0.7741935483870972,
+            0.9787568843430368
+          ]
+        },
+        "hitsRatioAll": {
+          "reviews": 5,
+          "median": 0.925601750547046
+        },
+        "medianHits": {
+          "base": 423.6666666666667,
+          "candidate": 414.6666666666667
+        }
+      },
+      "cc-by-nc": {
+        "reviews": 15,
+        "allCapturedRate": {
+          "base": 0.4666666666666666,
+          "candidate": 0.3333333333333333,
+          "difference": -0.1333333333333333
+        },
+        "studyRecall": {
+          "base": 0.8841257523250701,
+          "candidate": 0.7715833612276107,
+          "difference": -0.11254239109745934,
+          "confidenceInterval": [
+            -0.18962131734006732,
+            -0.0487092331288847
+          ]
+        },
+        "missedStudies": {
+          "base": 144.33333333333331,
+          "candidate": 250.00000000000003,
+          "difference": 105.66666666666671
+        },
+        "failureRate": {
+          "base": 0,
+          "candidate": 0,
+          "difference": 0
+        },
+        "hitsRatio": {
+          "reviews": 5,
+          "ratio": 0.6459089717905191,
+          "confidenceInterval": [
+            0.43007151047646486,
+            0.9371233981844406
+          ]
+        },
+        "hitsRatioAll": {
+          "reviews": 15,
+          "median": 0.533118332919871
+        },
+        "medianHits": {
+          "base": 3381,
+          "candidate": 719
+        }
+      }
+    },
+    "verdict": "reject",
+    "reasons": [
+      "全捕捉の割合が下がっています",
+      "平均再現率（研究単位）が下がっています",
+      "取りこぼし研究数の合計が増えています"
+    ],
+    "improvedBy": [
+      "hits"
+    ],
+    "conditions": {
+      "allCapturedNonDecreasing": false,
+      "recallNonDecreasing": false,
+      "missedStudiesNonIncreasing": false,
+      "recallAndMissedNonWorsening": false,
+      "failureNonIncreasing": true,
+      "recallImproved": false,
+      "hitsImproved": true,
+      "anyImprovement": true,
+      "tierDirections": {
+        "recall": {
+          "cc-by": "consistent",
+          "cc-by-nc": "consistent"
+        },
+        "hits": {
+          "cc-by": "consistent",
+          "cc-by-nc": "consistent"
+        }
+      },
+      "tierDirectionConsistent": true
+    }
+  }
+}
