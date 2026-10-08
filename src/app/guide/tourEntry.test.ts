@@ -90,3 +90,53 @@ test('一覧の末尾に表示言語の切り替えがあり、押すと言語�
     root.chrome.storage.local.set = saved;
   }
 });
+
+describe('一覧の更新でのフォーカス', () => {
+  function open(): { anchor: HTMLElement; entry: ReturnType<typeof createTourEntry> } {
+    jest.spyOn(storage, 'getGuideProgress').mockReturnValue(createEmptyGuideProgress());
+    document.body.innerHTML = '<button id="anchor">ツアー</button><button id="outside">外</button>';
+    const anchor = document.getElementById('anchor')!;
+    return { anchor, entry: createTourEntry(document, anchor, () => ({}), jest.fn()) };
+  }
+
+  test('「始める」にフォーカスがあれば、差し替え後の新しい「始める」へ戻る', () => {
+    const { anchor, entry } = open();
+    anchor.click();
+    const before = panel()!.querySelector<HTMLButtonElement>('[data-guide-action="start"]')!;
+    before.focus();
+    entry.refresh();
+    const after = panel()!.querySelector<HTMLButtonElement>('[data-guide-action="start"]')!;
+    expect(after).not.toBe(before);
+    expect(document.activeElement).toBe(after);
+    entry.destroy();
+  });
+
+  test('言語ボタンにフォーカスがあれば、同じ言語のボタンに残る', () => {
+    const { anchor, entry } = open();
+    anchor.click();
+    panel()!.querySelector<HTMLButtonElement>('[data-guide-language="en"]')!.focus();
+    entry.refresh();
+    expect(document.activeElement).toBe(panel()!.querySelector('[data-guide-language="en"]'));
+    entry.destroy();
+  });
+
+  test('フォーカスがパネルの外にあれば動かさない', () => {
+    const { anchor, entry } = open();
+    anchor.click();
+    const outside = document.getElementById('outside')!;
+    outside.focus();
+    entry.refresh();
+    expect(document.activeElement).toBe(outside);
+    entry.destroy();
+  });
+
+  test('一覧が閉じているときの更新はフォーカスを動かさない', () => {
+    const { entry } = open();
+    const outside = document.getElementById('outside')!;
+    outside.focus();
+    entry.refresh();
+    expect(document.activeElement).toBe(outside);
+    expect(panel()).toBeNull();
+    entry.destroy();
+  });
+});

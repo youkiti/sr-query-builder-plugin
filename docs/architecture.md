@@ -253,7 +253,7 @@ startApp(document);
 | `src/lib/guide/guideProgressStore.ts` | 進捗を `chrome.storage.local` へ保存・読込し、他タブの変更を購読する |
 | `src/app/guide/` | 画面側。`index.ts`（`initGuide`。`bootstrap.ts` の `startApp` が呼ぶ）、`tourRunner.ts`（カード・枠・進行）、`placement.ts`（カードの配置）、`tourEntry.ts`（一覧と表示言語の切り替え）、`suggestBand.ts`（提案帯）、`tourConditions.ts` / `guideEvents.ts`（条件とイベント）、`adapters/<名前>.ts`（ツアー固有の条件とイベント） |
 | `src/lib/i18n/` | ツアーの文面だけの日英辞書（`ja.ts` がキー集合の正典、`en.ts` は同じキー集合を型で強制）。`t(key)` で現在の言語の文言を引く。表示言語は `uiLanguageStore.ts` が `chrome.storage.local` の `uiLanguage` に保存する。アプリ本体の既存の文言は辞書に入れていない |
-| `src/app/styles/guide.css` | ツアーのスタイル。z-index は枠が 2001、カード・一覧・提案帯が 2002 |
+| `src/app/styles/guide.css` | ツアーのスタイル。z-index は枠が 2001、カード・提案帯が 2002、一覧が 2003（カードを入れ直しても一覧のボタンが隠れない） |
 
 画面側の要素には `data-tour="<対象名>"` を付けて手順の `target` から指す。サイドバーのボタンは `nav-<ルート名>`（`bootstrap.ts` の `renderSidebar` が付ける）、サイドバー全体は `nav`、ヘッダーの「ツアー」ボタンは `tour-list`。
 

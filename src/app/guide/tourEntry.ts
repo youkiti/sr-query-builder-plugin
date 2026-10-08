@@ -40,7 +40,19 @@ export function createTourEntry(doc: Document, anchor: HTMLElement, conditions: 
     }
     return group;
   }
+  function buttonKey(button: Element): string {
+    const { guideAction = '', guideTour = '', guideLanguage = '' } = (button as HTMLElement).dataset;
+    return `${guideAction}|${guideTour}|${guideLanguage}`;
+  }
+  /** 差し替えでフォーカス中のボタンが失われないよう、パネル内にフォーカスがあったときだけ同じボタンへ戻す。 */
   function refresh(): void {
+    const focused = panel.isConnected && panel.contains(doc.activeElement) ? buttonKey(doc.activeElement!) : null;
+    rebuild();
+    if (focused !== null) {
+      Array.from(panel.querySelectorAll<HTMLButtonElement>('button')).find(button => buttonKey(button) === focused)?.focus();
+    }
+  }
+  function rebuild(): void {
     panel.setAttribute('aria-label', t('guide.openTours'));
     panel.replaceChildren(guideButton(doc, 'close-list', t('guide.closeList'), () => { close(); anchor.focus(); }));
     for (const tour of availableTours(undefined, conditions())) {
@@ -57,7 +69,7 @@ export function createTourEntry(doc: Document, anchor: HTMLElement, conditions: 
   }
   function toggle(): void {
     if (panel.isConnected) { close(); return; }
-    refresh();
+    rebuild();
     doc.body.append(panel);
     anchor.setAttribute('aria-expanded', 'true');
     panel.querySelector<HTMLButtonElement>('button')!.focus();

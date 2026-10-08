@@ -20,6 +20,8 @@
 }
 
 .guide-tour-list {
+  /* カードの入れ直しで重なり順が逆転しないよう、一覧はカード・提案帯（2002）より前面に置く。 */
+  z-index: 2003;
   top: 72px;
   right: 12px;
   max-height: calc(100vh - 84px);
