@@ -48,6 +48,7 @@
     "p2f:original-diff": "tsx experiments/protocol-to-formula-loop/src/originalDiff.ts",
     "p2f:seed-select": "tsx experiments/protocol-to-formula-loop/src/seedSelect.ts",
     "p2f:start-seeded-runs": "tsx experiments/protocol-to-formula-loop/src/startSeededRuns.ts",
+    "p2f:spread": "tsx experiments/protocol-to-formula-loop/src/spread.ts",
     "p2f:compare": "tsx experiments/protocol-to-formula-loop/src/compare.ts",
     "p2f:leak-check": "tsx experiments/protocol-to-formula-loop/src/leakCheck.ts",
     "dev": "webpack --mode development",
