@@ -4,6 +4,50 @@ import { join } from 'node:path';
 import { procedureBody } from './leakCheck';
 import { loadConditions, validateConditions } from './conditions';
 
+test.each(['alibaba', 'z-ai', 'a.b-2', 'deepinfra/bf16'])('OpenRouter の提供元と固定モデルを受け付ける: %s', (provider) => {
+  const conditions = { ...loadConditions('v0'), runner: 'openrouter-api', model: 'qwen/qwen3.8-flash', provider };
+  expect(validateConditions(conditions, 'v0')).toEqual(conditions);
+});
+
+test.each([undefined, null, 1, '', 'Alibaba', '-alibaba', 'z_ai', 'a/b/c', 'a/', '/b', 'a/-b', 'a b'])('OpenRouter の提供元は必須で形式も検査する: %j', (provider) => {
+  expect(() => validateConditions({ ...loadConditions('v1q27'), provider }, 'v1q27')).toThrow('提供元の指定が不正です');
+});
+
+test.each([undefined, 'claude-subagent', 'gemini-api'])('他の実行役では提供元とスラッシュ付きモデルを拒否する: %j', (runner) => {
+  expect(() => validateConditions({ ...loadConditions('v0'), runner, provider: 'alibaba' }, 'v0')).toThrow('提供元の指定が不正です');
+  expect(() => validateConditions({ ...loadConditions('v0'), runner, model: 'qwen/qwen3.8-flash' }, 'v0')).toThrow('固定 ID');
+});
+
+test.each(['qwen3.8-flash', 'qwen/a/b', 'qwen/qwen3.8-flash:free', '~qwen/model', 'qwen/~model',
+  'qwen/latest', 'latest/model', 'qwen/model-latest-1', '/model', 'qwen/'])('OpenRouter の不正なモデルを拒否する: %s', (model) => {
+  expect(() => validateConditions({ ...loadConditions('v1q27'), model }, 'v1q27')).toThrow('固定 ID');
+});
+
+test.each([undefined, 'low', 'medium', 'high'])('OpenRouter の推論の強さを受け付ける: %j', (thinkingLevel) => {
+  const conditions = { ...loadConditions('v1q27'), thinkingLevel };
+  expect(validateConditions(conditions, 'v1q27')).toEqual(conditions);
+});
+
+test.each(['', 'HIGH', 'minimal', null, 1, true, {}, []])('OpenRouter の不正な推論の強さを拒否する: %j', (thinkingLevel) => {
+  expect(() => validateConditions({ ...loadConditions('v1q27'), thinkingLevel }, 'v1q27')).toThrow('推論の強さの指定が不正です');
+});
+
+test.each([['q27', 'qwen/qwen3.8-27b', 'deepinfra/bf16'], ['glm', 'z-ai/glm-5.3', 'z-ai']])(
+  'OpenRouter の単独版と束ねる版の条件と手順書のバイト列を保つ: %s', (suffix, model, provider) => {
+    const body = (version: string) => {
+      const bytes = readFileSync(join(__dirname, '../harness', version, 'procedure.md'));
+      return bytes.subarray(bytes.indexOf(Buffer.from('---')));
+    };
+    for (const prefix of ['v1', 'v4']) {
+      const version = `${prefix}${suffix}`;
+      const conditions = loadConditions(version);
+      expect(conditions).toMatchObject({ model, provider, runner: 'openrouter-api', thinkingLevel: 'high',
+        tools: ['check', 'count', 'mesh', 'submit'], maxMeasurements: 20, maxSubmissions: 4 });
+      expect(conditions.combine).toEqual(prefix === 'v1' ? undefined : { from: `v1${suffix}`, k: 3 });
+      expect(body(version)).toEqual(body('v1'));
+    }
+  });
+
 test.each([undefined, 1, 10000, Number.MAX_SAFE_INTEGER])('表の件数の目安を受け付ける: %j', (hitsLimit) => {
   expect(validateConditions({ ...loadConditions('v11'), hitsLimit }, 'v11').hitsLimit).toBe(hitsLimit);
 });

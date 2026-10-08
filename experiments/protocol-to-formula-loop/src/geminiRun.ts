@@ -11,7 +11,7 @@ import { createRun, readRun, runPath } from './runDir';
 import { parseRunOptions, targetReviews, type RunRuntime } from './startRuns';
 import { defaultRuntime, main as toolMain } from './tool';
 
-const SETTINGS = `## この作業の設定
+export const SETTINGS = `## この作業の設定
 
 - \`TOOL\` は関数 \`tool\` です。\`TOOL check <検索式ファイル>\` は \`tool(command="check")\`、\`TOOL count <検索式ファイル>\` は \`tool(command="count")\`、\`TOOL mesh "<語>"\` は \`tool(command="mesh", argument="<語>")\`、\`TOOL outside <検索式ファイル> <ブロックの ID>\` は \`tool(command="outside", argument="<ブロックの ID>")\`、\`TOOL submit <検索式ファイル>\` は \`tool(command="submit")\` と呼びます。
 - 検索式ファイル（formula.md）は、関数 \`write_formula(content="...")\` で書きます。書き直すたびに全文を渡してください。道具は、最後に書いた formula.md を読みます。
@@ -25,14 +25,14 @@ interface Agent {
   status: Status; model: string; modelVersion: string | null; turns: number; startedAt: string; finishedAt: string;
   promptTokens: number; outputTokens: number; thinkingLevel: string | null; thoughtsTokens: number; note?: string;
 }
-interface FunctionCall { name: string; args?: Record<string, unknown>; id?: string }
+export interface FunctionCall { name: string; args?: Record<string, unknown>; id?: string }
 interface Part { text?: string; thought?: boolean; functionCall?: FunctionCall }
 interface Content { role?: string; parts?: Part[] }
 interface Reply {
   candidates?: { content?: Content; finishReason?: string }[]; modelVersion?: string;
   usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number; thoughtsTokenCount?: number };
 }
-const safeText = (runtime: RunRuntime, text: string) => redact(text, [runtime.env.GEMINI_API_KEY ?? '', runtime.env.NCBI_API_KEY ?? '']);
+export const safeText = (runtime: RunRuntime, text: string) => redact(text, [runtime.env.GEMINI_API_KEY ?? '', runtime.env.OPENROUTER_API_KEY ?? '', runtime.env.NCBI_API_KEY ?? '']);
 const tokens = (value: unknown): number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : 0;
 
 export function parseOptions(args: string[]) {
@@ -72,7 +72,7 @@ async function generate(url: string, body: unknown, runtime: RunRuntime, failed:
   }
 }
 
-async function callFunction(call: FunctionCall, dir: string, commands: Command[], runtime: RunRuntime): Promise<string> {
+export async function callFunction(call: FunctionCall, dir: string, commands: Command[], runtime: RunRuntime): Promise<string> {
   const args = call.args ?? {};
   const file = resolve(dir, 'formula.md');
   if (call.name === 'write_formula') {
