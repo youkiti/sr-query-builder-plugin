@@ -1,4 +1,11 @@
 import {
+  BUILTIN_MODELS,
+  DEFAULT_MODEL,
+  MAX_CUSTOM_MODELS,
+  resolveProviderId as resolveProvider,
+  type CustomModel,
+} from '@/lib/llm/modelRegistry';
+import {
   detectGeminiTier as defaultDetectGeminiTier,
   FREE_TIER_MODEL_ID,
 } from '@/lib/llm/geminiTierDetector';
@@ -6,29 +13,13 @@ import type { RenderView } from './types';
 
 const KEY_GEMINI = 'apiKeys.gemini';
 const KEY_OPENROUTER = 'apiKeys.openrouter';
+const KEY_ANTHROPIC = 'apiKeys.anthropic';
 const KEY_NCBI = 'apiKeys.ncbi';
 const KEY_LLM_MODEL = 'llm.selectedModel';
 const KEY_CUSTOM_MODELS = 'llm.customModels';
 const KEY_PENDING = 'pendingOpenAppTab';
 /** 最後に検出した Gemini プラン（'paid' | 'free'）。Options 画面と共有する */
 const KEY_GEMINI_TIER = 'gemini.detectedTier';
-const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
-const MAX_CUSTOM_MODELS = 20;
-
-const BUILTIN_MODELS = [
-  { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash（無料枠対応）', provider: 'gemini' as const },
-  { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', provider: 'gemini' as const },
-  { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash Lite', provider: 'gemini' as const },
-  { id: 'qwen/qwen3-235b-a22b-2507', label: 'Qwen3 235B Instruct', provider: 'openrouter' as const },
-  { id: 'deepseek/deepseek-v4-flash', label: 'DeepSeek V4 Flash', provider: 'openrouter' as const },
-];
-
-type Provider = 'gemini' | 'openrouter';
-
-interface CustomModel {
-  id: string;
-  label?: string;
-}
 
 export interface SettingsViewCallbacks {
   readKey: (key: string) => Promise<string | undefined>;
@@ -39,12 +30,6 @@ export interface SettingsViewCallbacks {
    * 省略時は本物の detectGeminiTier を使う（テストではモックを注入する）。
    */
   detectGeminiTier?: (apiKey: string) => Promise<'paid' | 'free' | 'unknown' | 'unavailable'>;
-}
-
-function resolveProvider(modelId: string): Provider {
-  const found = BUILTIN_MODELS.find((m) => m.id === modelId);
-  if (found) return found.provider;
-  return modelId.includes('/') ? 'openrouter' : 'gemini';
 }
 
 function parseCustomModels(raw: string | undefined): CustomModel[] {
@@ -71,6 +56,13 @@ function populateModelSelect(
     if (m.id === selectedModelId) opt.selected = true;
     geminiGroup.appendChild(opt);
   });
+  customModels.filter((m) => resolveProvider(m.id) === 'gemini').forEach((m) => {
+    const opt = selectEl.ownerDocument.createElement('option');
+    opt.value = m.id;
+    opt.textContent = m.label ? `${m.label} (${m.id})` : m.id;
+    if (m.id === selectedModelId) opt.selected = true;
+    geminiGroup.appendChild(opt);
+  });
   selectEl.appendChild(geminiGroup);
 
   const orGroup = selectEl.ownerDocument.createElement('optgroup');
@@ -82,7 +74,7 @@ function populateModelSelect(
     if (m.id === selectedModelId) opt.selected = true;
     orGroup.appendChild(opt);
   });
-  customModels.forEach((m) => {
+  customModels.filter((m) => resolveProvider(m.id) === 'openrouter').forEach((m) => {
     const opt = selectEl.ownerDocument.createElement('option');
     opt.value = m.id;
     opt.textContent = m.label ? `${m.label} (${m.id})` : m.id;
@@ -90,6 +82,24 @@ function populateModelSelect(
     orGroup.appendChild(opt);
   });
   selectEl.appendChild(orGroup);
+
+  const anthropicGroup = selectEl.ownerDocument.createElement('optgroup');
+  anthropicGroup.label = 'Anthropic';
+  BUILTIN_MODELS.filter((m) => m.provider === 'anthropic').forEach((m) => {
+    const opt = selectEl.ownerDocument.createElement('option');
+    opt.value = m.id;
+    opt.textContent = m.label;
+    if (m.id === selectedModelId) opt.selected = true;
+    anthropicGroup.appendChild(opt);
+  });
+  customModels.filter((m) => resolveProvider(m.id) === 'anthropic').forEach((m) => {
+    const opt = selectEl.ownerDocument.createElement('option');
+    opt.value = m.id;
+    opt.textContent = m.label ? `${m.label} (${m.id})` : m.id;
+    if (m.id === selectedModelId) opt.selected = true;
+    anthropicGroup.appendChild(opt);
+  });
+  selectEl.appendChild(anthropicGroup);
 }
 
 function refreshProviderCards(doc: Document, selectedModelId: string): void {
@@ -100,6 +110,9 @@ function refreshProviderCards(doc: Document, selectedModelId: string): void {
   doc
     .getElementById('settings-openrouter-card')
     ?.classList.toggle('settings__provider-card--active', provider === 'openrouter');
+  doc
+    .getElementById('settings-anthropic-card')
+    ?.classList.toggle('settings__provider-card--active', provider === 'anthropic');
 }
 
 function updateTierBadge(
@@ -267,7 +280,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
     customHeading.textContent = 'カスタムモデルを追加（上限 20 件）';
     const customMuted = doc.createElement('p');
     customMuted.className = 'settings__muted';
-    customMuted.textContent = 'OpenRouter の任意のモデルIDを追加できます（例: meta-llama/llama-3.3-70b）。';
+    customMuted.textContent = 'OpenRouter の任意のモデルID（例: meta-llama/llama-3.3-70b）や Claude のモデルID（例: claude-opus-5-5）を追加できます。';
     const customFieldRow = doc.createElement('div');
     customFieldRow.className = 'settings__field-row';
     const customIdLabel = doc.createElement('label');
@@ -308,6 +321,41 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
     customForm.appendChild(customModelsList);
     orCard.appendChild(customForm);
     llmSection.appendChild(orCard);
+
+    // Anthropic カード
+    const anthropicCard = doc.createElement('div');
+    anthropicCard.className = 'settings__provider-card';
+    anthropicCard.id = 'settings-anthropic-card';
+    const anthropicTitle = doc.createElement('h4');
+    anthropicTitle.className = 'settings__provider-title';
+    const anthropicTitleText = doc.createElement('span');
+    anthropicTitleText.textContent = 'Anthropic';
+    const anthropicLink = doc.createElement('a');
+    anthropicLink.href = 'https://console.anthropic.com/settings/keys';
+    anthropicLink.target = '_blank';
+    anthropicLink.rel = 'noreferrer';
+    anthropicLink.className = 'settings__provider-link';
+    anthropicLink.textContent = 'APIキーを取得 ↗';
+    anthropicTitle.appendChild(anthropicTitleText);
+    anthropicTitle.appendChild(anthropicLink);
+    anthropicCard.appendChild(anthropicTitle);
+    const anthropicMuted = doc.createElement('p');
+    anthropicMuted.className = 'settings__muted';
+    anthropicMuted.textContent = 'Claude モデルを利用できます。';
+    anthropicCard.appendChild(anthropicMuted);
+    const anthropicLabel = doc.createElement('label');
+    anthropicLabel.className = 'settings__field';
+    const anthropicLabelText = doc.createElement('span');
+    anthropicLabelText.textContent = 'API キー';
+    const anthropicInput = doc.createElement('input');
+    anthropicInput.type = 'password';
+    anthropicInput.id = 'settings-anthropic-key';
+    anthropicInput.autocomplete = 'off';
+    anthropicLabel.appendChild(anthropicLabelText);
+    anthropicLabel.appendChild(anthropicInput);
+    anthropicCard.appendChild(anthropicLabel);
+
+    llmSection.appendChild(anthropicCard);
 
     // 使用モデル選択
     const modelLabel = doc.createElement('label');
@@ -361,11 +409,12 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
 
     // ---- 非同期初期化 ----
     void (async () => {
-      const [pending, gemini, openrouter, ncbi, rawModel, rawCustom, savedTier] =
+      const [pending, gemini, openrouter, anthropic, ncbi, rawModel, rawCustom, savedTier] =
         await Promise.all([
           callbacks.readKey(KEY_PENDING),
           callbacks.readKey(KEY_GEMINI),
           callbacks.readKey(KEY_OPENROUTER),
+          callbacks.readKey(KEY_ANTHROPIC),
           callbacks.readKey(KEY_NCBI),
           callbacks.readKey(KEY_LLM_MODEL),
           callbacks.readKey(KEY_CUSTOM_MODELS),
@@ -380,6 +429,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
 
       if (gemini) geminiInput.value = gemini;
       if (openrouter) orInput.value = openrouter;
+      if (anthropic) anthropicInput.value = anthropic;
       if (ncbi) ncbiInput.value = ncbi;
 
       const selectedModel = rawModel ?? DEFAULT_MODEL;
@@ -391,6 +441,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
       const parts: string[] = [];
       parts.push(gemini ? 'Google AI Studio: 保存済み' : 'Google AI Studio: 未設定');
       parts.push(openrouter ? 'OpenRouter: 保存済み' : 'OpenRouter: 未設定');
+      parts.push(anthropic ? 'Anthropic: 保存済み' : 'Anthropic: 未設定');
       parts.push(ncbi ? 'NCBI: 保存済み' : 'NCBI: 未設定（3 req/s 枠）');
       status.textContent = parts.join(' / ');
 
@@ -433,8 +484,8 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
       void (async () => {
         const id = customModelIdInput.value.trim();
         const label = customModelLabelInput.value.trim();
-        if (!id.includes('/')) {
-          status.textContent = 'モデルID は "provider/model-name" 形式で入力してください。';
+        if (!id.includes('/') && !id.startsWith('claude-')) {
+          status.textContent = 'モデルID は "provider/model-name" 形式、または "claude-" で始まる ID を入力してください。';
           return;
         }
         const raw = await callbacks.readKey(KEY_CUSTOM_MODELS);
@@ -462,12 +513,14 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
       void (async () => {
         const geminiVal = geminiInput.value;
         const orVal = orInput.value;
+        const anthropicVal = anthropicInput.value;
         const ncbiVal = ncbiInput.value;
         const selectedModel = modelSelect.value ?? DEFAULT_MODEL;
 
         await Promise.all([
           callbacks.writeKey(KEY_GEMINI, geminiVal),
           callbacks.writeKey(KEY_OPENROUTER, orVal),
+          callbacks.writeKey(KEY_ANTHROPIC, anthropicVal),
           callbacks.writeKey(KEY_NCBI, ncbiVal),
           callbacks.writeKey(KEY_LLM_MODEL, selectedModel),
         ]);
@@ -515,7 +568,8 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
         const pendingNow = await callbacks.readKey(KEY_PENDING);
         const currentModel = modelSelect.value ?? DEFAULT_MODEL;
         const provider = resolveProvider(currentModel);
-        const keyForProvider = provider === 'openrouter' ? orVal : geminiVal;
+        const keyForProvider = provider === 'openrouter' ? orVal
+          : provider === 'anthropic' ? anthropicVal : geminiVal;
 
         if (pendingNow === '1' && keyForProvider.trim() !== '') {
           await callbacks.removeKey(KEY_PENDING);

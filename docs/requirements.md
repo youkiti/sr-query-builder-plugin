@@ -56,8 +56,8 @@
 | ビルド | webpack |
 | 認証 | Google OAuth 2.0（`chrome.identity.getAuthToken`） |
 | ストレージ | Google Sheets（主 DB）/ Google Drive（LLM ログの実体）/ `chrome.storage`（API キー、ローカルキャッシュ） |
-| LLM（MVP） | Gemini API |
-| LLM（将来） | OpenAI / Anthropic Claude / OpenRouter |
+| LLM（実装済み） | Gemini API / OpenRouter API / Anthropic API |
+| LLM（将来） | OpenAI API への直接連携 |
 | docx パース | `fflate`（TS） |
 | Node.js | ≥ 18 |
 
@@ -517,15 +517,15 @@ RCT と observational / cohort 等のデザインが混在する場合は RCT �
 ### 4.9 LLM プロバイダ抽象化
 
 - `LLMProvider` インターフェースは **低レベル**（`chat(messages, options) -> response`）のみ。skill ごとのロジックは skill 側に持つ。これにより skill（何をしたいか）と provider（誰に頼むか）を直交させる
-- MVP は `GeminiProvider` のみ実装
-- 将来の OpenAI / Claude / OpenRouter 追加時に `Config.llm_provider` を切り替えるだけで全 skill がそのまま動く構造
+- `GeminiProvider` / `OpenRouterProvider` / `AnthropicProvider` を実装済み
+- Gemini / OpenRouter / Anthropic の選択モデルに応じたプロバイダで全 skill がそのまま動く構造。OpenAI への直接連携は将来対応
 - 全 skill は呼び出しごとに `LLMApiLog` + Drive にログを残す（`purpose` 列で skill を識別）
 
 ## 5. 機能要件（MVP 後 / P1 以降）
 
 - ブロック重複分析（`check_block_overlap.py` 移植）: 各 OR 要素の寄与度を可視化（ロジック層は移植済み・UI 未接続。[src/features/validation/freewordDelta.ts](src/features/validation/freewordDelta.ts)）
 - MeSH 用語単発チェック（`check_mesh.py` / `check_mesh_overlap.py`）（ロジック層は移植済み・UI 未接続。[src/features/validation/blockMeshTree.ts](src/features/validation/blockMeshTree.ts) + [src/lib/ncbi/meshRdf.ts](src/lib/ncbi/meshRdf.ts)）
-- 他 LLM プロバイダ（OpenAI / Claude / OpenRouter）
+- 他 LLM プロバイダ（OpenAI への直接連携）
 - 検索式バージョン間 diff ビュー
 - Ovid → PubMed 変換（P2）
 

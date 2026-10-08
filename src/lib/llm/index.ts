@@ -7,6 +7,7 @@ export {
   type LLMProvider,
   type ResponseFormat,
 } from './LLMProvider';
+export { AnthropicProvider, type AnthropicProviderOptions, type AnthropicEffort } from './AnthropicProvider';
 export { GeminiProvider, type GeminiProviderOptions } from './GeminiProvider';
 export { OpenRouterProvider, type OpenRouterProviderOptions } from './OpenRouterProvider';
 export {

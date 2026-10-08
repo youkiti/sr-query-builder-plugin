@@ -55,7 +55,7 @@ describe('startOptions', () => {
     );
     expect((doc.getElementById('ncbi-api-key') as HTMLInputElement).value).toBe('ncbi-existing');
     expect(doc.getElementById('options-status')?.textContent).toBe(
-      'Gemini: 保存済み / OpenRouter: 保存済み / NCBI: 保存済み'
+      'Gemini: 保存済み / OpenRouter: 保存済み / Anthropic: 未設定 / NCBI: 保存済み'
     );
   });
 
@@ -742,3 +742,54 @@ describe('createChromeOptionsDeps', () => {
     expect(tabsCreate).toHaveBeenCalledWith({ url: 'chrome-extension://x/app/app.html' });
   });
 });
+
+describe('Options の Anthropic 設定', () => {
+  test.each(['', 'saved-key'])('キーの保存・再表示と pending の解除: %s', async (key) => {
+    const doc = document.implementation.createHTMLDocument('Anthropic');
+    doc.body.innerHTML = `<p id="options-status"></p><div id="anthropic-card"></div>
+      <input id="anthropic-api-key" /><select id="llm-model-select"></select><button id="save-keys"></button>
+      <input id="custom-model-id" /><button id="add-custom-model"></button>`;
+    const store: Record<string, string> = { 'llm.selectedModel': 'claude-opus-5-5',
+      'apiKeys.anthropic': key, pendingOpenAppTab: '1' };
+    const deps: OptionsDeps = {
+      readKey: async (k) => store[k], writeKey: async (k, v) => { store[k] = v; },
+      removeKey: async (k) => { delete store[k]; }, openAppTab: jest.fn(),
+    };
+    await startOptions(doc, deps);
+    const input = doc.querySelector<HTMLInputElement>('#anthropic-api-key')!;
+    expect(input.value).toBe(key);
+    expect(doc.querySelector('#options-status')?.textContent).toContain(`Anthropic: ${key ? '保存済み' : '未設定'}`);
+    expect(doc.querySelector('#anthropic-card')?.classList.contains('options__provider-card--active')).toBe(true);
+    expect(doc.querySelectorAll('optgroup[label="Anthropic"] option')).toHaveLength(3);
+    const flush = async () => { for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0)); };
+    doc.querySelector<HTMLButtonElement>('#save-keys')!.click();
+    await flush();
+    expect(deps.openAppTab).toHaveBeenCalledTimes(key ? 1 : 0);
+    input.value = 'updated-key';
+    doc.querySelector<HTMLButtonElement>('#save-keys')!.click();
+    await flush();
+    expect(store['apiKeys.anthropic']).toBe('updated-key');
+    doc.querySelector<HTMLInputElement>('#custom-model-id')!.value = 'claude-custom';
+    doc.querySelector<HTMLButtonElement>('#add-custom-model')!.click();
+    await flush();
+    expect(doc.querySelector('optgroup[label="Anthropic"] option[value="claude-custom"]')).not.toBeNull();
+    await startOptions(doc, deps);
+    expect(input.value).toBe('updated-key');
+  });
+});
+
+test.each([['claude-foo', 'Anthropic', 'anthropic'], ['a/b', 'OpenRouter', 'openrouter'],
+  ['claude-org/foo', 'OpenRouter', 'openrouter'], ['gemini-x', 'Gemini', 'gemini']])(
+  'Options のカスタムモデル %s のグループとカードが一致する', async (id, group, provider) => {
+    const doc = document.implementation.createHTMLDocument('models');
+    doc.body.innerHTML = '<select id="llm-model-select"></select><div id="gemini-card"></div>'
+      + '<div id="openrouter-card"></div><div id="anthropic-card"></div>';
+    const store: Record<string, string> = { 'llm.customModels': JSON.stringify([{ id, label: 'custom' }]),
+      'llm.selectedModel': id };
+    await startOptions(doc, { readKey: async (k) => store[k], writeKey: jest.fn(),
+      removeKey: jest.fn(), openAppTab: jest.fn() });
+    expect(doc.querySelector<HTMLSelectElement>('select')!.value).toBe(id);
+    expect(doc.querySelector(`optgroup[label="${group}"] option[value="${id}"]`)).not.toBeNull();
+    expect(doc.querySelector(`#${provider}-card`)?.classList.contains('options__provider-card--active')).toBe(true);
+  }
+);

@@ -20,8 +20,8 @@ import {
 /**
  * LLM プロバイダ生成サービス。
  *
- * - chrome.storage から Gemini API キーを取得
- * - GeminiProvider を生成
+ * - chrome.storage から選択モデルのプロバイダの API キーを取得
+ * - Gemini / OpenRouter / Anthropic のプロバイダを生成
  * - withLogging で Drive へ prompt/response を保存し、LLMApiLog に行追記
  * - withRetry で 429/5xx の一時的エラーを指数バックオフで自動再試行
  *
@@ -31,6 +31,7 @@ import {
 
 export const STORAGE_KEY_GEMINI = 'apiKeys.gemini';
 export const STORAGE_KEY_OPENROUTER = 'apiKeys.openrouter';
+export const STORAGE_KEY_ANTHROPIC = 'apiKeys.anthropic';
 export const STORAGE_KEY_LLM_MODEL = 'llm.selectedModel';
 const LLM_LOG_HEADER = SHEET_HEADERS.LLMApiLog;
 
@@ -88,6 +89,12 @@ export async function getOpenRouterApiKey(store: ProjectStoreDeps): Promise<stri
   return value === undefined || value === '' ? null : value;
 }
 
+/** chrome.storage から Anthropic API キーを取得する（無ければ null）。 */
+export async function getAnthropicApiKey(store: ProjectStoreDeps): Promise<string | null> {
+  const value = await store.read<string>(STORAGE_KEY_ANTHROPIC);
+  return value === undefined || value === '' ? null : value;
+}
+
 /**
  * Drive ロガー付きの LLMProvider ファクトリを生成する。
  *
@@ -102,9 +109,12 @@ export async function buildLlmProviderFactory(deps: LlmFactoryDeps): Promise<Llm
   const apiKey =
     providerId === 'openrouter'
       ? await getOpenRouterApiKey(deps.store)
-      : await getGeminiApiKey(deps.store);
+      : providerId === 'anthropic'
+        ? await getAnthropicApiKey(deps.store)
+        : await getGeminiApiKey(deps.store);
   if (apiKey === null) {
-    const providerName = providerId === 'openrouter' ? 'OpenRouter' : 'Gemini';
+    const providerName = providerId === 'openrouter' ? 'OpenRouter'
+      : providerId === 'anthropic' ? 'Anthropic' : 'Gemini';
     throw new LlmApiKeyMissingError(providerName);
   }
   const baseProvider = createProvider({

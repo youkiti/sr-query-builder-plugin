@@ -44,3 +44,16 @@ describe('modelRegistry の定数', () => {
     expect(MAX_CUSTOM_MODELS).toBe(20);
   });
 });
+
+test.each([
+  ['claude-opus-5-5', 'anthropic'], ['claude-sonnet-5-5', 'anthropic'],
+  ['claude-haiku-5-5', 'anthropic'], ['claude-foo', 'anthropic'],
+  ['claude-org/foo', 'openrouter'], ['a/b', 'openrouter'], ['gemini-x', 'gemini'],
+])('モデル %s は %s に解決する', (model, provider) => {
+  expect(resolveProviderId(model)).toBe(provider);
+});
+
+test('Anthropic の組み込みモデルの表示名', () => {
+  expect(BUILTIN_MODELS.filter((m) => m.provider === 'anthropic').map((m) => m.label))
+    .toEqual(['Claude Opus 5.5', 'Claude Sonnet 5.5', 'Claude Haiku 5.5']);
+});

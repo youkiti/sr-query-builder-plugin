@@ -7,6 +7,8 @@ import {
   buildLlmProviderFactory,
   getGeminiApiKey,
   getOpenRouterApiKey,
+  getAnthropicApiKey,
+  STORAGE_KEY_ANTHROPIC,
 } from './llmProviderService';
 import type { ProjectStoreDeps } from '@/features/project';
 
@@ -228,4 +230,25 @@ test('optimize_query は送信ごとに hook と新しい signal を使い、ロ
   expect(signals[0]).not.toBe(signals[1]);
   expect(fetch.mock.calls.filter(([url]) => (url as string).includes('/values/LLMApiLog'))).toHaveLength(2);
   expect(fetch.mock.calls.filter(([url]) => (url as string).includes('/upload/drive/'))).toHaveLength(4);
+});
+
+test.each([undefined, '', 'test-anthropic-key'])('Anthropic キーの読み取りと不足エラー: %s', async (key) => {
+  const { store } = memoryStore({ [STORAGE_KEY_LLM_MODEL]: 'claude-opus-5-5', [STORAGE_KEY_ANTHROPIC]: key });
+  await expect(getAnthropicApiKey(store)).resolves.toBe(key || null);
+  const fetch = jest.fn().mockResolvedValue(jsonResponse({ content: [{ type: 'text', text: 'ok' }],
+    id: 'log', webViewLink: 'https://example.test/log', usage: { input_tokens: 2, output_tokens: 3 } }));
+  const result = buildLlmProviderFactory({ store, google: { fetch, getAccessToken: async () => 'token' },
+    llmLogFolderId: 'F', spreadsheetId: 'S' });
+  if (!key) {
+    await expect(result).rejects.toBeInstanceOf(LlmApiKeyMissingError);
+    await expect(result).rejects.toThrow('Anthropic');
+  } else {
+    const provider = (await result).forPurpose('extract_protocol');
+    expect(provider.providerId).toBe('anthropic');
+    expect(provider.model).toBe('claude-opus-5-5');
+    await expect(provider.chat([{ role: 'user', content: 'q' }])).resolves.toMatchObject({ text: 'ok' });
+    expect(fetch).toHaveBeenCalledWith('https://api.anthropic.com/v1/messages', expect.objectContaining({
+      headers: expect.objectContaining({ 'x-api-key': key }),
+    }));
+  }
 });

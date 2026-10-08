@@ -101,6 +101,11 @@ export async function demoFetch(input: RequestInfo | URL, init?: RequestInit): P
       '[demo] デモビルドは OpenRouter 経由の LLM プロバイダに対応していません。Options 画面で Gemini モデルを選択してください。'
     );
   }
+  if (url.startsWith('https://api.anthropic.com/v1/messages')) {
+    throw new Error(
+      '[demo] デモビルドは Anthropic 経由の LLM プロバイダに対応していません。Options 画面で Gemini モデルを選択してください。'
+    );
+  }
   if (url.startsWith('https://sheets.googleapis.com/v4/spreadsheets')) {
     await sleep(LATENCY_MS.google * latencyFactor);
     return handleSheetsRequest(url, method, bodyText);

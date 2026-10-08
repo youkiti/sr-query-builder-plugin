@@ -1,3 +1,4 @@
+import { AnthropicProvider } from './AnthropicProvider';
 import { GeminiProvider } from './GeminiProvider';
 import { OpenRouterProvider } from './OpenRouterProvider';
 import { createProvider } from './providerFactory';
@@ -58,4 +59,12 @@ describe('createProvider', () => {
     });
     expect(provider.model).toBe('gemini-2.5-flash');
   });
+});
+
+test.each([undefined, 'anthropic'] as const)('Anthropic の解決と effort の引き渡し: %s', async (provider) => {
+  const fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+  const result = createProvider({ provider, apiKey: 'test-key', model: 'claude-opus-5-5', fetch, effort: 'max' });
+  expect(result).toBeInstanceOf(AnthropicProvider);
+  await result.chat([]);
+  expect(JSON.parse(fetch.mock.calls[0][1].body).output_config).toEqual({ effort: 'max' });
 });
