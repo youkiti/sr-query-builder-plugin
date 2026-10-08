@@ -56,7 +56,7 @@ export function main(args: string[], runtime: RunRuntime = defaultRuntime()): nu
   if (relay && extra.size) throw new Error('中継の版には --env-file と --rps を渡せません');
   if (!relay && (!Number.isFinite(rps) || rps <= 0 || rps > 10)) throw new Error('--rps は 0 より大きく 10 以下にしてください');
   if (!relay && (!envFile || !isAbsolute(envFile) || !existsSync(envFile) || !statSync(envFile).isFile())) throw new Error('--env-file に存在するファイルの絶対パスが必要です');
-  if (conditions.seeds || conditions.runner === 'gemini-api') throw new Error('この版には使えません');
+  if (conditions.seeds || conditions.runner === 'gemini-api' || conditions.runner === 'openrouter-api') throw new Error('この版には使えません');
   const dirs = targetReviews(options, runtime).flatMap((review) => Array.from({ length: options.runsPerReview }, (_, i) => slash(runPath(options.root, options.version, review.pmcid, i + 1))));
   for (const dir of dirs) {
     if (!existsSync(dir) || !statSync(dir).isDirectory()) throw new Error('実行フォルダがありません');

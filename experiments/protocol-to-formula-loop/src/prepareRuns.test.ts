@@ -74,7 +74,7 @@ test.each(['relative.env', 'missing.env', 'directory'])('環境ファイルの�
   s.args[s.args.indexOf('--env-file') + 1] = file === 'relative.env' ? file : file === 'directory' ? s.root : join(s.root, file);
   expect(() => main(s.args, s.runtime)).toThrow('--env-file');
 });
-test.each([{ seeds: { label: 'seed', max: 1 } }, { runner: 'gemini-api' }])('未対応の版には何も作らない: %j', (override) => {
+test.each([{ seeds: { label: 'seed', max: 1 } }, { runner: 'gemini-api' }, { runner: 'openrouter-api', model: 'qwen/qwen3.8-flash', provider: 'alibaba' }])('未対応の版には何も作らない: %j', (override) => {
   const s = setup(false);
   writeJson(join(s.harnessDir, s.version, 'conditions.json'), { ...s.conditions, ...override });
   expect(() => main(s.args, s.runtime)).toThrow('この版には使えません');
