@@ -70,7 +70,7 @@ function bootstrap(values: number[], resamples: number, random: () => number): I
   return [percentile(0.025), percentile(0.975)];
 }
 
-export function comparePaired(base: ReviewRuns[], candidate: ReviewRuns[], options: { resamples?: number; seed?: number } = {}): Comparison {
+export function comparePaired(base: ReviewRuns[], candidate: ReviewRuns[], options: { resamples?: number; seed?: number; allowUnequalRuns?: boolean } = {}): Comparison {
   const { resamples = 10_000, seed = 20261005 } = options;
   if (!Number.isSafeInteger(resamples) || resamples <= 0 || !Number.isSafeInteger(seed)) throw new Error('再抽出回数と種が不正です');
   if (!base.length || !candidate.length) throw new Error('レビューが空です');
@@ -82,7 +82,7 @@ export function comparePaired(base: ReviewRuns[], candidate: ReviewRuns[], optio
   const pairs = [...base].sort((a, b) => a.pmcid < b.pmcid ? -1 : a.pmcid > b.pmcid ? 1 : 0).map((row) => {
     const other = candidateById.get(row.pmcid)!;
     if (row.tier !== other.tier) throw new Error('対応するレビューのティアが一致しません');
-    if (row.runs.length !== other.runs.length) throw new Error('対応するレビューの実行数が一致しません');
+    if (options.allowUnequalRuns !== true && row.runs.length !== other.runs.length) throw new Error('対応するレビューの実行数が一致しません');
     return { tier: row.tier, base: aggregateVersion([row]), candidate: aggregateVersion([other]) };
   });
   const summarize = (rows: typeof pairs): PairedSummary => {
@@ -165,13 +165,20 @@ export function parseCompareOptions(args: string[]) {
   const versions = new Map<string, string>();
   for (let i = 0; i < args.length; i++) {
     const key = args[i]!;
+    if (key === '--candidate-runs-per-review') {
+      const value = args[i + 1];
+      if (versions.has(key) || !value || value.startsWith('--') || !Number.isSafeInteger(Number(value)) || Number(value) <= 0) throw new Error('実行引数が不正です');
+      versions.set(key, args[++i]!); continue;
+    }
     if (key !== '--base' && key !== '--candidate' && key !== '--exclude-seeds') { remaining.push(key); continue; }
     if (versions.has(key) || !args[i + 1] || !/^[A-Za-z0-9_-]+$/.test(args[i + 1]!)) throw new Error('比較する版の指定が不正です');
     versions.set(key, args[++i]!);
   }
   if (!versions.has('--base') || !versions.has('--candidate') || remaining.includes('--version')) throw new Error('比較する版の指定が不足しているか不正です');
+  if (versions.has('--candidate-runs-per-review') && versions.has('--exclude-seeds')) throw new Error('実行引数が不正です');
   const base = versions.get('--base')!, candidate = versions.get('--candidate')!;
   return { ...parseRunOptions([...remaining, '--version', base], '--runs'), base, candidate,
+    ...(versions.has('--candidate-runs-per-review') ? { candidateRunsPerReview: Number(versions.get('--candidate-runs-per-review')) } : {}),
     ...(versions.has('--exclude-seeds') ? { excludeSeeds: versions.get('--exclude-seeds')! } : {}) };
 }
 
@@ -202,11 +209,11 @@ export function main(args: string[], runtime: RunRuntime = defaultRuntime()): nu
     });
   }
   let missing = 0, unscored = 0, invalidDates = 0;
-  const load = (version: string) => {
+  const load = (version: string, runsPerReview: number) => {
     const dates = new Set<string>();
     const rows: ReviewRuns[] = reviews.map((review) => {
       const runs: RunScore[] = [];
-      for (let i = 1; i <= options.runsPerReview; i++) {
+      for (let i = 1; i <= runsPerReview; i++) {
         const dir = runPath(options.root, version, review.pmcid, i);
         const path = join(dir, 'score.json');
         if (!existsSync(path)) { missing++; continue; }
@@ -232,15 +239,17 @@ export function main(args: string[], runtime: RunRuntime = defaultRuntime()): nu
     });
     return { rows, dates: [...dates].sort() };
   };
-  const base = load(options.base), candidate = load(options.candidate);
+  const base = load(options.base, options.runsPerReview), candidate = load(options.candidate, options.candidateRunsPerReview ?? options.runsPerReview);
   if (missing || unscored || invalidDates) throw new Error(`採点記録の不足 ${missing} 件、未採点 ${unscored} 件、測定日不正 ${invalidDates} 件`);
   const sameDay = base.dates.length === 1 && candidate.dates.length === 1 && base.dates[0] === candidate.dates[0];
   const seeded = (row: ReviewRuns) => !!selections.get(row.pmcid)?.pmids.length;
   const seededReviews = base.rows.filter(seeded).length;
   const report = { base: options.base, candidate: options.candidate, subset: options.subset, reviews: reviews.length,
     runsPerReview: options.runsPerReview, generatedAt: runtime.now().toISOString(), sameDay,
+    ...(options.candidateRunsPerReview !== undefined ? { candidateRunsPerReview: options.candidateRunsPerReview } : {}),
     measuredDates: { base: base.dates, candidate: candidate.dates },
-    comparison: options.excludeSeeds && !reviews.length ? null : comparePaired(base.rows, candidate.rows),
+    comparison: options.excludeSeeds && !reviews.length ? null : comparePaired(base.rows, candidate.rows,
+      options.candidateRunsPerReview !== undefined ? { allowUnequalRuns: true } : {}),
     ...(options.excludeSeeds ? { excludeSeeds: options.excludeSeeds, seededReviews, unseededReviews: reviews.length - seededReviews, droppedReviews,
       seededOnly: seededReviews ? comparePaired(base.rows.filter(seeded), candidate.rows.filter(seeded)) : null } : {}) };
   const reportsDir = runtime.reportsDir ?? resolve(__dirname, '../reports');

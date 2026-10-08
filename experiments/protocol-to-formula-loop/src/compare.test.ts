@@ -276,3 +276,45 @@ test.each([
 ])('不正な版の指定を拒否する（%j）', (...args) => {
   expect(() => parseCompareOptions(args)).toThrow('版');
 });
+
+test('実行数が異なる比較は明示時だけ許可し既存のレビュー内集計を保つ', () => {
+  const base = [row(1, [score(0, 10), score(0.5, 20), score(1, 90)])], candidate = [row(1, [score(1, 20)])];
+  expect(() => compare(base, candidate)).toThrow('実行数');
+  expect(() => comparePaired(base, candidate, { allowUnequalRuns: false })).toThrow('実行数');
+  const result = comparePaired(base, candidate, { allowUnequalRuns: true, resamples: 20 });
+  expect(result.studyRecall).toMatchObject({ base: 0.5, candidate: 1, difference: 0.5 });
+  expect(result.medianHits).toEqual({ base: 40, candidate: 20 });
+  expect(result.hitsRatioAll).toEqual({ reviews: 1, median: 0.5 });
+  expect(() => comparePaired(base, [row(1, [])], { allowUnequalRuns: true })).toThrow('run が空');
+  expect(() => comparePaired(base, [row(1, [score()], 'cc-by-nc')], { allowUnequalRuns: true })).toThrow('ティア');
+  expect(() => comparePaired(base, [row(2, [score()])], { allowUnequalRuns: true })).toThrow('集合');
+});
+
+test('候補の実行数を読み、省略時は既存の引数の形を保つ', () => {
+  const s = setup();
+  expect(parseCompareOptions(s.args)).toEqual({ root: dirname(dirname(dirname(dirname(s.path('v0'))))), version: 'v0', base: 'v0', candidate: 'v1', subset: 'smoke', runsPerReview: 2, openTestSet: false });
+  expect(parseCompareOptions([...s.args, '--candidate-runs-per-review', '1']).candidateRunsPerReview).toBe(1);
+});
+
+test.each([[], ['0'], ['-1'], ['1.5'], ['abc'], ['9007199254740992'], ['1', '--candidate-runs-per-review', '2'], ['1', '--exclude-seeds', 'seed']])('候補の実行数の不正な指定を拒否する（%j）', (...values) => {
+  const s = setup();
+  expect(() => parseCompareOptions([...s.args, '--candidate-runs-per-review', ...values])).toThrow('実行引数');
+});
+
+test('基準三実行と候補一実行を読み指定された実行数をレポートに残す', () => {
+  const s = setup(); s.save();
+  const dir = dirname(s.path('v0', 3));
+  writeJson(join(dir, 'submission.json'), { number: 1, query: 'a[tiab]' });
+  writeLines(join(dir, 'tool-log.jsonl'), [{ command: 'submit' }]);
+  writeJson(s.path('v0', 3), JSON.parse(readFileSync(s.path('v0'), 'utf8')));
+  writeFileSync(s.path('v1', 2), '読まない記録');
+  expect(main([...s.args.slice(0, -1), '3', '--candidate-runs-per-review', '1'], s.runtime)).toBe(0);
+  const report = JSON.parse(readFileSync(join(s.runtime.reportsDir!, 'compare-v0-v1-smoke.json'), 'utf8'));
+  expect(report).toMatchObject({ runsPerReview: 3, candidateRunsPerReview: 1, comparison: { reviews: 1 } });
+  expect(s.runtime.fetchImpl).not.toHaveBeenCalled();
+});
+
+test('候補の実行数を省略したレポートに項目を追加しない', () => {
+  const s = setup(); s.save(); main(s.args, s.runtime);
+  expect(JSON.parse(readFileSync(join(s.runtime.reportsDir!, 'compare-v0-v1-smoke.json'), 'utf8'))).not.toHaveProperty('candidateRunsPerReview');
+});
