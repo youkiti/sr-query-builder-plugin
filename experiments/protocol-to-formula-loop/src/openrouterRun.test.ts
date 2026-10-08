@@ -307,30 +307,83 @@ test('空文字列の引数は空オブジェクトとして扱い、引数不�
 });
 
 test.each([
-  ['関数なし', { id: '不正' }],
-  ['関数が文字列', { id: '不正', function: '不正' }],
-  ['関数が配列', { id: '不正', function: [] }],
-  ['関数が null', { id: '不正', function: null }],
-  ['名前が数値', { id: '不正', function: { name: 1, arguments: '{}' } }],
-  ['引数がオブジェクト', { id: '不正', function: { name: 'write_formula', arguments: { content: formula } } }],
-  ['ID なし', { function: { name: 'write_formula', arguments: JSON.stringify({ content: formula }) } }],
-  ['ID が数値', { id: 1, function: { name: 'write_formula', arguments: JSON.stringify({ content: formula }) } }],
-  ['要素が null', null],
-  ['要素が数値', 0],
-])('壊れた関数要素（%s）は引数不正として記録し続行する', async (_label, broken) => {
-  const s = setup([reply({ role: 'assistant', tool_calls: [broken] }), call('write_formula', { content: formula }), done()]);
+  ['関数なし', [{ id: '不正' }]],
+  ['関数が文字列', [{ id: '不正', function: '不正' }]],
+  ['関数が配列', [{ id: '不正', function: [] }]],
+  ['関数が null', [{ id: '不正', function: null }]],
+  ['名前が数値', [{ id: '不正', function: { name: 1, arguments: '{}' } }]],
+  ['引数がオブジェクト', [{ id: '不正', function: { name: 'write_formula', arguments: { content: formula } } }]],
+  ['ID なし', [{ function: { name: 'write_formula', arguments: JSON.stringify({ content: formula }) } }]],
+  ['ID が数値', [{ id: 1, function: { name: 'write_formula', arguments: JSON.stringify({ content: formula }) } }]],
+  ['ID が空文字列', [functionCall('write_formula', { content: formula }, '')]],
+  ['要素が null', [null]],
+  ['要素が数値', [0]],
+  ['二番目の ID なし', [functionCall('write_formula', { content: formula }),
+    { function: { name: 'write_formula', arguments: JSON.stringify({ content: formula }) } }]],
+  ['二番目が null', [functionCall('write_formula', { content: formula }), null]],
+])('壊れた関数要素（%s）は会話に戻さず引数不正として記録し続行する', async (_label, broken) => {
+  const s = setup([reply({ role: 'assistant', tool_calls: broken }), call('write_formula', { content: formula }), done()]);
   const spy = jest.spyOn(tool, 'main');
   const fetchImpl = s.runtime.fetchImpl;
   s.runtime.fetchImpl = async (input, init) => {
-    if (s.bodies.length === 1) expect(existsSync(join(s.dir, 'formula.md'))).toBe(false);
+    if (s.bodies.length === 1) {
+      expect(existsSync(join(s.dir, 'formula.md'))).toBe(false);
+      expect(spy).not.toHaveBeenCalled();
+    }
     return fetchImpl(input, init);
   };
   expect(await main(s.args, s.runtime)).toBe(0);
   expect(spy).not.toHaveBeenCalled();
-  expect(messages(s, 1).slice(-1)[0]).toEqual({ role: 'tool', tool_call_id: broken && typeof broken === 'object' && 'id' in broken && typeof broken.id === 'string' ? broken.id : '', content: badArgumentsText });
+  expect(messages(s, 1).filter((message) => message.role === 'assistant')).toHaveLength(0);
+  expect(messages(s, 1).filter((message) => message.role === 'tool')).toHaveLength(0);
+  expect(messages(s, 1).slice(-1)[0]).toEqual({ role: 'user',
+    content: '関数の呼び出しの形式が読めませんでした。関数を 1 つ、もう一度呼んでください。' });
   expect(s.agent()).toMatchObject({ status: 'completed', turns: 3, badArguments: 1 });
   expect(logs(s).map((row) => row.type)).toEqual(['bad_arguments', 'write_formula', 'text']);
+  expect(logs(s)[0]!.resultLength).toBe(0);
+  expect(logs(s)[0]!.arguments).toBeUndefined();
   expect(s.read('formula.md')).toBe(formula);
+  expect(messages(s, 2).filter((message) => message.role === 'tool')).toHaveLength(1);
+  for (let turn = 1; turn < s.bodies.length; turn++) {
+    let ids: unknown[] = [];
+    for (const message of messages(s, turn)) {
+      if (message.role === 'assistant') ids = (message.tool_calls as { id: unknown }[]).map((item) => item.id);
+      if (message.role === 'tool') {
+        expect(typeof message.tool_call_id).toBe('string');
+        expect(message.tool_call_id).not.toBe('');
+        expect(ids).toContain(message.tool_call_id);
+      }
+    }
+  }
+});
+
+test('形が壊れた関数呼び出しが 60 回続いてもエラーにせず打ち切る', async () => {
+  const s = setup(Array.from({ length: 60 }, () => reply({ role: 'assistant', tool_calls: [null] })));
+  const spy = jest.spyOn(tool, 'main');
+  expect(await main(s.args, s.runtime)).toBe(0);
+  expect(s.agent()).toMatchObject({ status: 'max_turns', turns: 60, badArguments: 60 });
+  expect(s.fetchImpl).toHaveBeenCalledTimes(60);
+  expect(s.runtime.sleep).not.toHaveBeenCalled();
+  expect(spy).not.toHaveBeenCalled();
+  expect(existsSync(join(s.dir, 'formula.md'))).toBe(false);
+  expect(logs(s)).toHaveLength(60);
+  for (const row of logs(s)) {
+    expect(row).toMatchObject({ type: 'bad_arguments', resultLength: 0 });
+    expect(row.arguments).toBeUndefined();
+  }
+});
+
+test('形が壊れた関数呼び出しを挟むと空応答の連続判定を数え直す', async () => {
+  const s = setup([reply({ role: 'assistant', content: '' }), reply({ role: 'assistant', tool_calls: [null] }),
+    reply({ role: 'assistant', content: '' }), done()]);
+  expect(await main(s.args, s.runtime)).toBe(0);
+  expect(s.agent()).toMatchObject({ status: 'completed', turns: 4, badArguments: 1, emptyReplies: 2 });
+  expect(s.agent().note).toBeUndefined();
+  expect(s.fetchImpl).toHaveBeenCalledTimes(4);
+  expect(messages(s, 3).slice(-1)[0]).toEqual({ role: 'user', content: '応答が空でした。続けてください。' });
+  expect(messages(s, 3).filter((message) => message.content === '応答が空でした。続けてください。')).toHaveLength(2);
+  expect(logs(s).map((row) => row.type)).toEqual(['empty', 'bad_arguments', 'empty', 'text']);
+  expect(s.read('final.txt')).toBe('提出した式の説明');
 });
 
 test.each([{ content: null }, { content: '' }, {}])('空応答 %j は会話に戻さず一度だけ続行を促す', async (content) => {

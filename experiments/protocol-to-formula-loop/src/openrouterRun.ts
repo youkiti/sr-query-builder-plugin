@@ -100,23 +100,30 @@ async function runAgent(dir: string, procedure: string, runtime: RunRuntime): Pr
       const call = calls[0];
       const fn = object(call) && object(call.function) ? call.function : undefined;
       const name = typeof fn?.name === 'string' ? fn.name : undefined;
+      const argumentsText = fn?.arguments;
+      const malformedCall = calls.some((item) => !object(item) || typeof item.id !== 'string' || item.id === '')
+        || name === undefined || typeof argumentsText !== 'string';
       const text = typeof message.content === 'string' ? message.content : '';
       let result = '', badArguments = false;
       let args: FunctionCall['args'] = {};
       try {
         if (calls.length) {
-          try {
-            if (!object(call) || typeof call.id !== 'string' || name === undefined || typeof fn?.arguments !== 'string') throw new Error('関数の形式が不正です');
-            const parsed: unknown = JSON.parse(fn.arguments === '' ? '{}' : fn.arguments);
-            if (!object(parsed)) throw new Error('引数はオブジェクトが必要です');
-            args = parsed;
-          } catch { badArguments = true; agent.badArguments++; }
-          result = badArguments ? 'エラー: 引数が読めませんでした。JSON のオブジェクトで指定してください'
-            : await callFunction({ name: name!, args }, dir, conditions.tools, runtime);
-          if (calls.length > 1) result += '\n複数の関数が指定されたため、最初の 1 つだけ実行しました。';
-          messages.push(message, ...calls.map((item, index) => ({ role: 'tool', tool_call_id: object(item) && typeof item.id === 'string' ? item.id : '',
-            content: safeText(runtime, index === 0 ? result : '未実行: 関数は 1 回の応答で 1 つずつ呼んでください。'),
-          })));
+          if (malformedCall) {
+            badArguments = true; agent.badArguments++;
+            messages.push({ role: 'user', content: '関数の呼び出しの形式が読めませんでした。関数を 1 つ、もう一度呼んでください。' });
+          } else {
+            try {
+              const parsed: unknown = JSON.parse(argumentsText === '' ? '{}' : argumentsText);
+              if (!object(parsed)) throw new Error('引数はオブジェクトが必要です');
+              args = parsed;
+            } catch { badArguments = true; agent.badArguments++; }
+            result = badArguments ? 'エラー: 引数が読めませんでした。JSON のオブジェクトで指定してください'
+              : await callFunction({ name: name!, args }, dir, conditions.tools, runtime);
+            if (calls.length > 1) result += '\n複数の関数が指定されたため、最初の 1 つだけ実行しました。';
+            messages.push(message, ...calls.map((item, index) => ({ role: 'tool', tool_call_id: (item as { id: string }).id,
+              content: safeText(runtime, index === 0 ? result : '未実行: 関数は 1 回の応答で 1 つずつ呼んでください。'),
+            })));
+          }
           empty = false;
         } else if (text) {
           writeFileSync(join(dir, 'final.txt'), safeText(runtime, text)); agent.status = 'completed';
@@ -128,7 +135,7 @@ async function runAgent(dir: string, procedure: string, runtime: RunRuntime): Pr
       } finally {
         log({ turn, attempt, at: runtime.now().toISOString(), type: badArguments ? 'bad_arguments'
           : call ? (['write_formula', 'tool'].includes(name!) ? name : 'unknown') : text ? 'text' : 'empty',
-          arguments: name === 'write_formula' ? { contentLength: typeof args.content === 'string' ? args.content.length : 0 }
+          arguments: malformedCall ? undefined : name === 'write_formula' ? { contentLength: typeof args.content === 'string' ? args.content.length : 0 }
             : name === 'tool' ? { command: conditions.tools.includes(args.command as Command) ? args.command : 'unknown',
               argumentLength: typeof args.argument === 'string' ? args.argument.length : 0 } : undefined,
           resultLength: result.length, usage });
