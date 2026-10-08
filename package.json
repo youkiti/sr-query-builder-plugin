@@ -41,6 +41,7 @@
     "p2f:prepare-runs": "tsx experiments/protocol-to-formula-loop/src/prepareRuns.ts",
     "p2f:gemini": "tsx experiments/protocol-to-formula-loop/src/geminiRun.ts",
     "p2f:openrouter": "tsx experiments/protocol-to-formula-loop/src/openrouterRun.ts",
+    "p2f:codex": "tsx experiments/protocol-to-formula-loop/src/codexRun.ts",
     "p2f:combine": "tsx experiments/protocol-to-formula-loop/src/combineRuns.ts",
     "p2f:combine-blocks": "tsx experiments/protocol-to-formula-loop/src/combineBlocks.ts",
     "p2f:sample-yield": "tsx experiments/protocol-to-formula-loop/src/sampleYield.ts",

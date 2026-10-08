@@ -10,6 +10,34 @@ import { defaultRuntime } from './tool';
 
 const slash = (path: string): string => resolve(path).replace(/\\/g, '/');
 const quoted = (text: string): string => '"' + text.replace(/[\\"$`]/g, '\\$&') + '"';
+
+function relayScript(dir: string): string {
+  return `#!/bin/bash
+cd ${quoted(dir)} || exit 9
+mkdir -p .relay || exit 3
+id="$(date +%s)-$$-$RANDOM"
+if [ "$#" -eq 0 ]; then
+  : > ".relay/$id.req.tmp"
+else
+  printf '%s\\0' "$@" > ".relay/$id.req.tmp"
+fi
+mv ".relay/$id.req.tmp" ".relay/$id.req" || exit 3
+for ((waited=0; waited<900; waited++)); do
+  [ -e ".relay/$id.done" ] && break
+  sleep 1
+done
+if [ ! -e ".relay/$id.done" ]; then
+  printf '%s\\n' '測定に失敗しました。回数は消費していません（中継の応答がありません）' >&2
+  exit 3
+fi
+cat ".relay/$id.out"
+cat ".relay/$id.err" >&2
+code=$(cat ".relay/$id.code")
+[[ "$code" =~ ^[0-9]+$ ]] || exit 3
+exit "$code"
+`;
+}
+
 export function main(args: string[], runtime: RunRuntime = defaultRuntime()): number {
   const rest: string[] = [];
   const extra = new Map<string, string>();
@@ -23,9 +51,11 @@ export function main(args: string[], runtime: RunRuntime = defaultRuntime()): nu
   const options = parseRunOptions(rest, '--runs');
   const envFile = extra.get('--env-file');
   const rps = Number(extra.get('--rps'));
-  if (!Number.isFinite(rps) || rps <= 0 || rps > 10) throw new Error('--rps は 0 より大きく 10 以下にしてください');
-  if (!envFile || !isAbsolute(envFile) || !existsSync(envFile) || !statSync(envFile).isFile()) throw new Error('--env-file に存在するファイルの絶対パスが必要です');
   const conditions = loadConditions(options.version, runtime.harnessDir);
+  const relay = conditions.runner === 'codex-relay';
+  if (relay && extra.size) throw new Error('中継の版には --env-file と --rps を渡せません');
+  if (!relay && (!Number.isFinite(rps) || rps <= 0 || rps > 10)) throw new Error('--rps は 0 より大きく 10 以下にしてください');
+  if (!relay && (!envFile || !isAbsolute(envFile) || !existsSync(envFile) || !statSync(envFile).isFile())) throw new Error('--env-file に存在するファイルの絶対パスが必要です');
   if (conditions.seeds || conditions.runner === 'gemini-api' || conditions.runner === 'openrouter-api') throw new Error('この版には使えません');
   const dirs = targetReviews(options, runtime).flatMap((review) => Array.from({ length: options.runsPerReview }, (_, i) => slash(runPath(options.root, options.version, review.pmcid, i + 1))));
   for (const dir of dirs) {
@@ -39,8 +69,8 @@ export function main(args: string[], runtime: RunRuntime = defaultRuntime()): nu
   const dotenv = `${root}/node_modules/dotenv/config`;
   const nodeOptions = `--require ${/\s/.test(dotenv) ? JSON.stringify(dotenv) : dotenv}`;
   for (const dir of dirs) {
-    const prompt = procedure + `\n\n## この作業の設定\n\n- 作業フォルダ: \`${dir}\`\n- \`TOOL\` は \`bash "${dir}/tool.sh"\` です。例: \`bash "${dir}/tool.sh" count ${file}\`、\`bash "${dir}/tool.sh" mesh "語"\`。\n- ${kind}は作業フォルダに \`${file}\` という名前で書いてください（道具には \`${file}\` とだけ渡せば届きます）。\n- 読んでよいファイルは、作業フォルダの \`protocol.md\` と、あなたが書いた \`${file}\` だけです。\`tool.sh\` の中身や、作業フォルダの外は読まないでください。\n- コマンドは 1 つずつ実行してください（同時に複数実行しない）。\`count\` は数分かかることがあります。タイムアウトを 10 分にして実行してください。\n- 道具が「測定に失敗しました」と返したら、少し待って同じコマンドをもう一度だけ試してください。\n`;
-    const script = `#!/bin/bash\n# 道具の入口。作業フォルダへ移動してから呼ぶので、ファイルは相対パスで指定できる。\ncd ${quoted(dir)} || exit 9\nDOTENV_CONFIG_PATH=${quoted(slash(envFile))} NODE_OPTIONS=${quoted(nodeOptions)} P2F_NCBI_RPS=${rps} PYTHONUTF8=1 \\\n  node ${quoted(`${root}/node_modules/tsx/dist/cli.mjs`)} ${quoted(`${root}/experiments/protocol-to-formula-loop/src/tool.ts`)} --run ${quoted(dir)} "$@"\n`;
+    const prompt = procedure + `\n\n## この作業の設定\n\n- 作業フォルダ: \`${dir}\`\n- \`TOOL\` は \`bash "${dir}/tool.sh"\` です。例: \`bash "${dir}/tool.sh" count ${file}\`、\`bash "${dir}/tool.sh" mesh "語"\`。\n- ${kind}は作業フォルダに \`${file}\` という名前で書いてください（道具には \`${file}\` とだけ渡せば届きます）。\n- 読んでよいファイルは、作業フォルダの \`protocol.md\` と、あなたが書いた \`${file}\` だけです。\`tool.sh\` の中身や、作業フォルダの外は読まないでください。\n- コマンドは 1 つずつ実行してください（同時に複数実行しない）。${relay ? '' : '`count` は数分かかることがあります。タイムアウトを 10 分にして実行してください。'}\n- 道具が「測定に失敗しました」と返したら、少し待って同じコマンドをもう一度だけ試してください。\n`;
+    const script = relay ? relayScript(dir) : `#!/bin/bash\n# 道具の入口。作業フォルダへ移動してから呼ぶので、ファイルは相対パスで指定できる。\ncd ${quoted(dir)} || exit 9\nDOTENV_CONFIG_PATH=${quoted(slash(envFile!))} NODE_OPTIONS=${quoted(nodeOptions)} P2F_NCBI_RPS=${rps} PYTHONUTF8=1 \\\n  node ${quoted(`${root}/node_modules/tsx/dist/cli.mjs`)} ${quoted(`${root}/experiments/protocol-to-formula-loop/src/tool.ts`)} --run ${quoted(dir)} "$@"\n`;
     writeFileSync(join(dir, 'prompt.txt'), prompt, { flag: 'wx' });
     writeFileSync(join(dir, 'tool.sh'), script, { flag: 'wx' });
   }

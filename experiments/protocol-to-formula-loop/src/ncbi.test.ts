@@ -1,6 +1,6 @@
 /** @jest-environment node */
 import { EutilsError } from '../../../src/lib/ncbi/eutils';
-import { isQueryRejection, createDeps, ncbiRate, timeoutFetch } from './ncbi';
+import { isQueryRejection, isWildcardLimitRejection, createDeps, ncbiRate, timeoutFetch } from './ncbi';
 
 test('渡されたレート制限をそのまま使う', async () => {
   const rateLimiter = { acquire: jest.fn(async () => undefined) };
@@ -56,6 +56,20 @@ test('式への恒久的な拒否だけを区別する', () => {
   for (const error of [new EutilsError('esearch の件数が欠落しています', 200, true),
     new EutilsError('esearch の PMID 一覧が不正です', 200, true), new EutilsError('HTTP 503', 503),
     new DOMException('制限時間超過', 'TimeoutError'), new Error('一般の例外'), null]) expect(isQueryRejection(error)).toBe(false);
+});
+test('ワイルドカード上限の拒否を型・接頭辞・文言で区別する', () => {
+  const message = 'esearch エラー: Search Backend failed: An error occurred while processing request. Status: 500. Source: /api/search/?r= Details: Search is temporarily unavailable. Please try again later. Details: Cannot search because the number of wildcards (*) exceeds 256.';
+  expect(isWildcardLimitRejection(new EutilsError(message, 503))).toBe(true);
+  expect(isWildcardLimitRejection(new EutilsError(message, 503, true))).toBe(true);
+  expect(isWildcardLimitRejection(new EutilsError(message.replace('exceeds 256.', 'exceeds 512.'), 503))).toBe(true);
+  expect(isWildcardLimitRejection(new EutilsError(message.toUpperCase(), 503))).toBe(true);
+  for (const error of [
+    new EutilsError('esearch エラー: Search Backend failed: Search is temporarily unavailable. Please try again later.', 503),
+    new Error(message),
+    new EutilsError('HTTP 500: number of wildcards (*) exceeds 256', 500),
+    new EutilsError('esearch エラー: number of wildcards (*) exceeds many', 503),
+    null, message, new DOMException(message),
+  ]) expect(isWildcardLimitRejection(error)).toBe(false);
 });
 test('連続取得の2回目以降は補充を待つ', async () => {
   let now = 0;

@@ -85,3 +85,31 @@ test('重複した追加引数を拒否し、既存の引数検査も保つ', ()
   expect(() => main([...s.args, '--rps', '2'], s.runtime)).toThrow('実行引数');
   expect(() => main([...s.args, '--unknown', 'x'], s.runtime)).toThrow('実行引数');
 });
+
+test('中継版は設定末尾をそろえ、秘密や実行環境を含まない LF の入口を作る', () => {
+  const s = setup(false);
+  writeJson(join(s.harnessDir, s.version, 'conditions.json'), { ...s.conditions, runner: 'codex-relay' });
+  expect(main(s.args.slice(0, -4), s.runtime)).toBe(0);
+  for (const dir of s.dirs) {
+    const path = dir.replace(/\\/g, '/');
+    const expected = `## この作業の設定
+
+- 作業フォルダ: \`${path}\`
+- \`TOOL\` は \`bash "${path}/tool.sh"\` です。例: \`bash "${path}/tool.sh" count formula.md\`、\`bash "${path}/tool.sh" mesh "語"\`。
+- 検索式ファイルは作業フォルダに \`formula.md\` という名前で書いてください（道具には \`formula.md\` とだけ渡せば届きます）。
+- 読んでよいファイルは、作業フォルダの \`protocol.md\` と、あなたが書いた \`formula.md\` だけです。\`tool.sh\` の中身や、作業フォルダの外は読まないでください。
+- コマンドは 1 つずつ実行してください（同時に複数実行しない）。
+- 道具が「測定に失敗しました」と返したら、少し待って同じコマンドをもう一度だけ試してください。
+`;
+    const prompt = readFileSync(join(dir, 'prompt.txt'), 'utf8');
+    expect(prompt.endsWith(expected)).toBe(true);
+    expect(prompt).not.toContain('タイムアウト');
+    expect(readFileSync(join(dir, 'tool.sh'), 'utf8')).not.toMatch(/\r|\.env|node|tsx|NCBI_API_KEY/);
+  }
+});
+
+test.each(['--env-file', '--rps'])('中継版の準備には %s を渡せない', (flag) => {
+  const s = setup(false);
+  writeJson(join(s.harnessDir, s.version, 'conditions.json'), { ...s.conditions, runner: 'codex-relay' });
+  expect(() => main([...s.args.slice(0, -4), flag, s.args[s.args.indexOf(flag) + 1]!], s.runtime)).toThrow('渡せません');
+});
