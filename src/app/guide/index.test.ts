@@ -242,3 +242,111 @@ test.each(['store', 'hashchange', 'progress', 'observer', 'pagehide'] as const)(
     jest.restoreAllMocks();
   }
 });
+
+describe('見出しの「?」とメニュー', () => {
+  const content = (): HTMLElement => document.getElementById('app-content')!;
+  const helpButtons = (): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElement>('#app-content .guide-help-btn'));
+  const nextFrame = (): Promise<void> => new Promise(resolve => { window.requestAnimationFrame(() => resolve()); });
+  const render = (html: string): void => { content().innerHTML = html; };
+
+  test('初期化時に最初の h2 へ 1 つ差し、見出しの文字は変えない', async () => {
+    render('<h2>ホーム</h2><h2>二つ目</h2>');
+    await run();
+    expect(helpButtons()).toHaveLength(1);
+    expect(helpButtons()[0]!.dataset.help).toBe('home');
+    expect(content().querySelector('h2')!.firstChild!.textContent).toBe('ホーム');
+    expect(content().querySelector('h2')!.querySelector('button')).toBeNull();
+    expect(content().querySelector('h2')!.nextElementSibling).toBe(helpButtons()[0]);
+    expect(helpButtons()[0]!.textContent).toBe('');
+  });
+
+  test('描き直しのたびに 1 つだけ入り、二重にならない', async () => {
+    await run();
+    expect(helpButtons()).toHaveLength(0);
+    render('<h2>ホーム</h2>');
+    await nextFrame();
+    expect(helpButtons()).toHaveLength(1);
+    render('<section><div><h2>入れ子の見出し</h2></div></section>');
+    await nextFrame();
+    await nextFrame();
+    expect(helpButtons()).toHaveLength(1);
+    expect(content().querySelectorAll('.guide-help-btn')).toHaveLength(1);
+  });
+
+  test('見出しの中だけが描き直されても取りこぼさない', async () => {
+    render('<section><h2>見出し</h2></section>');
+    await run();
+    content().querySelector('h2')!.replaceChildren('新しい見出し');
+    await nextFrame();
+    expect(helpButtons()).toHaveLength(1);
+  });
+
+  test('ルートが変わるとトピックが替わる', async () => {
+    render('<h2>見出し</h2>');
+    await run();
+    go('#/blocks');
+    expect(helpButtons()).toHaveLength(1);
+    expect(helpButtons()[0]!.dataset.help).toBe('blocks');
+  });
+
+  test('h2 が無い画面では何もしない', async () => {
+    render('<h3>見出し</h3>');
+    await run();
+    go('#/seeds');
+    expect(helpButtons()).toHaveLength(0);
+  });
+
+  test('data-help-topic を持つ要素にも入る', async () => {
+    render('<h2>見出し</h2><div id="extra" data-help-topic="expand"></div>');
+    await run();
+    expect((document.getElementById('extra')!.nextElementSibling as HTMLElement).dataset.help).toBe('expand');
+    expect(document.getElementById('extra')!.querySelector('.guide-help-btn')).toBeNull();
+    expect(helpButtons()).toHaveLength(2);
+  });
+
+  test('「ここからツアーを始める」でツアーが始まる', async () => {
+    render('<h2>ホーム</h2>');
+    await run();
+    helpButtons()[0]!.click();
+    document.querySelector<HTMLButtonElement>('.guide-help-menu [data-help-action="start-tour"]')!.click();
+    expect(runner.start).toHaveBeenCalledWith('getting-started');
+    expect(document.querySelector('.guide-help-menu')).toBeNull();
+  });
+
+  test('「ツアーの一覧」で一覧が開き、メニューは閉じる', async () => {
+    render('<h2>ホーム</h2>');
+    await run();
+    helpButtons()[0]!.click();
+    document.querySelector<HTMLButtonElement>('.guide-help-menu [data-help-action="tour-list"]')!.click();
+    expect(document.getElementById('guide-tour-list')).not.toBeNull();
+    expect(document.querySelector('.guide-help-menu')).toBeNull();
+    expect(document.getElementById('app-open-tours')!.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  test('言語切替で「?」の aria-label とメニューの文面が替わり、画面が描き直されてもメニューは開いたまま新しい「?」へ付け替わる', async () => {
+    render('<h2>ホーム</h2>');
+    await run();
+    helpButtons()[0]!.click();
+    setUiLanguage('en');
+    expect(helpButtons()[0]!.getAttribute('aria-label')).toBe('Help: Home');
+    expect(document.querySelector('.guide-help-menu a')!.textContent).toBe('Read the help');
+    render('<h2>別の画面</h2>');
+    await nextFrame();
+    expect(document.querySelector('.guide-help-menu')).not.toBeNull();
+    expect(helpButtons()[0]!.getAttribute('aria-expanded')).toBe('true');
+    go('#/seeds');
+    await nextFrame();
+    expect(document.querySelector('.guide-help-menu')).toBeNull();
+  });
+
+  test('後始末でメニューと保留中の描画を片づける', async () => {
+    render('<h2>ホーム</h2>');
+    const dispose = await run();
+    helpButtons()[0]!.click();
+    render('<h2>次</h2>');
+    dispose();
+    await nextFrame();
+    expect(document.querySelector('.guide-help-menu')).toBeNull();
+    expect(helpButtons()).toHaveLength(0);
+  });
+});

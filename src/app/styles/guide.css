@@ -76,3 +76,78 @@
   color: var(--color-primary);
   background: var(--color-bg);
 }
+
+/* 見出しの横の「?」。見出しの子にすると読み上げ名に aria-label が混ざるので、見出しの直後の兄弟に置き、
+   直後に「?」を持つ要素だけ inline-block にして同じ行へ並べる。白地に --color-primary は 5.4:1 */
+#app-content :has(+ .guide-help-btn):not([hidden]) {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.guide-help-btn {
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
+  margin-left: 8px;
+  padding: 0;
+  font-size: 14px;
+  font-weight: bold;
+  line-height: 1;
+  vertical-align: middle;
+  color: #fff;
+  background: var(--color-primary);
+  border: 1px solid var(--color-primary);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.guide-help-btn::before {
+  content: '?';
+}
+
+.guide-help-btn:focus-visible,
+.guide-help-menu a:focus-visible,
+.guide-help-menu button:focus-visible {
+  outline: 3px solid var(--color-text);
+  outline-offset: 2px;
+}
+
+.guide-help-menu {
+  /* ツアーの一覧（2003）と同じ前面に置き、カード（2002）に隠れないようにする。 */
+  z-index: 2003;
+  position: fixed;
+  box-sizing: border-box;
+  width: min(280px, calc(100vw - 24px));
+  padding: 8px;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--guide-radius, 8px);
+  box-shadow: 0 2px 8px var(--color-border);
+}
+
+.guide-help-menu a,
+.guide-help-menu button {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  padding: 8px 12px;
+  font: inherit;
+  text-align: left;
+  color: var(--color-primary);
+  text-decoration: none;
+  background: var(--color-bg);
+  border: 0;
+  border-radius: var(--guide-radius, 8px);
+  cursor: pointer;
+}
+
+.guide-help-menu a {
+  text-decoration: underline;
+}
+
+.guide-help-menu a:hover,
+.guide-help-menu button:hover {
+  background: var(--color-bg-muted);
+}

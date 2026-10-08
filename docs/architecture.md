@@ -266,6 +266,28 @@ startApp(document);
 5. `src/lib/i18n/ja.ts` と `en.ts` に文言を足す。見出しは `guide.tour<ID>Title`、説明は `guide.tour<ID>Desc`、手順の本文は `guide.tour<ID>Step<手順ID>`（`keys.ts` が生成する形）。
 6. テスト（定義の照合・単体・E2E）を足す。E2E の共通スタブは既定で提案帯を止めているので、提案帯を検証する spec だけが `guide_progress` を明示的に渡す。
 
+#### 「?」メニューと対応表
+
+各画面の見出し（`#app-content` の最初の `h2`）の直後の兄弟として「?」ボタン（`.guide-help-btn`）を置き（見出しの子にすると読み上げ名にボタンの `aria-label` が混ざるため。見た目は CSS の `:has(+ .guide-help-btn)` で同じ行に並べる）、押すと小さなメニュー（`.guide-help-menu`）が開く。項目は「ヘルプを読む」（公開ヘルプの該当節を新しいタブで開く）、「この機能の動画を見る」（解説動画の該当章を開始秒つきで新しいタブで開く）、「ここからツアーを始める」（トピックにツアーがあり、今使えるときだけ）、「ツアーの一覧」。
+
+| 場所 | 役割 |
+|---|---|
+| `src/lib/guide/topics.ts` | 対応表（UI・通信に依存しない）。`GUIDE_TOPICS`（トピック ID → ヘルプの節 id・動画の章・ツアー ID）、`GUIDE_VIDEO_ID`、`GUIDE_VIDEO_CHAPTERS`（章の開始秒）、`buildHelpUrl` / `buildVideoUrl` / `topicForRoute`。トピック ID は今はルート名と 1:1 |
+| `src/app/guide/helpButton.ts` | 「?」ボタンの生成と、表示領域への差し込み（`mountHelpButtons`）。文字は CSS の `::before` で出し、ボタンの `textContent` は空。`data-help-topic="<トピック ID>"` を持つ要素の直後にも同じ「?」が入る。直前の兄弟が自分の対象でなくなったボタンは外す |
+| `src/app/guide/helpMenu.ts` | メニューの開閉・位置・フォーカス・言語切替での作り直し。画面の描き直しで「?」が作り直されたら、同じトピックの「?」へ付け替える（`refresh`）。`document` への委譲クリックで「?」を拾う |
+| `src/app/guide/index.ts` | `initGuide` が表示領域の描き直しを監視し（1 フレームに 1 回へ間引く）、「?」を差し直す。既存のビューは変えない |
+
+照合は `src/lib/guide/topics.test.ts` が行う（`helpAnchor` が `hosted/help.html` の `id` に実在すること、動画 ID が `hosted/help.html` と `hosted/index.html` の埋め込みと一致すること、`hosted/help.html` の `?t=<秒>` が章の開始秒のどれかであること）。
+
+トピックを 1 つ足す手順:
+
+1. `GuideTopicId`（今は `RouteName`）に当たるルートを足し、`GUIDE_TOPICS` と `GUIDE_TOPIC_TITLE_KEYS` に行を足す。`helpAnchor` は `hosted/help.html` の `<section id>` に合わせる。
+2. `src/lib/i18n/ja.ts` と `en.ts` に `guide.topic<Pascal>` を足す（ja は `ROUTE_LABELS` と同じ語）。
+3. 対応する動画の章があれば `GUIDE_VIDEO_CHAPTERS` に足して `video` に指定する。ツアーがあれば `tourId` に指定する。
+4. `hosted/help.html` に節と、章の動画リンク（`?t=<秒>`）を足す。
+
+動画を上げ直したら、`GUIDE_VIDEO_ID`・`GUIDE_VIDEO_CHAPTERS` の開始秒・`hosted/index.html` と `hosted/help.html` の埋め込み・`hosted/help.html` の章リンクを一緒に直す。
+
 ## 3. ビルド構成
 
 ### 3.1 webpack エントリ
