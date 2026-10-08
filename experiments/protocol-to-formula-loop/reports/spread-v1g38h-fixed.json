@@ -1,0 +1,50 @@
+{
+  "version": "v1g38h",
+  "subset": "fixed",
+  "reviews": 20,
+  "runsPerReview": 3,
+  "generatedAt": "2026-10-08T03:52:36.853Z",
+  "runs": 60,
+  "failedRuns": 1,
+  "recallSpread": {
+    "reviews": 20,
+    "mean": 0.039885784218220206,
+    "median": 0,
+    "max": 0.43997755273829625
+  },
+  "hitsRange": {
+    "reviews": 20,
+    "median": 1.1895258032027927,
+    "max": 32.657266811279825,
+    "over10x": 1
+  },
+  "largeHits": {
+    "runs": 59,
+    "over10000": 8,
+    "over50000": 0
+  },
+  "toolUse": {
+    "measurements": {
+      "median": 20,
+      "max": 20,
+      "zero": 0
+    },
+    "submissions": {
+      "median": 1,
+      "max": 1
+    }
+  },
+  "byCutoff": {
+    "splitDate": "2019-07-04",
+    "older": {
+      "reviews": 10,
+      "allCapturedRate": 0.5,
+      "studyRecall": 0.8806165886447321
+    },
+    "newer": {
+      "reviews": 10,
+      "allCapturedRate": 0.4333333333333333,
+      "studyRecall": 0.8416739126661806
+    }
+  }
+}
