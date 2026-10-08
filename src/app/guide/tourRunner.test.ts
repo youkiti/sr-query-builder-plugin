@@ -4,10 +4,10 @@ import { createEmptyGuideProgress, startTour, setActiveStep, type GuideProgress,
 import * as storage from '../../lib/guide/guideProgressStore';
 import { setUiLanguage, t } from '../../lib/i18n';
 
-import { useTestTours } from '../../../tests/fixtures/guideTours';
+import { SAMPLE_TOUR, useTestTours } from '../../../tests/fixtures/guideTours';
 
 jest.mock('../../lib/guide/guideProgressStore');
-const original = GUIDE_TOURS['getting-started'];
+const original = SAMPLE_TOUR;
 useTestTours([original]);
 let progress: GuideProgress;
 let listeners: Set<() => void>;
@@ -188,6 +188,21 @@ test('画面内への移動を確認した後は利用者のスクロールを�
   window.dispatchEvent(new Event('scroll'));
   jest.advanceTimersByTime(4000);
   expect(node.scrollIntoView).toHaveBeenCalledTimes(1);
+});
+
+test('「次へ」で進む手順は、対象が画面に無い待機の間も「次へ」が押せて、先へ進める', () => {
+  custom();
+  runner.start('getting-started');
+  expect(card()?.dataset.guideStep).toBe('a');
+  expect(card()?.dataset.guideWaiting).toBe('true');
+  expect(action('next').hidden).toBe(false);
+  expect(action('next').disabled).toBe(false);
+  action('next').click();
+  expect(card()?.dataset.guideStep).toBe('b');
+  // 「押さずに次へ」の手順も、待機の間に押せる
+  expect(card()?.dataset.guideWaiting).toBe('true');
+  expect(action('skip').hidden).toBe(false);
+  expect(action('skip').disabled).toBe(false);
 });
 
 test('遅延処理は対象を探し直し、対象が消えた場合は次の機会を待つ', () => {

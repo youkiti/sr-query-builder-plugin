@@ -6,7 +6,8 @@
 
 import { test, expect, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { injectAppStub } from './fixtures/appStub';
+import { PROJECT_FIXTURE, injectAppStub, scenarioWithProject } from './fixtures/appStub';
+import { FULL_BLOCKS_DRAFT, FULL_PROTOCOL_DRAFT } from './fixtures/scenarios/fullState';
 
 const HOME_URL = '/app/app.html#/home';
 const SUGGESTING = { tours: {}, active: null, suppressSuggestions: false };
@@ -40,32 +41,47 @@ test.describe('app-guide (ヘルプツアー)', () => {
     await expect(band).toHaveCount(0);
   });
 
-  test('ヘッダーの「ツアー」から一覧を開き、3 手順を最後まで進めて終え、一覧に「済み」が付く', async ({ page }) => {
-    await injectAppStub(page);
+  test('ヘッダーの「ツアー」から一覧を開き、ブロック承認までの流れを最後まで進めて終え、一覧に「済み」が付く', async ({ page }) => {
+    // プロトコルは解析済み（未保存）の状態。プロトコル入力の 2 手順は飛ばされ、8 手順になる。
+    await injectAppStub(page, scenarioWithProject({
+      preloadedState: { project: PROJECT_FIXTURE, protocolDraft: FULL_PROTOCOL_DRAFT, blocksDraft: FULL_BLOCKS_DRAFT },
+    }));
     await page.goto(HOME_URL);
     await waitForGuide(page);
     await page.locator('#app-open-tours').click();
     await page.locator('#guide-tour-list [data-guide-action="start"]').click();
     const card = page.locator('.guide-tour-card');
     await expect(card).toHaveAttribute('data-guide-step', 'welcome');
-    await expect(card).toContainText('1 / 3');
+    await expect(card).toContainText('1 / 8');
     await card.locator('[data-guide-action="next"]').click();
-    await expect(card).toHaveAttribute('data-guide-step', 'open-protocol');
-    await expect(card).toContainText('2 / 3');
+    await expect(card).toHaveAttribute('data-guide-step', 'open-blocks');
+    await expect(card).toContainText('2 / 8');
     // 枠は対象の位置に追従する（再配置は一拍遅れることがある）。同じ瞬間に両方を読み、重なるまで待つ
     await expect
       .poll(() =>
         page.evaluate(() => {
-          const target = document.querySelector('[data-tour="nav-protocol"]')!.getBoundingClientRect();
+          const target = document.querySelector('[data-tour="nav-blocks"]')!.getBoundingClientRect();
           const frame = document.querySelector('.guide-tour-highlight')!.getBoundingClientRect();
           return [Math.round(frame.x - target.x), Math.round(frame.y - target.y)];
         }),
       )
       .toEqual([-3, -3]);
-    await page.locator('[data-tour="nav-protocol"]').click();
-    await expect(page).toHaveURL(/#\/protocol$/);
+    await page.locator('[data-tour="nav-blocks"]').click();
+    await expect(page).toHaveURL(/#\/blocks$/);
+    await expect(card).toHaveAttribute('data-guide-step', 'review-blocks');
+    await expect(card).toContainText('3 / 8');
+    await card.locator('[data-guide-action="next"]').click();
+    await expect(card).toHaveAttribute('data-guide-step', 'review-filters');
+    await card.locator('[data-guide-action="next"]').click();
+    await expect(card).toHaveAttribute('data-guide-step', 'approve-blocks');
+    await card.locator('[data-guide-action="skip"]').click();
+    await expect(card).toHaveAttribute('data-guide-step', 'open-seeds');
+    await page.locator('[data-tour="nav-seeds"]').click();
+    await expect(page).toHaveURL(/#\/seeds$/);
+    await expect(card).toHaveAttribute('data-guide-step', 'add-seeds');
+    await card.locator('[data-guide-action="next"]').click();
     await expect(card).toHaveAttribute('data-guide-step', 'finish');
-    await expect(card).toContainText('3 / 3');
+    await expect(card).toContainText('8 / 8');
     await card.locator('[data-guide-action="next"]').click();
     await expect(card).toHaveCount(0);
     await page.locator('#app-open-tours').click();

@@ -9,5 +9,8 @@ export function computeGuideConditions(state: AppState): Record<GuideCondition, 
     // #/blocks を開ける条件（guards.ts）と同じ判定に揃える。
     'has-protocol': evaluateGuards(state).blocks.enabled,
     ...GUIDE_ADAPTERS.gettingStarted.conditions(state),
+    ...GUIDE_ADAPTERS.draftAndOptimize.conditions(state),
+    ...GUIDE_ADAPTERS.expandSeeds.conditions(state),
+    ...GUIDE_ADAPTERS.editAndExport.conditions(state),
   };
 }

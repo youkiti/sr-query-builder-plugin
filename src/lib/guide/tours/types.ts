@@ -1,4 +1,4 @@
-export type GuideTourId = 'getting-started';
+export type GuideTourId = 'getting-started' | 'draft-and-optimize' | 'expand-seeds' | 'edit-and-export';
 
 /**
  * 全ツアーで共通のイベント名。画面側が投げる、ツアーを進める（または提案する）ためのイベント。

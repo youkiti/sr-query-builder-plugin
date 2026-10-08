@@ -64,6 +64,7 @@ export function createExportView(callbacks: ExportViewCallbacks = {}): RenderVie
     const exportBtn = doc.createElement('button');
     exportBtn.type = 'button';
     exportBtn.textContent = '4 DB へ変換して保存';
+    exportBtn.dataset.tour = 'export-run';
     actions.appendChild(exportBtn);
     container.appendChild(actions);
 
@@ -96,11 +97,14 @@ export function createExportView(callbacks: ExportViewCallbacks = {}): RenderVie
       status.textContent = '変換中…';
       errorBox.textContent = '';
       results.innerHTML = '';
+      delete results.dataset['tour'];
       callbacks
         .onExport()
         .then((result) => {
           status.textContent = '変換が完了しました。';
           renderResults(doc, results, result);
+          // ツアーが枠を付ける対象。変換結果があるときだけ付け、空の領域には付けない。
+          results.dataset.tour = 'export-results';
         })
         .catch((err: unknown) => {
           errorBox.textContent = formatError(err);

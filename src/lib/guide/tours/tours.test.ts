@@ -6,7 +6,7 @@ import { en } from '../../i18n/en';
 import { ROUTES } from '../../../app/router';
 
 test('登録 ID と定義は一致し、未知の値や継承プロパティを ID と認めない', () => {
-  expect(GUIDE_TOUR_IDS).toEqual(['getting-started']);
+  expect(GUIDE_TOUR_IDS).toEqual(['getting-started', 'draft-and-optimize', 'expand-seeds', 'edit-and-export']);
   for (const [id, tour] of Object.entries(GUIDE_TOURS)) {
     expect(tour.id).toBe(id);
     expect(isGuideTourId(id)).toBe(true);
@@ -72,6 +72,18 @@ test('全ツアーの全手順の対象が、画面側の data-tour に実在す
       if (step.route !== undefined) expect(ROUTES.map(route => `#/${route}`)).toContain(step.route);
     }
   }
+});
+
+test('data-tour の付け方は、照合が拾える書き方（dataset.tour = \'…\' / data-tour="…" / nav- の組み立て）だけ', () => {
+  const sources = sourceFiles(join(process.cwd(), 'src/app')).map(file => file.text).join('\n');
+  const residue = sources
+    .replace(/dataset\.tour = '[^']+'/g, '')
+    .replace(/data-tour="[^"]+"/g, '')
+    .replace('btn.dataset.tour = `nav-${route}`', '');
+  // 拾えない書き方（setAttribute・動的な値の代入）は、照合に規則を足すまで使わない。
+  expect(residue).not.toMatch(/setAttribute\(\s*['"]data-tour['"]/);
+  expect(residue).not.toMatch(/dataset\.tour\s*=/);
+  expect(residue).not.toMatch(/dataset\[\s*['"]tour['"]\s*\]\s*=/);
 });
 
 test('ja と en の辞書は同じキー集合を持つ', () => {

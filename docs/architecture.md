@@ -257,6 +257,8 @@ startApp(document);
 
 画面側の要素には `data-tour="<対象名>"` を付けて手順の `target` から指す。サイドバーのボタンは `nav-<ルート名>`（`bootstrap.ts` の `renderSidebar` が付ける）、サイドバー全体は `nav`、ヘッダーの「ツアー」ボタンは `tour-list`。
 
+現在のツアーは 4 本（`getting-started` / `draft-and-optimize` / `expand-seeds` / `edit-and-export`）。条件とイベントはツアーごとのアダプタ（`adapters/<名前>.ts`）が持つ。`#/draft`・`#/expand`・`#/edit` を開けないときに使えないツアーは `unavailableIf` で、`src/app/guards.ts` の `evaluateGuards` と同じ判定の条件（`draft-unavailable` など）を指す。状態が満たされたことを知らせるイベント（プロトコルの解析、ブロックの承認、自動調整の開始、境界事例の取得、編集の保存）は、ビューやサービスから投げず、アダプタの `risingEvents` が `AppState` の立ち上がりから作る。画面ごとの手順の一覧は [ui-states.md](ui-states.md) の「ツアーの一覧」。
+
 ツアーを 1 本足す手順:
 
 1. `src/lib/guide/tours/types.ts` の `GuideTourId` に ID を足し、`src/lib/guide/tours/<名前>.ts` に定義を書く（ツアー固有のイベント・条件があればそのファイルで型を `export` する）。

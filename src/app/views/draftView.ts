@@ -137,6 +137,7 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
     if (existing) {
       secondaryActions = doc.createElement('div');
       secondaryActions.className = 'draft__actions draft__actions--secondary';
+      secondaryActions.dataset.tour = 'draft-secondary-actions';
       const label = doc.createElement('span');
       label.className = 'draft__actions-label';
       label.textContent = 'その他の操作:';
@@ -1019,6 +1020,7 @@ function renderQueryOptimization(container: HTMLElement, state: AppState, callba
   }
   const section = doc.createElement('section');
   section.className = 'optimization__setup';
+  section.dataset.tour = 'draft-optimize-settings';
   const heading = doc.createElement('h3');
   heading.textContent = '検索式の自動調整';
   section.appendChild(heading);
@@ -1077,6 +1079,7 @@ function renderQueryOptimization(container: HTMLElement, state: AppState, callba
   const start = doc.createElement('button');
   start.type = 'submit';
   start.className = 'optimization__start';
+  start.dataset.tour = 'draft-optimize-start';
   start.textContent = '検索式を作成・自動調整する';
   start.disabled = running || run?.save?.status === 'saving' || setup?.status !== 'ready' || state.draftRun?.status === 'running' || !state.protocolDraftPersisted;
   form.addEventListener('submit', (event) => {
