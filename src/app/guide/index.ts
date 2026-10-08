@@ -11,6 +11,9 @@ import type { AppStore } from '../store';
 import { computeGuideConditions } from './tourConditions';
 import { createTourRunner } from './tourRunner';
 import { createTourEntry } from './tourEntry';
+import { mountHelpButtons } from './helpButton';
+import { createHelpMenu } from './helpMenu';
+import { topicForRoute } from '../../lib/guide/topics';
 import { createSuggestBand } from './suggestBand';
 import { guideEvents, routeGuideEvent } from './guideEvents';
 
@@ -45,6 +48,18 @@ export async function initGuide({ store, win, doc, navigate, getHash, onHashChan
     refresh();
   }
   const entry = createTourEntry(doc, anchor, conditions, start);
+  const helpMenu = createHelpMenu(doc, { conditions, start, openTourList: () => entry.open() });
+  /** 見出しの横の「?」を現在のルートのトピックで差し直し、開いているメニューを追従させる。 */
+  function mountHelp(): void {
+    mountHelpButtons(content!, topicForRoute(parseRoute(getHash())));
+    helpMenu.refresh();
+  }
+  let helpFrame: number | null = null;
+  /** 描き直しのたびに走らせず、1 フレームに 1 回へ間引く（自分の挿入では結果が変わらず、再び回らない）。 */
+  function scheduleMountHelp(): void {
+    if (helpFrame !== null) return;
+    helpFrame = win.requestAnimationFrame(() => { helpFrame = null; mountHelp(); });
+  }
   function labelAnchor(): void {
     anchor!.textContent = t('guide.openTours');
   }
@@ -69,8 +84,9 @@ export async function initGuide({ store, win, doc, navigate, getHash, onHashChan
     const next = currentRoute();
     if (route !== next) { route = next; runner.handleEvent(routeGuideEvent(next)); }
     refresh();
+    mountHelp();
   };
-  const cleanups: Array<() => void> = [() => runner.stop(), () => entry.destroy()];
+  const cleanups: Array<() => void> = [() => runner.stop(), () => entry.destroy(), () => helpMenu.destroy()];
   const dispose = (): void => {
     cleanups.splice(0).reverse().forEach(cleanup => cleanup());
   };
@@ -85,6 +101,7 @@ export async function initGuide({ store, win, doc, navigate, getHash, onHashChan
       runner.resume();
       entry.refresh();
       refresh();
+      helpMenu.refresh(false);
     });
     cleanups.push(unsubscribeStore);
     cleanups.push(onHashChange(onRoute));
@@ -96,15 +113,19 @@ export async function initGuide({ store, win, doc, navigate, getHash, onHashChan
       doc.getElementById('guide-suggest-band')?.remove();
       refresh();
       entry.refresh();
+      mountHelp();
     }));
-    // ルートの再描画で表示領域の中身が差し替わっても、提案帯を戻す。自分の挿入では重複させない。
-    const observer = new MutationObserver(refresh);
+    // ルートの再描画で表示領域の中身が差し替わっても、提案帯と「?」を戻す。自分の挿入では重複させない。
+    // ビューが入れ子の要素ごと見出しを描き直しても取りこぼさないよう、子孫まで見る。
+    const observer = new MutationObserver(() => { refresh(); scheduleMountHelp(); });
     cleanups.push(() => observer.disconnect());
-    observer.observe(content, { childList: true });
+    cleanups.push(() => { if (helpFrame !== null) win.cancelAnimationFrame(helpFrame); helpFrame = null; });
+    observer.observe(content, { childList: true, subtree: true });
     win.addEventListener('pagehide', dispose);
     cleanups.push(() => win.removeEventListener('pagehide', dispose));
     runner.resume();
     refresh();
+    mountHelp();
   } catch (error) {
     dispose();
     throw error;

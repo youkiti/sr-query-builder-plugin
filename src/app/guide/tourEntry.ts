@@ -85,7 +85,9 @@ export function createTourEntry(doc: Document, anchor: HTMLElement, conditions: 
   anchor.addEventListener('click', toggle);
   doc.addEventListener('click', outside);
   doc.addEventListener('keydown', escape);
-  return { refresh, destroy(): void {
+  return { refresh, open(): void {
+    if (!panel.isConnected) toggle();
+  }, destroy(): void {
     close();
     anchor.removeEventListener('click', toggle);
     doc.removeEventListener('click', outside);
