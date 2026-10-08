@@ -74,6 +74,30 @@ test('検査で拒否した提出も数え、以前に受け付けた提出は�
   expect(tools.state.submissions).toBe(2);
 });
 
+test.each(['AND', 'NOT'])('括弧なしの OR と %s の混在は検査不合格にする', async (operator) => {
+  const { tools, deps } = setup();
+  tools.writeFormula(md(`#1 aspirin[tiab] OR drug[tiab] ${operator} therapy[tiab]\n#2 disease[tiab]`));
+  const reason = '#1: 括弧の無い AND / NOT と OR が同じ並びに混ざっています。括弧で囲んでください\n[終了コード 1]';
+  expect(await tools.call('check')).toBe(reason);
+  expect(tools.state).toMatchObject({ measurements: 0, submissions: 0 });
+  expect(await tools.call('submit')).toBe(reason);
+  expect(tools.state).toMatchObject({ measurements: 0, submissions: 1, acceptedSubmission: null });
+  expect(deps.count).not.toHaveBeenCalled();
+});
+
+test.each(['(aspirin[tiab] OR drug[tiab]) AND therapy[tiab]', 'aspirin[tiab] OR drug[tiab]'])(
+  '括弧で分けた行と OR だけの行を受け付け、フィルタと結合式は混在検査しない: %s', async (expression) => {
+    const { deps } = setup();
+    const tools = createAgentDraftTools({ ...approval,
+      filters: [{ blockId: 'RCTfilter', expression: 'trial[pt] OR randomized[tiab] NOT (animals[mh] NOT (humans[mh] AND animals[mh]))' }],
+      combinationExpression: '#1 OR #2 AND #RCTfilter',
+    }, deps);
+    tools.writeFormula(md(`#1 ${expression}\n#2 disease[tiab]`));
+    expect(await tools.call('check')).toBe('検査に通りました\n[終了コード 0]');
+    expect(await tools.call('submit')).toBe('提出 1 を受け付けました\n[終了コード 0]');
+  }
+);
+
 test('測定上限と使えないコマンドは予算を使わない', async () => {
   const { tools } = setup({ maxMeasurements: 1 });
   expect(await tools.call('mesh', 'term')).toBe('正式な見出し: Heading\ntree number: A01\n[終了コード 0]');
@@ -114,4 +138,12 @@ test('MeSH の引数なしと不明は消費せず、見出しなしは成功と
   deps.resolveMesh.mockResolvedValueOnce(new Map([['term', { status: 'missing' }]]));
   expect(await tools.call('mesh', 'term')).toBe('見出しは見つかりませんでした\n[終了コード 0]');
   expect(tools.state.measurements).toBe(1);
+});
+
+test('件数欠落は測定失敗として扱い、回数を消費しない', async () => {
+  const { tools, deps } = setup();
+  tools.writeFormula(content);
+  deps.count.mockRejectedValueOnce(new EutilsError('esearch の件数が欠落しているか、不正な値です', 200, true));
+  expect(await tools.call('count')).toBe('測定に失敗しました。回数は消費していません\nesearch の件数が欠落しているか、不正な値です\n[終了コード 3]');
+  expect(tools.state).toMatchObject({ measurements: 0, submissions: 0 });
 });

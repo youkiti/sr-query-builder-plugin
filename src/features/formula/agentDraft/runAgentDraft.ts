@@ -60,7 +60,15 @@ export async function runAgentDraft(input: RunAgentDraftInput): Promise<AgentDra
   let empty = false;
   for (let turn = 1; turn <= (input.maxModelCalls ?? 60); turn++) {
     if (input.signal?.aborted) throw input.signal.reason;
-    const reply = await input.provider.chatWithTools(system, messages, TOOL_DEFINITIONS, { signal: input.signal });
+    let reply;
+    try {
+      reply = await input.provider.chatWithTools(system, messages, TOOL_DEFINITIONS, { signal: input.signal });
+    } catch (error) {
+      if (input.signal?.aborted || !tools.state.acceptedSubmission) throw error;
+      result.status = 'completed';
+      result.note = '提出のあとのモデルの呼び出しに失敗しました';
+      break;
+    }
     if (input.signal?.aborted) throw input.signal.reason;
     result.modelCalls = turn;
     result.tokensIn += reply.tokensIn ?? 0;

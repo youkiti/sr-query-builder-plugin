@@ -4,6 +4,7 @@ import type { MeshResolution, MeshTreeLookup } from '../../../lib/ncbi/mesh';
 import { isQueryRejection } from '../../../lib/ncbi/queryRejection';
 import { expandFormula } from '../../validation/expandFormula';
 import { validateFormulaMd } from '../../validation/validateFormulaMd';
+import { hasPrecedenceMixing } from '../../validation/precedenceMixing';
 
 export const AGENT_COMMANDS = ['check', 'count', 'mesh', 'submit'] as const;
 export type AgentCommand = typeof AGENT_COMMANDS[number];
@@ -41,6 +42,9 @@ export function createAgentDraftTools(approval: AgentDraftApproval, deps: AgentD
       for (const block of parsed.blocks) {
         if (!approval.blockIds.includes(block.id)) reasons.push(`#${block.id}: 承認済みのブロックではありません`);
         if (/#/.test(block.expression)) reasons.push(`#${block.id}: 行の中で他の行を参照できません`);
+        if (approval.blockIds.includes(block.id) && hasPrecedenceMixing(block.expression)) {
+          reasons.push(`#${block.id}: 括弧の無い AND / NOT と OR が同じ並びに混ざっています。括弧で囲んでください`);
+        }
       }
       if (reasons.length) return { ok: false as const, reasons };
       const combinationExpression = normalizeCombinationExpression(approval.combinationExpression);

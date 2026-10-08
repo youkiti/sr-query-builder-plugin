@@ -125,6 +125,42 @@ test('中断はそのまま投げる', async () => {
   expect(chatWithTools).not.toHaveBeenCalled();
 });
 
+test('提出後の通信失敗は最後の提出を保持し、失敗した呼び出しを数えない', async () => {
+  const latest = content.replace('disease[tiab]', 'latest[tiab]');
+  const { input, chatWithTools } = setup([]);
+  chatWithTools
+    .mockResolvedValueOnce(reply([call('write_formula', { content })]))
+    .mockResolvedValueOnce(reply([call('tool', { command: 'submit' })]))
+    .mockResolvedValueOnce(reply([call('write_formula', { content: latest })]))
+    .mockResolvedValueOnce(reply([call('tool', { command: 'submit' })]))
+    .mockRejectedValueOnce(new Error('https://example.test/?api_key=secret'));
+  const result = await runAgentDraft(input);
+  expect(result).toMatchObject({ status: 'completed', finalReport: '',
+    note: '提出のあとのモデルの呼び出しに失敗しました', submission: { number: 2 },
+    modelCalls: 4, measurements: 0, submissions: 2, tokensIn: 40, tokensOut: 20 });
+  expect(result.submission!.md).toContain('latest[tiab]');
+  expect(result.toolCalls).toHaveLength(4);
+  expect(chatWithTools).toHaveBeenCalledTimes(5);
+  expect(JSON.stringify(result)).not.toMatch(/https|secret/);
+});
+
+test.each([false, true])('モデルの呼び出し中の中断は提出の有無に関わらず投げる: %s', async (submitted) => {
+  const { input, chatWithTools } = setup([]);
+  const controller = new AbortController();
+  input.signal = controller.signal;
+  const error = new Error('通信中断');
+  if (submitted) {
+    chatWithTools.mockResolvedValueOnce(reply([call('write_formula', { content })]))
+      .mockResolvedValueOnce(reply([call('tool', { command: 'submit' })]));
+  }
+  chatWithTools.mockImplementationOnce(async () => {
+    controller.abort(new Error('中止'));
+    throw error;
+  });
+  await expect(runAgentDraft(input)).rejects.toBe(error);
+  expect(chatWithTools).toHaveBeenCalledTimes(submitted ? 3 : 1);
+});
+
 test('フィルタなしを最初のメッセージに明記する', async () => {
   const { input, requests } = setup([reply([], '報告')]);
   input.filters = [];

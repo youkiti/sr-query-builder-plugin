@@ -1267,7 +1267,7 @@ export async function runOptimizeQuery(
         // 件数の測定は、モデルが道具を呼ぶ経路（Anthropic）だけに渡す。従来の経路に渡すと、
         // ブロックごとの件数の前倒し計測が始まり、自動調整の通信が増える。
         ...(factory.providerId === 'anthropic' ? {
-          countBlockHits: async (expression: string) => (await esearch(expression, eutils, { retmax: 0 })).count,
+          countBlockHits: async (expression: string) => (await esearch(expression, { ...eutils, strictCounts: true }, { retmax: 0 })).count,
         } : {}),
         fetchMeshTreeNumbers: (descriptors) => fetchMeshTreeNumbers(descriptors, eutils),
         resolveMeshDescriptors: (descriptors) => resolveMeshDescriptors(descriptors, eutils) });
@@ -1890,7 +1890,7 @@ async function runGenerateDraft(
     resolveMeshDescriptors: (descriptors) => resolveMeshDescriptors(descriptors, eutils),
     // 概念ブロックは葉式なのでそのまま esearch count に投げられる
     countBlockHits: async (expression) =>
-      (await esearch(expression, eutils, { retmax: 0 })).count,
+      (await esearch(expression, factory.providerId === 'anthropic' ? { ...eutils, strictCounts: true } : eutils, { retmax: 0 })).count,
   }, { targetHits });
 }
 
