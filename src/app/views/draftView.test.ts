@@ -1046,3 +1046,20 @@ test.each(['括弧', 'フィルタ', '両方', 'なし'] as const)('%s の通知
   if (run.filterNotice) expect(notice?.textContent).toContain(run.filterNotice);
   if (kind === 'フィルタ') expect(notice?.querySelector('ul')).toBeNull();
 });
+
+test.each([
+  ['write_formula', '式の書き込み'], ['check', '書式の検査'], ['count', '件数の測定'], ['mesh', 'MeSH の照会'], ['submit', '提出'], [null, null],
+] as const)('道具による生成を一行で表示し経過時間を維持する: %s', (lastCommand, label) => {
+  const progress: DraftProgress = { step: 'agent', blockCount: 1, agent: { modelCalls: 5, measurements: 3, maxMeasurements: 20, submissions: 0, maxSubmissions: 4, lastCommand, lastExitCode: null } };
+  const container = buildContainer();
+  const view = createDraftView();
+  view(container, { state: stateReady({ draftRun: { ...runningState(), progress: { ...progress, phase: 'generating' } } }), navigate: jest.fn() });
+  const status = container.querySelector('.draft__status')!.textContent;
+  expect(status).toContain('AI が検索式を作成中（測定 3 / 20 回、提出 0 / 4 回）');
+  if (label) expect(status).toContain(`直前の操作: ${label}`);
+  else expect(status).not.toContain('直前の操作');
+  expect(status).toContain('経過');
+  expect(container.querySelector('.draft__step-block')).toBeNull();
+  expect(currentStepIndex({ ...progress, phase: 'generating' }, 1)).toBe(0);
+  view(container, { state: stateReady(), navigate: jest.fn() });
+});

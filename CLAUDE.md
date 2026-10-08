@@ -4,6 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 現在のフェーズ
 
+- Anthropic のモデルでは、ブロック抽出が概念ブロック（原則 2 個まで）と検索フィルターを提案し、人が承認した後はモデルが道具（書式の検査・件数・MeSH の照会・提出。測定 20 回・提出 4 回・モデルの呼び出し 60 回まで）を呼びながら式を作る。フィルタの行と結合式は承認どおりにコードが足す。シードと目安件数はこの経路の初期式生成に使わない。手順書は `src/features/formula/agentDraft/procedure.ts` にあり、実験（`experiments/protocol-to-formula-loop` の手順書 v1）から移したものなので、文面を変えるときは実験側で測り直す。Gemini・OpenRouter は従来の 1 問 1 答の経路のまま。
+
 **MVP 実装フェーズ**（2026-06 時点）。要件定義は完了し、`src/` 配下にフルページアプリ・Popup・Options・Background を含む実装と、unit 1100 件規模 / E2E 98 件のテストスイートが存在する。
 
 - ユーザーフロー全 10 ルート（home → protocol → blocks → seeds → draft → expand → edit → export → done + history）の画面実装済み。検索式の生成と検証は `draft` タブに統合され、主操作は自動調整カードの「検索式を作成・自動調整する」（`.optimization__start`）に一本化している。現式があればそれを初期式に、無ければ AI で生成したうえで実測・調整を反復し、最終レビューを表示する（旧 `validate` ルートは廃止）。**自動調整はブロックごとのヒット数（line_hits）のライブ表示も、完了後の捕捉率・MeSH 検証も更新しない**（更新するのは検証フェーズ = `runValidationPhase` を経由する経路だけ）。現式があるときだけ、自動調整カードの直後に「検証のみ再実行」（`runRevalidateOnly`。LLM を呼ばず検証フェーズだけをやり直し、捕捉率・MeSH 検証を更新）「最初から作り直す」（`.draft__generate`。旧「生成して検証する」の生成→検証パイプラインそのもの。ブロックごとのヒット数をライブ表示しつつ検証まで実行）の補助操作を出す

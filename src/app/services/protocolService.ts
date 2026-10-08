@@ -64,6 +64,8 @@ export async function submitProtocol(
   const blocksDraft: BlocksDraft = {
     blocks: draft.blocks.map(toBlockDraft),
     combinationExpression: draft.combinationExpression,
+    ...(draft.suggestedFilterIds !== undefined
+      ? { selectedFilterIds: draft.suggestedFilterIds, filterSelectionSource: 'ai' as const } : {}),
   };
   const protocolDraft: ProtocolDraft = {
     frameworkType: draft.frameworkType,

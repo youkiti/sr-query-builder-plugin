@@ -18,7 +18,7 @@ import { EutilsError } from '@/lib/ncbi';
 export type ApiErrorKind = 'permission' | 'rate_limit' | 'temporary' | 'other';
 
 /** 相手側の一時障害とみなす HTTP ステータス。429 は `rate_limit` として別に扱う。 */
-const TEMPORARY_STATUSES: ReadonlySet<number> = new Set([500, 502, 503, 504]);
+const TEMPORARY_STATUSES: ReadonlySet<number> = new Set([500, 502, 503, 504, 529]);
 
 function fromStatus(status: number): ApiErrorKind {
   if (status === 429) return 'rate_limit';

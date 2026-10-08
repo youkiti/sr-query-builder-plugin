@@ -252,3 +252,20 @@ test.each([undefined, '', 'test-anthropic-key'])('Anthropic キーの読み取�
     }));
   }
 });
+
+test.each([
+  ['claude-opus-5-5', 'anthropic', STORAGE_KEY_ANTHROPIC],
+  ['gemini-3.5-flash-lite', 'gemini', STORAGE_KEY_GEMINI],
+  ['openai/gpt-test', 'openrouter', STORAGE_KEY_OPENROUTER],
+])('解決したプロバイダを保持し Anthropic にだけ medium を指定: %s', async (model, providerId, key) => {
+  const { store } = memoryStore({ [STORAGE_KEY_LLM_MODEL]: model, [key!]: 'fake' });
+  const fetch = jest.fn().mockResolvedValue(jsonResponse({ content: [{ type: 'text', text: 'ok' }],
+    candidates: [{ content: { parts: [{ text: 'ok' }] } }], choices: [{ message: { content: 'ok' } }],
+    id: 'log', webViewLink: 'https://example.test/log' }));
+  const factory = await buildLlmProviderFactory({ store, google: { fetch, getAccessToken: async () => 'token' }, llmLogFolderId: 'F', spreadsheetId: 'S' });
+  expect(factory.providerId).toBe(providerId);
+  await factory.forPurpose('draft_agent').chat([{ role: 'user', content: 'q' }]);
+  const body = JSON.parse(fetch.mock.calls[0]![1].body);
+  if (providerId === 'anthropic') expect(body.output_config.effort).toBe('medium');
+  else expect(body.output_config).toBeUndefined();
+});

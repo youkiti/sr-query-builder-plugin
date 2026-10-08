@@ -50,6 +50,26 @@ export interface LLMProvider {
   readonly providerId: LlmProviderId;
   readonly model: string;
   chat(messages: readonly ChatMessage[], options?: ChatOptions): Promise<ChatResponse>;
+  chatWithTools?(system: string, messages: readonly ToolChatMessage[], tools: readonly ToolDefinition[], options?: ToolChatOptions): Promise<ToolChatResponse>;
+}
+
+export interface ToolChatMessage {
+  role: 'user' | 'assistant';
+  content: string | readonly unknown[];
+}
+
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  inputSchema: JsonSchema;
+}
+
+export type ToolChatOptions = Pick<ChatOptions, 'signal' | 'maxOutputTokens'>;
+export interface ToolCall { id: string; name: string; input: unknown }
+export interface ToolChatResponse extends ChatResponse {
+  content: readonly unknown[];
+  toolCalls: ToolCall[];
+  stopReason: string | null;
 }
 
 /** プロバイダ呼び出し時の例外（4xx/5xx を統一的に表す） */

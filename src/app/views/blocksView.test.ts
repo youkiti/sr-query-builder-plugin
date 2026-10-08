@@ -575,3 +575,18 @@ test('混在デザインの理由は選択未設定の間だけ表示する', ()
   expect(store.getState().blocksDraft?.selectedFilterIds).toEqual(['RCTfilter']);
   expect(container.querySelector('.blocks__filter-selector')?.textContent).not.toContain('RCT 以外（observational）');
 });
+
+test.each([undefined, 'ai'] as const)('AI の初期選択の注記は出典があるときだけ表示: %s', (filterSelectionSource) => {
+  const store = createStore(withProject({ blocksDraft: { ...draftOf(1), selectedFilterIds: [], filterSelectionSource } }));
+  const view = createBlocksView(store);
+  const container = buildContainer();
+  view(container, { state: store.getState(), navigate: jest.fn() });
+  const message = 'フィルターの初期選択は AI の提案です。必要に応じて変更してください。';
+  expect(container.textContent?.includes(message)).toBe(filterSelectionSource === 'ai');
+  if (filterSelectionSource === 'ai') {
+    expect(Array.from(container.querySelectorAll('.blocks__field-hint')).some((e) => e.textContent === message)).toBe(true);
+    container.querySelector<HTMLInputElement>('.blocks__filter-list input')!.click();
+    expect(store.getState().blocksDraft?.filterSelectionSource).toBe('ai');
+    expect(container.textContent).toContain(message);
+  }
+});

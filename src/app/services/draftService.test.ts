@@ -709,3 +709,94 @@ test.each([true, false])('括弧補完を記録し保存する（複数語: %s�
   if (multiple) expect(note).toContain(`#1 Population: (${term})`);
   else expect(note).not.toContain('括弧で囲みました');
 });
+
+describe('Anthropic の道具による生成', () => {
+  const content = '## PubMed/MEDLINE\n\n```\n#1 disease[tiab]\n#2 treatment[tiab]\n```';
+  const reply = (name?: string, input: unknown = {}, text = '') => ({
+    text, content: [], tokensIn: null, tokensOut: null, raw: {}, stopReason: null,
+    toolCalls: name ? [{ id: 't', name, input }] : [],
+  });
+  function setup(replies = [reply('write_formula', { content }), reply('tool', { command: 'submit' }), reply(undefined, {}, '完了')]) {
+    const base = setupDeps();
+    const chatWithTools = jest.fn().mockImplementation(async () => replies.shift() ?? reply('tool', { command: 'check' }));
+    const chat = jest.fn();
+    const forPurpose = jest.fn(() => ({ providerId: 'anthropic' as const, model: 'claude-test', chat, chatWithTools }));
+    const deps = { ...base.deps, llmFactory: { providerId: 'anthropic' as const, model: 'claude-test', forPurpose },
+      countBlockHits: jest.fn().mockResolvedValue(42),
+      resolveMeshDescriptors: jest.fn().mockResolvedValue(new Map([['Disease', { status: 'resolved', headings: ['Disease'] }]])),
+      fetchMeshTreeNumbers: jest.fn().mockResolvedValue({ trees: new Map(), reasons: new Map() }),
+      onProgress: jest.fn(),
+    };
+    const state = base.store.getState();
+    const input = { protocol: state.protocolDraft!, blocks: { ...state.blocksDraft!, combinationExpression: ' #1 and #2 ', selectedFilterIds: ['RCTfilter'] },
+      seedContext: { titles: ['使わないシード'], samples: [], meshSummary: { seedCount: 0, concepts: [], checkTags: [] } }, targetHits: 12345 };
+    return { ...base, deps, input, chatWithTools, chat, forPurpose };
+  }
+
+  test('承認済みフィルタ・正規化した結合式を足し、道具ごとに通知する', async () => {
+    const s = setup([reply('write_formula', { content }), ...['check', 'count', 'mesh', 'submit'].map((command) =>
+      reply('tool', { command, argument: 'Disease' })), reply(undefined, {}, '完了')]);
+    const result = await generateDraftFormula(s.input, s.deps);
+    expect(s.forPurpose.mock.calls).toEqual([['draft_agent']]);
+    expect(s.chat).not.toHaveBeenCalled();
+    expect(result.formula.combinationExpression).toBe('#1 AND #2 AND #RCTfilter');
+    expect(result.markdown).toContain('#RCTfilter ' + result.filter.filters[0]!.expression);
+    expect(result.formula.blocks.map((b) => b.id)).toEqual(['1', '2', 'RCTfilter', '3']);
+    expect(result.blockSkeletons).toEqual([0, 1].map(() => ({ conceptSummary: '', meshRequirements: [], freewordRequirements: [], rationale: '' })));
+    expect(result.meshSuggestions).toEqual([[], []]);
+    expect(result.freewordSuggestions).toEqual([[], []]);
+    for (const key of ['parenthesizedTerms', 'removedMeshHeadings', 'replacedMeshHeadings', 'blockHits'] as const) expect(result[key]).toEqual([]);
+    expect(s.deps.resolveMeshDescriptors).toHaveBeenCalledWith(['Disease']);
+    expect(s.deps.fetchMeshTreeNumbers).toHaveBeenCalledWith(['Disease']);
+    const progress = s.deps.onProgress.mock.calls.map(([p]) => p);
+    expect(progress.map((p) => p.agent.lastCommand)).toEqual([null, 'write_formula', 'check', 'count', 'mesh', 'submit']);
+    expect(progress[0]).toEqual({ step: 'agent', blockCount: 2, agent: { modelCalls: 0, measurements: 0, submissions: 0, maxMeasurements: 20, maxSubmissions: 4, lastCommand: null, lastExitCode: null } });
+    expect(progress[5].agent).toMatchObject({ modelCalls: 5, measurements: 2, submissions: 1 });
+    expect(JSON.stringify(s.chatWithTools.mock.calls[0])).not.toMatch(/使わないシード|12345/);
+  });
+
+  test('上限に達しても受け付け済みの提出を返す', async () => {
+    const s = setup([reply('write_formula', { content }), reply('tool', { command: 'submit' })]);
+    expect((await generateDraftFormula(s.input, s.deps)).markdown).toContain('disease[tiab]');
+    expect(s.chatWithTools).toHaveBeenCalledTimes(60);
+  });
+
+  test.each([false, true])('提出が無ければ回数を含む例外（上限到達: %s）', async (limit) => {
+    const s = setup(limit ? [] : [reply(undefined, {}, '終了')]);
+    await expect(generateDraftFormula(s.input, s.deps)).rejects.toThrow(`AI が検索式を提出できませんでした（モデルの呼び出し ${limit ? 60 : 1} 回、測定 0 回、提出の試行 0 回）`);
+  });
+
+  test.each(['通信失敗', '中断'])('例外をそのまま返す: %s', async (message) => {
+    const s = setup();
+    const error = new Error(message);
+    s.chatWithTools.mockRejectedValue(error);
+    await expect(generateDraftFormula(s.input, s.deps)).rejects.toBe(error);
+  });
+
+  test.each(['countBlockHits', 'resolveMeshDescriptors', 'fetchMeshTreeNumbers'] as const)('依存 %s が無ければモデルを呼ばない', async (key) => {
+    const s = setup();
+    await expect(generateDraftFormula(s.input, { ...s.deps, [key]: undefined })).rejects.toThrow(key);
+    expect(s.forPurpose).not.toHaveBeenCalled();
+  });
+
+  test('FormulaVersions に ai_draft とモデルを保存して save / done を通知する', async () => {
+    const s = setup();
+    const result = await generateDraft(s.deps);
+    expect(s.store.getState()).toMatchObject({ currentFormulaMarkdown: result.markdown, currentFormulaModel: 'claude-test', currentFormulaCreatedBy: 'ai_draft' });
+    const call = s.fetchMock.mock.calls.find(([url]) => String(url).includes('FormulaVersions') && String(url).includes('append'))!;
+    const row = JSON.parse(call[1].body).values[0];
+    expect(row[SHEET_HEADERS.FormulaVersions.indexOf('created_by')]).toBe('ai_draft');
+    expect(row[SHEET_HEADERS.FormulaVersions.indexOf('model')]).toBe('claude-test');
+    expect(row[SHEET_HEADERS.FormulaVersions.indexOf('note')]).toBe('');
+    expect(s.deps.onProgress.mock.calls.slice(-2).map(([p]) => p.step)).toEqual(['save', 'done']);
+  });
+});
+
+test.each(['gemini', 'openrouter'] as const)('従来プロバイダの生成呼び出し順を維持: %s', async (providerId) => {
+  const { deps, purposes, store } = setupDeps();
+  deps.llmFactory.providerId = providerId;
+  const state = store.getState();
+  await generateDraftFormula({ protocol: state.protocolDraft!, blocks: state.blocksDraft!,
+    seedContext: { titles: [], samples: [], meshSummary: { seedCount: 0, concepts: [], checkTags: [] } } }, deps);
+  expect(purposes).toEqual(['draft_block', 'suggest_mesh', 'expand_freeword', 'draft_block', 'suggest_mesh', 'expand_freeword']);
+});

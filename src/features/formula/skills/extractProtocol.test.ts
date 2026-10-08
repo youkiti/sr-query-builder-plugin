@@ -1,10 +1,13 @@
 import type { ChatMessage, LLMProvider } from '@/lib/llm';
 import {
   EXTRACT_PROTOCOL_SYSTEM_PROMPT,
+  EXTRACT_PROTOCOL_AGENT_SYSTEM_PROMPT,
   EXTRACT_PROTOCOL_USER_PROMPT_TEMPLATE,
   extractProtocol,
 } from './extractProtocol';
 import { SkillResponseError } from './parseSkillJson';
+import { PREDEFINED_FILTER_DEFS } from './filterDesigner';
+import type { ChatOptions } from '@/lib/llm';
 
 function provider(text: string): { provider: LLMProvider; calls: ChatMessage[][] } {
   const calls: ChatMessage[][] = [];
@@ -140,4 +143,39 @@ describe('extractProtocol', () => {
     const { provider: p } = provider('{}');
     await expect(extractProtocol('x', p)).rejects.toThrow(/1〜5/);
   });
+});
+
+test('Anthropic 専用の指示と strict スキーマで抽出し、不明 ID と重複を除く', async () => {
+  const chat = jest.fn().mockResolvedValue({ text: JSON.stringify({ blocks: [{ block_label: 'P', description: '対象' }], suggested_filter_ids: ['RCTfilter', 'unknown', 'RCTfilter', 'SRfilter'] }) });
+  const result = await extractProtocol('本文', { providerId: 'anthropic', model: 'fake', chat });
+  expect(result.suggestedFilterIds).toEqual(['RCTfilter', 'SRfilter']);
+  const [messages, options] = chat.mock.calls[0]!;
+  expect(messages[0].content).toBe(EXTRACT_PROTOCOL_AGENT_SYSTEM_PROMPT);
+  expect(messages[1].content).toContain('"suggested_filter_ids"');
+  for (const def of PREDEFINED_FILTER_DEFS) expect(messages[0].content).toContain(`  - ${def.id}: ${def.description}`);
+  expect(options.responseSchema).toMatchObject({ additionalProperties: false,
+    properties: { suggested_filter_ids: { type: 'array', items: { type: 'string', enum: PREDEFINED_FILTER_DEFS.map((d) => d.id) } },
+      blocks: { items: { additionalProperties: false } } } });
+  expect(options.responseSchema.required).toContain('suggested_filter_ids');
+});
+
+test('Gemini と OpenRouter の要求は同一で、提案フィールドを足さない', async () => {
+  const requests: unknown[] = [];
+  for (const providerId of ['gemini', 'openrouter'] as const) {
+    const chat = jest.fn().mockResolvedValue({ text: JSON.stringify({ blocks: [{}], suggested_filter_ids: ['RCTfilter'] }) });
+    const result = await extractProtocol('本文', { providerId, model: 'fake', chat });
+    const [messages, options] = chat.mock.calls[0]! as [ChatMessage[], ChatOptions];
+    expect(messages).toEqual([{ role: 'system', content: EXTRACT_PROTOCOL_SYSTEM_PROMPT },
+      { role: 'user', content: EXTRACT_PROTOCOL_USER_PROMPT_TEMPLATE.replace('{{PROTOCOL}}', '本文') }]);
+    expect(options.responseSchema?.properties).not.toHaveProperty('suggested_filter_ids');
+    expect(result).not.toHaveProperty('suggestedFilterIds');
+    requests.push(chat.mock.calls[0]);
+  }
+  expect(requests[0]).toEqual(requests[1]);
+});
+
+test('Anthropic の空本文は呼び出しも提案フィールドも無い', async () => {
+  const chat = jest.fn();
+  expect(await extractProtocol('', { providerId: 'anthropic', model: 'fake', chat })).not.toHaveProperty('suggestedFilterIds');
+  expect(chat).not.toHaveBeenCalled();
 });

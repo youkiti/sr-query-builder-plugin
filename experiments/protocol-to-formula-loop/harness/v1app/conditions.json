@@ -1,0 +1,12 @@
+{
+  "version": "v1app",
+  "model": "claude-opus-5-5",
+  "generationSettings": "アプリの生成コード（Anthropic の Messages API。推論の強さは medium。温度などの生成設定は指定しない）",
+  "inputs": ["protocol.md", "アプリのブロック抽出の指示（extractProtocol.ts の Anthropic 用）", "アプリの手順書（src/features/formula/agentDraft/procedure.ts）"],
+  "tools": ["check", "count", "mesh", "submit"],
+  "maxMeasurements": 20,
+  "maxSubmissions": 4,
+  "costLimit": "道具の呼び出し回数の上限と、モデルの呼び出し 60 回の上限",
+  "finalSelection": "最後に受け付けられた提出 1 本。採点結果による選び直しはしない",
+  "runner": "app-anthropic"
+}

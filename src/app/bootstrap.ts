@@ -1264,6 +1264,12 @@ export async function runOptimizeQuery(
         seedContext: { titles: seeds.flatMap((seed) => seed.title ? [seed.title] : []).slice(0, 30),
           samples: [], meshSummary: { seedCount: 0, concepts: [], checkTags: [] } },
       }, { llmFactory: factory, onProgress: () => check(),
+        // 件数の測定は、モデルが道具を呼ぶ経路（Anthropic）だけに渡す。従来の経路に渡すと、
+        // ブロックごとの件数の前倒し計測が始まり、自動調整の通信が増える。
+        ...(factory.providerId === 'anthropic' ? {
+          countBlockHits: async (expression: string) => (await esearch(expression, eutils, { retmax: 0 })).count,
+        } : {}),
+        fetchMeshTreeNumbers: (descriptors) => fetchMeshTreeNumbers(descriptors, eutils),
         resolveMeshDescriptors: (descriptors) => resolveMeshDescriptors(descriptors, eutils) });
       initialFormula = generated.formula;
       const { filterNotice, parenthesizedTerms, removedMeshHeadings, replacedMeshHeadings } = generated;
@@ -1880,6 +1886,7 @@ async function runGenerateDraft(
     llmFactory: factory,
     onProgress,
     onBlockCounted,
+    fetchMeshTreeNumbers: (descriptors) => fetchMeshTreeNumbers(descriptors, eutils),
     resolveMeshDescriptors: (descriptors) => resolveMeshDescriptors(descriptors, eutils),
     // 概念ブロックは葉式なのでそのまま esearch count に投げられる
     countBlockHits: async (expression) =>

@@ -1,6 +1,12 @@
 import { estimateCostUsd, MODEL_PRICING } from './pricing';
 
 describe('estimateCostUsd', () => {
+  test('Haiku の長いプロンプトは入力・出力とも段階単価を使う', () => {
+    expect(estimateCostUsd('claude-haiku-5-5', 200000, 1000)).toBeCloseTo(0.1025, 10);
+    expect(estimateCostUsd('claude-haiku-5-5', 100000, 1000)).toBeCloseTo(0.0105, 10);
+    expect(estimateCostUsd('claude-haiku-5-5', 100001, 1000)).toBeCloseTo(0.0525005, 10);
+    expect(estimateCostUsd('claude-haiku-5-5', null, 1000)).toBeCloseTo(0.0005, 10);
+  });
   test('gemini-2.5-pro は入力 $1.25 / 出力 $10.00 per 1M で概算する', () => {
     // 1,000,000 入力 + 500,000 出力 = 1.25 + 5.00 = 6.25 USD
     expect(estimateCostUsd('gemini-2.5-pro', 1_000_000, 500_000)).toBeCloseTo(6.25, 10);

@@ -29,6 +29,9 @@ import { efetchArticles, type EfetchArticle, type EutilsDeps } from '@/lib/ncbi'
 import { nowIso } from '@/utils/iso8601';
 import { newUuid } from '@/utils/uuid';
 import type { LlmProviderFactory } from './llmProviderService';
+import { runAgentDraft } from '@/features/formula/agentDraft/runAgentDraft';
+import type { AgentDraftDeps } from '@/features/formula/agentDraft/tools';
+import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
 
 /**
  * ブロック承認後に走る「検索式ドラフト生成」サービス。
@@ -45,6 +48,7 @@ import type { LlmProviderFactory } from './llmProviderService';
 export interface DraftProgress {
   /** 現在の処理ステップ（UI 表示用） */
   step:
+    | 'agent'
     | 'block-designer'
     | 'mesh-suggester'
     | 'freeword-designer'
@@ -57,6 +61,15 @@ export interface DraftProgress {
   blockIndex?: number;
   /** ユーザーブロックの総数 */
   blockCount: number;
+  agent?: {
+    modelCalls: number;
+    measurements: number;
+    maxMeasurements: number;
+    submissions: number;
+    maxSubmissions: number;
+    lastCommand: 'write_formula' | 'check' | 'count' | 'mesh' | 'submit' | null;
+    lastExitCode: number | null;
+  };
 }
 
 /**
@@ -95,6 +108,7 @@ export interface DraftServiceDeps {
    */
   countBlockHits?: (expression: string) => Promise<number>;
   resolveMeshDescriptors?: (descriptors: string[]) => Promise<Map<string, MeshResolution>>;
+  fetchMeshTreeNumbers?: AgentDraftDeps['meshTrees'];
   /** 1 ブロックの計測が確定するたびに呼ぶ（view のライブ表示更新用） */
   onBlockCounted?: (hit: DraftBlockHit) => void;
   /** テスト時に差し替え可能な UUID / 時刻 */
@@ -132,7 +146,7 @@ export interface DraftGenerationInput {
 
 /** LLM と計測・進捗の副作用は注入元が管理する。保存なし用途ではロガーなしの LLM を渡す。 */
 export type DraftGenerationDeps = Pick<
-  DraftServiceDeps, 'llmFactory' | 'onProgress' | 'countBlockHits' | 'onBlockCounted' | 'resolveMeshDescriptors'
+  DraftServiceDeps, 'llmFactory' | 'onProgress' | 'countBlockHits' | 'onBlockCounted' | 'resolveMeshDescriptors' | 'fetchMeshTreeNumbers'
 >;
 
 export interface DraftGenerationOptions {
@@ -211,6 +225,7 @@ export async function generateDraftFormula(
   input: DraftGenerationInput,
   deps: DraftGenerationDeps
 ): Promise<DraftGeneration> {
+  if (deps.llmFactory.providerId === 'anthropic') return generateAgentDraftFormula(input, deps);
   const { protocol, blocks, seedContext } = input;
   if (blocks.blocks.length === 0) {
     throw new Error('blocksDraft が未設定です。ブロック承認を先に行ってください');
@@ -374,6 +389,49 @@ export async function generateDraftFormula(
     removedMeshHeadings,
     replacedMeshHeadings,
   };
+}
+
+/** Anthropic の初期式生成では seedContext と targetHits を使わず、承認済みの構造から作る。 */
+async function generateAgentDraftFormula(input: DraftGenerationInput, deps: DraftGenerationDeps): Promise<DraftGeneration> {
+  const { protocol, blocks } = input;
+  const blockCount = blocks.blocks.length;
+  if (!blockCount) throw new Error('blocksDraft が未設定です。ブロック承認を先に行ってください');
+  const { countBlockHits, resolveMeshDescriptors, fetchMeshTreeNumbers } = deps;
+  const missing = [!countBlockHits && 'countBlockHits', !resolveMeshDescriptors && 'resolveMeshDescriptors',
+    !fetchMeshTreeNumbers && 'fetchMeshTreeNumbers'].filter(Boolean);
+  if (!countBlockHits || !resolveMeshDescriptors || !fetchMeshTreeNumbers) {
+    throw new Error(`検索式の生成に必要な依存が未設定です: ${missing.join('、')}`);
+  }
+  const filter = buildFiltersFromSelection(
+    blocks.selectedFilterIds ?? getDefaultSelectedFilterIds(protocol.studyDesign)
+  );
+  const filterNotice = blocks.selectedFilterIds === undefined
+    ? explainDefaultFilterSelection(protocol.studyDesign).rctSkippedReason : null;
+  const blockSkeletons = blocks.blocks.map(() => ({ conceptSummary: '', meshRequirements: [], freewordRequirements: [], rationale: '' }));
+  const combinationExpression = assembleFormulaMd({
+    baseCombinationExpression: blocks.combinationExpression,
+    blocks: blockSkeletons.map((skeleton) => ({ skeleton, mesh: [], freewords: [] })),
+    filterResult: filter,
+  }).formula.combinationExpression!;
+  const maxMeasurements = 20;
+  const maxSubmissions = 4;
+  const notify = (agent: NonNullable<DraftProgress['agent']>): void => deps.onProgress?.({ step: 'agent', blockCount, agent });
+  notify({ modelCalls: 0, measurements: 0, submissions: 0, maxMeasurements, maxSubmissions, lastCommand: null, lastExitCode: null });
+  const result = await runAgentDraft({
+    provider: deps.llmFactory.forPurpose('draft_agent'), protocol,
+    blocks: blocks.blocks.map((block, index) => ({ id: String(index + 1), name: block.blockLabel, description: block.description })),
+    filters: filter.filters, combinationExpression, maxMeasurements, maxSubmissions,
+    deps: { count: countBlockHits, resolveMesh: (term) => resolveMeshDescriptors([term]), meshTrees: fetchMeshTreeNumbers },
+    onStep: (step) => notify({ modelCalls: step.modelCalls, measurements: step.measurements, submissions: step.submissions,
+      maxMeasurements, maxSubmissions, lastCommand: step.type === 'write_formula' ? 'write_formula' : step.command, lastExitCode: step.exitCode }),
+  });
+  if (!result.submission) {
+    throw new Error(`AI が検索式を提出できませんでした（モデルの呼び出し ${result.modelCalls} 回、測定 ${result.measurements} 回、提出の試行 ${result.submissions} 回）`);
+  }
+  const markdown = result.submission.md;
+  return { markdown, formula: parsePubmedFormulaMd(markdown), filter, filterNotice, blockSkeletons,
+    meshSuggestions: blocks.blocks.map(() => []), freewordSuggestions: blocks.blocks.map(() => []),
+    parenthesizedTerms: [], removedMeshHeadings: [], replacedMeshHeadings: [], blockHits: [] };
 }
 
 /** ドラフト生成の各 skill へ渡す seed 論文コンテクスト。 */
