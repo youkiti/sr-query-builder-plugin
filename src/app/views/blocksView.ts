@@ -228,6 +228,7 @@ function appendRefField(
 function buildBlocksSection(doc: Document, draft: BlocksDraft, store: AppStore): HTMLElement {
   const section = doc.createElement('section');
   section.className = 'blocks__section';
+  section.dataset.tour = 'blocks-list';
   section.setAttribute('aria-labelledby', 'blocks-section-heading');
 
   const header = doc.createElement('div');
@@ -539,6 +540,7 @@ function buildFilterSelector(doc: Document, draft: BlocksDraft, store: AppStore)
 
   const section = doc.createElement('div');
   section.className = 'blocks__filter-selector';
+  section.dataset.tour = 'blocks-filters';
 
   const header = doc.createElement('div');
   header.className = 'blocks__filter-selector-header';
@@ -667,6 +669,7 @@ function buildActionRow(
   const approveBtn = doc.createElement('button');
   approveBtn.type = 'button';
   approveBtn.className = 'blocks__btn-primary';
+  approveBtn.dataset.tour = 'blocks-approve';
   approveBtn.textContent = '承認してシード論文へ →';
   approveBtn.disabled = hasErrors;
   if (hasErrors) {

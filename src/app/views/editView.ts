@@ -410,6 +410,7 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
 
     const blocksSection = doc.createElement('section');
     blocksSection.className = 'edit__blocks';
+    blocksSection.dataset.tour = 'edit-blocks';
     const blocksHeading = doc.createElement('h3');
     blocksHeading.textContent = 'ブロック';
     blocksSection.appendChild(blocksHeading);
@@ -453,6 +454,7 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
     const saveBtn = doc.createElement('button');
     saveBtn.type = 'button';
     saveBtn.textContent = '新バージョンとして保存';
+    saveBtn.dataset.tour = 'edit-save';
     // 保存中の二重起動防止（実行そのものの排他は bootstrap 側の guard が担う）。
     saveBtn.disabled = save?.status === 'saving';
     actions.appendChild(saveBtn);
@@ -933,6 +935,8 @@ function buildBlockRow(
       ...inspector.caches,
     });
     if (el) {
+      // ツアーが枠を付ける対象。インスペクタが開いているときだけ存在する。
+      el.dataset.tour = 'edit-inspector';
       inspectorSlot.appendChild(el);
     }
   }

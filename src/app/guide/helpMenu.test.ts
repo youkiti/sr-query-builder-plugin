@@ -67,13 +67,13 @@ describe('ツアーが今は使えないとき', () => {
 });
 
 test('動画の無いトピックでは動画の項目を出さない', () => {
-  const saved = GUIDE_TOPICS.blocks.video;
-  delete GUIDE_TOPICS.blocks.video;
+  const saved = GUIDE_TOPICS.history.video;
+  delete GUIDE_TOPICS.history.video;
   try {
-    mountButton('blocks').click();
+    mountButton('history').click();
     expect(labels()).toEqual(['ヘルプを読む', 'ツアーの一覧']);
   } finally {
-    GUIDE_TOPICS.blocks.video = saved;
+    GUIDE_TOPICS.history.video = saved;
   }
 });
 

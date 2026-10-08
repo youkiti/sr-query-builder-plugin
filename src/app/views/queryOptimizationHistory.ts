@@ -243,6 +243,7 @@ export function createOptimizationHistoryRenderer(): (
         section = doc.createElement('section');
         section.className = 'optimization__history';
         section.dataset.optimizationRun = nextKey;
+        section.dataset.tour = 'draft-optimize-history';
         const heading = doc.createElement('h3');
         heading.textContent = '試行履歴';
         section.appendChild(heading);

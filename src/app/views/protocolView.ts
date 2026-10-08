@@ -148,6 +148,7 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
 
       const form = doc.createElement('form');
       form.className = 'protocol__form';
+      form.dataset.tour = 'protocol-form';
 
       const sourceSection = buildSection(doc, '入力形式', buildSourceModeRadios);
       form.appendChild(sourceSection);

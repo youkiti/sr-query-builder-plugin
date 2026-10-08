@@ -33,6 +33,7 @@ function renderHeldCandidateCard(
 ): HTMLElement {
   const card = doc.createElement('article');
   card.className = 'optimization__held-candidate';
+  card.dataset.tour = 'draft-held-candidates';
   card.setAttribute('aria-label', `保留候補 ${trial.candidateId} の操作`);
   const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions, {
     bestCapturedPmids: run.result?.best?.measurement.capturedPmids,
@@ -129,6 +130,7 @@ export function renderOptimizationReview(
   const doc = container.ownerDocument;
   const section = doc.createElement('section');
   section.className = 'optimization__review';
+  section.dataset.tour = 'draft-optimize-review';
   section.setAttribute('aria-label', '自動調整の最終レビュー');
   const result = run.result;
   const best = result?.best;

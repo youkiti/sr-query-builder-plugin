@@ -84,6 +84,17 @@ test('ROUTES の全ルートにトピックがあり、ツアー ID は登録済
   }
 });
 
+test('画面ごとの「ここからツアーを始める」が、対応表どおりのツアーを指す', () => {
+  const expected: Partial<Record<GuideTopicId, string>> = {
+    home: 'getting-started', protocol: 'getting-started', blocks: 'getting-started', seeds: 'getting-started',
+    draft: 'draft-and-optimize', expand: 'expand-seeds',
+    edit: 'edit-and-export', export: 'edit-and-export', done: 'edit-and-export',
+  };
+  for (const topicId of topicIds) expect(GUIDE_TOPICS[topicId].tourId).toBe(expected[topicId]);
+  expect(GUIDE_TOPICS.history.tourId).toBeUndefined();
+  expect(GUIDE_TOPICS.settings.tourId).toBeUndefined();
+});
+
 test('isGuideTopicId は登録済みのトピック ID だけを通す', () => {
   expect(isGuideTopicId('home')).toBe(true);
   for (const value of ['', 'unknown', 'toString', null, undefined, 1]) expect(isGuideTopicId(value)).toBe(false);

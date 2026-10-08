@@ -69,6 +69,7 @@ export function createSeedsView(callbacks: SeedsViewCallbacks = {}): RenderView 
 
     const form = doc.createElement('div');
     form.className = 'seeds__form';
+    form.dataset.tour = 'seeds-form';
     container.appendChild(form);
 
     form.appendChild(

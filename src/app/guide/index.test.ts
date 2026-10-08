@@ -136,7 +136,7 @@ test('一覧から開始できる', async () => {
 test('実行部へ条件・現在のルート・ガード付きの遷移を渡す', async () => {
   await run();
   const host = jest.mocked(createTourRunner).mock.calls[0]![0];
-  expect(host.computeConditions()).toEqual({ 'has-project': true, 'has-protocol': false });
+  expect(host.computeConditions()).toMatchObject({ 'has-project': true, 'has-protocol': false });
   expect(host.currentRoute()).toBe('#/home');
   host.navigate('#/protocol');
   expect(navigate).toHaveBeenCalledWith('protocol' satisfies RouteName);

@@ -147,6 +147,7 @@ export function createExpandView(callbacks: ExpandViewCallbacks = {}): RenderVie
     actions.className = 'expand__actions';
     const fetchBtn = doc.createElement('button');
     fetchBtn.type = 'button';
+    fetchBtn.dataset.tour = 'expand-fetch';
     fetchBtn.textContent = running ? '取得中…' : '境界事例を取得';
     fetchBtn.disabled = running;
     actions.appendChild(fetchBtn);
@@ -395,6 +396,8 @@ function setupCandidates(
     items.push(handle);
   });
   if (items.length > 0) {
+    // ツアーが枠を付ける対象。候補があるときだけ付け、空の一覧には付けない。
+    list.dataset.tour = 'expand-candidates';
     list.focus({ preventScroll: true });
     setFocus(0);
   }
@@ -968,6 +971,7 @@ function runRoundComplete(
 function buildProposals(doc: Document, proposals: UpdateProposal[]): HTMLElement {
   const wrap = doc.createElement('section');
   wrap.className = 'expand__proposals';
+  wrap.dataset.tour = 'expand-proposals';
   const title = doc.createElement('h3');
   title.textContent = '検索式の更新提案（推定）';
   wrap.appendChild(title);
