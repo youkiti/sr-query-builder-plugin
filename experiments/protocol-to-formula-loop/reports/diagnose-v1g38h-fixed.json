@@ -1,0 +1,134 @@
+{
+  "version": "v1g38h",
+  "subset": "fixed",
+  "reviews": 20,
+  "runsPerReview": 3,
+  "generatedAt": "2026-10-08T03:55:31.835Z",
+  "summary": {
+    "runs": 60,
+    "noSubmission": 1,
+    "byConceptCount": [
+      {
+        "conceptLines": 1,
+        "runs": 8,
+        "meanStudyRecall": 0.9236111111111112,
+        "allCapturedRate": 0.625,
+        "medianHits": 926.5
+      },
+      {
+        "conceptLines": 2,
+        "runs": 42,
+        "meanStudyRecall": 0.9199526450629534,
+        "allCapturedRate": 0.5476190476190477,
+        "medianHits": 394.5
+      },
+      {
+        "conceptLines": 3,
+        "runs": 7,
+        "meanStudyRecall": 0.5512116749230151,
+        "allCapturedRate": 0,
+        "medianHits": 7263
+      }
+    ],
+    "byConceptCountExcludedRuns": 2,
+    "withFilter": {
+      "runs": 40,
+      "meanStudyRecall": 0.9033096572830249,
+      "allCapturedRate": 0.6,
+      "medianHits": 399
+    },
+    "withoutFilter": {
+      "runs": 19,
+      "meanStudyRecall": 0.8177015130529672,
+      "allCapturedRate": 0.21052631578947367,
+      "medianHits": 4085
+    },
+    "missedStudies": 827,
+    "attribution": {
+      "single_concept": {
+        "studies": 545,
+        "proportion": 0.6590084643288996
+      },
+      "single_filter": {
+        "studies": 108,
+        "proportion": 0.13059250302297462
+      },
+      "multiple": {
+        "studies": 155,
+        "proportion": 0.18742442563482467
+      },
+      "none": {
+        "studies": 6,
+        "proportion": 0.007255139056831923
+      },
+      "no_lines": {
+        "studies": 0,
+        "proportion": 0
+      },
+      "undetermined": {
+        "studies": 13,
+        "proportion": 0.015719467956469165
+      }
+    },
+    "worstConcept": {
+      "lines": 57,
+      "hits": {
+        "median": 11289,
+        "q1": 4080,
+        "q3": 93111
+      },
+      "meshTerms": {
+        "median": 2,
+        "q1": 1,
+        "q3": 2
+      },
+      "freewordTerms": {
+        "median": 18,
+        "q1": 7,
+        "q3": 30
+      },
+      "plainTerms": {
+        "median": 0,
+        "q1": 0,
+        "q3": 0
+      },
+      "zeroMeshLines": 5,
+      "atMostThreeFreewordLines": 4
+    },
+    "allConcepts": {
+      "lines": 113,
+      "hits": {
+        "median": 95883,
+        "q1": 11289,
+        "q3": 435794
+      },
+      "meshTerms": {
+        "median": 2,
+        "q1": 1,
+        "q3": 3
+      },
+      "freewordTerms": {
+        "median": 17,
+        "q1": 6,
+        "q3": 29
+      },
+      "plainTerms": {
+        "median": 0,
+        "q1": 0,
+        "q3": 0
+      },
+      "zeroMeshLines": 7,
+      "atMostThreeFreewordLines": 14
+    },
+    "allCaptured": {
+      "runs": 28,
+      "meanConceptLines": 1.8214285714285714,
+      "medianFreewordTermsPerLine": 11
+    },
+    "notAllCaptured": {
+      "runs": 31,
+      "meanConceptLines": 2,
+      "medianFreewordTermsPerLine": 18
+    }
+  }
+}

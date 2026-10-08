@@ -5,7 +5,7 @@ import { config } from 'dotenv';
 import { esearch } from '../../../src/lib/ncbi/eutils';
 import { capturedGold, redact } from '../../query-optimization-bench/ncbiEval';
 import { aggregateVersion, scoreSubmission, type ReviewRuns, type RunScore, type SubmissionOutcome } from './metrics';
-import { createDeps, isQueryRejection } from './ncbi';
+import { createDeps, isQueryRejection, isWildcardLimitRejection } from './ncbi';
 import { readRun, runPath, writeJson } from './runDir';
 import { parseRunOptions, targetReviews, type RunRuntime } from './startRuns';
 import { defaultRuntime } from './tool';
@@ -66,7 +66,7 @@ export async function main(args: string[], runtime: RunRuntime = defaultRuntime(
           outcome = { status: 'measured', hits, capturedPmids };
         } catch (error) {
           const message = redact(error instanceof Error ? error.message : String(error), [env.NCBI_API_KEY ?? '']);
-          outcome = isQueryRejection(error) ? { status: 'invalid_submission', reason: message } : { status: 'measurement_failed', error: message };
+          outcome = isQueryRejection(error) || isWildcardLimitRejection(error) ? { status: 'invalid_submission', reason: message } : { status: 'measurement_failed', error: message };
         }
       } else {
         outcome = submitAttempts ? { status: 'invalid_submission', reason: '受け付けられた提出がありません' } : { status: 'no_submission' };

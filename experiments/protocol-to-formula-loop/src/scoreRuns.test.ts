@@ -90,6 +90,38 @@ test('式の拒否と0件は失敗として集計し、0件の捕捉通信は行
   expect(JSON.parse(readFileSync(join(s.runtime.reportsDir!, 'v0-smoke.json'), 'utf8')).summary.failures)
     .toEqual({ zeroHits: 0.25, invalidSubmission: 0.25, noSubmission: 0.5 });
 });
+test('ワイルドカード上限の拒否は再現率0で採点し、集計を止めない', async () => {
+  const s = setup();
+  writeJson(join(s.dirs[0]!, 'submission.json'), { number: 1, query: 'a*[tiab]' });
+  const message = 'Search Backend failed: An error occurred while processing request. Status: 500. Source: /api/search/?r= Details: Search is temporarily unavailable. Please try again later. Details: Cannot search because the number of wildcards (*) exceeds 256.';
+  s.runtime.fetchImpl = jest.fn(async (input) => {
+    expect(new URL(String(input)).pathname).toMatch(/\/esearch\.fcgi$/);
+    return new Response(JSON.stringify({ esearchresult: { ERROR: message } }));
+  });
+  expect(await main(s.args, s.runtime)).toBe(0);
+  expect(JSON.parse(readFileSync(join(s.dirs[0]!, 'score.json'), 'utf8'))).toMatchObject({
+    status: 'scored', studyRecall: 0, pmidRecall: 0, failure: 'invalid_submission',
+    outcome: { status: 'invalid_submission', reason: expect.stringContaining('number of wildcards') },
+  });
+  expect(s.runtime.stdout).not.toHaveBeenCalledWith(expect.stringContaining('未確定'));
+  expect(JSON.parse(readFileSync(join(s.runtime.reportsDir!, 'v0-smoke.json'), 'utf8')).summary)
+    .toMatchObject({ studyRecall: 0, pmidRecall: 0, failures: { invalidSubmission: 0.25 } });
+});
+test('ワイルドカード上限を含まない検索バックエンド障害は測定失敗のまま集計しない', async () => {
+  const s = setup();
+  writeJson(join(s.dirs[0]!, 'submission.json'), { number: 1, query: 'a[tiab]' });
+  const message = 'Search Backend failed: An error occurred while processing request. Status: 500. Source: /api/search/?r= Details: Search is temporarily unavailable. Please try again later.';
+  s.runtime.fetchImpl = jest.fn(async (input) => {
+    expect(new URL(String(input)).pathname).toMatch(/\/esearch\.fcgi$/);
+    return new Response(JSON.stringify({ esearchresult: { ERROR: message } }));
+  });
+  expect(await main(s.args, s.runtime)).toBe(1);
+  expect(JSON.parse(readFileSync(join(s.dirs[0]!, 'score.json'), 'utf8'))).toMatchObject({
+    status: 'unknown', outcome: { status: 'measurement_failed', error: expect.stringContaining(message) },
+  });
+  expect(s.runtime.stdout).toHaveBeenCalledWith(expect.stringContaining('未確定'));
+  expect(existsSync(s.runtime.reportsDir!)).toBe(false);
+});
 test('捕捉の段階でも拒否と応答破損を区別する', async () => {
   const s = setup();
   writeJson(join(s.dirs[0]!, 'submission.json'), { number: 1, query: 'a[tiab]' });
