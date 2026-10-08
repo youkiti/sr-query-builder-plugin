@@ -267,6 +267,16 @@ startApp(document);
 4. 手順の対象になる要素に `data-tour` を付ける。実行時に組み立てる値は、`src/lib/guide/tours/tours.test.ts` の「定義と実装の照合」に規則を足す。
 5. `src/lib/i18n/ja.ts` と `en.ts` に文言を足す。見出しは `guide.tour<ID>Title`、説明は `guide.tour<ID>Desc`、手順の本文は `guide.tour<ID>Step<手順ID>`（`keys.ts` が生成する形）。
 6. テスト（定義の照合・単体・E2E）を足す。E2E の共通スタブは既定で提案帯を止めているので、提案帯を検証する spec だけが `guide_progress` を明示的に渡す。
+7. 通し検査のシナリオ `tools/guide-tour-check/scenarios/<ID>.mjs` を足す（ファイル名とシナリオ名はツアー ID と同じにする）。短い解説動画の対象にするなら `video/scripts/tour-videos.mjs` の `DEFAULT_TOURS` にも足す。
+
+#### 通し検査と短い解説動画
+
+| 場所 | 役割 |
+|---|---|
+| `tools/guide-tour-check/` | 通し検査（`npm run check:tours`）。デモビルド（`dist-demo/`）を本物の Chromium に拡張として読み込み、ツアーを 1 手順ずつ実際に進める。各手順で「カードが出ている・対象に強調枠が重なっている・カードが画面内」を確かめ、画像を `.tmp/guide-tour-check/<ツアー ID>-<連番>-<手順 ID>.png` に残す。シナリオはツアーごとに 1 本（`scenarios/<ID>.mjs`）で、プロトコルの解析・ブロックの承認・自動調整・境界事例の判定・変換など、手順が前提とする操作を実際に行って、できるだけ全手順で対象が画面に出ている状態を撮る。デモの通信の差し替えで再現できない状態（保留候補など）の手順は、待機の状態で撮り、検査の集計に警告として載る |
+| `video/scripts/tour-videos.mjs` | ツアー 1 本につき 1 本の短い解説動画（`npm run video:tours`）。通し検査の画像と、辞書の文面（ナレーション原稿）から作る。手順は [video/README.md](../video/README.md) の「操作ツアーの解説動画」 |
+
+ツアーの手順や文面・対象を変えたら、`npm run build:demo` → `npm run check:tours` を回す。本物のブラウザの窓が要るため CI では回らない（`npm run test:tools` は、検査と動画生成の部品の単体テストだけを CI で回す）。`check:tours` が落ちる変更は、短い動画の撮り直しも要る合図になる。ツアーの手順や文面を変えたら、動画も `npm run video:tours` で作り直す。`--lang en` で英語のカードも確かめられる。
 
 #### 「?」メニューと対応表
 

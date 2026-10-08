@@ -61,6 +61,9 @@ playwright/.cache/
 video/tools/
 video/build/
 
+# ヘルプツアーの通し検査（npm run check:tours）が残す手順ごとの画像。短い解説動画の素材にもなる
+.tmp/
+
 experiments/query-optimization-bench/results/
 experiments/protocol-to-formula-loop/cases/
 experiments/protocol-to-formula-loop/results/

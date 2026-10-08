@@ -151,3 +151,12 @@
 .guide-help-menu button:hover {
   background: var(--color-bg-muted);
 }
+
+/* 自動調整の進捗（.optimization__status）は画面の上端に固定表示される。その下の対象へ
+   スクロールで寄せるとき、対象の上端（見出し）が進捗の下に隠れないよう余白を取る。
+   進捗の高さは折り返しで変わるので、4 行ぶんに余裕を足した値にしている。 */
+[data-tour="draft-optimize-history"],
+[data-tour="draft-optimize-review"],
+[data-tour="draft-held-candidates"] {
+  scroll-margin-top: 200px;
+}
