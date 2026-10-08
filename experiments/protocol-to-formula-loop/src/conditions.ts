@@ -7,7 +7,7 @@ export interface Conditions {
   version: string; model: string; generationSettings: string; inputs: string[]; tools: Command[];
   maxMeasurements: number; maxSubmissions: number; costLimit: string; finalSelection: string;
   combine?: { from: string; k: number; blocks?: { minOverlap: number; minMargin: number; maxConcepts: number } } | { versions: string[] };
-  runner?: 'claude-subagent' | 'gemini-api';
+  runner?: 'claude-subagent' | 'gemini-api' | 'codex-relay';
   seeds?: { label: string; max: number };
   table?: boolean;
   hitsLimit?: number;
@@ -17,13 +17,15 @@ export function validateConditions(value: unknown, version: string): Conditions 
   const c = value as Conditions | null;
   if (!/^[A-Za-z0-9_-]+$/.test(version) || !c || c.version !== version) throw new Error('版とフォルダ名が一致しません');
   if (typeof c.model !== 'string' || !/^[A-Za-z0-9.-]+$/.test(c.model) || c.model.includes('latest')) throw new Error('モデルは固定 ID が必要です');
-  if (c.runner !== undefined && c.runner !== 'claude-subagent' && c.runner !== 'gemini-api') throw new Error('実行役の指定が不正です');
+  if (c.runner !== undefined && c.runner !== 'claude-subagent' && c.runner !== 'gemini-api' && c.runner !== 'codex-relay') throw new Error('実行役の指定が不正です');
+  if (c.runner === 'codex-relay' && (c.table !== undefined || c.seeds !== undefined || c.combine !== undefined
+    || !Array.isArray(c.tools) || c.tools.some((tool) => !['check', 'count', 'mesh', 'submit'].includes(tool)))) throw new Error('中継の条件が不正です');
   if (c.hitsLimit !== undefined && (!Number.isSafeInteger(c.hitsLimit) || c.hitsLimit < 1 || c.table !== true)) throw new Error('件数の目安の条件が不正です');
   if ((c.table !== undefined && typeof c.table !== 'boolean') || (c.table === true
     && (c.seeds !== undefined || !Array.isArray(c.tools) || c.tools.some((tool) => !['check', 'count', 'mesh', 'submit'].includes(tool))))) throw new Error('表の条件が不正です');
   if (c.seeds !== undefined && (!c.seeds || typeof c.seeds.label !== 'string' || !/^[A-Za-z0-9_-]+$/.test(c.seeds.label)
     || !Number.isInteger(c.seeds.max) || c.seeds.max < 1 || c.seeds.max > 5)) throw new Error('シードの条件が不正です');
-  if (!Array.isArray(c.tools) || !c.tools.includes('submit') || c.tools.some((tool) => !COMMANDS.includes(tool))) throw new Error('道具の指定が不正です');
+  if (!Array.isArray(c.tools) || (c.runner !== 'codex-relay' && !c.tools.includes('submit')) || c.tools.some((tool) => !COMMANDS.includes(tool))) throw new Error('道具の指定が不正です');
   if (![c.maxMeasurements, c.maxSubmissions].every((n) => Number.isSafeInteger(n) && n > 0)) throw new Error('上限は正の整数が必要です');
   if (!Array.isArray(c.inputs) || c.inputs.some((s) => typeof s !== 'string')
     || [c.generationSettings, c.costLimit, c.finalSelection].some((s) => typeof s !== 'string' || !s.trim())) throw new Error('生成条件の記述が不正です');
