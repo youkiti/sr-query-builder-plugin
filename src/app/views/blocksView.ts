@@ -557,6 +557,12 @@ function buildFilterSelector(doc: Document, draft: BlocksDraft, store: AppStore)
   section.appendChild(header);
   const reason = draft.selectedFilterIds === undefined
     ? explainDefaultFilterSelection(protocol?.studyDesign ?? '').rctSkippedReason : null;
+  if (draft.filterSelectionSource === 'ai') {
+    const notice = doc.createElement('p');
+    notice.className = 'blocks__field-hint';
+    notice.textContent = 'フィルターの初期選択は AI の提案です。必要に応じて変更してください。';
+    section.appendChild(notice);
+  }
   if (reason) {
     const notice = doc.createElement('p');
     notice.className = 'blocks__field-hint';

@@ -14,6 +14,7 @@ import * as seeds from '@/features/seeds/seedRepository';
 import * as draft from './services/draftService';
 import * as mesh from '@/lib/ncbi/mesh';
 import * as meshRdf from '@/lib/ncbi/meshRdf';
+import { sharedEutilsRateLimiters } from '@/lib/ncbi';
 import * as protocolRepository from '@/features/protocol/protocolRepository';
 import * as formulaRepository from '@/features/formula/formulaRepository';
 import * as improveSkill from '@/features/formula/skills/improveBlock';
@@ -307,6 +308,55 @@ test('シードなし・式なしは保存なし生成を経て実行する', as
   expect(fixture.store.getState().queryOptimizationRun?.seedCount).toBe(0);
   expect(fixture.store.getState().currentFormulaMarkdown).toBeNull();
 });
+
+test.each(['anthropic', 'gemini', 'openrouter'] as const)(
+  '初期式生成の件数測定は Anthropic だけに渡し、件数欠落を失敗にする: %s', async (providerId) => {
+    const f = setup();
+    f.store.setState((s) => ({ ...s, currentFormulaMarkdown: null }));
+    f.buildFactory.mockResolvedValue({ providerId, model: 'fake', forPurpose: jest.fn() });
+    const generate = jest.spyOn(draft, 'generateDraftFormula').mockRejectedValue(new Error('生成をここで停止'));
+    await f.invoke();
+    expect(generate).toHaveBeenCalledTimes(1);
+    const count = generate.mock.calls[0]![1].countBlockHits;
+    if (providerId !== 'anthropic') {
+      expect(count).toBeUndefined();
+      return;
+    }
+    jest.spyOn(sharedEutilsRateLimiters.withoutApiKey, 'acquire').mockResolvedValue(undefined);
+    jest.mocked(f.runtime.google.fetch).mockResolvedValue({ ok: true, status: 200,
+      json: async () => ({ esearchresult: {} }),
+    } as Response);
+    await expect(count!('a[tiab]')).rejects.toThrow('esearch の件数が欠落しているか、不正な値です');
+  }
+);
+
+test.each(['anthropic', 'gemini', 'openrouter'] as const)(
+  'draft の件数測定は Anthropic だけ件数欠落を失敗にする: %s', async (providerId) => {
+    const f = setup();
+    f.buildFactory.mockResolvedValue({ providerId, model: 'fake', forPurpose: jest.fn() });
+    const generate = jest.spyOn(draft, 'generateDraft').mockRejectedValue(new Error('生成をここで停止'));
+    const doc = document.implementation.createHTMLDocument('生成');
+    doc.body.innerHTML = '<section id="app-content"></section>';
+    const app = startApp(doc, { store: f.store, runtime: f.runtime,
+      getHash: () => '#/draft', onHashChange: () => () => undefined, setHash: jest.fn() });
+    await flush();
+    doc.querySelector<HTMLButtonElement>('.draft__generate')!.click();
+    await flush();
+    expect(generate).toHaveBeenCalledTimes(1);
+    const deps = generate.mock.calls[0]![0];
+    expect(deps.eutils.strictCounts).toBeUndefined();
+    jest.spyOn(sharedEutilsRateLimiters.withoutApiKey, 'acquire').mockResolvedValue(undefined);
+    jest.mocked(f.runtime.google.fetch).mockResolvedValue({ ok: true, status: 200,
+      json: async () => ({ esearchresult: {} }),
+    } as Response);
+    if (providerId === 'anthropic') {
+      await expect(deps.countBlockHits!('a[tiab]')).rejects.toThrow('esearch の件数が欠落しているか、不正な値です');
+    } else {
+      await expect(deps.countBlockHits!('a[tiab]')).resolves.toBe(0);
+    }
+    app.dispose();
+  }
+);
 
 
 test('MeSH 追加文脈は確認した親子だけを結び、枝数・再試行数を制限する', async () => {

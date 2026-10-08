@@ -8,6 +8,9 @@ function google(status: number): GoogleApiError {
 }
 
 describe('classifyApiError', () => {
+  test('Anthropic の 529 は一時障害に分類する', () => {
+    expect(classifyApiError(new LlmProviderError('overloaded', 'anthropic', 529, ''))).toBe('temporary');
+  });
   test.each([403, 404])('Google の %i は許可の問題として扱う（drive.file では未選択が 404 でも返る）', (status) => {
     expect(classifyApiError(google(status))).toBe('permission');
   });

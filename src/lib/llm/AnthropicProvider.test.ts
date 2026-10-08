@@ -8,6 +8,57 @@ function jsonResponse(body: unknown, status = 200): Response {
   } as Response;
 }
 
+test('道具の要求と応答を扱い、thinking を含む配列を次の往復でそのまま返す', async () => {
+  const content = [{ type: 'thinking', thinking: '', signature: 'opaque' },
+    { type: 'redacted_thinking', data: '' }, { type: 'text', text: 'a' },
+    { type: 'tool_use', id: 'toolu_1', name: 'tool', input: { command: 'check' } },
+    { type: 'text', text: 'b' }];
+  const raw = { content, stop_reason: 'tool_use', usage: { input_tokens: 10, output_tokens: 20,
+    cache_creation_input_tokens: 30, cache_read_input_tokens: 40 } };
+  const fetch = jest.fn().mockResolvedValueOnce(jsonResponse(raw)).mockResolvedValueOnce(jsonResponse({}));
+  const provider = new AnthropicProvider({ apiKey: 'test-key', model: 'claude-opus-5-5', fetch });
+  const tools = [{ name: 'tool', description: '道具', inputSchema: { type: 'object' } }];
+  const signal = new AbortController().signal;
+  const result = await provider.chatWithTools('system', [{ role: 'user', content: 'start' }], tools, { signal });
+  expect(result).toEqual({ content, raw, text: 'ab', stopReason: 'tool_use', tokensIn: 80, tokensOut: 20,
+    toolCalls: [{ id: 'toolu_1', name: 'tool', input: { command: 'check' } }] });
+  expect(result.content).toBe(content);
+  expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
+    model: 'claude-opus-5-5', system: 'system', messages: [{ role: 'user', content: 'start' }],
+    tools: [{ name: 'tool', description: '道具', input_schema: { type: 'object' } }],
+    max_tokens: 16000, thinking: { type: 'adaptive' }, cache_control: { type: 'ephemeral' },
+  });
+  expect(fetch.mock.calls[0][1].signal).toBe(signal);
+  await provider.chatWithTools('system', [{ role: 'user', content: 'start' }, { role: 'assistant', content: result.content },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'ok' }] }], tools, { maxOutputTokens: 123 });
+  const second = JSON.parse(fetch.mock.calls[1][1].body);
+  expect(second.messages[1].content).toEqual(content);
+  expect(second.max_tokens).toBe(123);
+  expect(second).not.toHaveProperty('temperature');
+  expect(second).not.toHaveProperty('tool_choice');
+});
+
+test.each(['claude-haiku-4-5-20251001', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'])(
+  'chat と道具呼び出しでモデルに応じて thinking を指定する: %s', async (model) => {
+    const fetch = jest.fn().mockResolvedValue(jsonResponse({}));
+    const provider = new AnthropicProvider({ apiKey: 'test-key', model, fetch });
+    await provider.chat([]);
+    await provider.chatWithTools('', [], []);
+    for (const [, init] of fetch.mock.calls) {
+      const body = JSON.parse(init.body);
+      if (model === 'claude-haiku-4-5-20251001') expect(body).not.toHaveProperty('thinking');
+      else expect(body.thinking).toEqual({ type: 'adaptive' });
+    }
+  }
+);
+
+test('道具呼び出しの失敗もキーを除去した共通の例外になる', async () => {
+  const fetch = jest.fn().mockResolvedValue(jsonResponse({ error: 'test-secret' }, 529));
+  const provider = new AnthropicProvider({ apiKey: 'test-secret', model: 'claude-opus-5-5', fetch });
+  await expect(provider.chatWithTools('', [], [])).rejects.toMatchObject({ status: 529,
+    responseBody: '{"error":"[REDACTED]"}' });
+});
+
 test('Messages API のヘッダ・ロール・system・既定値を送り、text と使用量を読む', async () => {
   const raw = {
     content: [{ type: 'thinking', thinking: '内部' }, { type: 'text', text: 'a' },

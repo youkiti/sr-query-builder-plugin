@@ -4,7 +4,6 @@ import { newUuid } from '@/utils/uuid';
 import {
   LlmProviderError,
   type ChatMessage,
-  type ChatOptions,
   type ChatResponse,
   type LLMProvider,
 } from './LLMProvider';
@@ -59,58 +58,71 @@ export function withLogging(
   const uuid = deps.newUuid ?? newUuid;
   const now = deps.now ?? nowIso;
 
+  const log = async <T extends ChatResponse>(request: unknown, summary: string, call: () => Promise<T>): Promise<T> => {
+    const logId = uuid();
+    const startedAt = now();
+    const startMs = Date.now();
+    let response: ChatResponse | null = null;
+    let errorMessage: string | null = null;
+    try {
+      const result = await call();
+      response = result;
+      return result;
+    } catch (err) {
+      errorMessage = formatError(err);
+      throw err;
+    } finally {
+      const latencyMs = Date.now() - startMs;
+      const promptUpload = await deps.uploadJson({
+        filename: `${logId}.prompt.json`,
+        content: JSON.stringify(request, null, 2),
+      });
+      const responseUpload = await deps.uploadJson({
+        filename: `${logId}.response.json`,
+        content: JSON.stringify(
+          response !== null ? response.raw : { error: errorMessage },
+          null,
+          2
+        ),
+      });
+      const entry: LlmApiLogEntry = {
+        logId,
+        timestamp: startedAt,
+        provider: provider.providerId,
+        model: provider.model,
+        purpose,
+        promptRef: promptUpload.webViewLink,
+        responseRef: responseUpload.webViewLink,
+        promptSummary: summary,
+        tokensIn: response?.tokensIn ?? null,
+        tokensOut: response?.tokensOut ?? null,
+        latencyMs,
+        // モデル単価表（pricing.ts）から概算コストを算出。未知モデルは null。
+        costEstimateUsd: estimateCostUsd(
+          provider.model,
+          response?.tokensIn ?? null,
+          response?.tokensOut ?? null
+        ),
+        error: errorMessage,
+      };
+      await deps.appendLogEntry(entry);
+    }
+  };
   return {
     providerId: provider.providerId,
     model: provider.model,
-    chat: async (messages: readonly ChatMessage[], options?: ChatOptions) => {
-      const logId = uuid();
-      const startedAt = now();
-      const startMs = Date.now();
-      let response: ChatResponse | null = null;
-      let errorMessage: string | null = null;
-      try {
-        response = await provider.chat(messages, options);
-        return response;
-      } catch (err) {
-        errorMessage = formatError(err);
-        throw err;
-      } finally {
-        const latencyMs = Date.now() - startMs;
-        const promptUpload = await deps.uploadJson({
-          filename: `${logId}.prompt.json`,
-          content: JSON.stringify({ messages, options }, null, 2),
-        });
-        const responseUpload = await deps.uploadJson({
-          filename: `${logId}.response.json`,
-          content: JSON.stringify(
-            response !== null ? response.raw : { error: errorMessage },
-            null,
-            2
-          ),
-        });
-        const entry: LlmApiLogEntry = {
-          logId,
-          timestamp: startedAt,
-          provider: provider.providerId,
-          model: provider.model,
-          purpose,
-          promptRef: promptUpload.webViewLink,
-          responseRef: responseUpload.webViewLink,
-          promptSummary: buildPromptSummary(messages),
-          tokensIn: response?.tokensIn ?? null,
-          tokensOut: response?.tokensOut ?? null,
-          latencyMs,
-          // モデル単価表（pricing.ts）から概算コストを算出。未知モデルは null。
-          costEstimateUsd: estimateCostUsd(
-            provider.model,
-            response?.tokensIn ?? null,
-            response?.tokensOut ?? null
-          ),
-          error: errorMessage,
-        };
-        await deps.appendLogEntry(entry);
-      }
-    },
+    chat: (messages, options) => log({ messages, options }, buildPromptSummary(messages),
+      () => provider.chat(messages, options)),
+    ...(provider.chatWithTools ? {
+      chatWithTools: (system, messages, tools, options) => {
+        const last = [...messages].reverse().find((message) => message.role === 'user');
+        const content = typeof last?.content === 'string' ? last.content : (last?.content ?? []).map((block) =>
+          block && typeof block === 'object' && 'type' in block && block.type === 'tool_result'
+            && 'content' in block && typeof block.content === 'string' ? block.content : '').join('\n');
+        return log({ system, messages, tools, options }, buildPromptSummary([{ role: 'user', content }]),
+          () => provider.chatWithTools!(system, messages, tools, options));
+      },
+    } satisfies Partial<LLMProvider> : {}),
   };
 }
 

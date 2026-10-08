@@ -157,3 +157,23 @@ describe('submitProtocol - docx', () => {
     ).rejects.toThrow(/DocxExtractor/);
   });
 });
+
+test.each(['gemini', 'openrouter', 'anthropic'] as const)('フィルター提案を持つのは Anthropic だけ: %s', async (providerId) => {
+  const { provider } = fakeProvider(JSON.stringify({ ...JSON.parse(skillResponse), suggested_filter_ids: ['SRfilter'] }));
+  const store = createStore();
+  const result = await submitProtocol({ sourceType: 'manual', inlineText: '本文' }, { store, provider: { ...provider, providerId } });
+  if (providerId === 'anthropic') {
+    expect(result.blocksDraft).toMatchObject({ selectedFilterIds: ['SRfilter'], filterSelectionSource: 'ai' });
+  } else {
+    expect(result.blocksDraft).not.toHaveProperty('selectedFilterIds');
+    expect(result.blocksDraft).not.toHaveProperty('filterSelectionSource');
+  }
+});
+
+test('空本文では Anthropic でも選択の出典を付けない', async () => {
+  const { provider, calls } = fakeProvider(skillResponse);
+  const result = await submitProtocol({ sourceType: 'manual', inlineText: '' }, { store: createStore(), provider: { ...provider, providerId: 'anthropic' } });
+  expect(calls).toHaveLength(0);
+  expect(result.blocksDraft).not.toHaveProperty('filterSelectionSource');
+  expect(result.blocksDraft).not.toHaveProperty('selectedFilterIds');
+});

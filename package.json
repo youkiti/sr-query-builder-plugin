@@ -40,6 +40,7 @@
     "p2f:start-runs": "tsx experiments/protocol-to-formula-loop/src/startRuns.ts",
     "p2f:prepare-runs": "tsx experiments/protocol-to-formula-loop/src/prepareRuns.ts",
     "p2f:gemini": "tsx experiments/protocol-to-formula-loop/src/geminiRun.ts",
+    "p2f:app": "tsx experiments/protocol-to-formula-loop/src/appRun.ts",
     "p2f:openrouter": "tsx experiments/protocol-to-formula-loop/src/openrouterRun.ts",
     "p2f:codex": "tsx experiments/protocol-to-formula-loop/src/codexRun.ts",
     "p2f:combine": "tsx experiments/protocol-to-formula-loop/src/combineRuns.ts",

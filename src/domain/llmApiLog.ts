@@ -7,6 +7,7 @@ export type LlmProviderId = 'gemini' | 'openai' | 'anthropic' | 'openrouter';
 
 export type LlmPurpose =
   | 'draft_block'
+  | 'draft_agent'
   | 'suggest_mesh'
   | 'expand_freeword'
   | 'design_filter'

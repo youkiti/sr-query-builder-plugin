@@ -7,7 +7,7 @@ export interface Conditions {
   version: string; model: string; generationSettings: string; inputs: string[]; tools: Command[];
   maxMeasurements: number; maxSubmissions: number; costLimit: string; finalSelection: string;
   combine?: { from: string; k: number; blocks?: { minOverlap: number; minMargin: number; maxConcepts: number } } | { versions: string[] };
-  runner?: 'claude-subagent' | 'gemini-api' | 'openrouter-api' | 'codex-relay';
+  runner?: 'claude-subagent' | 'gemini-api' | 'openrouter-api' | 'codex-relay' | 'app-anthropic';
   provider?: string;
   thinkingLevel?: 'low' | 'medium' | 'high';
   seeds?: { label: string; max: number };
@@ -18,7 +18,9 @@ export interface Conditions {
 export function validateConditions(value: unknown, version: string): Conditions {
   const c = value as Conditions | null;
   if (!/^[A-Za-z0-9_-]+$/.test(version) || !c || c.version !== version) throw new Error('版とフォルダ名が一致しません');
-  if (c.runner !== undefined && c.runner !== 'claude-subagent' && c.runner !== 'gemini-api' && c.runner !== 'openrouter-api' && c.runner !== 'codex-relay') throw new Error('実行役の指定が不正です');
+  if (c.runner !== undefined && c.runner !== 'claude-subagent' && c.runner !== 'gemini-api' && c.runner !== 'openrouter-api' && c.runner !== 'codex-relay' && c.runner !== 'app-anthropic') throw new Error('実行役の指定が不正です');
+  if (c.runner === 'app-anthropic' && (c.table !== undefined || c.seeds !== undefined || c.combine !== undefined || c.hitsLimit !== undefined
+    || !Array.isArray(c.tools) || c.tools.some((tool) => !['check', 'count', 'mesh', 'submit'].includes(tool)))) throw new Error('アプリの条件が不正です');
   const modelPattern = c.runner === 'openrouter-api' ? /^[A-Za-z0-9.-]+\/[A-Za-z0-9.-]+$/ : /^[A-Za-z0-9.-]+$/;
   if (typeof c.model !== 'string' || !modelPattern.test(c.model) || c.model.includes('latest')) throw new Error('モデルは固定 ID が必要です');
   if (c.runner === 'openrouter-api' ? typeof c.provider !== 'string' || !/^[a-z0-9][a-z0-9.-]*(\/[a-z0-9][a-z0-9.-]*)?$/.test(c.provider)

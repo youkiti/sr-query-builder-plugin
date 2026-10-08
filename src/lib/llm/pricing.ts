@@ -9,6 +9,7 @@ export interface ModelPricing {
   inputPerMillion: number;
   /** 出力 1M トークンあたりの USD */
   outputPerMillion: number;
+  longPrompt?: { threshold: number; inputPerMillion: number; outputPerMillion: number };
 }
 
 /**
@@ -21,7 +22,8 @@ export const MODEL_PRICING: Readonly<Record<string, ModelPricing>> = {
   'claude-opus-5-5': { inputPerMillion: 4, outputPerMillion: 20 },
   'claude-sonnet-5-5': { inputPerMillion: 2, outputPerMillion: 10 },
   // Haiku はプロンプト 10 万トークン以下。超過時は入力 0.50 / 出力 2.50。
-  'claude-haiku-5-5': { inputPerMillion: 0.10, outputPerMillion: 0.50 },
+  'claude-haiku-5-5': { inputPerMillion: 0.10, outputPerMillion: 0.50,
+    longPrompt: { threshold: 100_000, inputPerMillion: 0.50, outputPerMillion: 2.50 } },
   // Gemini 2.5 Pro: 入力 $1.25 / 出力 $10.00（per 1M tokens）
   'gemini-2.5-pro': { inputPerMillion: 1.25, outputPerMillion: 10.0 },
   // 以下は 2026-06 時点の概算価格。実際の単価は各プロバイダの料金ページで確認すること。
@@ -52,7 +54,9 @@ export function estimateCostUsd(
   if (tokensIn === null && tokensOut === null) {
     return null;
   }
-  const inputCost = ((tokensIn ?? 0) / 1_000_000) * pricing.inputPerMillion;
-  const outputCost = ((tokensOut ?? 0) / 1_000_000) * pricing.outputPerMillion;
+  const rates = pricing.longPrompt && tokensIn !== null && tokensIn > pricing.longPrompt.threshold
+    ? pricing.longPrompt : pricing;
+  const inputCost = ((tokensIn ?? 0) / 1_000_000) * rates.inputPerMillion;
+  const outputCost = ((tokensOut ?? 0) / 1_000_000) * rates.outputPerMillion;
   return inputCost + outputCost;
 }

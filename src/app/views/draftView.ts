@@ -249,7 +249,9 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
     // 全体の進捗トラッカー（プログレスバー + ステップカウンタ + フェーズ・ステッパー）。
     // 「今やっていること」の 1 行（下の status）に対し、こちらは「全体のどこか」を示し、
     // 長い LLM 待ち（特にフリーワード展開）でも残りが見えるようにする。実行中のみ表示。
-    if (running && run) {
+    const agentProgress = run?.progress?.phase === 'generating' && run.progress.step === 'agent'
+      ? run.progress : null;
+    if (running && run && !agentProgress) {
       container.appendChild(renderProgressTracker(doc, ctx.state, run));
     }
 
@@ -265,8 +267,9 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
 
     if (run) {
       if (run.status === 'running') {
-        status.textContent = runningStatusText(run.phase, run.progressLabel, run.startedAtMs);
-        startElapsedTicker(status, run.phase, run.progressLabel, run.startedAtMs);
+        const progressLabel = agentProgress ? formatDraftProgress(agentProgress) : run.progressLabel;
+        status.textContent = runningStatusText(run.phase, progressLabel, run.startedAtMs);
+        startElapsedTicker(status, run.phase, progressLabel, run.startedAtMs);
       } else if (run.status === 'error') {
         const phaseLabel = run.phase === 'validating' ? '検証' : '生成';
         errorBox.textContent = `${phaseLabel}に失敗しました: ${run.error ?? '不明なエラー'}`;
@@ -288,7 +291,7 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
     // ブロックごとのライブヒット数。実行中（生成フェーズ）に「出来上がったブロックから順に
     // 件数が出る」様子を見せる。生成済みの blockHits が残っていれば完了後も表示する。
     const blockHits = run?.blockHits ?? [];
-    if (blockHits.length > 0 || running) {
+    if (!agentProgress && (blockHits.length > 0 || running)) {
       container.appendChild(renderLiveBlockHits(doc, ctx.state, blockHits, running));
     }
     if (!running && run) {
@@ -621,6 +624,7 @@ export function currentStepIndex(
     return 0;
   }
   if (progress.phase === 'generating') {
+    if (progress.step === 'agent') return 0;
     const subIdx = (GEN_SUBSTEPS as readonly string[]).indexOf(progress.step);
     if (subIdx >= 0) {
       return (progress.blockIndex ?? 0) * GEN_SUBSTEPS.length + subIdx;
@@ -870,6 +874,12 @@ function formatElapsed(ms: number): string {
 
 /** DraftProgress を表示用ラベルへ変換する（bootstrap が draftRun.progressLabel に入れる） */
 export function formatDraftProgress(progress: DraftProgress): string {
+  if (progress.step === 'agent') {
+    const agent = progress.agent;
+    const operations = { write_formula: '式の書き込み', check: '書式の検査', count: '件数の測定', mesh: 'MeSH の照会', submit: '提出' };
+    const label = `AI が検索式を作成中（測定 ${agent?.measurements ?? 0} / ${agent?.maxMeasurements ?? 20} 回、提出 ${agent?.submissions ?? 0} / ${agent?.maxSubmissions ?? 4} 回）`;
+    return agent?.lastCommand ? `${label} 直前の操作: ${operations[agent.lastCommand]}` : label;
+  }
   const label = {
     'block-designer': 'ブロック骨格を設計中',
     'mesh-suggester': 'MeSH を提案中',

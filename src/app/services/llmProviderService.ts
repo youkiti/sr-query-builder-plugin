@@ -1,4 +1,4 @@
-import type { LlmApiLogEntry, LlmPurpose } from '@/domain/llmApiLog';
+import type { LlmApiLogEntry, LlmPurpose, LlmProviderId } from '@/domain/llmApiLog';
 import type { LlmRequestState, RetryOptions } from '@/lib/llm/retry';
 import { SHEET_HEADERS } from '@/domain/sheetsSchema';
 import type { ProjectStoreDeps } from '@/features/project';
@@ -63,6 +63,7 @@ export interface LlmFactoryDeps {
 export type LlmAttemptOptions = Pick<RetryOptions, 'beforeAttempt' | 'createSignal' | 'sleep'>;
 
 export interface LlmProviderFactory {
+  providerId?: LlmProviderId;
   /** 指定 purpose 用のロガー付きプロバイダを返す */
   forPurpose: (purpose: LlmPurpose, onRequestState?: (state: LlmRequestState) => void,
     attempts?: LlmAttemptOptions) => LLMProvider;
@@ -121,12 +122,14 @@ export async function buildLlmProviderFactory(deps: LlmFactoryDeps): Promise<Llm
     apiKey,
     model: selectedModel,
     fetch: deps.google.fetch,
+    ...(providerId === 'anthropic' ? { effort: 'medium' as const } : {}),
   });
   // withLogging を内側にして「再試行 1 回ごとに LLMApiLog へ 1 行」残す
   // （503 等の失敗試行も監査ログに見える状態を保つ）。
   // 期限の層はログより内側に置き、ログ保存の待ちを期限に含めない。
   return {
     model: selectedModel,
+    providerId,
     forPurpose: (purpose, onRequestState, attempts) =>
       withRetry(
         withLogging(withSignalDeadline(baseProvider), purpose, {

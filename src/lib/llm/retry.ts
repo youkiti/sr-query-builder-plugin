@@ -1,6 +1,5 @@
 import {
   LlmProviderError,
-  type ChatMessage,
   type ChatOptions,
   type ChatResponse,
   type LLMProvider,
@@ -56,26 +55,31 @@ export function withRetry(provider: LLMProvider, options: RetryOptions = {}): LL
     try { options.onRequestState?.(state); } catch { /* 表示側の失敗は通信へ伝播させない。 */ }
   };
 
+  const run = async <T extends ChatResponse>(call: (opts?: ChatOptions) => Promise<T>, opts?: ChatOptions): Promise<T> => {
+    for (let attempt = 1; ; attempt += 1) {
+      if (options.beforeAttempt) await options.beforeAttempt();
+      const signal = options.createSignal?.() ?? opts?.signal;
+      if (signal?.aborted) throw signal.reason;
+      try {
+        return await call(signal ? { ...opts, signal } : opts);
+      } catch (err) {
+        if (attempt >= maxAttempts || !isRetryable(err)) {
+          notify('failure');
+          throw err;
+        }
+        notify('retry');
+        await sleep(baseDelayMs * 2 ** (attempt - 1));
+        notify('idle');
+      }
+    }
+  };
   return {
     providerId: provider.providerId,
     model: provider.model,
-    chat: async (messages: readonly ChatMessage[], opts?: ChatOptions): Promise<ChatResponse> => {
-      for (let attempt = 1; ; attempt += 1) {
-        if (options.beforeAttempt) await options.beforeAttempt();
-        const signal = options.createSignal?.() ?? opts?.signal;
-        if (signal?.aborted) throw signal.reason;
-        try {
-          return await provider.chat(messages, signal ? { ...opts, signal } : opts);
-        } catch (err) {
-          if (attempt >= maxAttempts || !isRetryable(err)) {
-            notify('failure');
-            throw err;
-          }
-          notify('retry');
-          await sleep(baseDelayMs * 2 ** (attempt - 1));
-          notify('idle');
-        }
-      }
-    },
+    chat: (messages, opts) => run((options) => provider.chat(messages, options), opts),
+    ...(provider.chatWithTools ? {
+      chatWithTools: (system, messages, tools, opts) => run(
+        (options) => provider.chatWithTools!(system, messages, tools, options), opts),
+    } satisfies Partial<LLMProvider> : {}),
   };
 }
