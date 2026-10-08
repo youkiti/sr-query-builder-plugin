@@ -1,5 +1,26 @@
 /** @jest-environment node */
 import { loadConditions, validateConditions } from './conditions';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { procedureBody } from './leakCheck';
+
+test('中継の版と束ねる版を読み込み、作業者向け本文を保つ', () => {
+  expect(loadConditions('v1a')).toMatchObject({ model: 'gpt-6-astra', runner: 'codex-relay' });
+  expect(loadConditions('v4a')).toMatchObject({ model: 'gpt-6-astra', combine: { from: 'v1a', k: 3 } });
+  expect(loadConditions('v4a').runner).toBeUndefined();
+  const body = (version: string) => procedureBody(readFileSync(join(__dirname, '../harness', version, 'procedure.md'), 'utf8'));
+  for (const version of ['v1a', 'v4a']) expect(body(version)).toBe(body('v1'));
+});
+
+test.each([[], ['check'], ['check', 'count', 'mesh', 'submit']].map((tools) => [tools]))('中継の道具は許可した部分集合を受け付ける: %j', (tools) => {
+  const value = { ...loadConditions('v1a'), tools };
+  expect(validateConditions(value, 'v1a')).toEqual(value);
+});
+
+test.each([{ table: true }, { table: false }, { seeds: { label: 'seed', max: 1 } }, { combine: { from: 'v1', k: 3 } },
+  { tools: ['submit', 'titles'] }, { tools: ['submit', 'outside'] }, { tools: ['submit', 'seeds'] }])('中継に併用できない条件を拒否する: %j', (change) => {
+  expect(() => validateConditions({ ...loadConditions('v1a'), ...change }, 'v1a')).toThrow('中継の条件');
+});
 
 test.each([undefined, 1, 10000, Number.MAX_SAFE_INTEGER])('表の件数の目安を受け付ける: %j', (hitsLimit) => {
   expect(validateConditions({ ...loadConditions('v11'), hitsLimit }, 'v11').hitsLimit).toBe(hitsLimit);

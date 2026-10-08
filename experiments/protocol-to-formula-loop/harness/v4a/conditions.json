@@ -1,0 +1,23 @@
+{
+  "version": "v4a",
+  "model": "gpt-6-astra",
+  "generationSettings": "codex CLI（codex exec）。推論の強さは medium。外部通信を遮断したサンドボックスで動かし、道具は中継役が代わりに実行する",
+  "inputs": [
+    "protocol.md",
+    "procedure.md"
+  ],
+  "tools": [
+    "check",
+    "count",
+    "mesh",
+    "submit"
+  ],
+  "maxMeasurements": 20,
+  "maxSubmissions": 4,
+  "costLimit": "1 本あたりの道具の呼び出し回数の上限は v1 と同じ。成果物 1 つに生成 3 本を使う（費用は v1a の 3 倍）",
+  "finalSelection": "v1a の手順で独立に作った 3 本それぞれの「最後に受け付けられた提出」を OR で束ねた 1 本。採点結果による選び直しはしない",
+  "combine": {
+    "from": "v1a",
+    "k": 3
+  }
+}

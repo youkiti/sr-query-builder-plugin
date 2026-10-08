@@ -1,0 +1,20 @@
+{
+  "version": "v1a",
+  "model": "gpt-6-astra",
+  "generationSettings": "codex CLI（codex exec）。推論の強さは medium。外部通信を遮断したサンドボックスで動かし、道具は中継役が代わりに実行する",
+  "inputs": [
+    "protocol.md",
+    "procedure.md"
+  ],
+  "tools": [
+    "check",
+    "count",
+    "mesh",
+    "submit"
+  ],
+  "maxMeasurements": 20,
+  "maxSubmissions": 4,
+  "costLimit": "道具の呼び出し回数の上限で代替する（codex の費用は直接制限できない）",
+  "finalSelection": "最後に受け付けられた提出 1 本。採点結果による選び直しはしない",
+  "runner": "codex-relay"
+}
