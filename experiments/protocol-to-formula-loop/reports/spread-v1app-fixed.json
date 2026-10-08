@@ -1,0 +1,50 @@
+{
+  "version": "v1app",
+  "subset": "fixed",
+  "reviews": 20,
+  "runsPerReview": 3,
+  "generatedAt": "2026-10-08T08:09:39.191Z",
+  "runs": 60,
+  "failedRuns": 0,
+  "recallSpread": {
+    "reviews": 20,
+    "mean": 0.01660997663874978,
+    "median": 0,
+    "max": 0.18458380361113907
+  },
+  "hitsRange": {
+    "reviews": 20,
+    "median": 1.2157266039710086,
+    "max": 7.011412268188303,
+    "over10x": 0
+  },
+  "largeHits": {
+    "runs": 60,
+    "over10000": 10,
+    "over50000": 0
+  },
+  "toolUse": {
+    "measurements": {
+      "median": 4,
+      "max": 7,
+      "zero": 0
+    },
+    "submissions": {
+      "median": 1,
+      "max": 1
+    }
+  },
+  "byCutoff": {
+    "splitDate": "2019-07-04",
+    "older": {
+      "reviews": 10,
+      "allCapturedRate": 0.7,
+      "studyRecall": 0.9445276965562053
+    },
+    "newer": {
+      "reviews": 10,
+      "allCapturedRate": 0.5,
+      "studyRecall": 0.9227918069584735
+    }
+  }
+}
