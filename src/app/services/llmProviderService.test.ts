@@ -6,6 +6,7 @@ import {
   STORAGE_KEY_OPENROUTER,
   buildLlmProviderFactory,
   getGeminiApiKey,
+  resolveSelectedModelKey,
   getOpenRouterApiKey,
   getAnthropicApiKey,
   STORAGE_KEY_ANTHROPIC,
@@ -62,6 +63,34 @@ describe('getOpenRouterApiKey', () => {
     await expect(
       getOpenRouterApiKey(memoryStore({ [STORAGE_KEY_OPENROUTER]: '' }).store)
     ).resolves.toBeNull();
+  });
+});
+
+describe('resolveSelectedModelKey', () => {
+  test.each([
+    [undefined, 'a', undefined, undefined, 'claude-opus-5-5', 'anthropic', 'Anthropic', 'a'],
+    [undefined, 'a', 'g', undefined, 'claude-opus-5-5', 'anthropic', 'Anthropic', 'a'],
+    [undefined, undefined, 'g', undefined, 'gemini-3.5-flash-lite', 'gemini', 'Gemini', 'g'],
+    [undefined, undefined, undefined, undefined, 'claude-opus-5-5', 'anthropic', 'Anthropic', null],
+    [undefined, undefined, undefined, 'or', 'claude-opus-5-5', 'anthropic', 'Anthropic', null],
+    ['gemini-3.5-flash', 'a', 'g', 'or', 'gemini-3.5-flash', 'gemini', 'Gemini', 'g'],
+    ['gemini-3.5-flash', 'a', undefined, 'or', 'gemini-3.5-flash', 'gemini', 'Gemini', null],
+    ['qwen/qwen3-235b-a22b-2507', 'a', 'g', 'or', 'qwen/qwen3-235b-a22b-2507', 'openrouter', 'OpenRouter', 'or'],
+    ['qwen/qwen3-235b-a22b-2507', 'a', 'g', undefined, 'qwen/qwen3-235b-a22b-2507', 'openrouter', 'OpenRouter', null],
+    ['claude-sonnet-5-5', 'a', 'g', 'or', 'claude-sonnet-5-5', 'anthropic', 'Anthropic', 'a'],
+    ['claude-sonnet-5-5', undefined, 'g', 'or', 'claude-sonnet-5-5', 'anthropic', 'Anthropic', null],
+  ])('保存モデル=%s Anthropic=%s Gemini=%s OpenRouter=%s', async (
+    savedModel, anthropic, gemini, openrouter, model, providerId, providerName, apiKey
+  ) => {
+    const { store } = memoryStore({
+      [STORAGE_KEY_LLM_MODEL]: savedModel,
+      [STORAGE_KEY_ANTHROPIC]: anthropic,
+      [STORAGE_KEY_GEMINI]: gemini,
+      [STORAGE_KEY_OPENROUTER]: openrouter,
+    });
+    await expect(resolveSelectedModelKey(store)).resolves.toEqual({
+      model, providerId, providerName, apiKey,
+    });
   });
 });
 

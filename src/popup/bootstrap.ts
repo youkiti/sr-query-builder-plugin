@@ -14,7 +14,7 @@
 import {
   createChromeRuntimeDeps,
   createNewProject,
-  getGeminiApiKey,
+  resolveSelectedModelKey,
   loadExistingProject,
   type ChromeRuntimeDeps,
 } from '@/app/services';
@@ -208,11 +208,11 @@ async function openRecent(
 }
 
 /**
- * メインビュー遷移前に Gemini API キーの有無をチェックする。
+ * メインビュー遷移前に選択モデルのプロバイダの API キーの有無をチェックする。
  * 未設定なら保存後に自動でメインビューへ戻れるよう pending フラグを立て、Options 画面へ誘導する。
  */
 async function openAppOrRedirect(doc: Document, deps: PopupDeps): Promise<void> {
-  const apiKey = await getGeminiApiKey(deps.runtime.store);
+  const { apiKey, providerName } = await resolveSelectedModelKey(deps.runtime.store);
   if (apiKey !== null) {
     deps.openAppTab();
     return;
@@ -221,7 +221,7 @@ async function openAppOrRedirect(doc: Document, deps: PopupDeps): Promise<void> 
   const status = doc.getElementById('popup-status');
   if (status) {
     status.textContent =
-      'Gemini APIキーが未設定です。設定画面で入力すると、保存後にトップ画面に戻ります。';
+      `${providerName} APIキーが未設定です。設定画面で入力すると、保存後にトップ画面に戻ります。`;
   }
   deps.openOptions();
 }

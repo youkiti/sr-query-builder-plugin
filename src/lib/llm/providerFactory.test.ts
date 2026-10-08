@@ -4,10 +4,20 @@ import { OpenRouterProvider } from './OpenRouterProvider';
 import { createProvider } from './providerFactory';
 
 describe('createProvider', () => {
+  test.each([
+    ['anthropic', 'claude-opus-5-5'],
+    ['openrouter', 'gemini-3.5-flash-lite'],
+  ] as const)('provider: %s でモデル省略なら %s を使う', (providerId, model) => {
+    const provider = createProvider({ provider: providerId, apiKey: 'k' });
+    expect(provider.providerId).toBe(providerId);
+    expect(provider.model).toBe(model);
+  });
+
   test('provider: gemini を明示すると GeminiProvider が返る（後方互換）', () => {
     const provider = createProvider({ provider: 'gemini', apiKey: 'k' });
     expect(provider).toBeInstanceOf(GeminiProvider);
     expect(provider.providerId).toBe('gemini');
+    expect(provider.model).toBe('gemini-3.5-flash-lite');
   });
 
   test('provider: openrouter を明示すると OpenRouterProvider が返る', () => {

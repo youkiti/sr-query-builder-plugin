@@ -8,6 +8,7 @@ describe('app/services index 再エクスポート', () => {
     expect(typeof mod.loadExistingProject).toBe('function');
     expect(typeof mod.buildLlmProviderFactory).toBe('function');
     expect(typeof mod.getGeminiApiKey).toBe('function');
+    expect(typeof mod.resolveSelectedModelKey).toBe('function');
     expect(typeof mod.LlmApiKeyMissingError).toBe('function');
     expect(typeof mod.STORAGE_KEY_GEMINI).toBe('string');
     expect(typeof mod.submitProtocol).toBe('function');
