@@ -49,7 +49,7 @@ export const ja = {
   'guide.tourGettingStartedStepApproveBlocks': '内容に問題がなければ「承認してシード論文へ →」を押します。承認すると、プロトコルとブロックがスプレッドシートに保存されます。押さずに次へ進んでもかまいません。',
   'guide.tourGettingStartedStepOpenSeeds': 'シード論文を開いてください。',
   'guide.tourGettingStartedStepAddSeeds': 'ここで、すでに分かっている適格な論文の PMID を登録します（ファイルからの登録もできます）。登録は任意です。あとで、検索式がそれらの論文を捕捉できているかの確認に使います。',
-  'guide.tourGettingStartedStepFinish': 'ツアーはここからいつでも始め直せます。続きは「検索式の作成と自動調整」のツアーで案内します。',
+  'guide.tourGettingStartedStepFinish': 'ツアーはここからいつでも始め直せます。省略した手順も、準備ができてから始め直すと案内されます。',
   // ツアー: draft-and-optimize
   'guide.tourDraftAndOptimizeTitle': '検索式の作成と自動調整',
   'guide.tourDraftAndOptimizeDesc': '自動調整の設定と開始、履歴、最終レビューの見方を案内します。',
@@ -63,11 +63,11 @@ export const ja = {
   'guide.tourDraftAndOptimizeStepFinish': 'ツアーはここからいつでも始め直せます。',
   // ツアー: expand-seeds
   'guide.tourExpandSeedsTitle': 'シードの拡張',
-  'guide.tourExpandSeedsDesc': '現在の検索式の外側から境界事例を取得し、判定して、更新提案を見るまでを案内します。',
+  'guide.tourExpandSeedsDesc': '境界事例の候補を取得し、判定して、更新提案を見るまでを案内します。',
   'guide.tourExpandSeedsStepOpenExpand': '対話的シード拡張を開いてください。シード論文を増やし、検索式の取りこぼしを見つける画面です。',
-  'guide.tourExpandSeedsStepFetchCandidates': '「境界事例を取得」を押すと、現在の検索式の外側から、判定が迷いやすい論文を AI が選びます。実験的機能で、AI と PubMed への通信が走るので、押さずに次へ進んでもかまいません。',
+  'guide.tourExpandSeedsStepFetchCandidates': '「境界事例を取得」を押すと、AI が候補の論文を選びます。有効なシード論文があるときは現在の検索式の外側から判定が迷いやすい論文を、無いときは式に当たる論文から最初のシードの候補を選びます。実験的機能で、AI と PubMed への通信が走るので、押さずに次へ進んでもかまいません。',
   'guide.tourExpandSeedsStepJudgeCandidates': '候補ごとに include / exclude / maybe を判定します。キー操作は、i・e・m で判定、n で次の未判定へ、p で前へ移動です。include した論文は、シード論文に追加されます。',
-  'guide.tourExpandSeedsStepUpdateProposals': 'すべての候補を判定し終え、式の外側の論文を include していると、「検索式の更新提案（推定）」が出ます。どの語をどのブロックに足すと何件回収できるかの案です。採用は、検索式（生成・検証）で式を編集して自分で行います。',
+  'guide.tourExpandSeedsStepUpdateProposals': 'シード論文があるときに、すべての候補を判定し終えて、式の外側の論文を include していると、「検索式の更新提案（推定）」が出ます。どの語をどのブロックに足すと何件回収できるかの案です。採用は、検索式（生成・検証）で式を編集して自分で行います。',
   'guide.tourExpandSeedsStepFinish': 'ツアーはここからいつでも始め直せます。',
   // ツアー: edit-and-export
   'guide.tourEditAndExportTitle': '編集と書き出し',
@@ -75,7 +75,7 @@ export const ja = {
   'guide.tourEditAndExportStepOpenEdit': '検索式編集を開いてください。検索式をブロックごとに手で直す画面です。',
   'guide.tourEditAndExportStepEditBlocks': 'ブロックごとに、鉛筆のボタンでチップ編集をするか、「AI に改善させる」で再設計できます。語は MeSH とフリーワードで色分けされます。',
   'guide.tourEditAndExportStepInspectBlock': '鉛筆のボタンか「AI に改善させる」でブロックを開くと、その下に「このブロックのインスペクタ」が出ます。語ごとのヒット数と寄与（Δ）、MeSH の階層を見ながら、語を足し引きできます。',
-  'guide.tourEditAndExportStepSaveVersion': '直したら、必要に応じて「編集メモ」に理由を書き、「新バージョンとして保存」を押します。新しいバージョンとして追記され、元のバージョンも残ります。押さずに次へ進んでもかまいません。',
+  'guide.tourEditAndExportStepSaveVersion': '直したら、必要に応じて「編集メモ」に理由を書き、「新バージョンとして保存」を押します。新しいバージョンとして追記され、元のバージョンも残り、保存するとエクスポートへ進めるようになります。押さずに次へ進んでもかまいません。',
   'guide.tourEditAndExportStepOpenExport': 'エクスポートを開いてください。検索式を他のデータベース向けに変換する画面です。',
   'guide.tourEditAndExportStepRunExport': '「4 DB へ変換して保存」を押すと、4 つのデータベース向けに変換し、結果をスプレッドシートに保存します。画面の上に注意が出ているときは、先に確認してください。押さなくても次へ進めます。',
   'guide.tourEditAndExportStepConvertDatabases': '変換が終わると、Cochrane CENTRAL・Embase (Dialog)・ClinicalTrials.gov・ICTRP の結果が並びます。各項目を開くと、変換後の式、注意点、ダウンロードのリンクが見られます。',

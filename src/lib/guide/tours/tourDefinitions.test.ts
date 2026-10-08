@@ -72,11 +72,25 @@ describe('はじめての流れ', () => {
   test('プロトコルが入っていればプロトコル入力の 2 手順を飛ばし、承認済みなら承認の手順を飛ばす', () => {
     expect(step('getting-started', 'open-protocol').skipIf).toBe('has-protocol');
     expect(step('getting-started', 'enter-protocol').skipIf).toBe('has-protocol');
-    expect(step('getting-started', 'approve-blocks').skipIf).toBe('blocks-approved');
+    expect(step('getting-started', 'approve-blocks').skipIf).toBe('approve-blocks-not-needed');
     const tour = GUIDE_TOURS['getting-started'];
     expect(nextStepIndex(tour, 1, { 'has-protocol': true })).toBe(3);
-    expect(nextStepIndex(tour, 6, { 'blocks-approved': true })).toBe(7);
+    expect(nextStepIndex(tour, 6, { 'approve-blocks-not-needed': true })).toBe(7);
     expect(nextStepIndex(tour, 1, {})).toBe(1);
+  });
+
+  test('開けない画面に関わる手順は飛ばす（blocks は 4 手順、seeds は 2 手順）', () => {
+    for (const stepId of ['open-blocks', 'review-blocks', 'review-filters']) {
+      expect(step('getting-started', stepId).skipIf).toBe('blocks-unavailable');
+    }
+    for (const stepId of ['open-seeds', 'add-seeds']) {
+      expect(step('getting-started', stepId).skipIf).toBe('seeds-unavailable');
+    }
+    const tour = GUIDE_TOURS['getting-started'];
+    // プロトコル未解析・プロジェクトなし: どの画面も開けないので、enter-protocol の次は finish
+    expect(nextStepIndex(tour, 3, { 'blocks-unavailable': true, 'seeds-unavailable': true, 'approve-blocks-not-needed': true })).toBe(9);
+    // プロジェクトはあるがプロトコル未解析: blocks 側だけ飛び、seeds は残る
+    expect(nextStepIndex(tour, 3, { 'blocks-unavailable': true, 'approve-blocks-not-needed': true })).toBe(7);
   });
 
   test('プロトコルの解析とブロックの承認が、それぞれのイベントで進む', () => {
@@ -143,6 +157,15 @@ describe('編集と書き出し', () => {
     const tour = GUIDE_TOURS['edit-and-export'];
     expect(tour.unavailableIf).toBe('edit-unavailable');
     expect(isTourUnavailable(tour, { 'edit-unavailable': true })).toBe(true);
+  });
+
+  test('#/export を開けない間は、エクスポートの 3 手順を飛ばす', () => {
+    for (const stepId of ['open-export', 'run-export', 'convert-databases']) {
+      expect(step('edit-and-export', stepId).skipIf).toBe('export-unavailable');
+    }
+    const tour = GUIDE_TOURS['edit-and-export'];
+    expect(nextStepIndex(tour, 4, { 'export-unavailable': true })).toBe(7);
+    expect(nextStepIndex(tour, 4, {})).toBe(4);
   });
 
   test('保存は保存完了のイベントで進み、変換結果は実行の後に置く（結果は実行しないと現れない）', () => {

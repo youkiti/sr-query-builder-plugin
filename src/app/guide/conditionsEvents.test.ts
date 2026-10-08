@@ -37,19 +37,41 @@ test('プロジェクトとプロトコルの有無から条件を作る。プ�
 test('全ツアーの条件が計算され、初期状態ではツアー固有の条件が「使えない」側になる', () => {
   expect(computeGuideConditions(createInitialState())).toEqual({
     'has-project': false, 'has-protocol': false, 'blocks-approved': false,
+    'blocks-unavailable': true, 'seeds-unavailable': true, 'approve-blocks-not-needed': true,
     'draft-unavailable': true, 'optimization-running': false,
     'expand-unavailable': true, 'expand-candidates-ready': false,
-    'edit-unavailable': true, 'formula-save-done': false,
+    'edit-unavailable': true, 'export-unavailable': true, 'formula-save-done': false,
   });
 });
 
 test('はじめての流れ: ブロックの承認済みは、#/draft を開けて、かつプロトコルが保存済みのとき', () => {
-  expect(GETTING_STARTED_ADAPTER.conditions(createInitialState())).toEqual({ 'blocks-approved': false });
-  expect(GETTING_STARTED_ADAPTER.conditions(approved())).toEqual({ 'blocks-approved': true });
+  expect(GETTING_STARTED_ADAPTER.conditions(createInitialState())).toMatchObject({ 'blocks-approved': false });
+  expect(GETTING_STARTED_ADAPTER.conditions(approved())).toMatchObject({ 'blocks-approved': true });
   // 新しいプロトコルを解析した直後（未保存）は、版番号が残っていても承認済みとは見なさない
-  expect(GETTING_STARTED_ADAPTER.conditions({ ...approved(), protocolDraftPersisted: false })).toEqual({ 'blocks-approved': false });
-  expect(GETTING_STARTED_ADAPTER.conditions({ ...approved(), project: null })).toEqual({ 'blocks-approved': false });
+  expect(GETTING_STARTED_ADAPTER.conditions({ ...approved(), protocolDraftPersisted: false })).toMatchObject({ 'blocks-approved': false });
+  expect(GETTING_STARTED_ADAPTER.conditions({ ...approved(), project: null })).toMatchObject({ 'blocks-approved': false });
   expect(GETTING_STARTED_ADAPTER.risingEvents).toEqual({ 'has-protocol': 'protocol-analyzed', 'blocks-approved': 'blocks-approved' });
+});
+
+test('はじめての流れ: 開けない画面に関わる手順を飛ばす条件は、evaluateGuards の blocks / seeds に合わせる', () => {
+  const states: Record<string, AppState> = {
+    initial: createInitialState(),
+    projectOnly: { ...createInitialState(), project },
+    analyzed: { ...createInitialState(), project, protocolDraft },
+    approved: approved(),
+  };
+  const expected: Record<string, Record<string, boolean>> = {
+    initial: { 'blocks-unavailable': true, 'seeds-unavailable': true, 'approve-blocks-not-needed': true },
+    projectOnly: { 'blocks-unavailable': true, 'seeds-unavailable': false, 'approve-blocks-not-needed': true },
+    analyzed: { 'blocks-unavailable': false, 'seeds-unavailable': false, 'approve-blocks-not-needed': false },
+    approved: { 'blocks-unavailable': false, 'seeds-unavailable': false, 'approve-blocks-not-needed': true },
+  };
+  for (const [name, state] of Object.entries(states)) {
+    expect([name, GETTING_STARTED_ADAPTER.conditions(state)]).toEqual([name, { ...expected[name], 'blocks-approved': name === 'approved' }]);
+    const guards = evaluateGuards(state);
+    expect(GETTING_STARTED_ADAPTER.conditions(state)['blocks-unavailable']).toBe(!guards.blocks.enabled);
+    expect(GETTING_STARTED_ADAPTER.conditions(state)['seeds-unavailable']).toBe(!guards.seeds.enabled);
+  }
 });
 
 test('検索式の作成と自動調整: #/draft を開けるかと、自動調整の実行中かを条件にする', () => {
@@ -79,7 +101,13 @@ test('シードの拡張: #/expand を開けるかと、候補の取得が済ん
 test('編集と書き出し: #/edit を開けるかと、検索式の保存が完了したかを条件にする', () => {
   expect(EDIT_AND_EXPORT_ADAPTER.conditions(approved())['edit-unavailable']).toBe(true);
   const ready = EDIT_AND_EXPORT_ADAPTER.conditions(withFormula());
-  expect(ready).toEqual({ 'edit-unavailable': false, 'formula-save-done': false });
+  expect(ready).toEqual({ 'edit-unavailable': false, 'export-unavailable': false, 'formula-save-done': false });
+  // 保存済みの版が無く、編集下書きだけで #/edit に入れる状態では、#/export は開けない
+  const draftOnly: AppState = {
+    ...approved(), formulaEditDraft: { formulaVersionId: null, markdown: '#1 x' },
+  };
+  expect(EDIT_AND_EXPORT_ADAPTER.conditions(draftOnly)).toEqual({ 'edit-unavailable': false, 'export-unavailable': true, 'formula-save-done': false });
+  expect(evaluateGuards(draftOnly).export.enabled).toBe(false);
   expect(ready['edit-unavailable']).toBe(!evaluateGuards(withFormula()).edit.enabled);
   for (const [status, expected] of [['saving', false], ['error', false], ['saved', true]] as const) {
     const state = { ...withFormula(), formulaSave: { formulaVersionId: 'v1', status, error: null } as AppState['formulaSave'] };

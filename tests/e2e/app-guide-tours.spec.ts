@@ -6,7 +6,7 @@
 
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { injectAppStub, scenarioWithProject } from './fixtures/appStub';
-import { FULL_BLOCKS_DRAFT, FULL_PROTOCOL_DRAFT, fullStateScenario } from './fixtures/scenarios/fullState';
+import { FULL_APP_STATE, FULL_BLOCKS_DRAFT, FULL_FORMULA_MARKDOWN, FULL_PROTOCOL_DRAFT, fullStateScenario } from './fixtures/scenarios/fullState';
 
 const HOME_URL = '/app/app.html#/home';
 const DRAFT_URL = '/app/app.html#/draft';
@@ -145,6 +145,56 @@ test.describe('app-guide-tours (ツアー 4 本)', () => {
     // 変換していないので、結果は画面に無い（待機）
     await expectStep(card, 'convert-databases', '7 / 8', true);
     await next(card).click();
+    await finishAndExpectDone(page, card, 'edit-and-export');
+  });
+
+  test('はじめての流れ: プロトコル未解析のまま「押さずに次へ」で進むと、開けない画面の手順を飛ばして最後まで完了できる', async ({ page }) => {
+    // プロジェクトだけ選んだ状態。#/blocks は開けないので、ブロック承認の 4 手順は飛ばされる。
+    await injectAppStub(page, scenarioWithProject());
+    await page.goto(HOME_URL);
+    await waitForGuide(page);
+    const card = await startFromList(page, 'getting-started');
+    await expectStep(card, 'welcome', '1 / 6', false);
+    await next(card).click();
+    await expectStep(card, 'open-protocol', '2 / 6', false);
+    await page.locator('[data-tour="nav-protocol"]').click();
+    await expect(page).toHaveURL(/#\/protocol$/);
+    // 解析は AI を呼ぶので押さずに進める
+    await expectStep(card, 'enter-protocol', '3 / 6', false);
+    await skip(card).click();
+    await expectStep(card, 'open-seeds', '4 / 6', false);
+    await page.locator('[data-tour="nav-seeds"]').click();
+    await expect(page).toHaveURL(/#\/seeds$/);
+    await expectStep(card, 'add-seeds', '5 / 6', false);
+    await next(card).click();
+    await expectStep(card, 'finish', '6 / 6', false);
+    await finishAndExpectDone(page, card, 'getting-started');
+  });
+
+  test('編集と書き出し: 保存済みバージョンが無い状態で保存を省略すると、エクスポートの手順を飛ばして最後まで完了できる', async ({ page }) => {
+    // 検索式の下書きはあるが保存済みバージョンが無い（自動調整の候補を未保存のまま #/edit へ渡した状態）。
+    // guards.ts: #/edit は formulaEditDraft が現在の版（null）向けなら開けるが、#/export は版が無いと開けない。
+    await injectAppStub(page, scenarioWithProject({
+      preloadedState: {
+        ...FULL_APP_STATE,
+        currentFormulaVersionId: null,
+        currentFormulaMarkdown: null,
+        formulaEditDraft: { formulaVersionId: null, markdown: FULL_FORMULA_MARKDOWN },
+      },
+    }));
+    await page.goto(HOME_URL);
+    await waitForGuide(page);
+    const card = await startFromList(page, 'edit-and-export');
+    await expectStep(card, 'open-edit', '1 / 5', false);
+    await page.locator('[data-tour="nav-edit"]').click();
+    await expect(page).toHaveURL(/#\/edit$/);
+    await expectStep(card, 'edit-blocks', '2 / 5', false);
+    await next(card).click();
+    await expectStep(card, 'inspect-block', '3 / 5', true);
+    await next(card).click();
+    await expectStep(card, 'save-version', '4 / 5', false);
+    await skip(card).click();
+    await expectStep(card, 'finish', '5 / 5', false);
     await finishAndExpectDone(page, card, 'edit-and-export');
   });
 

@@ -49,7 +49,7 @@ export const en: Record<MessageKey, string> = {
   'guide.tourGettingStartedStepApproveBlocks': 'If everything looks right, press 「承認してシード論文へ →」 (Approve and go to seed papers). Approving saves the protocol and the blocks to the spreadsheet. You can move on without pressing it.',
   'guide.tourGettingStartedStepOpenSeeds': 'Open 「シード論文」 (Seed papers).',
   'guide.tourGettingStartedStepAddSeeds': 'Register the PMIDs of eligible papers you already know here (you can also register from a file). This is optional. Later it is used to check whether the search formula captures those papers.',
-  'guide.tourGettingStartedStepFinish': 'You can start this tour again from here at any time. The next tour, on creating and auto-tuning the search formula, picks up from here.',
+  'guide.tourGettingStartedStepFinish': 'You can start this tour again from here at any time. Steps you skipped are covered when you start it again once you are ready.',
   // ツアー: draft-and-optimize
   'guide.tourDraftAndOptimizeTitle': 'Creating and auto-tuning the formula',
   'guide.tourDraftAndOptimizeDesc': 'How to set up and start auto-tuning, and how to read the history and the final review.',
@@ -63,11 +63,11 @@ export const en: Record<MessageKey, string> = {
   'guide.tourDraftAndOptimizeStepFinish': 'You can start this tour again from here at any time.',
   // ツアー: expand-seeds
   'guide.tourExpandSeedsTitle': 'Expanding seeds',
-  'guide.tourExpandSeedsDesc': 'How to fetch borderline cases from outside the current formula, judge them, and read the update proposals.',
+  'guide.tourExpandSeedsDesc': 'How to fetch candidates of borderline cases, judge them, and read the update proposals.',
   'guide.tourExpandSeedsStepOpenExpand': 'Open 「対話的シード拡張」 (Interactive seed expansion). This screen grows your seed papers and finds what the formula misses.',
-  'guide.tourExpandSeedsStepFetchCandidates': 'Pressing 「境界事例を取得」 (Fetch borderline cases) has the AI pick papers from outside the current formula that are hard to judge. This is an experimental feature and it communicates with the AI and PubMed, so you can move on without pressing it.',
+  'guide.tourExpandSeedsStepFetchCandidates': 'Pressing 「境界事例を取得」 (Fetch borderline cases) has the AI pick candidate papers. If you have valid seed papers, it picks hard-to-judge papers from outside the current formula; if not, it picks first-seed candidates from the papers the formula matches. This is an experimental feature and it communicates with the AI and PubMed, so you can move on without pressing it.',
   'guide.tourExpandSeedsStepJudgeCandidates': 'Judge each candidate as include, exclude, or maybe. Keys: i, e, and m to judge, n to jump to the next unjudged one, and p to go back. Papers you include are added to the seed papers.',
-  'guide.tourExpandSeedsStepUpdateProposals': 'After you judge every candidate and include papers from outside the formula, 「検索式の更新提案（推定）」 (Formula update proposals, estimated) appears. It suggests which terms to add to which block and how many papers each would recover. You adopt them yourself by editing the formula in 「検索式（生成・検証）」.',
+  'guide.tourExpandSeedsStepUpdateProposals': 'When you have seed papers, after you judge every candidate and include papers from outside the formula, 「検索式の更新提案（推定）」 (Formula update proposals, estimated) appears. It suggests which terms to add to which block and how many papers each would recover. You adopt them yourself by editing the formula in 「検索式（生成・検証）」.',
   'guide.tourExpandSeedsStepFinish': 'You can start this tour again from here at any time.',
   // ツアー: edit-and-export
   'guide.tourEditAndExportTitle': 'Editing and exporting',
@@ -75,7 +75,7 @@ export const en: Record<MessageKey, string> = {
   'guide.tourEditAndExportStepOpenEdit': 'Open 「検索式編集」 (Edit search formula). This screen is for fixing the formula by hand, block by block.',
   'guide.tourEditAndExportStepEditBlocks': 'For each block, use the pencil button to edit terms as chips, or 「AI に改善させる」 (Let the AI improve it) to redesign it. Terms are color-coded as MeSH or free-text words.',
   'guide.tourEditAndExportStepInspectBlock': 'Open a block with the pencil button or 「AI に改善させる」 and 「このブロックのインスペクタ」 (This block’s inspector) appears below it. Add or remove terms while looking at each term’s hit count and contribution (Δ) and the MeSH hierarchy.',
-  'guide.tourEditAndExportStepSaveVersion': 'When you are done, write the reason in 「編集メモ」 (Edit note) if you like, then press 「新バージョンとして保存」 (Save as a new version). It is appended as a new version and the original is kept. You can move on without pressing it.',
+  'guide.tourEditAndExportStepSaveVersion': 'When you are done, write the reason in 「編集メモ」 (Edit note) if you like, then press 「新バージョンとして保存」 (Save as a new version). It is appended as a new version, the original is kept, and saving lets you move on to the export. You can move on without pressing it.',
   'guide.tourEditAndExportStepOpenExport': 'Open 「エクスポート」 (Export). This screen converts the formula for other databases.',
   'guide.tourEditAndExportStepRunExport': 'Pressing 「4 DB へ変換して保存」 (Convert to 4 databases and save) converts the formula for four databases and saves the result to the spreadsheet. If a notice is shown at the top of the screen, check it first. You can move on without pressing it.',
   'guide.tourEditAndExportStepConvertDatabases': 'After the conversion, results for Cochrane CENTRAL, Embase (Dialog), ClinicalTrials.gov, and ICTRP are listed. Open each one to see the converted formula, warnings, and the download link.',
