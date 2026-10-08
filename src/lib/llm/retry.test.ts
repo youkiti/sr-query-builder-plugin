@@ -157,3 +157,19 @@ test('各試行は hook 完了後に新しい signal を作り、完了後の ab
   expect(chat.mock.calls.map((call) => call[1])).toEqual(signals.map((signal) => ({ temperature: 0.2, signal })));
   for (const remove of removes) expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
 });
+
+test.each([429, 500, 502, 503, 504, 529])('Anthropic HTTP %i は再試行する', async (status) => {
+  const chat = jest.fn().mockRejectedValueOnce(new LlmProviderError('一時エラー', 'anthropic', status, ''))
+    .mockResolvedValueOnce(okResponse());
+  await expect(withRetry({ providerId: 'anthropic', model: 'claude-foo', chat }, { sleep: noSleep }).chat([]))
+    .resolves.toEqual(okResponse());
+  expect(chat).toHaveBeenCalledTimes(2);
+});
+
+test.each([400, 401, 402, 403, 404, 413])('Anthropic HTTP %i は再試行しない', async (status) => {
+  const error = new LlmProviderError('エラー', 'anthropic', status, '');
+  const chat = jest.fn().mockRejectedValue(error);
+  await expect(withRetry({ providerId: 'anthropic', model: 'claude-foo', chat }, { sleep: noSleep }).chat([]))
+    .rejects.toBe(error);
+  expect(chat).toHaveBeenCalledTimes(1);
+});

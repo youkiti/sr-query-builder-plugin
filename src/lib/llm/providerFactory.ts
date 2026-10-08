@@ -1,3 +1,4 @@
+import { AnthropicProvider, type AnthropicEffort } from './AnthropicProvider';
 import { GeminiProvider } from './GeminiProvider';
 import { OpenRouterProvider } from './OpenRouterProvider';
 import { resolveProviderId, DEFAULT_MODEL } from './modelRegistry';
@@ -12,16 +13,24 @@ import type { LLMProvider } from './LLMProvider';
  */
 
 export interface ProviderConfig {
-  provider?: 'gemini' | 'openrouter'; // 省略時は model から自動解決
+  provider?: 'gemini' | 'openrouter' | 'anthropic'; // 省略時は model から自動解決
   apiKey: string;
   model?: string; // 省略時は modelRegistry の DEFAULT_MODEL
   fetch?: typeof fetch;
+  effort?: AnthropicEffort;
 }
 
 export function createProvider(config: ProviderConfig): LLMProvider {
   const resolvedModel = config.model ?? DEFAULT_MODEL;
   const resolvedProvider = config.provider ?? resolveProviderId(resolvedModel);
   switch (resolvedProvider) {
+    case 'anthropic':
+      return new AnthropicProvider({
+        apiKey: config.apiKey,
+        model: resolvedModel,
+        fetch: config.fetch,
+        effort: config.effort,
+      });
     case 'gemini':
       return new GeminiProvider({
         apiKey: config.apiKey,

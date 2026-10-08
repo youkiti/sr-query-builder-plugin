@@ -11,8 +11,8 @@
     <title data-en="Privacy Policy — SR Query Builder Plugin">プライバシーポリシー — SR Query Builder Plugin</title>
     <meta
       name="description"
-      content="SR Query Builder Plugin のプライバシーポリシー。開発者サーバーは存在せず、データは利用者の Google アカウントと BYOK の LLM API（Gemini / OpenRouter）・NCBI API の間でのみ流通します。"
-      data-en-content="Privacy policy for SR Query Builder Plugin: there is no developer-operated server; data flows only between the user’s own Google account and the BYOK LLM API (Gemini / OpenRouter) and NCBI API."
+      content="SR Query Builder Plugin のプライバシーポリシー。開発者サーバーは存在せず、データは利用者の Google アカウントと BYOK の LLM API（Gemini / OpenRouter / Anthropic）・NCBI API の間でのみ流通します。"
+      data-en-content="Privacy policy for SR Query Builder Plugin: there is no developer-operated server; data flows only between the user’s own Google account and the BYOK LLM API (Gemini / OpenRouter / Anthropic) and NCBI API."
     />
     <link rel="stylesheet" href="style.css" />
     <!-- 表示言語（ja / en）の解決と切替。初期描画前に確定させるため head で同期読み込みする -->
@@ -115,11 +115,11 @@
             </li>
             <li>
               <span class="ja" lang="ja"
-                >利用者が自分の API キー（BYOK: Bring Your Own Key）で契約する LLM API（Gemini または OpenRouter。既定は
+                >利用者が自分の API キー（BYOK: Bring Your Own Key）で契約する LLM API（Gemini、OpenRouter、または Anthropic。既定は
                 Gemini）、NCBI E-utilities、および NLM MeSH RDF（MeSH 階層情報の取得。API キー不要の公開エンドポイント）</span
               >
               <span class="en" lang="en"
-                >The LLM API the user contracts with using their own key (BYOK: Gemini or OpenRouter; Gemini is the
+                >The LLM API the user contracts with using their own key (BYOK: Gemini, OpenRouter, or Anthropic; Gemini is the
                 default), NCBI E-utilities, and NLM MeSH RDF (used to fetch MeSH hierarchy data; a public endpoint
                 that needs no API key)</span
               >
@@ -193,10 +193,10 @@
                   </td>
                   <td>
                     <span class="ja" lang="ja"
-                      >利用者が選択した LLM プロバイダ（Gemini または OpenRouter。既定は Gemini）の API（BYOK）</span
+                      >利用者が選択した LLM プロバイダ（Gemini、OpenRouter、または Anthropic。既定は Gemini）の API（BYOK）</span
                     >
                     <span class="en" lang="en"
-                      >The LLM provider the user selected (Gemini or OpenRouter; Gemini is the default), via its API
+                      >The LLM provider the user selected (Gemini, OpenRouter, or Anthropic; Gemini is the default), via its API
                       (BYOK)</span
                     >
                   </td>
@@ -300,8 +300,8 @@
                 </tr>
                 <tr>
                   <td>
-                    <span class="ja" lang="ja">LLM プロバイダ（Gemini / OpenRouter）の API キー・NCBI API キー</span>
-                    <span class="en" lang="en">LLM provider (Gemini / OpenRouter) API key and NCBI API key</span>
+                    <span class="ja" lang="ja">LLM プロバイダ（Gemini / OpenRouter / Anthropic）の API キー・NCBI API キー</span>
+                    <span class="en" lang="en">LLM provider (Gemini / OpenRouter / Anthropic) API key and NCBI API key</span>
                   </td>
                   <td>
                     <span class="ja" lang="ja">利用者のブラウザ内（<code>chrome.storage</code>）</span>
@@ -431,17 +431,15 @@
           <ul>
             <li>
               <span class="ja" lang="ja"
-                ><strong>LLM プロバイダ（Gemini または OpenRouter。既定は Gemini）</strong>:
+                ><strong>LLM プロバイダ（Gemini、OpenRouter、または Anthropic。既定は Gemini）</strong>:
                 検索式のドラフト生成や検証結果の解釈補助を実行すると、研究プロトコルの本文・検索式ブロック定義・検索式ドラフトなどが、利用者が選択した
-                LLM プロバイダの API キー（BYOK）を用いて、そのプロバイダ（Google の Gemini API、または
-                OpenRouter）へ送信されます。送信先によるデータの取り扱いは、各プロバイダ自身のプライバシーポリシー・利用規約に従います。本拡張はプロバイダを仲介せず、利用者のブラウザから直接
+                LLM プロバイダの API キー（BYOK）を用いて、そのプロバイダ（Google の Gemini API、OpenRouter、または Anthropic の API）へ送信されます。送信先によるデータの取り扱いは、各プロバイダ自身のプライバシーポリシー・利用規約に従います。本拡張はプロバイダを仲介せず、利用者のブラウザから直接
                 API を呼び出します。</span
               >
               <span class="en" lang="en"
-                ><strong>LLM provider (Gemini or OpenRouter; Gemini is the default)</strong>: running search-strategy
+                ><strong>LLM provider (Gemini, OpenRouter, or Anthropic; Gemini is the default)</strong>: running search-strategy
                 drafting or getting help interpreting validation results sends the protocol text, search block
-                definitions and search draft to the LLM provider the user selected — Google’s Gemini API, or
-                OpenRouter — using that provider’s API key (BYOK). How that destination handles the data is governed
+                definitions and search draft to the LLM provider the user selected — Google’s Gemini API, OpenRouter, or Anthropic’s API — using that provider’s API key (BYOK). How that destination handles the data is governed
                 by that provider’s own privacy policy and terms. The extension does not proxy the request: the call
                 is made directly from the user’s browser.</span
               >
@@ -497,12 +495,12 @@
             <li>
               <span class="ja" lang="ja"
                 >本拡張をアンインストールすると、<code>chrome.storage</code> 内の設定（LLM プロバイダ（Gemini /
-                OpenRouter）・NCBI の API キー、認証状態等）は Chrome によって削除されます。Google Drive / Sheets
+                OpenRouter / Anthropic）・NCBI の API キー、認証状態等）は Chrome によって削除されます。Google Drive / Sheets
                 上のプロジェクトデータは利用者の資産としてそのまま残ります。</span
               >
               <span class="en" lang="en"
                 >Uninstalling the extension makes Chrome delete its <code>chrome.storage</code> settings (LLM
-                provider (Gemini / OpenRouter) and NCBI API keys, sign-in state, etc.). Project data in Google Drive
+                provider (Gemini / OpenRouter / Anthropic) and NCBI API keys, sign-in state, etc.). Project data in Google Drive
                 / Sheets remains, as it belongs to the user.</span
               >
             </li>

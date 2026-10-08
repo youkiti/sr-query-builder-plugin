@@ -3,6 +3,7 @@
  *
  * - Gemini API キー（LLM プロバイダ）
  * - OpenRouter API キー（OSS / 多プロバイダモデル用）
+ * - Anthropic API キー（Claude 用）
  * - 使用モデルの選択（ビルトイン + ユーザー追加のカスタムモデル）
  * - NCBI API キー（E-utilities の 3→10 req/s 引き上げ用、任意）
  *
@@ -16,6 +17,13 @@
  * ページ読み込み時にも自動判定してバッジへ反映する。
  */
 
+import {
+  BUILTIN_MODELS as BUILTIN_MODELS_DISPLAY,
+  DEFAULT_MODEL as DEFAULT_MODEL_ID,
+  MAX_CUSTOM_MODELS as MAX_CUSTOM_MODELS_LIMIT,
+  resolveProviderId,
+  type CustomModel as CustomModelEntry,
+} from '@/lib/llm/modelRegistry';
 import { detectGeminiTier, FREE_TIER_MODEL_ID } from '@/lib/llm/geminiTierDetector';
 
 // webpack DefinePlugin が注入するビルド日付（YYYY-MM-DD）
@@ -39,6 +47,7 @@ export interface OptionsDeps {
 
 export const STORAGE_KEY_GEMINI = 'apiKeys.gemini';
 export const STORAGE_KEY_OPENROUTER = 'apiKeys.openrouter';
+export const STORAGE_KEY_ANTHROPIC = 'apiKeys.anthropic';
 export const STORAGE_KEY_LLM_MODEL = 'llm.selectedModel';
 export const STORAGE_KEY_CUSTOM_MODELS = 'llm.customModels';
 export const STORAGE_KEY_NCBI = 'apiKeys.ncbi';
@@ -46,42 +55,6 @@ export const STORAGE_KEY_NCBI = 'apiKeys.ncbi';
 export const STORAGE_KEY_PENDING_APP_TAB = 'pendingOpenAppTab';
 /** 最後に検出した Gemini プラン（'paid' | 'free'）。ページリロード後もバッジ復元に使う */
 export const STORAGE_KEY_GEMINI_TIER = 'gemini.detectedTier';
-
-/**
- * バンドル分離のため modelRegistry からは import せず、Options 画面が自前で
- * モデル一覧を保持する（modelRegistry に巻き込まれて他依存を引き込まないため）。
- */
-const BUILTIN_MODELS_DISPLAY = [
-  { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash（無料枠対応）', provider: 'gemini' as const },
-  { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', provider: 'gemini' as const },
-  { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash Lite', provider: 'gemini' as const },
-  { id: 'qwen/qwen3-235b-a22b-2507', label: 'Qwen3 235B Instruct', provider: 'openrouter' as const },
-  { id: 'deepseek/deepseek-v4-flash', label: 'DeepSeek V4 Flash', provider: 'openrouter' as const },
-];
-const DEFAULT_MODEL_ID = 'gemini-3.5-flash-lite';
-const MAX_CUSTOM_MODELS_LIMIT = 20;
-
-type ModelProvider = 'gemini' | 'openrouter';
-
-interface BuiltinModelDef {
-  id: string;
-  label: string;
-  provider: ModelProvider;
-}
-
-interface CustomModelEntry {
-  id: string;
-  label?: string;
-}
-
-function resolveProviderFromModelId(
-  modelId: string,
-  builtins: readonly BuiltinModelDef[]
-): ModelProvider {
-  const found = builtins.find((m) => m.id === modelId);
-  if (found) return found.provider;
-  return modelId.includes('/') ? 'openrouter' : 'gemini';
-}
 
 function populateModelSelect(
   selectEl: HTMLSelectElement,
@@ -99,7 +72,7 @@ function populateModelSelect(
     if (m.id === selectedModelId) opt.selected = true;
     geminiGroup.appendChild(opt);
   });
-  customModels.filter((m) => !m.id.includes('/')).forEach((m) => {
+  customModels.filter((m) => resolveProviderId(m.id) === 'gemini').forEach((m) => {
     const opt = document.createElement('option');
     opt.value = m.id;
     opt.textContent = m.label ? m.label + ' (' + m.id + ')' : m.id;
@@ -117,7 +90,7 @@ function populateModelSelect(
     if (m.id === selectedModelId) opt.selected = true;
     orGroup.appendChild(opt);
   });
-  customModels.filter((m) => m.id.includes('/')).forEach((m) => {
+  customModels.filter((m) => resolveProviderId(m.id) === 'openrouter').forEach((m) => {
     const opt = document.createElement('option');
     opt.value = m.id;
     opt.textContent = m.label ? m.label + ' (' + m.id + ')' : m.id;
@@ -125,16 +98,37 @@ function populateModelSelect(
     orGroup.appendChild(opt);
   });
   selectEl.appendChild(orGroup);
+  // Anthropic optgroup（ビルトイン + カスタム Anthropic）
+  const anthropicGroup = document.createElement('optgroup');
+  anthropicGroup.label = 'Anthropic';
+  BUILTIN_MODELS_DISPLAY.filter((m) => m.provider === 'anthropic').forEach((m) => {
+    const opt = document.createElement('option');
+    opt.value = m.id;
+    opt.textContent = m.label;
+    if (m.id === selectedModelId) opt.selected = true;
+    anthropicGroup.appendChild(opt);
+  });
+  customModels.filter((m) => resolveProviderId(m.id) === 'anthropic').forEach((m) => {
+    const opt = document.createElement('option');
+    opt.value = m.id;
+    opt.textContent = m.label ? m.label + ' (' + m.id + ')' : m.id;
+    if (m.id === selectedModelId) opt.selected = true;
+    anthropicGroup.appendChild(opt);
+  });
+  selectEl.appendChild(anthropicGroup);
 }
 
 function refreshProviderCards(doc: Document, selectedModelId: string): void {
-  const provider = resolveProviderFromModelId(selectedModelId, BUILTIN_MODELS_DISPLAY);
+  const provider = resolveProviderId(selectedModelId);
   doc
     .getElementById('gemini-card')
     ?.classList.toggle('options__provider-card--active', provider === 'gemini');
   doc
     .getElementById('openrouter-card')
     ?.classList.toggle('options__provider-card--active', provider === 'openrouter');
+  doc
+    .getElementById('anthropic-card')
+    ?.classList.toggle('options__provider-card--active', provider === 'anthropic');
 }
 
 function updateTierBadge(
@@ -195,11 +189,13 @@ function parseCustomModels(raw: string | undefined): CustomModelEntry[] {
 function buildInitialStatus(
   gemini: string | undefined,
   openrouter: string | undefined,
-  ncbi: string | undefined
+  ncbi: string | undefined,
+  anthropic: string | undefined
 ): string {
   const parts: string[] = [];
   parts.push(gemini ? 'Gemini: 保存済み' : 'Gemini: 未設定');
   parts.push(openrouter ? 'OpenRouter: 保存済み' : 'OpenRouter: 未設定');
+  parts.push(anthropic ? 'Anthropic: 保存済み' : 'Anthropic: 未設定');
   parts.push(ncbi ? 'NCBI: 保存済み' : 'NCBI: 未設定（3 req/s 枠）');
   return parts.join(' / ');
 }
@@ -232,6 +228,7 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
   const status = doc.getElementById('options-status');
   const geminiInput = doc.getElementById('gemini-api-key') as HTMLInputElement | null;
   const openrouterInput = doc.getElementById('openrouter-api-key') as HTMLInputElement | null;
+  const anthropicInput = doc.getElementById('anthropic-api-key') as HTMLInputElement | null;
   const ncbiInput = doc.getElementById('ncbi-api-key') as HTMLInputElement | null;
   const selectEl = doc.getElementById('llm-model-select') as HTMLSelectElement | null;
   const customModelIdInput = doc.getElementById('custom-model-id') as HTMLInputElement | null;
@@ -242,6 +239,7 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
 
   const existingGemini = await deps.readKey(STORAGE_KEY_GEMINI);
   const existingOpenRouter = await deps.readKey(STORAGE_KEY_OPENROUTER);
+  const existingAnthropic = await deps.readKey(STORAGE_KEY_ANTHROPIC);
   const existingNcbi = await deps.readKey(STORAGE_KEY_NCBI);
   const existingModel = (await deps.readKey(STORAGE_KEY_LLM_MODEL)) ?? DEFAULT_MODEL_ID;
   const customModels = parseCustomModels(await deps.readKey(STORAGE_KEY_CUSTOM_MODELS));
@@ -252,6 +250,9 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
   }
   if (openrouterInput && existingOpenRouter !== undefined) {
     openrouterInput.value = existingOpenRouter;
+  }
+  if (anthropicInput && existingAnthropic !== undefined) {
+    anthropicInput.value = existingAnthropic;
   }
   if (ncbiInput && existingNcbi !== undefined) {
     ncbiInput.value = existingNcbi;
@@ -307,7 +308,7 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
   }
 
   if (status) {
-    status.textContent = buildInitialStatus(existingGemini, existingOpenRouter, existingNcbi);
+    status.textContent = buildInitialStatus(existingGemini, existingOpenRouter, existingNcbi, existingAnthropic);
   }
 
   selectEl?.addEventListener('change', () => {
@@ -351,6 +352,7 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
   saveBtn?.addEventListener('click', () => {
     const geminiVal = geminiInput?.value ?? '';
     const openrouterVal = openrouterInput?.value ?? '';
+    const anthropicVal = anthropicInput?.value ?? '';
     const ncbiVal = ncbiInput?.value ?? '';
     const selectedModel = selectEl?.value ?? DEFAULT_MODEL_ID;
 
@@ -361,6 +363,7 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
         await Promise.all([
           deps.writeKey(STORAGE_KEY_GEMINI, geminiVal),
           deps.writeKey(STORAGE_KEY_OPENROUTER, openrouterVal),
+          deps.writeKey(STORAGE_KEY_ANTHROPIC, anthropicVal),
           deps.writeKey(STORAGE_KEY_NCBI, ncbiVal),
           deps.writeKey(STORAGE_KEY_LLM_MODEL, selectedModel),
         ]);
@@ -369,7 +372,7 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
         let modelSwitchedToFree = false;
         let tierUndetermined = false;
         let tierUnavailable = false;
-        const provider = resolveProviderFromModelId(selectedModel, BUILTIN_MODELS_DISPLAY);
+        const provider = resolveProviderId(selectedModel);
         if (geminiVal.trim() === '') {
           // キーが空になったので保存済み tier をクリア
           await deps.removeKey(STORAGE_KEY_GEMINI_TIER);
@@ -409,8 +412,9 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
 
         const pendingNow = await deps.readKey(STORAGE_KEY_PENDING_APP_TAB);
         const currentModel = selectEl?.value ?? DEFAULT_MODEL_ID;
-        const currentProvider = resolveProviderFromModelId(currentModel, BUILTIN_MODELS_DISPLAY);
-        const keyForProvider = currentProvider === 'openrouter' ? openrouterVal : geminiVal;
+        const currentProvider = resolveProviderId(currentModel);
+        const keyForProvider = currentProvider === 'openrouter' ? openrouterVal
+          : currentProvider === 'anthropic' ? anthropicVal : geminiVal;
 
         if (pendingNow === '1' && keyForProvider.trim() !== '') {
           await deps.removeKey(STORAGE_KEY_PENDING_APP_TAB);

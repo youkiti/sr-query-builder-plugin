@@ -215,3 +215,61 @@ describe('createSettingsView - Gemini プラン判定', () => {
     expect(store['llm.selectedModel']).toBe('gemini-3.5-flash');
   });
 });
+
+describe('設定画面の Anthropic 設定', () => {
+  test.each(['', 'saved-key'])('キーの保存・復元と pending の解除: %s', async (key) => {
+    const store: Record<string, string> = { 'llm.selectedModel': 'claude-opus-5-5',
+      'apiKeys.anthropic': key, pendingOpenAppTab: '1' };
+    const deps: SettingsViewCallbacks = {
+      readKey: async (k) => store[k], writeKey: async (k, v) => { store[k] = v; },
+      removeKey: async (k) => { delete store[k]; }, detectGeminiTier: jest.fn(),
+    };
+    const ctx: ViewContext = { state: {} as AppState, navigate: jest.fn() };
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const flush = async () => { for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0)); };
+    try {
+      createSettingsView(deps)(container, ctx);
+      await flush();
+      const input = container.querySelector<HTMLInputElement>('#settings-anthropic-key')!;
+      expect(input.value).toBe(key);
+      expect(input.type).toBe('password');
+      expect(input.autocomplete).toBe('off');
+      expect(container.querySelector('.settings__status')?.textContent).toContain(`Anthropic: ${key ? '保存済み' : '未設定'}`);
+      expect(container.querySelector('#settings-anthropic-card')?.classList.contains('settings__provider-card--active')).toBe(true);
+      expect(container.querySelectorAll('optgroup[label="Anthropic"] option')).toHaveLength(3);
+      container.querySelector<HTMLButtonElement>('#settings-save')!.click();
+      await flush();
+      expect(ctx.navigate).toHaveBeenCalledTimes(key ? 1 : 0);
+      input.value = 'updated-key';
+      container.querySelector<HTMLButtonElement>('#settings-save')!.click();
+      await flush();
+      expect(store['apiKeys.anthropic']).toBe('updated-key');
+      container.querySelector<HTMLInputElement>('#settings-custom-model-id')!.value = 'claude-custom';
+      container.querySelector<HTMLButtonElement>('.settings__custom-model-form button')!.click();
+      await flush();
+      expect(container.querySelector('optgroup[label="Anthropic"] option[value="claude-custom"]')).not.toBeNull();
+      createSettingsView(deps)(container, ctx);
+      await flush();
+      expect(container.querySelector<HTMLInputElement>('#settings-anthropic-key')!.value).toBe('updated-key');
+    } finally { container.remove(); }
+  });
+});
+
+test.each([['claude-foo', 'Anthropic', 'anthropic'], ['a/b', 'OpenRouter', 'openrouter'],
+  ['claude-org/foo', 'OpenRouter', 'openrouter'], ['gemini-x', 'Google AI Studio', 'gemini']])(
+  '設定画面のカスタムモデル %s のグループとカードが一致する', async (id, group, provider) => {
+    const store: Record<string, string> = { 'llm.customModels': JSON.stringify([{ id, label: 'custom' }]),
+      'llm.selectedModel': id };
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    try {
+      createSettingsView({ readKey: async (k) => store[k], writeKey: jest.fn(),
+        removeKey: jest.fn(), detectGeminiTier: jest.fn() })(container, { state: {} as AppState, navigate: jest.fn() });
+      await new Promise((r) => setTimeout(r, 0));
+      expect(container.querySelector<HTMLSelectElement>('select')!.value).toBe(id);
+      expect(container.querySelector(`optgroup[label="${group}"] option[value="${id}"]`)).not.toBeNull();
+      expect(container.querySelector(`#settings-${provider}-card`)?.classList.contains('settings__provider-card--active')).toBe(true);
+    } finally { container.remove(); }
+  }
+);

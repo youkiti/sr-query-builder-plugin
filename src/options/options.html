@@ -61,6 +61,7 @@
             <h4>カスタムモデルを追加（上限 20 件）</h4>
             <p class="options__muted">
               OpenRouter の任意のモデルIDを追加できます（例: meta-llama/llama-3.3-70b）。
+              Claude のモデルIDも追加できます（例: claude-opus-5-5）。
               Gemini モデルIDも追加できます（例: gemini-3.5-pro）。
             </p>
             <div class="options__field-row">
@@ -76,6 +77,18 @@
             <button type="button" id="add-custom-model" class="options__button">追加</button>
             <div id="custom-models-list" class="options__custom-models-list"></div>
           </div>
+        </div>
+
+        <div class="options__provider-card" id="anthropic-card">
+          <h3 class="options__provider-title">
+            Anthropic
+            <a href="https://console.anthropic.com/settings/keys" target="_blank"
+              rel="noreferrer" class="options__provider-link">APIキーを取得 ↗</a>
+          </h3>
+          <label class="options__field">
+            <span>API キー</span>
+            <input type="password" id="anthropic-api-key" autocomplete="off" />
+          </label>
         </div>
 
         <label class="options__field">

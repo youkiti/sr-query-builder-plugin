@@ -104,3 +104,8 @@ describe('人工レイテンシ', () => {
     expect(Date.now() - startedAt).toBeGreaterThanOrEqual(200);
   });
 });
+
+test('Anthropic 宛はデモ非対応のエラーを投げる', async () => {
+  await expect(demoFetch('https://api.anthropic.com/v1/messages', { method: 'POST', body: '{}' }))
+    .rejects.toThrow('[demo] デモビルドは Anthropic 経由の LLM プロバイダに対応していません。Options 画面で Gemini モデルを選択してください。');
+});

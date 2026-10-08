@@ -48,3 +48,9 @@ describe('estimateCostUsd', () => {
     });
   });
 });
+
+test.each([
+  ['claude-opus-5-5', 24], ['claude-sonnet-5-5', 12], ['claude-haiku-5-5', 0.6],
+] as const)('Anthropic の単価: %s', (model, cost) => {
+  expect(estimateCostUsd(model, 1000, 1000)).toBeCloseTo(cost / 1000);
+});

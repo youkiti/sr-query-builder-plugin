@@ -15,8 +15,8 @@ import {
  * 試行ごとの signal を下位へ渡す。期限による待機の打ち切りはプロバイダ直上の層が担う。
  */
 
-/** 再試行対象の HTTP ステータス（一時的エラーのみ） */
-export const RETRYABLE_STATUSES: ReadonlySet<number> = new Set([429, 500, 502, 503, 504]);
+/** 再試行対象の HTTP ステータス（一時的エラーのみ。529 は Anthropic の overloaded） */
+export const RETRYABLE_STATUSES: ReadonlySet<number> = new Set([429, 500, 502, 503, 504, 529]);
 
 export type LlmRequestState = 'retry' | 'failure' | 'idle';
 
