@@ -379,7 +379,7 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
     if (status) status.textContent = 'カスタムモデルを追加しました。';
   });
 
-  if (saveBtn?.parentElement) addLlmPermissionButtons(saveBtn.parentElement, deps.hostPermissions);
+  if (saveBtn?.parentElement) addLlmPermissionButtons(saveBtn.parentElement, deps.hostPermissions, 'options__button');
   saveBtn?.addEventListener('click', () => {
     const hostPermission = requestLlmHosts([
       ...((openrouterInput?.value ?? '').trim() ? ['openrouter' as const] : []),

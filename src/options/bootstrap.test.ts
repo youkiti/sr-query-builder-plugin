@@ -908,6 +908,8 @@ test.each([false, true])('Options の保存クリックで送信許可を求め�
   };
   await startOptions(doc, deps);
   expect(hostPermissions.request).not.toHaveBeenCalled();
+  expect(doc.querySelectorAll('button.options__button')).toHaveLength(2);
+  expect(doc.querySelectorAll('p.llm-permission__status[role="status"]')).toHaveLength(2);
   doc.querySelector<HTMLButtonElement>('#save-keys')!.click();
   expect(hostPermissions.request).toHaveBeenCalledWith({ origins: ['https://api.anthropic.com/*'] });
   await new Promise((resolve) => setTimeout(resolve, 0));

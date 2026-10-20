@@ -546,7 +546,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
       })();
     });
 
-    if (saveBtn?.parentElement) addLlmPermissionButtons(saveBtn.parentElement, callbacks.hostPermissions);
+    if (saveBtn?.parentElement) addLlmPermissionButtons(saveBtn.parentElement, callbacks.hostPermissions, 'settings__btn');
     saveBtn.addEventListener('click', () => {
       const hostPermission = requestLlmHosts([
         ...((orInput.value ?? '').trim() ? ['openrouter' as const] : []),

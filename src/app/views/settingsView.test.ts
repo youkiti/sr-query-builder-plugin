@@ -378,6 +378,8 @@ test.each([false, true])('アプリ内の保存クリックで送信許可を求
   })(container, { state: {} as AppState, navigate: jest.fn() });
   await new Promise((resolve) => setTimeout(resolve, 0));
   const input = container.querySelector<HTMLInputElement>('#settings-openrouter-key')!;
+  expect(container.querySelectorAll('.settings__actions > button.settings__btn:not(#settings-save)')).toHaveLength(2);
+  expect(container.querySelectorAll('.settings__actions > p.llm-permission__status[role="status"]')).toHaveLength(2);
   input.value = 'fake';
   expect(hostPermissions.request).not.toHaveBeenCalled();
   container.querySelector<HTMLButtonElement>('#settings-save')!.click();

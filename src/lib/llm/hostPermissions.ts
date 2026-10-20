@@ -40,12 +40,14 @@ export function requestLlmHosts(providers: LlmProviderId[], permissions = chrome
 }
 export const HOST_PERMISSION_DENIED = '許可がないため、このプロバイダには送信できません';
 
-export function addLlmPermissionButtons(parent: HTMLElement, permissions = chromeLlmHostPermissions()): void {
+export function addLlmPermissionButtons(parent: HTMLElement, permissions = chromeLlmHostPermissions(), buttonClassName = ''): void {
   for (const provider of ['openrouter', 'anthropic'] as const) {
     const button = parent.ownerDocument.createElement('button');
     button.type = 'button';
+    button.className = buttonClassName;
     button.textContent = `${provider === 'anthropic' ? 'Anthropic' : 'OpenRouter'} への送信を許可する`;
     const notice = parent.ownerDocument.createElement('p');
+    notice.className = 'llm-permission__status';
     notice.setAttribute('role', 'status');
     button.addEventListener('click', () => {
       void requestLlmHosts([provider], permissions).then((allowed) => {

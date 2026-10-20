@@ -1,4 +1,13 @@
-import { ensureLlmHostPermission, requestLlmHosts, providerOrigins, chromeLlmHostPermissions } from './hostPermissions';
+import { addLlmPermissionButtons, ensureLlmHostPermission, requestLlmHosts, providerOrigins, chromeLlmHostPermissions } from './hostPermissions';
+
+test.each([undefined, 'permission-button'])('許可ボタンの任意クラスと状態文の共通クラスを付ける: %s', (buttonClassName) => {
+  const parent = document.createElement('div');
+  const permissions = { contains: jest.fn(), request: jest.fn() };
+  addLlmPermissionButtons(parent, permissions, buttonClassName);
+  expect(Array.from(parent.querySelectorAll('button')).map((button) => button.className))
+    .toEqual([buttonClassName ?? '', buttonClassName ?? '']);
+  expect(parent.querySelectorAll('p.llm-permission__status[role="status"]')).toHaveLength(2);
+});
 
 test('任意の送信先だけを重複なく要求する', async () => {
   const permissions = { contains: jest.fn(), request: jest.fn().mockResolvedValue(true) };

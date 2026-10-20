@@ -25,7 +25,9 @@ const sources: Record<string, string | null> = {
 
 /** 定数の初期値のソースを固定し、置換式も含めて雛形の変更を検出する。 */
 function templates(file: string, variant: string): string[] {
-  const source = ts.createSourceFile(file, readFileSync(join(__dirname, file + '.ts'), 'utf8'), ts.ScriptTarget.Latest, true);
+  // Windows の core.autocrlf=true では作業ツリーが CRLF になり、固定 SHA-256 と一致しなくなるため LF にそろえる。
+  const text = readFileSync(join(__dirname, file + '.ts'), 'utf8').replace(/\r\n/g, '\n');
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
   const values: string[] = [];
   const visit = (node: ts.Node): void => {
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
