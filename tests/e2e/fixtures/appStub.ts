@@ -124,6 +124,7 @@ export async function injectAppStub(page: Page, scenario: AppScenario = {}): Pro
       const createdTabs: { url?: string }[] = [];
 
       const chromeStub = {
+      permissions: { contains: async () => true, request: async () => true },
         runtime: {
           getURL: (p: string) => `chrome-extension://test/${p}`,
           getManifest: () => ({ version: '0.1.0-e2e' }),

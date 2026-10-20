@@ -896,3 +896,52 @@ test('Options のプラン判定も同意拒否では Gemini へ送らない', a
     storageGet.mockRestore();
   }
 });
+
+test.each([false, true])('Options の保存クリックで送信許可を求め、拒否しても保存する: %s', async (allowed) => {
+  const doc = document.implementation.createHTMLDocument('permissions');
+  doc.body.innerHTML = '<p id="options-status"></p><input id="anthropic-api-key" value="fake" /><button id="save-keys">保存</button>';
+  const data: Record<string, string> = {};
+  const hostPermissions = { contains: jest.fn().mockResolvedValue(allowed), request: jest.fn().mockResolvedValue(allowed) };
+  const deps: OptionsDeps = {
+    readKey: async (key) => data[key], writeKey: async (key, value) => { data[key] = value; },
+    removeKey: async () => undefined, openAppTab: jest.fn(), hostPermissions,
+  };
+  await startOptions(doc, deps);
+  expect(hostPermissions.request).not.toHaveBeenCalled();
+  doc.querySelector<HTMLButtonElement>('#save-keys')!.click();
+  expect(hostPermissions.request).toHaveBeenCalledWith({ origins: ['https://api.anthropic.com/*'] });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(data['apiKeys.anthropic']).toBe('fake');
+  expect(data['llm.selectedModel']).toBe('claude-opus-5-5');
+  expect(doc.body.textContent?.includes('許可がないため、このプロバイダには送信できません')).toBe(!allowed);
+  hostPermissions.request.mockResolvedValue(true);
+  Array.from(doc.querySelectorAll('button')).find((button) => button.textContent?.startsWith('Anthropic への'))!.click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(doc.body.textContent).toContain('許可しました。');
+});
+
+test.each([
+  ['claude-opus-5-5', 'https://api.anthropic.com/*', true],
+  ['claude-opus-5-5', 'https://api.anthropic.com/*', false],
+  ['qwen/qwen3-235b-a22b-2507', 'https://openrouter.ai/*', true],
+  ['qwen/qwen3-235b-a22b-2507', 'https://openrouter.ai/*', false],
+] as const)('Options のモデル変更で許可を先に要求し、即時保存する: %s / %s / %s', async (model, origin, allowed) => {
+  const doc = document.implementation.createHTMLDocument('permissions');
+  doc.body.innerHTML = '<p id="options-status"></p><select id="llm-model-select"></select><button id="save-keys">保存</button>';
+  const data: Record<string, string> = { 'llm.selectedModel': 'gemini-3.5-flash-lite' };
+  const hostPermissions = { contains: jest.fn(), request: jest.fn().mockResolvedValue(allowed) };
+  const writeKey = jest.fn(async (key: string, value: string) => { data[key] = value; });
+  await startOptions(doc, {
+    readKey: async (key) => data[key], writeKey,
+    removeKey: async () => undefined, openAppTab: jest.fn(), hostPermissions,
+  });
+  expect(hostPermissions.request).not.toHaveBeenCalled();
+  const select = doc.querySelector<HTMLSelectElement>('#llm-model-select')!;
+  select.value = model;
+  select.dispatchEvent(new Event('change'));
+  expect(hostPermissions.request).toHaveBeenCalledWith({ origins: [origin] });
+  expect(hostPermissions.request.mock.invocationCallOrder[0]).toBeLessThan(writeKey.mock.invocationCallOrder[0]!);
+  expect(data['llm.selectedModel']).toBe(model);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(doc.body.textContent?.includes('許可がないため、このプロバイダには送信できません')).toBe(!allowed);
+});

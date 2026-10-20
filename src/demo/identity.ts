@@ -18,6 +18,8 @@ export const DEMO_EMAIL = 'demo@example.com';
 const DEMO_ACCOUNT_ID = 'demo-account-id';
 
 export function installDemoIdentity(): void {
+  chrome.permissions.contains = async () => true;
+  chrome.permissions.request = async () => true;
   chrome.identity.getAuthToken = ((
     _details: unknown,
     callback?: (token?: string) => void

@@ -67,6 +67,7 @@ export async function injectChromeStub(page: Page, scenario: PopupScenario): Pro
     data['__pickerGrantCalls'] = pickerGrantCalls;
 
     const chromeStub = {
+      permissions: { contains: async () => true, request: async () => true },
       runtime: {
         getURL: (p: string) => `chrome-extension://test/${p}`,
         openOptionsPage: () => undefined,

@@ -3,12 +3,12 @@
      正典はこのファイル（master の hosted/）。デプロイ手順は hosted/README.md を参照。
      内容はワークフローレベルに留める（画面細部はアプリ内のリード文が担う）。
      文言は ja / en を両方持ち、表示は lang.js + CSS が片方だけに絞る（併記しない）。
-     version: 2026-08-15 -->
+     version: 2026-10-20 -->
 <html lang="ja">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title data-en="User guide — SR Query Builder Plugin">使い方ガイド — SR Query Builder Plugin</title>
+    <title data-en="User guide / SR Query Builder Plugin">使い方ガイド / SR Query Builder Plugin</title>
     <meta
       name="description"
       content="SR Query Builder Plugin の使い方ガイド。プロトコル入力から検索式ドラフト生成・検証・対話的シード拡張・エクスポートまでの操作手順とトラブルシューティング。"
@@ -53,9 +53,70 @@
           <span class="en" lang="en">User guide</span>
         </h1>
         <p class="last-updated">
-          <span class="ja" lang="ja">最終更新: 2026-10-08 / 対象バージョン: v0.3.0</span>
-          <span class="en" lang="en">Last updated: 2026-10-08 / Covers v0.3.0</span>
+          <span class="ja" lang="ja">最終更新: 2026-10-20 / 対象バージョン: v<span data-app-version>__APP_VERSION__</span></span>
+          <span class="en" lang="en">Last updated: 2026-10-20 / Covers v<span data-app-version>__APP_VERSION__</span></span>
         </p>
+        <section id="responsible-use">
+          <h2>
+            <span class="ja" lang="ja">用途と人の確認</span
+            ><span class="en" lang="en">Purpose and human review</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja"
+              >系統的レビューの PubMed 検索式の下書き、既知文献での検証、他 DB
+              への規則変換に使う道具です。検索式を自分で確かめられる人を想定し、情報専門家・司書の関与を勧めます。AI
+              の案は人が確かめる下書きです。規則による変換も各行を確かめてください。</span
+            ><span class="en" lang="en"
+              >This tool drafts PubMed queries for systematic reviews, checks them against known studies,
+              and converts them for other databases using rules. It is intended for people able to verify
+              queries themselves; involve an information specialist or librarian. AI proposals are drafts
+              for human review. Check every line of rule-based conversions too.</span
+            >
+          </p>
+          <p>
+            <span class="ja" lang="ja"
+              >人が確かめないまま最終の検索式として使わないでください。PRESS
+              などの査読の代わりにはなりません。機密のプロトコルを送り先の扱いを確かめずに送らないでください。未確認の版のエクスポートには警告を表示します。費用表示は目安で、実際の請求は提供元で確認してください。</span
+            ><span class="en" lang="en"
+              >Do not use an unchecked draft as your final search strategy or as a replacement for peer
+              review such as PRESS. Do not send confidential protocols without checking provider data
+              handling. Exporting an unreviewed version displays a warning. Costs are estimates; check
+              actual charges with the provider.</span
+            >
+          </p>
+          <p>
+            <span class="ja" lang="ja"
+              >初回の AI 送信前の同意、OpenRouter / Anthropic の任意の送信許可、NCBI への
+              email、実行者記録の追加、未確認の版の警告は次回の拡張機能の更新から適用します。</span
+            ><span class="en" lang="en"
+              >Consent before the first AI transmission, optional OpenRouter / Anthropic host permissions,
+              NCBI email, added executor records and warnings for unreviewed versions apply from the next
+              extension update.</span
+            >
+          </p>
+          <p>
+            <span class="ja" lang="ja"
+              >Gemini キーだけを保存したときの既定は gemini-3.5-flash-lite です。無料プランを検出すると
+              gemini-2.0-flash へ自動で切り替わります。Google
+              の説明では、無料枠で送った内容と応答は改善に使われ、人が読むことがあります。有料枠では改善に使わず、EEA・スイス・英国では無料でも有料枠の扱いです。</span
+            ><span class="en" lang="en"
+              >With only a Gemini key, the default is gemini-3.5-flash-lite. Detecting a free plan
+              automatically switches to gemini-2.0-flash. According to Google, free-tier content and
+              responses may be used for improvement and read by humans. Paid content is not used for
+              improvement; paid treatment also applies to free services in the EEA, Switzerland and
+              UK.</span
+            >
+          </p>
+          <p>
+            <span class="ja" lang="ja"
+              >大規模言語モデルの呼び出しには電力を使います。自動調整の反復上限は必要な分だけにしてください。</span
+            ><span class="en" lang="en"
+              >Calls to large language models use electricity. Set the automatic adjustment iteration limit
+              only as high as needed.</span
+            >
+          </p>
+        </section>
+
 
         <nav class="toc" aria-label="目次" data-en-aria-label="Table of contents">
           <h2>
@@ -84,55 +145,55 @@
             <li>
               <a href="#protocol"
                 ><span class="ja" lang="ja">#/protocol 研究プロトコルを入力する</span
-                ><span class="en" lang="en">#/protocol — Enter the research protocol</span></a
+                ><span class="en" lang="en">#/protocol, Enter the research protocol</span></a
               >
             </li>
             <li>
               <a href="#blocks"
                 ><span class="ja" lang="ja">#/blocks 検索式ブロックを承認する</span
-                ><span class="en" lang="en">#/blocks — Approve the search blocks</span></a
+                ><span class="en" lang="en">#/blocks, Approve the search blocks</span></a
               >
             </li>
             <li>
               <a href="#seeds"
                 ><span class="ja" lang="ja">#/seeds シード論文を登録する</span
-                ><span class="en" lang="en">#/seeds — Register seed papers</span></a
+                ><span class="en" lang="en">#/seeds, Register seed papers</span></a
               >
             </li>
             <li>
               <a href="#draft"
                 ><span class="ja" lang="ja">#/draft 検索式ドラフトの生成と検証</span
-                ><span class="en" lang="en">#/draft — Draft and validate the search strategy</span></a
+                ><span class="en" lang="en">#/draft, Draft and validate the search strategy</span></a
               >
             </li>
             <li>
               <a href="#expand"
                 ><span class="ja" lang="ja">#/expand 対話的シード拡張（実験的機能）</span
-                ><span class="en" lang="en">#/expand — Interactive seed expansion (experimental)</span></a
+                ><span class="en" lang="en">#/expand, Interactive seed expansion (experimental)</span></a
               >
             </li>
             <li>
               <a href="#edit"
                 ><span class="ja" lang="ja">#/edit 検索式を編集する</span
-                ><span class="en" lang="en">#/edit — Edit the search strategy</span></a
+                ><span class="en" lang="en">#/edit, Edit the search strategy</span></a
               >
             </li>
             <li>
               <a href="#export"
                 ><span class="ja" lang="ja">#/export 各データベースへ変換・エクスポートする</span
-                ><span class="en" lang="en">#/export — Convert and export for each database</span></a
+                ><span class="en" lang="en">#/export, Convert and export for each database</span></a
               >
             </li>
             <li>
               <a href="#done"
                 ><span class="ja" lang="ja">#/done 完了画面（各データベースの検索ページへ誘導）</span
-                ><span class="en" lang="en">#/done — Finish screen (links to each database’s search page)</span></a
+                ><span class="en" lang="en">#/done, Finish screen (links to each database’s search page)</span></a
               >
             </li>
             <li>
               <a href="#history"
                 ><span class="ja" lang="ja">#/history バージョン履歴</span
-                ><span class="en" lang="en">#/history — Version history</span></a
+                ><span class="en" lang="en">#/history, Version history</span></a
               >
             </li>
             <li>
@@ -348,15 +409,14 @@
             <p>
               <span class="ja" lang="ja"
                 >研究プロトコルの本文が外部へ送信されるのは、選択した LLM プロバイダ（既定は Anthropic の Claude。Gemini・OpenRouter
-                も選択可）へのドラフト生成リクエストと、NCBI E-utilities
-                への検索式検証リクエストのときだけです。開発者が運用するサーバーは存在しません（<a
+                も選択可）への AI リクエストです。NCBI E-utilities へは検索式・PMID などを送ります。開発者が運用するサーバーは存在しません（<a
                   href="privacy-policy.html"
                   >プライバシーポリシー</a
                 >）。</span
               >
               <span class="en" lang="en"
                 >Your protocol text leaves your browser only in drafting requests to your selected LLM provider
-                (Anthropic's Claude by default; Gemini or OpenRouter can also be selected) and validation requests to NCBI E-utilities.
+                (Anthropic's Claude by default; Gemini or OpenRouter can also be selected). NCBI E-utilities receives queries, PMIDs and related validation parameters.
                 There is no developer-operated server (see the <a href="privacy-policy.html">privacy policy</a>).</span
               >
             </p>
@@ -398,7 +458,7 @@
         <section id="protocol">
           <h2>
             <span class="ja" lang="ja">4. #/protocol 研究プロトコルを入力する</span>
-            <span class="en" lang="en">4. #/protocol — Enter the research protocol</span>
+            <span class="en" lang="en">4. #/protocol, Enter the research protocol</span>
           </h2>
           <p class="chapter-video">
             <span class="ja" lang="ja"
@@ -431,7 +491,7 @@
         <section id="blocks">
           <h2>
             <span class="ja" lang="ja">5. #/blocks 検索式ブロックを承認する</span>
-            <span class="en" lang="en">5. #/blocks — Approve the search blocks</span>
+            <span class="en" lang="en">5. #/blocks, Approve the search blocks</span>
           </h2>
           <p class="chapter-video">
             <span class="ja" lang="ja"
@@ -460,7 +520,7 @@
         <section id="seeds">
           <h2>
             <span class="ja" lang="ja">6. #/seeds シード論文を登録する</span>
-            <span class="en" lang="en">6. #/seeds — Register seed papers</span>
+            <span class="en" lang="en">6. #/seeds, Register seed papers</span>
           </h2>
           <p class="chapter-video">
             <span class="ja" lang="ja"
@@ -490,7 +550,7 @@
         <section id="draft">
           <h2>
             <span class="ja" lang="ja">7. #/draft 検索式ドラフトの生成と検証</span>
-            <span class="en" lang="en">7. #/draft — Draft and validate the search strategy</span>
+            <span class="en" lang="en">7. #/draft, Draft and validate the search strategy</span>
           </h2>
           <p class="chapter-video">
             <span class="ja" lang="ja"
@@ -514,7 +574,7 @@
               >A single “Create and auto-adjust the search strategy” action either drafts a PubMed search strategy
               from the approved blocks (if none exists yet) or measures and tunes the existing one, showing a live
               history of each measurement and change plus a final review when it finishes. Once a search strategy
-              already exists, “Re-run validation only” and “Start over” appear right below the auto-adjust card —
+              already exists, “Re-run validation only” and “Start over” appear right below the auto-adjust card 、
               only those two actions show each block’s hit count (line_hits) live and run seed-paper capture rate
               / MeSH validation (auto-adjust itself does not update either).</span
             >
@@ -524,7 +584,7 @@
         <section id="expand">
           <h2>
             <span class="ja" lang="ja">8. #/expand 対話的シード拡張（実験的機能）</span>
-            <span class="en" lang="en">8. #/expand — Interactive seed expansion (experimental)</span>
+            <span class="en" lang="en">8. #/expand, Interactive seed expansion (experimental)</span>
           </h2>
           <p class="chapter-video">
             <span class="ja" lang="ja"
@@ -592,7 +652,7 @@
         <section id="edit">
           <h2>
             <span class="ja" lang="ja">9. #/edit 検索式を編集する</span>
-            <span class="en" lang="en">9. #/edit — Edit the search strategy</span>
+            <span class="en" lang="en">9. #/edit, Edit the search strategy</span>
           </h2>
           <p class="chapter-video">
             <span class="ja" lang="ja"
@@ -624,7 +684,7 @@
         <section id="export">
           <h2>
             <span class="ja" lang="ja">10. #/export 各データベースへ変換・エクスポートする</span>
-            <span class="en" lang="en">10. #/export — Convert and export for each database</span>
+            <span class="en" lang="en">10. #/export, Convert and export for each database</span>
           </h2>
           <p class="chapter-video">
             <span class="ja" lang="ja"
@@ -659,7 +719,7 @@
         <section id="done">
           <h2>
             <span class="ja" lang="ja">11. #/done 完了画面</span>
-            <span class="en" lang="en">11. #/done — Finish screen</span>
+            <span class="en" lang="en">11. #/done, Finish screen</span>
           </h2>
           <p class="chapter-video">
             <span class="ja" lang="ja"
@@ -687,7 +747,7 @@
               ClinicalTrials.gov and ICTRP, each with a one-line note on where to paste the converted query (e.g.
               which advanced-search field). It also shows guidance text: “PubMed: Send to → Citation manager →
               PubMed format (NBIB); ClinicalTrials.gov / ICTRP: export from each site’s XML / CSV.” The actual
-              download happens on each database’s own site — it is not automated here.</span
+              download happens on each database’s own site, it is not automated here.</span
             >
           </p>
         </section>
@@ -695,7 +755,7 @@
         <section id="history">
           <h2>
             <span class="ja" lang="ja">12. #/history バージョン履歴</span>
-            <span class="en" lang="en">12. #/history — Version history</span>
+            <span class="en" lang="en">12. #/history, Version history</span>
           </h2>
           <p class="chapter-video">
             <span class="ja" lang="ja"
@@ -744,7 +804,7 @@
               Google スプレッドシート自体を開き、共有設定で編集権限があるか確認してください。</span
             >
             <span class="en" lang="en"
-              >There is no dedicated modal or button — the error message is shown as plain text in that screen’s
+              >There is no dedicated modal or button, the error message is shown as plain text in that screen’s
               error area (e.g. “Google API failed: HTTP 401 …” or “… HTTP 403 …”). If this happens repeatedly or
               won’t clear, use the “Log out” button in the Popup to discard the cached credentials, then sign in
               with Google again. If you suspect a missing write permission (403), open the project’s Google Sheet
@@ -791,7 +851,7 @@
               >There is no dedicated banner. Calls to NCBI E-utilities automatically retry with exponential backoff
               internally when they hit a rate limit (e.g. 429), so the in-progress action (e.g. “Create and
               auto-adjust the search strategy”) just appears to take longer than usual. If this happens often, set
-              the optional NCBI API key in Options — it raises the allowance from 3 req/s to 10 req/s.</span
+              the optional NCBI API key in Options, it raises the allowance from 3 req/s to 10 req/s.</span
             >
           </p>
 
@@ -807,11 +867,11 @@
               <code>LLMApiLog</code> タブに自動的に記録されます。</span
             >
             <span class="en" lang="en"
-              >There is no dedicated badge or “Retry” button — the screen’s error area shows the message as-is,
+              >There is no dedicated badge or “Retry” button, the screen’s error area shows the message as-is,
               e.g. “Generation failed: 〈error detail〉”. Check in Options that your API key is correct and that you
               have not exceeded your quota, then press the same action button again (e.g. “Create and auto-adjust
               the search strategy” if no strategy exists yet, or “Start over” right below the auto-adjust card if
-              one already does). Every call — successful or not — is recorded automatically in the
+              one already does). Every call, successful or not, is recorded automatically in the
               <code>LLMApiLog</code> tab.</span
             >
           </p>
@@ -930,7 +990,23 @@
             </p>
           </details>
         </section>
-      </div>
+        <section id="funding">
+          <h2>
+            <span class="ja" lang="ja">資金源・利益相反</span
+            ><span class="en" lang="en">Funding and competing interests</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja"
+              >本ツールの開発は JSPS 科研費（JP25K13585）と AMED（課題管理番号
+              26rea522132h0001「大規模言語モデルによる予防・健康づくり領域のシステマティックレビュー民主化」）の助成を受けています。開発者は
+              AI サービスの提供元（Anthropic、Google、OpenRouter）から報酬を受けていません。</span
+            ><span class="en" lang="en"
+              >Development is supported by JSPS KAKENHI Grant Number JP25K13585 and AMED under Grant Number
+              JP26rea522132. The developer receives no compensation from the AI service providers
+              (Anthropic, Google, OpenRouter).</span
+            >
+          </p>
+        </section>      </div>
     </main>
 
     <footer class="footer">
@@ -952,7 +1028,7 @@
             >
             <a href="https://github.com/youkiti/sr-query-builder-plugin">GitHub</a>
           </div>
-          <p class="copyright">© 2026 youkiti — MIT License</p>
+          <p class="copyright">© 2026 youkiti / MIT License</p>
         </div>
       </div>
     </footer>

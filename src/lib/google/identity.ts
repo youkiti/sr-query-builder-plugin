@@ -12,6 +12,10 @@ export function createChromeProfileDeps(): ProfileDeps {
   return {
     getProfileUserInfo: () =>
       new Promise((resolve) => {
+        if (typeof chrome === 'undefined' || !chrome.identity?.getProfileUserInfo) {
+          resolve({ email: '', id: '' });
+          return;
+        }
         // @types/chrome では AccountStatus が enum で提供されるためキャストで渡す
         chrome.identity.getProfileUserInfo(
           { accountStatus: 'ANY' as chrome.identity.AccountStatus },

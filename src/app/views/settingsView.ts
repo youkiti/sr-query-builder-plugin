@@ -1,3 +1,4 @@
+import { addLlmPermissionButtons, requestLlmHosts, HOST_PERMISSION_DENIED, type LlmHostPermissions } from '@/lib/llm/hostPermissions';
 import { AiConsentDeclinedError } from '../services/aiConsentService';
 import { updateGeminiDataNotice } from '@/lib/llm/aiDisclosure';
 import {
@@ -26,6 +27,7 @@ const KEY_PENDING = 'pendingOpenAppTab';
 const KEY_GEMINI_TIER = 'gemini.detectedTier';
 
 export interface SettingsViewCallbacks {
+  hostPermissions?: LlmHostPermissions;
   readKey: (key: string) => Promise<string | undefined>;
   writeKey: (key: string, value: string) => Promise<void>;
   removeKey: (key: string) => Promise<void>;
@@ -506,8 +508,13 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
     }
 
     modelSelect.addEventListener('change', () => {
-      void callbacks.writeKey(KEY_LLM_MODEL, modelSelect.value);
-      refreshProviderCards(doc, modelSelect.value);
+      const selectedModel = modelSelect.value;
+      const hostPermission = requestLlmHosts([resolveProvider(selectedModel)], callbacks.hostPermissions);
+      void callbacks.writeKey(KEY_LLM_MODEL, selectedModel);
+      refreshProviderCards(doc, selectedModel);
+      void hostPermission.then((allowed) => {
+        if (!allowed) status.textContent = HOST_PERMISSION_DENIED;
+      });
     });
 
     addCustomModelBtn.addEventListener('click', () => {
@@ -539,7 +546,12 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
       })();
     });
 
+    if (saveBtn?.parentElement) addLlmPermissionButtons(saveBtn.parentElement, callbacks.hostPermissions);
     saveBtn.addEventListener('click', () => {
+      const hostPermission = requestLlmHosts([
+        ...((orInput.value ?? '').trim() ? ['openrouter' as const] : []),
+        ...((anthropicInput.value ?? '').trim() ? ['anthropic' as const] : []),
+      ], callbacks.hostPermissions);
       void (async () => {
         const savedModel = await callbacks.readKey(KEY_LLM_MODEL);
         const geminiVal = geminiInput.value;
@@ -561,6 +573,14 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
           callbacks.writeKey(KEY_NCBI, ncbiVal),
           ...(shouldSaveModel ? [callbacks.writeKey(KEY_LLM_MODEL, selectedModel)] : []),
         ]);
+
+        const hostAllowed = await hostPermission;
+        if (!hostAllowed) {
+          const notice = doc.createElement('p');
+          notice.setAttribute('role', 'alert');
+          notice.textContent = HOST_PERMISSION_DENIED;
+          saveBtn?.parentElement?.appendChild(notice);
+        }
 
         // Gemini キーが設定されており Gemini モデルが選択されている場合にプラン自動判定
         let modelSwitchedToFree = false;
@@ -612,7 +632,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
         const keyForProvider = provider === 'openrouter' ? orVal
           : provider === 'anthropic' ? anthropicVal : geminiVal;
 
-        if (pendingNow === '1' && keyForProvider.trim() !== '') {
+        if (hostAllowed && pendingNow === '1' && keyForProvider.trim() !== '') {
           await callbacks.removeKey(KEY_PENDING);
           status.textContent = '保存しました。ホーム画面に戻ります…';
           banner.hidden = true;

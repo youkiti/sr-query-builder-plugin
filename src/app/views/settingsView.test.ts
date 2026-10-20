@@ -367,3 +367,48 @@ test.each([['claude-foo', 'Anthropic', 'anthropic'], ['a/b', 'OpenRouter', 'open
     } finally { container.remove(); }
   }
 );
+
+test.each([false, true])('アプリ内の保存クリックで送信許可を求め、拒否しても保存する: %s', async (allowed) => {
+  const data: Record<string, string> = { 'llm.selectedModel': 'vendor/model', 'llm.customModels': '[{"id":"vendor/model"}]' };
+  const hostPermissions = { contains: jest.fn().mockResolvedValue(allowed), request: jest.fn().mockResolvedValue(allowed) };
+  const container = document.createElement('div');
+  createSettingsView({
+    readKey: async (key) => data[key], writeKey: async (key, value) => { data[key] = value; },
+    removeKey: async () => undefined, hostPermissions,
+  })(container, { state: {} as AppState, navigate: jest.fn() });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const input = container.querySelector<HTMLInputElement>('#settings-openrouter-key')!;
+  input.value = 'fake';
+  expect(hostPermissions.request).not.toHaveBeenCalled();
+  container.querySelector<HTMLButtonElement>('#settings-save')!.click();
+  expect(hostPermissions.request).toHaveBeenCalledWith({ origins: ['https://openrouter.ai/*'] });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(data['apiKeys.openrouter']).toBe('fake');
+  expect(data['llm.selectedModel']).toBe('vendor/model');
+  expect(container.textContent?.includes('許可がないため、このプロバイダには送信できません')).toBe(!allowed);
+});
+
+test.each([
+  ['claude-opus-5-5', 'https://api.anthropic.com/*', true],
+  ['claude-opus-5-5', 'https://api.anthropic.com/*', false],
+  ['qwen/qwen3-235b-a22b-2507', 'https://openrouter.ai/*', true],
+  ['qwen/qwen3-235b-a22b-2507', 'https://openrouter.ai/*', false],
+] as const)('アプリ内のモデル変更で許可を先に要求し、即時保存する: %s / %s / %s', async (model, origin, allowed) => {
+  const data: Record<string, string> = { 'llm.selectedModel': 'gemini-3.5-flash-lite' };
+  const hostPermissions = { contains: jest.fn(), request: jest.fn().mockResolvedValue(allowed) };
+  const writeKey = jest.fn(async (key: string, value: string) => { data[key] = value; });
+  const container = document.createElement('div');
+  createSettingsView({
+    readKey: async (key) => data[key], writeKey, removeKey: async () => undefined, hostPermissions,
+  })(container, { state: {} as AppState, navigate: jest.fn() });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(hostPermissions.request).not.toHaveBeenCalled();
+  const select = container.querySelector<HTMLSelectElement>('#settings-llm-model')!;
+  select.value = model;
+  select.dispatchEvent(new Event('change'));
+  expect(hostPermissions.request).toHaveBeenCalledWith({ origins: [origin] });
+  expect(hostPermissions.request.mock.invocationCallOrder[0]).toBeLessThan(writeKey.mock.invocationCallOrder[0]!);
+  expect(data['llm.selectedModel']).toBe(model);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(container.textContent?.includes('許可がないため、このプロバイダには送信できません')).toBe(!allowed);
+});

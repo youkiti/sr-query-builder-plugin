@@ -38,6 +38,7 @@ export async function injectOptionsStub(
     }
 
     const chromeStub = {
+      permissions: { contains: async () => true, request: async () => true },
       runtime: {
         getURL: (p: string) => `chrome-extension://test/${p}`,
         get lastError() {

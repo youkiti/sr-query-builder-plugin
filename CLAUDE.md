@@ -286,6 +286,8 @@ MIT ライセンスの OSS Chrome 拡張 **sr-query-builder-plugin**。ユーザ
 
 ## 作業上の原則（tiab-review-plugin/AGENTS.md より継承）
 
+- AI の結果に影響する変更（既定モデルとその版、プロンプトの文面と `promptVersions.ts` の版、生成設定の既定値、集計方法）は `CHANGELOG.md` の「未リリース」に必ず書く。
+
 1. **ブランチ強制**: `main` / `master` / `develop` で直接作業しない。変更前に作業ブランチを切る。
    - **例外（意図的）**: `npm run release`（[tools/release/release.ps1](tools/release/release.ps1)）による version バンプ commit は `master` へ直接 push する。差分は `src/manifest.json` / `package.json` / `package-lock.json` の version 文字列 3 箇所のみで機能変更を含まず、スクリプト自身が push 前に「作業ツリーがクリーンであること」「本番ビルドと zip 化・検証が通ること」を機械的にゲートする。PR / レビュー待ちを挟む理由がないほど差分が小さく、かつ安全装置がスクリプト側にある場合に限った狭い例外であり、抜け穴として拡大解釈しないこと（機能変更を混ぜようとしても作業ツリーの汚れチェックで止まる）。
 2. **日本語化**: ユーザー向けアーティファクト（計画書・タスク・要件書・コミットメッセージ・コード内コメント）は日本語で書く。思考プロセスだけ英語でよい。

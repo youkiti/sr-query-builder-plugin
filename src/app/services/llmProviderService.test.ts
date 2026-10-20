@@ -417,3 +417,20 @@ test('同意を待ってから送信する', async () => {
   await rejected;
   expect(fetch).toHaveBeenCalled();
 });
+
+test.each(['claude-opus-5-5', 'openai/gpt-test'])('送信先の許可が無いと送信せず、再試行しない: %s', async (model) => {
+  const fetch = jest.fn();
+  const hostPermissions = { contains: jest.fn().mockResolvedValue(false), request: jest.fn() };
+  const factory = await buildLlmProviderFactory({
+    google: { fetch, getAccessToken: async () => 'token' },
+    store: memoryStore({ [STORAGE_KEY_ANTHROPIC]: 'key', [STORAGE_KEY_OPENROUTER]: 'key' }).store,
+    model, spreadsheetId: 'sheet', llmLogFolderId: 'logs', hostPermissions,
+  });
+  const provider = factory.forPurpose('draft_block');
+  await expect(provider.chat([{ role: 'user', content: 'protocol' }])).rejects.toMatchObject({ name: 'LlmHostPermissionMissingError' });
+  if (provider.chatWithTools) {
+    await expect(provider.chatWithTools('system', [{ role: 'user', content: 'protocol' }], [])).rejects.toMatchObject({ name: 'LlmHostPermissionMissingError' });
+  }
+  expect(fetch).not.toHaveBeenCalled();
+  expect(hostPermissions.request).not.toHaveBeenCalled();
+});

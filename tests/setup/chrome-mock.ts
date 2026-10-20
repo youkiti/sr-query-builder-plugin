@@ -44,6 +44,7 @@ if (typeof AbortSignal.any === 'undefined') {
 }
 
 const chromeMock: unknown = {
+  permissions: { contains: async () => true, request: async () => true },
   runtime: {
     getURL: (path: string) => `chrome-extension://test/${path}`,
     openOptionsPage: () => undefined,
@@ -62,7 +63,7 @@ const chromeMock: unknown = {
   },
   identity: {
     getAuthToken: () => undefined,
-    getProfileUserInfo: () => undefined,
+    getProfileUserInfo: (_options: unknown, callback: (info: { email: string; id: string }) => void) => callback({ email: '', id: '' }),
     removeCachedAuthToken: () => undefined,
   },
 };

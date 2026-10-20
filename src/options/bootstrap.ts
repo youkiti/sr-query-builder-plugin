@@ -1,3 +1,4 @@
+import { addLlmPermissionButtons, requestLlmHosts, HOST_PERMISSION_DENIED, type LlmHostPermissions } from '@/lib/llm/hostPermissions';
 import { createChromeStoreDeps } from '@/features/project';
 import { AiConsentDeclinedError, createEnsureAiConsent } from '@/app/services/aiConsentService';
 import { updateGeminiDataNotice } from '@/lib/llm/aiDisclosure';
@@ -34,6 +35,7 @@ import { detectGeminiTier, FREE_TIER_MODEL_ID } from '@/lib/llm/geminiTierDetect
 declare const __BUILD_DATE__: string;
 
 export interface OptionsDeps {
+  hostPermissions?: LlmHostPermissions;
   /** chrome.storage.local から既存値を読み取る */
   readKey: (key: string) => Promise<string | undefined>;
   /** chrome.storage.local へ書き込む */
@@ -337,8 +339,12 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
 
   selectEl?.addEventListener('change', () => {
     const selectedModel = selectEl.value;
+    const hostPermission = requestLlmHosts([resolveProviderId(selectedModel)], deps.hostPermissions);
     void deps.writeKey(STORAGE_KEY_LLM_MODEL, selectedModel);
     refreshProviderCards(doc, selectedModel);
+    void hostPermission.then((allowed) => {
+      if (!allowed && status) status.textContent = HOST_PERMISSION_DENIED;
+    });
   });
 
   addCustomModelBtn?.addEventListener('click', async () => {
@@ -373,7 +379,12 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
     if (status) status.textContent = 'カスタムモデルを追加しました。';
   });
 
+  if (saveBtn?.parentElement) addLlmPermissionButtons(saveBtn.parentElement, deps.hostPermissions);
   saveBtn?.addEventListener('click', () => {
+    const hostPermission = requestLlmHosts([
+      ...((openrouterInput?.value ?? '').trim() ? ['openrouter' as const] : []),
+      ...((anthropicInput?.value ?? '').trim() ? ['anthropic' as const] : []),
+    ], deps.hostPermissions);
     const geminiVal = geminiInput?.value ?? '';
     const openrouterVal = openrouterInput?.value ?? '';
     const anthropicVal = anthropicInput?.value ?? '';
@@ -398,6 +409,14 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
           deps.writeKey(STORAGE_KEY_NCBI, ncbiVal),
           ...(shouldSaveModel ? [deps.writeKey(STORAGE_KEY_LLM_MODEL, selectedModel)] : []),
         ]);
+
+        const hostAllowed = await hostPermission;
+        if (!hostAllowed) {
+          const notice = doc.createElement('p');
+          notice.setAttribute('role', 'alert');
+          notice.textContent = HOST_PERMISSION_DENIED;
+          saveBtn?.parentElement?.appendChild(notice);
+        }
 
         // Gemini キーが設定されており Gemini モデルが選択されている場合にプラン自動判定
         let modelSwitchedToFree = false;
@@ -451,7 +470,7 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
         const keyForProvider = currentProvider === 'openrouter' ? openrouterVal
           : currentProvider === 'anthropic' ? anthropicVal : geminiVal;
 
-        if (pendingNow === '1' && keyForProvider.trim() !== '') {
+        if (hostAllowed && pendingNow === '1' && keyForProvider.trim() !== '') {
           await deps.removeKey(STORAGE_KEY_PENDING_APP_TAB);
           if (status) {
             status.textContent = '保存しました。トップ画面に戻ります…';

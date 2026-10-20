@@ -1,7 +1,7 @@
-# プライバシーポリシー — SR Query Builder（sr-query-builder-plugin）
+# プライバシーポリシー : SR Query Builder（sr-query-builder-plugin）
 
-- **最終更新**: 2026-10-08
-- **対象バージョン**: v0.3.0
+- **最終更新**: 2026-10-20
+- **対象バージョン**: 拡張機能の現行版（版は公開ページに表示）
 - **対象**: Chrome 拡張機能「SR Query Builder」（sr-query-builder-plugin）
 - **配布元**: 本拡張は MIT ライセンス（[LICENSE](../../LICENSE)）の OSS です。
 
@@ -21,36 +21,55 @@
 |---|---|---|
 | 研究プロトコル（RQ・PICO 等）・検索式ブロック定義・シード論文（PMID）・検索式ドラフト・検証結果・LLM API ログ | 利用者の Google Sheets（プロジェクトのスプレッドシート内の各タブ） | プロジェクト DB。監査ログ・バージョニング目的 |
 | LLM API ログのフル payload | 利用者の Google Drive（プロジェクトの Drive フォルダ配下 `logs/llm/*.json`） | Sheets のセル文字数制限を超える内容の退避 |
-| 研究プロトコル本文・検索式ブロック定義・検索式ドラフトなど | 利用者が選択した LLM プロバイダ（Gemini、OpenRouter、または Anthropic。既定は Anthropic の Claude）の API（BYOK） | AI による検索式ドラフト生成・MeSH 提案・シノニム展開等。本文が外部へ送信されるのはこの経路と NCBI E-utilities のみ（NLM MeSH RDF へは研究プロトコル本文を送信せず、descriptor 名・tree number のみを送信します） |
-| 検索式・PMID | NCBI E-utilities（`eutils.ncbi.nlm.nih.gov`） | ヒット数検証・MeSH 用語の取得・シード論文の捕捉率計算 |
-| ブロック内の MeSH 用語（descriptor 名・tree number） | NLM MeSH RDF（`id.nlm.nih.gov` の SPARQL エンドポイント） | MeSH 階層（親子関係）の解析。ブロック内の用語重複・カテゴリ分散の検出（次回の拡張機能更新から適用。現在配信中の v0.3.0 はこの通信を行いません） |
-| 開こうとした共有スプレッドシートの ID・サインイン中のメールアドレス | 本拡張の公開ページ（`youkiti.github.io` の `picker.html`）。URL フラグメント（`#` 以降）で渡すため、HTTP リクエストとしては送信されません | Google ピッカーで対象ファイルを選択し、そのファイルだけにアクセスを許可するため（次回の拡張機能更新から適用。現在配信中の v0.3.0 はこの画面を使いません） |
-| Google OAuth トークン | 利用者のブラウザ内（`chrome.storage`） | Google API 認証。開発者へは送信されません |
-| LLM プロバイダ（Gemini / OpenRouter / Anthropic）の API キー・NCBI API キー | 利用者のブラウザ内（`chrome.storage`） | 各 API の認証（BYOK）。開発者へは送信されません |
+| 研究プロトコル本文・検索式ブロック定義・検索式・PubMed の書誌（タイトル・抄録）・シード論文と判定結果・Gemini API キー | 利用者が選択した Google Gemini（`generativelanguage.googleapis.com`）の API（BYOK） | AI による検索式ドラフト生成・MeSH 提案・シノニム展開等。プロトコル本文は NCBI E-utilities へ送信しません（NLM MeSH RDF へは研究プロトコル本文を送信せず、descriptor 名・tree number のみを送信します）。 |
+| 研究プロトコル本文・検索式ブロック定義・検索式・PubMed の書誌（タイトル・抄録）・シード論文と判定結果・Anthropic API キー | 利用者が選択した Anthropic（`api.anthropic.com`）の API（BYOK） | AI による検索式ドラフト生成・MeSH 提案・シノニム展開等。プロトコル本文は NCBI E-utilities へ送信しません（NLM MeSH RDF へは研究プロトコル本文を送信せず、descriptor 名・tree number のみを送信します）。使うときに Chrome が任意の送信許可を求めます。 |
+| 研究プロトコル本文・検索式ブロック定義・検索式・PubMed の書誌（タイトル・抄録）・シード論文と判定結果・OpenRouter API キー | 利用者が選択した OpenRouter（`openrouter.ai`）の API（BYOK）。さらに選んだモデルの提供元へ転送 | AI による検索式ドラフト生成・MeSH 提案・シノニム展開等。プロトコル本文は NCBI E-utilities へ送信しません（NLM MeSH RDF へは研究プロトコル本文を送信せず、descriptor 名・tree number のみを送信します）。使うときに Chrome が任意の送信許可を求めます。 |
+| 検索式・PMID・利用者のメール（`email`）・設定済み NCBI API キー | NCBI E-utilities（`eutils.ncbi.nlm.nih.gov`） | ヒット数検証・MeSH 用語の取得・シード論文の捕捉率計算 |
+| ブロック内の MeSH 用語（descriptor 名・tree number） | NLM MeSH RDF（`id.nlm.nih.gov` の SPARQL エンドポイント） | MeSH 階層（親子関係）の解析。ブロック内の用語重複・カテゴリ分散の検出 |
+| 開こうとした共有スプレッドシートの ID・サインイン中のメールアドレス | 本拡張の公開ページ（`youkiti.github.io` の `picker.html`）。URL フラグメント（`#` 以降）で渡すため、HTTP リクエストとしては送信されません | Google ピッカーで対象ファイルを選択し、そのファイルだけにアクセスを許可するため |
+| Google OAuth トークン | Chrome 自身（`chrome.identity`）が管理（拡張は自分で保存しません） | Google API 認証。開発者へは送信されません |
+| LLM プロバイダ（Gemini / OpenRouter / Anthropic）の API キー・NCBI API キー | 利用者のブラウザ内（`chrome.storage.local`）に暗号化せず保存 | 各 API の認証（BYOK）。開発者へは送信されませんが、LLM キーは対応する LLM プロバイダ、NCBI キーは NCBI へ送信します |
 
 ## Google ユーザーデータへのアクセス範囲
 
 本拡張が要求する OAuth スコープは以下の 1 つ **のみ** です。
 
-- `https://www.googleapis.com/auth/drive.file` — **利用者が作成に関与したファイル（本拡張が作成したスプレッドシート・Drive フォルダ・ログファイル、および利用者が Google ピッカーで明示的に選択したファイル）だけ** にアクセスします。Drive 全体を読むスコープ（`drive.readonly` 等）や、全スプレッドシートへアクセスできる `https://www.googleapis.com/auth/spreadsheets` スコープは要求しません。
+- `https://www.googleapis.com/auth/drive.file` : **利用者が作成に関与したファイル（本拡張が作成したスプレッドシート・Drive フォルダ・ログファイル、および利用者が Google ピッカーで明示的に選択したファイル）だけ** にアクセスします。Drive 全体を読むスコープ（`drive.readonly` 等）や、全スプレッドシートへアクセスできる `https://www.googleapis.com/auth/spreadsheets` スコープは要求しません。
 
 ### 共有スプレッドシートを開くとき（Google ピッカー）
-
-（次回の拡張機能更新から適用。現在配信中の v0.3.0 はこの画面を使いません）
 
 他の利用者が作成して共有したスプレッドシートは、上記スコープの性質上、**利用者がそのファイルを明示的に選択するまで本拡張からは読めません**。このため、共有スプレッドシートを開こうとしたときに Google 公式の「ピッカー」（ファイル選択画面）を表示し、対象ファイルを 1 回だけ選んでもらいます。選択されたファイルにのみアクセスが許可され、Drive 上の他のファイルは対象になりません。
 
 ピッカーの画面は、Chrome 拡張のセキュリティ制約（Manifest V3 の CSP）により拡張内に埋め込めないため、本拡張の公開ページ（`https://youkiti.github.io/sr-query-builder-plugin/picker.html`。GitHub Pages で配信される静的ページ）に置いています。このページは Google の公式スクリプトを読み込んでファイル選択画面を表示し、**選択されたファイルの ID を拡張機能へ返すだけ**です。開発者が運用するサーバーは介在せず、ファイルの内容もサインイン情報もこのページには保存されません。なお、選択の際に利用者のメールアドレスを URL のフラグメント（`#` 以降。HTTP リクエストとして送信されない部分）で渡し、拡張でサインイン中のアカウントと同一かを確認します。異なるアカウントで許可された場合は、取得したトークンを破棄して選択をやり直してもらいます。
 
-サインイン中アカウントのメールアドレスは OAuth スコープではなく、Chrome 拡張 API の `chrome.identity.getProfileUserInfo()`（`identity.email` permission）で取得します。これは Chrome プロファイルの同期アカウント情報を読むだけで、OAuth スコープを広げるものではありません。取得したメールアドレスは `FormulaVersions` 等の記録者列に書き込む目的にのみ使用し、開発者へ送信することはありません。
+サインイン中アカウントのメールアドレスは OAuth スコープではなく、Chrome 拡張 API の `chrome.identity.getProfileUserInfo()`（`identity.email` permission）で取得します。これは Chrome プロファイルの同期アカウント情報を読むだけで、OAuth スコープを広げるものではありません。取得したメールアドレスは、Meta・Protocol の `created_by`、SeedPapers の `decided_by`、FormulaVersions の `saved_by`、LLMApiLog の `executed_by`、Drive のログ JSON の `executed_by` に記録します。Google ピッカーでのアカウント確認、および NCBI E-utilities の `email` パラメータにも使用します。開発者へ送信することはありません。
 
 本拡張は、Google API から取得したユーザーデータを、上記の機能提供以外の目的（広告・分析・第三者への提供・機械学習モデルの学習等）に **一切使用しません**。Google API Services User Data Policy（Limited Use 要件を含む）を遵守します。
 
 ## LLM API・NCBI API への送信について
 
-- **LLM プロバイダ（Gemini、OpenRouter、または Anthropic。既定は Anthropic の Claude）**: 検索式のドラフト生成や検証結果の解釈補助を実行すると、研究プロトコルの本文・検索式ブロック定義・検索式ドラフトなどが、利用者が選択した LLM プロバイダの API キー（BYOK）を用いて、そのプロバイダ（Google の Gemini API、OpenRouter、または Anthropic の API）へ送信されます。送信先によるデータの取り扱いは、各プロバイダ自身のプライバシーポリシー・利用規約に従います。本拡張はプロバイダを仲介せず、利用者のブラウザから直接 API を呼び出します。
-- **NCBI E-utilities**: 検索式の検証（ブロックごとのヒット数、シード論文捕捉率、MeSH 用語抽出）のため、検索式や PMID を NCBI の E-utilities（`eutils.ncbi.nlm.nih.gov`）へ送信します。NCBI API キーは任意で BYOK として設定でき、レート制限緩和のために使用します。
+- **LLM プロバイダ（Gemini、OpenRouter、または Anthropic。既定は Anthropic の Claude）**: 検索式のドラフト生成や検証結果の解釈補助を実行すると、研究プロトコル本文・検索式ブロック定義・検索式・PubMed の書誌（タイトル・抄録）・シード論文と判定結果が、利用者が選択した LLM プロバイダの API キー（BYOK）を用いて、そのプロバイダ（Google の Gemini API、OpenRouter、または Anthropic の API）へ送信されます。送信先によるデータの取り扱いは、各プロバイダ自身のプライバシーポリシー・利用規約に従います。本拡張はプロバイダを仲介せず、利用者のブラウザから直接 API を呼び出します。
+- **NCBI E-utilities**: 検索式の検証（ブロックごとのヒット数、シード論文捕捉率、MeSH 用語抽出）のため、検索式や PMID、取得できたサインイン中の Google アカウントのメール（`email`）、設定済み NCBI API キーを NCBI の E-utilities（`eutils.ncbi.nlm.nih.gov`）へ送信します。NCBI API キーは任意で BYOK として設定でき、レート制限緩和のために使用します。
 - **NLM MeSH RDF（SPARQL エンドポイント）**: ブロック内の MeSH 用語について、MeSH ツリー上の親子関係（祖先・子ノードの名称）を取得するため、descriptor 名や tree number を NLM の MeSH RDF エンドポイント（`id.nlm.nih.gov/mesh/sparql`）へ SPARQL クエリとして送信します。PMID や研究プロトコルの本文は送信されません。認証や API キーは不要です。
+
+初回の AI 送信前に、送り先・送る内容・各社のデータの扱いを示す同意モーダルを表示します。同意しなければ送信しません。OpenRouter / Anthropic は、そのモデルの選択時またはキーの保存時に Chrome が任意の送信許可を求めます。拒否してもキー・モデルは保存できます。設定画面の「許可する」から再度許可でき、許可がない間は送信せず、自動再試行もしません。
+
+同意モーダル、任意の許可、NCBI の email、実行者の記録の追加は、次回の拡張機能の更新から適用します。
+
+Google の説明では、Gemini API の無料枠では、送った内容と応答が Google の製品の改善に使われ、人が読むことがあるとされています。有料枠では改善に使わないとされています。未公開のプロトコルなど機密の内容は、無料枠で送らないでください。EEA・スイス・英国では無料枠でも有料枠と同じ扱いとされています。
+
+Anthropic の説明では、API の入力と出力は、既定ではモデルの学習に使わないとされています。保持期間などは Anthropic の説明を確かめてください。Anthropic の説明では、API の入力と出力の標準の保持期間は 30 日とされています。
+
+OpenRouter の説明では、OpenRouter 自身は既定ではプロンプトと応答を保存しないとされています。転送先の提供元の扱いは提供元ごとに異なり、OpenRouter のプライバシー設定で学習に使う提供元を除外できます。
+
+抄録などの著作権は各著作者・出版社にあります。AI への送信は利用者の判断と責任で行い、送り先の利用条件に従ってください。
+
+- [Gemini API terms](https://ai.google.dev/gemini-api/terms)
+- [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing)
+- [Anthropic model training](https://privacy.claude.com/en/articles/7996868-is-my-data-used-for-model-training)
+- [Anthropic retention](https://platform.claude.com/docs/en/manage-claude/api-and-data-retention)
+- [OpenRouter logging](https://openrouter.ai/docs/guides/features/input-output-logging)
+- [OpenRouter ZDR](https://openrouter.ai/docs/guides/features/zdr)
 
 ## データの保存・削除
 

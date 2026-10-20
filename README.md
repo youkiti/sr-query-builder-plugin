@@ -4,7 +4,7 @@
 
 **[Chrome ウェブストアでインストール →](https://chromewebstore.google.com/detail/sr-query-builder-plugin/bckokafmjighegpjiocopkagghppnjld)**
 
-> **ステータス**: Chrome ウェブストアで**公開中**（v0.3.0）。`master` ブランチは次版を開発中です。プロトコル入力 → ブロック承認 → シード論文 → 検索式ドラフト → 検証 → エクスポートの各ルートと unit / E2E テストスイートを実装済みですが、P1 分析ロジック（ブロック重複・MeSH 分析）などは未実装です。詳細は [docs/requirements.md](docs/requirements.md)・[docs/architecture.md](docs/architecture.md)・[CLAUDE.md](CLAUDE.md) の「未実装・既知のギャップ」を参照してください。
+> **ステータス**: Chrome ウェブストアで**公開中**。`master` ブランチは次版を開発中です。プロトコル入力 → ブロック承認 → シード論文 → 検索式ドラフト → 検証 → エクスポートの各ルートと unit / E2E テストスイートを実装済みですが、P1 分析ロジック（ブロック重複・MeSH 分析）などは未実装です。詳細は [docs/requirements.md](docs/requirements.md)・[docs/architecture.md](docs/architecture.md)・[CLAUDE.md](CLAUDE.md) の「未実装・既知のギャップ」を参照してください。
 
 ## 公開ページ
 
@@ -32,7 +32,7 @@
 | gpt-6-astra（medium） | 実験用の実行環境（codex） | 0.945 | 61.7% | 1,634 | 0.955 | 97 秒 | 金額は出していない ※3 |
 | Claude Sonnet 5.5（medium） | 実験用の実行環境 | 0.905 | 55.0% | 1,297 | 0.934 | 30 秒 | 金額は出していない |
 | Gemini 3.8 Flash（high） | 実験用の実行環境 | 0.861 | 46.7% | 694 | 0.869 ※4 | 300 秒 | 約 0.5 ドル ※5 |
-| Claude Haiku 5.5（指定なし） | 実験用の実行環境 | 0.860 | 45.0% | 901 | 0.907 | — | 金額は出していない |
+| Claude Haiku 5.5（指定なし） | 実験用の実行環境 | 0.860 | 45.0% | 901 | 0.907 | - | 金額は出していない |
 | GLM-5.3（high） | 実験用の実行環境（OpenRouter） | 0.826 | 45.0% | 629 | 0.885 | 67 秒 | 0.028 ドル |
 | Qwen3.8 27B（high） | 実験用の実行環境（OpenRouter） | 0.812 | 43.3% | 718 | 0.880 | 166 秒 | 0.020 ドル |
 
@@ -44,6 +44,8 @@
 - ※3 ChatGPT のサブスクリプションの利用枠で実行しました。
 - ※4 束ねた式 20 件のうち 1 件は、ワイルドカードが PubMed の上限（256 個）を超えて実行できず、再現率 0 として数えています。
 - ※5 60 本あまりの合計（約 30 ドル。キャッシュの割引を入れない計算）を本数で割った値です。
+
+Haiku の推論の強さは、アプリでは medium で送ります。表は実験用の実行環境での値です。
 
 ### 読むときの注意
 
@@ -94,7 +96,7 @@ npm run test:e2e      # Playwright スモーク（事前に `npx playwright inst
 
 `npm run lint:css` は CSS の `[hidden]` リセット規約を固定化する Tier 0、`npm run test:e2e` は実 Chromium で app 全 11 ルート + popup + options の可視状態・ガード・ジャーニー・axe a11y 監査を回す Tier 2 / Tier 3（[docs/ui-deep-test-plan.md](docs/ui-deep-test-plan.md) Phase A〜G）。各ケースは [docs/ui-states.md](docs/ui-states.md) の状態 ID に対応する。
 
-テストの CI は未配置（GitHub Actions は公開ページのデプロイ [deploy-pages.yml](.github/workflows/deploy-pages.yml) のみ）。検証はローカルで以下を一通り通す:
+テストの CI は [ci.yml](.github/workflows/ci.yml) に配置済みです。ローカルでも以下を確認します:
 
 ```bash
 npm run lint && npm run lint:css && npm run typecheck && npm test && npm run test:e2e
@@ -126,3 +128,13 @@ OAuth スコープは `drive.file` の 1 本のみで、Drive 全体は読みま
 
 - 本拡張: [MIT](LICENSE)
 - サードパーティライブラリ: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
+
+## 資金源・利益相反 / Funding and competing interests
+
+本ツールの開発は JSPS 科研費（JP25K13585）と AMED（課題管理番号 26rea522132h0001「大規模言語モデルによる予防・健康づくり領域のシステマティックレビュー民主化」）の助成を受けています。開発者は AI サービスの提供元（Anthropic、Google、OpenRouter）から報酬を受けていません。
+
+Development is supported by JSPS KAKENHI Grant Number JP25K13585 and AMED under Grant Number JP26rea522132. The developer receives no compensation from the AI service providers (Anthropic, Google, OpenRouter).
+
+大規模言語モデルの呼び出しには電力を使います。自動調整の反復上限は必要な分だけにしてください。
+
+Calls to large language models use electricity. Set the automatic adjustment iteration limit only as high as needed.

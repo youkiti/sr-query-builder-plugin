@@ -2,7 +2,7 @@
 
 Chrome Web Store 提出物ドキュメント（manifest / アイコン配線 / プライバシーポリシー / 掲載文言など）の置き場。当初はフェーズ1（初回提出）の成果物置き場として作られたが、**公開後は更新提出のたびに参照する運用ドキュメント**になっている。
 
-**v0.2.0 が 2026-08-10 に公開され、続いて v0.3.0 が審査を通過し、現在の配信版として公開中**。公開 URL: <https://chromewebstore.google.com/detail/sr-query-builder-plugin/bckokafmjighegpjiocopkagghppnjld>
+**v0.2.0 が 2026-08-10 に公開され、現在は v0.8.0 が配信版として公開中**。公開 URL: <https://chromewebstore.google.com/detail/sr-query-builder-plugin/bckokafmjighegpjiocopkagghppnjld>
 
 ## このフォルダの中身
 
@@ -22,7 +22,7 @@ Chrome Web Store 提出物ドキュメント（manifest / アイコン配線 / �
   - 出典: [src/_locales/ja/messages.json](../../src/_locales/ja/messages.json) の `extDescription`。
 - **カテゴリ**: 仕事効率化（Productivity）
 - **言語**: 日本語（`default_locale: "ja"`）
-- **公開範囲**: **一般公開（public）**（確定）— ストア検索・リンクのどちらからでも誰でもインストールできる。同シリーズの sr-data-extraction-plugin と同じ方針
+- **公開範囲**: **一般公開（public）**（確定）。 ストア検索・リンクのどちらからでも誰でもインストールできる。同シリーズの sr-data-extraction-plugin と同じ方針
 - **プライバシーポリシー URL**: `https://youkiti.github.io/sr-query-builder-plugin/privacy-policy.html`（公開済み。ページの正典は [hosted/](../../hosted/)、デプロイ手順は [hosted/README.md](../../hosted/README.md) 参照）
 - **ウェブサイト**: `https://youkiti.github.io/sr-query-builder-plugin/`（公開済み。ページの正典は [hosted/](../../hosted/)）
 - **詳細な説明**: 原稿は [store-listing-description.md](store-listing-description.md) を参照
@@ -33,8 +33,8 @@ Chrome ウェブストアの掲載に必要な画像。スクリーンショッ�
 
 | 画像 | 仕様 | 状態 |
 |---|---|---|
-| ストアアイコン | 128×128 PNG | 済 — [src/icons/icon128.png](../../src/icons/icon128.png) を使用可 |
-| スクリーンショット | 1280×800、最低 1 枚（最大 5 枚） | 済 — [hosted/screenshots/](../../hosted/screenshots/) に 5 枚（`s1-protocol.png` 〜 `s5-export.png`）。`npm run shots`（Playwright + stub 環境・無人実行）で再生成できる。実 API を叩いた本物の画面で撮り直す場合は `npm run manual:check -- --shots`（詳細は [docs/manual-testing.md](../manual-testing.md)） |
+| ストアアイコン | 128×128 PNG | 済 。 [src/icons/icon128.png](../../src/icons/icon128.png) を使用可 |
+| スクリーンショット | 1280×800、最低 1 枚（最大 5 枚） | 済 。 [hosted/screenshots/](../../hosted/screenshots/) に 5 枚（`s1-protocol.png` 〜 `s5-export.png`）。`npm run shots`（Playwright + stub 環境・無人実行）で再生成できる。実 API を叩いた本物の画面で撮り直す場合は `npm run manual:check -- --shots`（詳細は [docs/manual-testing.md](../manual-testing.md)） |
 | 小型プロモタイル（任意） | 440×280 PNG | 任意・未設定 |
 
 ## 提出前チェック（本フェーズの実施状況）
@@ -43,17 +43,17 @@ Chrome ウェブストアの掲載に必要な画像。スクリーンショッ�
 - [x] プライバシーポリシー原稿
 - [x] 権限の使用理由原稿（日英）
 - [x] 提出用 zip の作成・検証ツール整備（[tools/release/](../../tools/release/)。`npm run release` / `npm run pack:release`）
-- [x] GitHub Pages 公開ページの作成・デプロイ（[hosted/](../../hosted/)。**作成・デプロイ済み**で、公開 URL `https://youkiti.github.io/sr-query-builder-plugin/` は有効。**デプロイは GitHub Actions で自動化済み** — `master` の `hosted/**` が変わると [.github/workflows/deploy-pages.yml](../../.github/workflows/deploy-pages.yml) が公開する。運用は [hosted/README.md](../../hosted/README.md)）
+- [x] GitHub Pages 公開ページの作成・デプロイ（[hosted/](../../hosted/)。**作成・デプロイ済み**で、公開 URL `https://youkiti.github.io/sr-query-builder-plugin/` は有効。**デプロイは GitHub Actions で自動化済み** 。 `master` の `hosted/**` が変わると [.github/workflows/deploy-pages.yml](../../.github/workflows/deploy-pages.yml) が公開する。運用は [hosted/README.md](../../hosted/README.md)）
 - [x] スクリーンショット取得（[hosted/screenshots/](../../hosted/screenshots/) に 1280×800 の 5 枚。`npm run shots` で再生成できる。上記「必要な画像」参照）
 - [x] クリーンな Chrome プロファイルでの実 Google 認証つき dist smoke
 - [x] Chrome ウェブストア デベロッパーアカウントで提出（**2026-08-07 に v0.2.0 を提出**。`release/sr-query-builder-plugin-0.2.0.zip` を `key.pem` 同梱でアップロード。version バンプはしていない＝0.2.0 は本提出が初出）
-- [x] 審査通過・一般公開（**v0.2.0 が 2026-08-10 に公開**。続けて v0.3.0 も審査を通過し公開中）
+- [x] 審査通過・一般公開（**v0.2.0 が 2026-08-10 に公開**。現在は v0.8.0 を配信中）
 - [x] 公開後: ストアに表示された拡張 ID が `bckokafmjighegpjiocopkagghppnjld` と一致することを確認する（一致していれば既存の OAuth client_id がそのまま使える）→ **確認済み**。ストア URL がこの ID を含む
 - [x] 公開後: [hosted/index.html](../../hosted/index.html) のヒーロー CTA と「はじめかた」を、自前ビルド手順からストアのインストールリンク・手順へ差し替える（[hosted/README.md](../../hosted/README.md) の「更新時に守ること」参照）→ **別 PR `docs/public-pages-v030-published` で実施中**
 
 ## v0.3.0 リリース記録
 
-- 提出用 zip: `release/sr-query-builder-plugin-0.3.0.zip`（`key.pem` は同梱していない。更新提出のため不要 — 拡張 ID はストアのアイテムに既に固定されている）
+- 提出用 zip: `release/sr-query-builder-plugin-0.3.0.zip`（`key.pem` は同梱していない。更新提出のため不要 。 拡張 ID はストアのアイテムに既に固定されている）
 - version バンプ commit: `663677a`
 - v0.2.0 からの差分（拡張本体に載るものだけ）:
   - 新機能: `.docx` 形式の研究プロトコル取り込み（fflate ベース）
@@ -85,4 +85,13 @@ Chrome ウェブストアの掲載に必要な画像。スクリーンショッ�
 
 - ✅ **「スプレッドシート ID から開く」の制約（issue #24 / PR #85 で解消）**: `drive.file` は「本拡張が作成したファイル + 利用者が Picker で明示的に選択したファイル」に限られるため、popup の「スプレッドシート ID から開く」導線（[src/popup/bootstrap.ts](../../src/popup/bootstrap.ts)）は、他人が作成した共有スプレッドシートに対しては 403/404 になりうる。PR #85（2026-08-15 に `master` へマージ済み）で Picker 許可フローを実装し解消した。
   - **当初の issue #24 が想定していた方式（`externally_connectable` でホストページと拡張がメッセージ通信する）とは異なる方式が採られている**点に注意: 実際には、拡張機能が `chrome.identity.launchWebAuthFlow`（[src/background/service-worker.ts](../../src/background/service-worker.ts) / [src/background/pickerGrant.ts](../../src/background/pickerGrant.ts)）で GitHub Pages 上の Picker 許可ページ（[hosted/picker.html](../../hosted/picker.html) / [src/picker/picker.ts](../../src/picker/picker.ts)。公開 URL: <https://youkiti.github.io/sr-query-builder-plugin/picker.html>）を開き、利用者がファイルを選択すると `https://<拡張ID>.chromiumapp.org/picker#picked=<ファイルID>` へのリダイレクトでファイル ID だけを受け取る。`externally_connectable` は設定していない（メッセージパッシングではなくリダイレクトで結果を受け渡すため不要）。URL 組み立てとリダイレクト解析は [src/lib/google/pickerUrl.ts](../../src/lib/google/pickerUrl.ts)。
-  - **注**: PR #85 は `master` へマージ済みで `deploy-pages` によりページも公開済みだが、Chrome ウェブストアへの提出はまだ行っていない（現在配信中のバージョンにはまだ含まれない）。
+  - **注**: Picker は現在配信中の拡張機能に含まれます。
+
+## 更新提出時に手で照合する項目（プライバシーへの取り組み）
+
+- [ ] 単一用途と送信先を manifest・ポリシー・申告で照合する。Gemini / OpenRouter / Anthropic の 3 社、後 2 社の任意の許可、NCBI の email を含める。
+- [ ] 個人を特定する情報: サインイン中のメール（記録者・実行者、Picker、NCBI の email）。
+- [ ] ウェブサイトのコンテンツ: プロトコル本文・PubMed のタイトルと抄録・検索式・判定など、選んだ AI に送る内容。
+- [ ] 認証情報: API キーは端末内に暗号化せず保存し、各キーの提供元へ認証のため送る。開発者には送らない。OAuth トークンは Chrome 管理。
+- [ ] 同意・任意の許可と、各社の学習・保持の説明を公開ポリシーと照合する。
+- [ ] 申告のデータ種別・目的・販売しない旨を、実際の送信内容とダッシュボードで本人が確認する。

@@ -1,3 +1,4 @@
+import { ensureLlmHostPermission, type LlmHostPermissions } from '@/lib/llm/hostPermissions';
 import { getPromptVersion } from '@/features/formula/skills/promptVersions';
 import type { LlmApiLogEntry, LlmPurpose, LlmProviderId } from '@/domain/llmApiLog';
 import type { LlmRequestState, RetryOptions } from '@/lib/llm/retry';
@@ -49,6 +50,7 @@ export class LlmApiKeyMissingError extends Error {
 }
 
 export interface LlmFactoryDeps {
+  hostPermissions?: LlmHostPermissions;
   ensureAiConsent?: (providerId: LlmProviderId) => Promise<void>;
   executedBy?: string | null;
   getExecutedBy?: () => Promise<string | null>;
@@ -197,10 +199,12 @@ export async function buildLlmProviderFactory(deps: LlmFactoryDeps): Promise<Llm
         providerId: provider.providerId,
         model: provider.model,
         chat: async (messages, options) => {
+          await ensureLlmHostPermission(providerId, deps.hostPermissions);
           await deps.ensureAiConsent?.(providerId);
           return provider.chat(messages, options);
         },
         ...(provider.chatWithTools ? { chatWithTools: async (...args: Parameters<NonNullable<LLMProvider['chatWithTools']>>) => {
+          await ensureLlmHostPermission(providerId, deps.hostPermissions);
           await deps.ensureAiConsent?.(providerId);
           return provider.chatWithTools!(...args);
         } } : {}),
