@@ -16,7 +16,7 @@ const disclosures = {
   anthropic: {
     destination: 'Anthropic（api.anthropic.com）',
     text: 'Anthropic の説明では、API の入力と出力は、既定ではモデルの学習に使わないとされています。保持期間などは Anthropic の説明を確かめてください。',
-    links: ['https://privacy.claude.com/en/articles/7996868-is-my-data-used-for-model-training', 'https://platform.claude.com/docs/en/manage-claude/api-and-data-retention'],
+    links: ['https://privacy.claude.com/en/articles/7996868-is-my-data-used-for-model-training', 'https://privacy.claude.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data'],
   },
   gemini: {
     destination: 'Google Gemini（generativelanguage.googleapis.com）',
@@ -26,7 +26,7 @@ const disclosures = {
   openrouter: {
     destination: 'OpenRouter（openrouter.ai）。選んだモデルの提供元へ転送されます',
     text: 'OpenRouter の説明では、OpenRouter 自身は既定ではプロンプトと応答を保存しないとされています。転送先の提供元の扱いは提供元ごとに異なり、OpenRouter のプライバシー設定で学習に使う提供元を除外できます。',
-    links: ['https://openrouter.ai/docs/guides/features/input-output-logging'],
+    links: ['https://openrouter.ai/docs/guides/features/zdr', 'https://openrouter.ai/docs/guides/privacy/provider-logging'],
   },
 };
 

@@ -58,7 +58,7 @@
 
 Google の説明では、Gemini API の無料枠では、送った内容と応答が Google の製品の改善に使われ、人が読むことがあるとされています。有料枠では改善に使わないとされています。未公開のプロトコルなど機密の内容は、無料枠で送らないでください。EEA・スイス・英国では無料枠でも有料枠と同じ扱いとされています。
 
-Anthropic の説明では、API の入力と出力は、既定ではモデルの学習に使わないとされています。保持期間などは Anthropic の説明を確かめてください。Anthropic の説明では、API の入力と出力の標準の保持期間は 30 日とされています。
+Anthropic の説明では、API の入力と出力は、既定ではモデルの学習に使わないとされています。保持期間などは Anthropic の説明を確かめてください。Anthropic の説明では、API の入力と出力は、受け取りまたは生成から 30 日以内にバックエンドから自動で削除されるとされています（利用ポリシー違反の確認や法令上の必要などの例外があります）。
 
 OpenRouter の説明では、OpenRouter 自身は既定ではプロンプトと応答を保存しないとされています。転送先の提供元の扱いは提供元ごとに異なり、OpenRouter のプライバシー設定で学習に使う提供元を除外できます。
 
@@ -67,8 +67,8 @@ OpenRouter の説明では、OpenRouter 自身は既定ではプロンプトと�
 - [Gemini API terms](https://ai.google.dev/gemini-api/terms)
 - [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing)
 - [Anthropic model training](https://privacy.claude.com/en/articles/7996868-is-my-data-used-for-model-training)
-- [Anthropic retention](https://platform.claude.com/docs/en/manage-claude/api-and-data-retention)
-- [OpenRouter logging](https://openrouter.ai/docs/guides/features/input-output-logging)
+- [Anthropic retention](https://privacy.claude.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data)
+- [OpenRouter provider logging and training](https://openrouter.ai/docs/guides/privacy/provider-logging)
 - [OpenRouter ZDR](https://openrouter.ai/docs/guides/features/zdr)
 
 ## データの保存・削除
