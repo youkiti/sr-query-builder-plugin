@@ -82,11 +82,11 @@ test.each(['success', 'failure'] as const)('参考注釈 %s は件数だけを�
   expect(deletion.lines.join('\n')).not.toContain('参考理由');
 });
 
-test('4 区分が確認済みなら未確認事項は空で、既知シードの限界は捕捉区分だけに出す', () => {
+test('4 区分のうち候補がない外側の確認は人の判定なしとして未確認事項に残す', () => {
   const review = buildOptimizationReviewSections(fixture());
   expect(review.sections.map((item) => item.label)).toEqual(['既知文献の捕捉', '目安件数', '外側の確認', '削除影響の確認']);
-  expect(review.sections.every((item) => item.state === 'confirmed')).toBe(true);
-  expect(review.unconfirmed).toEqual([]);
+  expect(review.sections.map((item) => item.state)).toEqual(['confirmed', 'confirmed', 'no_human_decision', 'confirmed']);
+  expect(review.unconfirmed).toEqual([expect.stringContaining('外側の確認:')]);
   expect(review.sections[0].lines).toContain('既知シード 1/1 件捕捉');
   expect(review.sections[2].lines[0]).toContain('外側 150 件');
   expect(review.sections[2].maybeCount).toBe(0);
@@ -158,7 +158,7 @@ test.each(['outside', 'lost'] as const)('%s の候補は保存済みだけを判
   if (source === 'lost') {
     expect(section(run, key).lines).toContain('保留候補 candidate-1: 失う集合 150 件のうち書誌を確認できたのは先頭 1 件');
     expect(section(run, key).lines).toContain('残り 149 件は未確認');
-    expect(section(run, 'outside_check').state).toBe('confirmed');
+    expect(section(run, 'outside_check').state).toBe('no_human_decision');
     run.outsideCheck!.candidates = [];
     run.trials[0]!.impact!.error = '書誌取得失敗';
     expect(section(run, key).state).toBe('unconfirmed');
@@ -197,7 +197,7 @@ test('失う集合 150 件のうち書誌 1 件だけを exclude 保存しても
   expect(review.sections[3].state).toBe('decided');
   expect(review.sections[3].maybeCount).toBe(0);
   expect(review.sections[3].lines).toContain('残り 149 件は未確認');
-  expect(review.unconfirmed).toEqual([expect.stringMatching(/^削除影響の確認:.*残り 149 件は未確認/)]);
+  expect(review.unconfirmed).toEqual([expect.stringMatching(/^外側の確認:/), expect.stringMatching(/^削除影響の確認:.*残り 149 件は未確認/)]);
 });
 
 test.each(['exclude', 'maybe'] as const)('失う集合 2 件を全件取得し、最後の判定が %s の場合', (decision) => {
@@ -224,7 +224,7 @@ test('登録済みシードとして判定候補に載らない PMID は全件�
   delete run.outsideCheck!.decisions['3'];
   const review = buildOptimizationReviewSections(run);
   expect(review.sections[3].state).toBe('confirmed');
-  expect(review.unconfirmed).toEqual([]);
+  expect(review.unconfirmed).toEqual([expect.stringMatching(/^外側の確認:/)]);
 });
 
 test.each(['取得失敗', '未測定', '影響なし', '空のエラー'] as const)('全判定候補を exclude 保存しても影響の状態を確認する: %s', (kind) => {
@@ -246,7 +246,7 @@ test('保留試行があり判定候補が 0 件なら全件取得済みでも�
   const review = buildOptimizationReviewSections(run);
   expect(review.sections[3].state).toBe('unconfirmed');
   expect(review.sections[3]).not.toHaveProperty('maybeCount');
-  expect(review.unconfirmed).toEqual([expect.stringMatching(/^削除影響の確認:/)]);
+  expect(review.unconfirmed).toEqual([expect.stringMatching(/^外側の確認:/), expect.stringMatching(/^削除影響の確認:/)]);
 });
 
 test('include 保存があっても未判定が残るなら判定待ちを優先する', () => {
@@ -546,4 +546,17 @@ test.each(['lost_search', 'lost_fetch', 'gained_search'] as const)('採用ゲー
   expect(gate.allowed).toBe(measurement === 'gained_search');
   if (measurement === 'lost_fetch') expect(gate.reason).toContain('書誌を取得');
   if (measurement === 'lost_search') expect(gate.reason).toContain('失う集合を実測');
+});
+
+ test.each([null, 0, 150])('判定候補なしでは外側 %s 件でも人の判定なし', (marginHits) => {
+  const run = fixture();
+  run.outsideCheck!.marginHits = marginHits;
+  expect(section(run, 'outside_check').state).toBe('no_human_decision');
+});
+test('外側が未測定なら候補を判定していても確認済みにしない', () => {
+  const run = fixture();
+  run.outsideCheck!.marginHits = null;
+  run.outsideCheck!.candidates = [candidate('outside')];
+  run.outsideCheck!.decisions['2'] = { decision: 'exclude', status: 'saved', error: null };
+  expect(section(run, 'outside_check').state).toBe('unconfirmed');
 });

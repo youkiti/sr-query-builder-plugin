@@ -1,3 +1,5 @@
+import { detectGeminiTier } from '@/lib/llm/geminiTierDetector';
+import { createEnsureAiConsent } from './services/aiConsentService';
 declare const __BUILD_DATE__: string;
 
 /**
@@ -19,6 +21,7 @@ import {
   buildEutilsDeps,
   withExpandApiWait,
   buildLlmProviderFactory,
+  resolveSelectedModelKey,
   clearBlocksDraftBackup,
   createChromeRuntimeDeps,
   getBlocksDraftBackup,
@@ -186,7 +189,7 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
     }
     opts.setHash(buildHash(route));
   };
-  const viewOptions = opts.viewOptions ?? buildDefaultViewOptions(store, runtime, navigate);
+  const viewOptions = opts.viewOptions ?? buildDefaultViewOptions(store, runtime, navigate, doc);
   const views = buildViews(store, viewOptions);
 
   // ヘッダーのアプリタイトル: クリックで #/home へ戻す（docs/ui-flow.md §4）
@@ -388,15 +391,18 @@ function toBlocksDraft(blocks: ProtocolBlock[], combinationExpression: string): 
 function buildDefaultViewOptions(
   store: AppStore,
   runtime: ChromeRuntimeDeps | null,
-  navigate: (route: RouteName) => void
+  navigate: (route: RouteName) => void,
+  doc: Document
 ): BuildViewsOptions {
   if (!runtime) {
     return {};
   }
   const llmFactoryPromise: Promise<Awaited<ReturnType<typeof buildLlmProviderFactory>>> | null = null;
+  const ensureAiConsent = createEnsureAiConsent(doc, runtime.store);
   const llmFactoryDepsBase = (): Omit<LlmFactoryDeps, 'llmLogFolderId' | 'spreadsheetId'> => ({
     google: runtime.google,
     store: runtime.store,
+    ensureAiConsent,
     getExecutedBy: () => getCurrentUserEmail(runtime.profile),
     onCostAccumulate: (costUsd) => {
       store.setState((s) => ({
@@ -703,6 +709,10 @@ function buildDefaultViewOptions(
       },
     },
     settings: {
+      detectGeminiTier: async (apiKey) => {
+        await ensureAiConsent('gemini');
+        return detectGeminiTier(apiKey, runtime.google.fetch);
+      },
       readKey: (key) => runtime.store.read<string>(key),
       writeKey: (key, value) => runtime.store.write({ [key]: value }),
       removeKey: (key) => chrome.storage.local.remove(key),
@@ -1168,10 +1178,11 @@ async function prepareQueryOptimization(store: AppStore, runtime: ChromeRuntimeD
   store.setState((s) => ({ ...s, queryOptimizationSetup: loading }));
   let checkpoint: Awaited<ReturnType<typeof getQueryOptimizationCheckpoint>> = null;
   try {
-    const [settingsResult, seedsResult, checkpointResult] = await Promise.allSettled([
+    const [settingsResult, seedsResult, checkpointResult, modelResult] = await Promise.allSettled([
       getQueryOptimizationSettings(project.projectId, runtime.store),
       listSeedPapers(project.spreadsheetId, runtime.google),
       getQueryOptimizationCheckpoint(project.projectId, runtime.store),
+      resolveSelectedModelKey(runtime.store),
     ]);
     if (checkpointResult.status === 'fulfilled') checkpoint = checkpointResult.value;
     else throw checkpointResult.reason;
@@ -1184,6 +1195,7 @@ async function prepareQueryOptimization(store: AppStore, runtime: ChromeRuntimeD
     const seedCount = seedPmids.length;
     store.setState((s) => s.project?.projectId !== project.projectId || s.queryOptimizationSetup !== loading ? s : {
       ...s, queryOptimizationSetup: { ...loading, status: 'ready', seedCount, seedPmids, checkpoint,
+        model: modelResult.status === 'fulfilled' ? modelResult.value.model : undefined,
         maxHits: String(settings?.maxHits ?? DEFAULT_QUERY_OPTIMIZATION_SETTINGS.maxHits),
         maxIterations: String(settings?.maxIterations ?? DEFAULT_QUERY_OPTIMIZATION_SETTINGS.maxIterations),
       },

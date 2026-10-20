@@ -1,3 +1,4 @@
+import { AI_CONSENT_VERSION } from '../../../src/lib/llm/aiDisclosure';
 /**
  * Playwright で app.html を読み込むときに使う、app 画面向けの拡張スタブ。
  *
@@ -78,6 +79,7 @@ export async function injectAppStub(page: Page, scenario: AppScenario = {}): Pro
       extraStorage: Record<string, unknown>;
       preloadedState: Partial<AppState> | null;
       guideProgress: unknown;
+      consentVersion: string;
     }) => {
       if (args.preloadedState) {
         (
@@ -87,6 +89,8 @@ export async function injectAppStub(page: Page, scenario: AppScenario = {}): Pro
 
       const data: Record<string, unknown> = {
         guide_progress: args.guideProgress,
+        aiConsent: Object.fromEntries(['anthropic', 'gemini', 'openrouter'].map((provider) =>
+          [provider, { version: args.consentVersion, acceptedAt: '2026-10-20T00:00:00.000Z' }])),
         ...args.extraStorage,
       };
       if (args.currentProject !== null) {
@@ -192,6 +196,7 @@ export async function injectAppStub(page: Page, scenario: AppScenario = {}): Pro
       extraStorage,
       preloadedState,
       guideProgress: GUIDE_PROGRESS_SUPPRESSED,
+      consentVersion: AI_CONSENT_VERSION,
     }
   );
 

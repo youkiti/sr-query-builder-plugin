@@ -190,6 +190,9 @@ test.describe('検索式の自動調整', () => {
     const result = await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze();
     expect(result.violations).toEqual([]);
     await adopt.click();
+    // 条件を満たさない結果の保存は、人が確かめたことの確認を挟む。
+    const confirm = page.getByRole('dialog', { name: '保存前の確認' });
+    await confirm.getByRole('button', { name: '確かめたうえで保存する' }).click();
     await expect(page.locator('.optimization__save-status')).toContainText('保存しました', { timeout: 15_000 });
     await expect.poll(() => fake.tabs['FormulaVersions']!.length).toBe(3);
     expect(fake.tabs['FormulaVersions']![2]![4]).toContain('"broad"[tiab]');

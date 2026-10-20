@@ -1,3 +1,6 @@
+import { createChromeStoreDeps } from '@/features/project';
+import { AiConsentDeclinedError, createEnsureAiConsent } from '@/app/services/aiConsentService';
+import { updateGeminiDataNotice } from '@/lib/llm/aiDisclosure';
 /**
  * Options 画面の起動ロジック。
  *
@@ -145,6 +148,7 @@ function updateTierBadge(
 ): void {
   const badge = doc.getElementById('gemini-tier-badge');
   if (!badge) return;
+  updateGeminiDataNotice(badge, state === 'free');
   badge.className = 'options__tier-badge';
   switch (state) {
     case 'checking':
@@ -208,7 +212,8 @@ function buildInitialStatus(
   return parts.join(' / ');
 }
 
-export function createChromeOptionsDeps(): OptionsDeps {
+export function createChromeOptionsDeps(doc: Document = document): OptionsDeps {
+  const ensureAiConsent = createEnsureAiConsent(doc, createChromeStoreDeps());
   return {
     readKey: async (key) => {
       const result = await chrome.storage.local.get(key);
@@ -224,7 +229,10 @@ export function createChromeOptionsDeps(): OptionsDeps {
     openAppTab: () => {
       chrome.tabs.create({ url: chrome.runtime.getURL('app/app.html') });
     },
-    detectGeminiTier: (apiKey) => detectGeminiTier(apiKey),
+    detectGeminiTier: async (apiKey) => {
+      await ensureAiConsent('gemini');
+      return detectGeminiTier(apiKey);
+    },
   };
 }
 
@@ -286,7 +294,12 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
       let tier: 'paid' | 'free' | 'unknown' | 'unavailable';
       try {
         tier = await detect(existingGemini);
-      } catch {
+      } catch (err) {
+        if (err instanceof AiConsentDeclinedError) {
+          updateTierBadge(doc, 'unknown');
+          if (status) status.textContent = err.message;
+          return;
+        }
         tier = 'unknown';
       }
       updateTierBadge(doc, tier);
@@ -403,7 +416,11 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
           let tier: 'paid' | 'free' | 'unknown' | 'unavailable';
           try {
             tier = await deps.detectGeminiTier(geminiVal);
-          } catch {
+          } catch (err) {
+            if (err instanceof AiConsentDeclinedError) {
+              updateTierBadge(doc, 'unknown');
+              throw err;
+            }
             tier = 'unknown';
           }
 

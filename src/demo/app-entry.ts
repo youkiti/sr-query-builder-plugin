@@ -1,3 +1,4 @@
+import { AI_CONSENT_VERSION } from '@/lib/llm/aiDisclosure';
 /**
  * デモビルド専用の `app.html` エントリ（`webpack --env demo` でのみ使われる）。
  *
@@ -46,6 +47,11 @@ async function suppressGuideSuggestions(): Promise<void> {
 
 async function boot(): Promise<void> {
   await suppressGuideSuggestions();
+  await chrome.storage.local.set({ aiConsent: Object.fromEntries(
+    ['anthropic', 'gemini', 'openrouter'].map((provider) => [provider, {
+      version: AI_CONSENT_VERSION, acceptedAt: new Date().toISOString(),
+    }])
+  ) });
   const search = window.location.search;
   const demoSeed = new URLSearchParams(search).get('demoSeed');
   // seed 投入はレイテンシ 0（既定）のまま一気に流す

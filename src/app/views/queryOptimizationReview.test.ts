@@ -438,3 +438,22 @@ test.each([undefined, { filterNotice: null, parenthesizedTerms: [], removedMeshH
     expect(container.textContent).not.toContain('初期式の生成で行った変更');
   }
 );
+
+test.each(['needs_review', 'stopped', 'error'] as const)('結果 %s の採用保存は人の承認後にだけ呼ぶ', async (status) => {
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  renderOptimizationReview(container, run(status), actions);
+  const adopt = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '採用して保存')!;
+  adopt.click();
+  expect(actions.adopt).not.toHaveBeenCalled();
+  expect(document.querySelector('[role=dialog]')?.textContent).toContain('この候補は条件を満たしていません。人が確かめたうえで保存しますか？');
+  Array.from(document.querySelectorAll('button')).find((b) => b.textContent === '中止する')!.click();
+  await Promise.resolve();
+  expect(actions.adopt).not.toHaveBeenCalled();
+  expect(adopt.disabled).toBe(false);
+  adopt.click();
+  Array.from(document.querySelectorAll('button')).find((b) => b.textContent === '確かめたうえで保存する')!.click();
+  await Promise.resolve();
+  expect(actions.adopt).toHaveBeenCalledTimes(1);
+  container.remove();
+});

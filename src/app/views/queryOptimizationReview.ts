@@ -1,3 +1,4 @@
+import { showConfirmationModal } from '../ui/confirmationModal';
 import { renderGenerationNotice } from './generationNotice';
 import { blockDiagnosisLines } from '@/features/validation/blockDiagnosis';
 import type { OptimizationTrial } from '@/features/formula/skills/optimizeQuery';
@@ -171,7 +172,7 @@ export function renderOptimizationReview(
   const seeds = best?.evaluation.seedPmids.length ?? run.seedCount;
   const review = buildOptimizationReviewSections(run);
   subheading('確認の状況');
-  const stateLabels: Record<ReviewSectionState, string> = { confirmed: '確認済み', unmet: '未達', needs_decision: '判定待ち', decided: '判定済み（残件あり）', unconfirmed: '未確認' };
+  const stateLabels: Record<ReviewSectionState, string> = { no_human_decision: '人の判定なし', confirmed: '確認済み', unmet: '未達', needs_decision: '判定待ち', decided: '判定済み（残件あり）', unconfirmed: '未確認' };
   for (const item of review.sections) {
     const group = doc.createElement('section');
     group.className = 'optimization__review-section';
@@ -337,9 +338,17 @@ export function renderOptimizationReview(
   adopt.type = 'button';
   adopt.textContent = '採用して保存';
   adopt.disabled = !best || !actions.adopt || run.save?.status === 'saving' || run.save?.status === 'saved';
-  adopt.addEventListener('click', () => {
+  adopt.addEventListener('click', async () => {
     if (adopt.disabled) return;
     adopt.disabled = true;
+    if (result?.status !== 'achieved') {
+      const content = doc.createElement('p');
+      content.textContent = 'この候補は条件を満たしていません。人が確かめたうえで保存しますか？';
+      const accepted = await showConfirmationModal(doc, {
+        title: '保存前の確認', content, acceptLabel: '確かめたうえで保存する', cancelLabel: '中止する',
+      });
+      if (!accepted) { adopt.disabled = false; return; }
+    }
     void actions.adopt?.();
   });
   const edit = doc.createElement('button');

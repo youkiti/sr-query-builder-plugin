@@ -12,11 +12,11 @@ describe('buildMethodsTexts', () => {
     expect(texts.en).toContain('(gemini-3.5-flash)');
     expect(texts.en).toContain('version 0.1.0');
     expect(texts.en).toContain('sr-query-builder-plugin');
-    expect(texts.en).toContain('reviewed, edited, and approved by the authors');
+    expect(texts.en).toContain('[Describe how the authors checked and revised the AI-generated drafts.]');
     expect(texts.ja).toContain('gemini-3.5-flash');
     expect(texts.ja).toContain('バージョン 0.1.0');
     expect(texts.ja).toContain('sr-query-builder-plugin');
-    expect(texts.ja).toContain('著者が内容を確認・修正のうえ確定した');
+    expect(texts.ja).toContain('［著者が AI の下書きをどう確かめ、直したかを記入］');
   });
 
   test('model が null ならプレースホルダを残す', () => {
@@ -74,5 +74,5 @@ test('保存版の拡張バージョンを優先し、寄与したモデルを�
   expect(texts.en).toContain('version 1.2.3');
   expect(texts.ja).toContain('バージョン 1.2.3');
   expect(texts.en).not.toContain('9.0.0');
-  expect(texts.en).toContain('All AI-generated output was reviewed, edited, and approved by the authors.');
+  expect(texts.en).toContain('[Describe how the authors checked and revised the AI-generated drafts.]');
 });

@@ -222,6 +222,7 @@ export interface QueryOptimizationRunState {
 }
 
 export interface QueryOptimizationSetupState {
+  model?: string;
   checkpoint?: CompletedQueryOptimization | InterruptedQueryOptimization | null;
   seedPmids?: string[];
   projectId: string;

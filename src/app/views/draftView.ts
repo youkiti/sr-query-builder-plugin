@@ -1,3 +1,4 @@
+import { MODEL_BENCHMARK_URL } from '@/lib/llm/modelRegistry';
 import { renderGenerationNotice } from './generationNotice';
 import { renderOptimizationReview } from './queryOptimizationReview';
 import { createQueryOptimizationInputIdentity, getQueryOptimizationResumeAvailability } from '../services/queryOptimizationCheckpointService';
@@ -1088,7 +1089,21 @@ function renderQueryOptimization(container: HTMLElement, state: AppState, callba
     start.disabled = true;
     void callbacks.onOptimize({ maxHits: Number(hits.value), maxIterations: Number(iterations.value) });
   });
-  form.append(hitsLabel, hitsNote, details, start);
+  const draftNotice = doc.createElement('p');
+  draftNotice.className = 'optimization__notice';
+  draftNotice.textContent = '⚠ AI が作る検索式は下書きです。使う前に、人が検索式を確かめてください。';
+  const costNotice = doc.createElement('p');
+  costNotice.className = 'optimization__cost-notice';
+  costNotice.textContent = setup?.model === 'claude-opus-5-5'
+    ? '目安: 初期式の生成 1 回あたり約 0.28 ドル以下（2026-10-08 の料金表・キャッシュ割引なしの上限、README のベンチマーク）。自動調整の反復ごとに追加の費用がかかり、この目安には含まれません。'
+    : 'このモデルの費用の目安は測っていません。実行後の概算はヘッダーに出ます。';
+  const benchmark = doc.createElement('a');
+  benchmark.href = MODEL_BENCHMARK_URL;
+  benchmark.textContent = 'README のベンチマーク';
+  benchmark.target = '_blank';
+  benchmark.rel = 'noopener noreferrer';
+  costNotice.append(' ', benchmark);
+  form.append(hitsLabel, hitsNote, details, draftNotice, costNotice, start);
   section.appendChild(form);
   const error = run?.error ?? setup?.error;
   if (error) {

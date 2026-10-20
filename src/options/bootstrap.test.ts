@@ -567,6 +567,8 @@ describe('startOptions', () => {
     expect(detectGeminiTierMock).toHaveBeenCalledWith('free-key');
     const badge = doc.getElementById('gemini-tier-badge');
     expect(badge?.textContent).toBe('無料プラン');
+    expect(doc.querySelector('.gemini-data-notice')?.textContent).toContain('Google の説明では、Gemini API の無料枠では送った内容と応答が製品の改善に使われ、人が読むことがあるとされています。未公開のプロトコルなど機密の内容は送らないでください。');
+    expect(doc.querySelector('.gemini-data-notice a')?.getAttribute('href')).toBe('https://ai.google.dev/gemini-api/terms');
     expect(badge?.classList.contains('options__tier-badge--free')).toBe(true);
     expect(store[STORAGE_KEY_LLM_MODEL]).toBe('gemini-2.0-flash');
     expect((doc.getElementById('llm-model-select') as HTMLSelectElement).value).toBe('gemini-2.0-flash');
@@ -872,3 +874,25 @@ test.each([['claude-foo', 'Anthropic', 'anthropic'], ['a/b', 'OpenRouter', 'open
     expect(doc.querySelector(`#${provider}-card`)?.classList.contains('options__provider-card--active')).toBe(true);
   }
 );
+
+test('Options のプラン判定も同意拒否では Gemini へ送らない', async () => {
+  const { AiConsentDeclinedError } = await import('@/app/services/aiConsentService');
+  const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+  const fetch = jest.fn(async () => { throw new Error('送信してはいけません'); });
+  Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true, value: fetch });
+  const doc = document.implementation.createHTMLDocument('同意');
+  const storageGet = jest.spyOn(chrome.storage.local, 'get').mockImplementation(async () => ({}));
+  try {
+    const deps = createChromeOptionsDeps(doc);
+    const request = deps.detectGeminiTier!('fake');
+    const rejected = expect(request).rejects.toBeInstanceOf(AiConsentDeclinedError);
+    for (let i = 0; i < 12; i += 1) await Promise.resolve();
+    Array.from(doc.querySelectorAll('button')).find((button) => button.textContent === '送らずに中止する')!.click();
+    await rejected;
+    expect(fetch).not.toHaveBeenCalled();
+  } finally {
+    if (originalFetch) Object.defineProperty(globalThis, 'fetch', originalFetch);
+    else Reflect.deleteProperty(globalThis, 'fetch');
+    storageGet.mockRestore();
+  }
+});

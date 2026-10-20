@@ -1,3 +1,5 @@
+import { AiConsentDeclinedError } from '../services/aiConsentService';
+import { updateGeminiDataNotice } from '@/lib/llm/aiDisclosure';
 import {
   BUILTIN_MODELS,
   DEFAULT_MODEL,
@@ -128,6 +130,7 @@ function updateTierBadge(
   badge: HTMLElement,
   state: 'checking' | 'paid' | 'free' | 'unknown' | 'unavailable'
 ): void {
+  updateGeminiDataNotice(badge, state === 'free');
   badge.className = 'settings__tier-badge';
   switch (state) {
     case 'checking':
@@ -475,7 +478,12 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
         let tier: 'paid' | 'free' | 'unknown' | 'unavailable';
         try {
           tier = await detectTier(gemini);
-        } catch {
+        } catch (err) {
+          if (err instanceof AiConsentDeclinedError) {
+            updateTierBadge(tierBadge, 'unknown');
+            status.textContent = err.message;
+            return;
+          }
           tier = 'unknown';
         }
         updateTierBadge(tierBadge, tier);
@@ -569,7 +577,11 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
           let tier: 'paid' | 'free' | 'unknown' | 'unavailable';
           try {
             tier = await detectTier(geminiVal);
-          } catch {
+          } catch (err) {
+            if (err instanceof AiConsentDeclinedError) {
+              updateTierBadge(tierBadge, 'unknown');
+              throw err;
+            }
             tier = 'unknown';
           }
 

@@ -1,7 +1,7 @@
 import type { OptimizationTrial } from '@/features/formula/skills/optimizeQuery';
 import type { OptimizationOutsideCheckState, QueryOptimizationRunState } from '../store';
 
-export type ReviewSectionState = 'confirmed' | 'unmet' | 'needs_decision' | 'decided' | 'unconfirmed';
+export type ReviewSectionState = 'no_human_decision' | 'confirmed' | 'unmet' | 'needs_decision' | 'decided' | 'unconfirmed';
 type LostSampleAnnotation = NonNullable<NonNullable<OptimizationTrial['impact']>['annotation']>;
 
 /** 参考注釈の表示・保存用集計。人の判定や採用条件には使わない。 */
@@ -35,6 +35,7 @@ export interface OptimizationReviewSection {
 
 function decisionState(check: OptimizationOutsideCheckState | undefined, source: 'outside' | 'lost'): ReviewSectionState {
   const candidates = check?.candidates.filter((candidate) => candidate.source === source) ?? [];
+  if (!candidates.length) return 'no_human_decision';
   if (candidates.some((candidate) => check?.decisions[candidate.pmid]?.status !== 'saved')) return 'needs_decision';
   if (candidates.some((candidate) => check?.decisions[candidate.pmid]?.decision === 'include')) return 'unmet';
   return candidates.some((candidate) => check?.decisions[candidate.pmid]?.decision === 'maybe') ? 'decided' : 'confirmed';
@@ -73,7 +74,8 @@ export function buildOptimizationReviewSections(run: QueryOptimizationRunState):
     const check = run.outsideCheck;
     const candidates = check?.candidates.filter((candidate) => candidate.source === 'outside') ?? [];
     if (check?.status === 'ready') {
-      outside.state = decisionState(check, 'outside');
+      outside.state = candidates.length && check.marginHits == null ? 'unconfirmed' : decisionState(check, 'outside');
+      if (candidates.length && check.marginHits == null) outside.lines.push('外側の件数は未測定です。');
       outside.maybeCount = candidates.filter((candidate) => check.decisions[candidate.pmid]?.status === 'saved'
         && check.decisions[candidate.pmid]?.decision === 'maybe').length;
       if (!candidates.length) outside.lines.push(`拡張式の外側 ${check.marginHits ?? '未測定'} 件から判定候補は選ばれませんでした。網羅性の保証ではありません`);

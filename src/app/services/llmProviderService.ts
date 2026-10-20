@@ -49,6 +49,7 @@ export class LlmApiKeyMissingError extends Error {
 }
 
 export interface LlmFactoryDeps {
+  ensureAiConsent?: (providerId: LlmProviderId) => Promise<void>;
   executedBy?: string | null;
   getExecutedBy?: () => Promise<string | null>;
   google: GoogleApiDeps;
@@ -164,8 +165,8 @@ export async function buildLlmProviderFactory(deps: LlmFactoryDeps): Promise<Llm
     model: selectedModel,
     executedBy,
     providerId,
-    forPurpose: (purpose, onRequestState, attempts) =>
-      withRetry(
+    forPurpose: (purpose, onRequestState, attempts) => {
+      const provider = withRetry(
         withLogging(withSignalDeadline(baseProvider), purpose, {
           executedBy,
           promptVersion: getPromptVersion(purpose, providerId),
@@ -191,7 +192,20 @@ export async function buildLlmProviderFactory(deps: LlmFactoryDeps): Promise<Llm
           },
         }),
         { ...attempts, onRequestState: onRequestState ?? deps.onRequestState }
-      ),
+      );
+      return {
+        providerId: provider.providerId,
+        model: provider.model,
+        chat: async (messages, options) => {
+          await deps.ensureAiConsent?.(providerId);
+          return provider.chat(messages, options);
+        },
+        ...(provider.chatWithTools ? { chatWithTools: async (...args: Parameters<NonNullable<LLMProvider['chatWithTools']>>) => {
+          await deps.ensureAiConsent?.(providerId);
+          return provider.chatWithTools!(...args);
+        } } : {}),
+      };
+    },
   };
 }
 

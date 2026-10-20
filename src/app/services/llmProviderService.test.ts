@@ -379,3 +379,41 @@ test.each([
     expect(warn).toHaveBeenCalledTimes(1);
   } finally { warn.mockRestore(); }
 });
+
+test.each(['chat', 'chatWithTools'] as const)('同意拒否なら %s の送信・ログ・再試行を始めない', async (method) => {
+  const { store } = memoryStore({ [STORAGE_KEY_ANTHROPIC]: 'fake' });
+  const fetch = jest.fn();
+  const { AiConsentDeclinedError } = await import('./aiConsentService');
+  const ensureAiConsent = jest.fn(async () => { throw new AiConsentDeclinedError(); });
+  const factory = await buildLlmProviderFactory({
+    google: { fetch, getAccessToken: async () => 'fake' }, store,
+    llmLogFolderId: 'F', spreadsheetId: 'S', ensureAiConsent,
+  });
+  const beforeAttempt = jest.fn();
+  const provider = factory.forPurpose('draft_agent', undefined, { beforeAttempt });
+  const request = method === 'chat' ? provider.chat([{ role: 'user', content: '本文' }])
+    : provider.chatWithTools!('指示', [{ role: 'user', content: '本文' }], []);
+  await expect(request).rejects.toThrow('AI への送信に同意しなかったため中止しました');
+  expect(ensureAiConsent).toHaveBeenCalledTimes(1);
+  expect(ensureAiConsent).toHaveBeenCalledWith('anthropic');
+  expect(fetch).not.toHaveBeenCalled();
+  expect(beforeAttempt).not.toHaveBeenCalled();
+});
+
+test('同意を待ってから送信する', async () => {
+  const { store } = memoryStore({ [STORAGE_KEY_GEMINI]: 'fake', [STORAGE_KEY_LLM_MODEL]: 'gemini-3.5-flash' });
+  let accept!: () => void;
+  const consent = new Promise<void>((resolve) => { accept = resolve; });
+  const fetch = jest.fn(async () => { throw new Error('テスト用の送信終了'); });
+  const factory = await buildLlmProviderFactory({
+    google: { fetch, getAccessToken: async () => 'fake' }, store,
+    llmLogFolderId: 'F', spreadsheetId: 'S', ensureAiConsent: async () => consent,
+  });
+  const request = factory.forPurpose('extract_protocol').chat([{ role: 'user', content: '本文' }]);
+  const rejected = expect(request).rejects.toThrow('テスト用の送信終了');
+  await Promise.resolve();
+  expect(fetch).not.toHaveBeenCalled();
+  accept();
+  await rejected;
+  expect(fetch).toHaveBeenCalled();
+});

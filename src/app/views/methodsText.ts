@@ -39,10 +39,10 @@ export function buildMethodsTexts(input: MethodsTextInput): MethodsTexts {
     en:
       `The PubMed search strategy was drafted with the assistance of ${modelPhrase} (${modelEn}) ` +
       `using sr-query-builder-plugin (version ${version}), an open-source browser extension for developing ` +
-      'systematic review search strategies. All AI-generated output was reviewed, edited, and approved by the authors.',
+      'systematic review search strategies. [Describe how the authors checked and revised the AI-generated drafts.]',
     ja:
       `PubMed 検索式の下書きは、オープンソースのブラウザ拡張 sr-query-builder-plugin（バージョン ${version}）上で` +
-      `生成 AI（${modelJa}）の支援を受けて作成し、著者が内容を確認・修正のうえ確定した。`,
+      `生成 AI（${modelJa}）の支援を受けて作成した。［著者が AI の下書きをどう確かめ、直したかを記入］`,
   };
 }
 

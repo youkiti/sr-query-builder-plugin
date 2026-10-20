@@ -1,3 +1,4 @@
+import { AI_CONSENT_VERSION } from '../../../src/lib/llm/aiDisclosure';
 /**
  * Options 画面専用の chrome.storage.local スタブ。
  * options/bootstrap.ts は identity / tabs を使わないため、storage.local だけ差し替える。
@@ -63,5 +64,5 @@ export async function injectOptionsStub(
     (window as unknown as { chrome: unknown }).chrome = chromeStub;
     (window as unknown as { __optionsStubData: Record<string, unknown> }).__optionsStubData =
       data;
-  }, { storage: scenario.storage ?? {} });
+  }, { storage: { aiConsent: { gemini: { version: AI_CONSENT_VERSION, acceptedAt: '2026-10-20T00:00:00Z' } }, ...scenario.storage } });
 }

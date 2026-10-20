@@ -106,3 +106,13 @@ test('密な再描画でも経過時間のタイマーは1つだけで、完了�
   expect(jest.getTimerCount()).toBe(0);
   expect(container.textContent).toContain('経過時間: 2秒');
 });
+
+test.each(['claude-opus-5-5', 'gemini-3.5-flash'])('下書きの注意と選択モデル %s の実行前費用を示す', (model) => {
+  const container = document.createElement('div');
+  const current = state();
+  current.queryOptimizationSetup = { projectId: 'p', status: 'ready', maxHits: '2000', maxIterations: '2', seedCount: 1, error: null, model };
+  createDraftView()(container, { state: current, navigate: jest.fn() });
+  expect(container.querySelector('.optimization__notice')?.textContent).toContain('AI が作る検索式は下書きです。');
+  expect(container.querySelector('.optimization__cost-notice')?.textContent).toContain(model === 'claude-opus-5-5' ? '約 0.28 ドル以下（2026-10-08' : 'このモデルの費用の目安は測っていません');
+  expect(container.querySelector('.optimization__cost-notice a')?.getAttribute('href')).toContain('#benchmark');
+});

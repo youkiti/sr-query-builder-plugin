@@ -187,6 +187,8 @@ describe('createSettingsView - Gemini プラン判定', () => {
     expect(detect).toHaveBeenCalledWith('free-key');
     const badge = container.querySelector('#settings-gemini-tier-badge');
     expect(badge?.textContent).toBe('無料プラン');
+    expect(container.querySelector('.gemini-data-notice')?.textContent).toContain('Google の説明では、Gemini API の無料枠では送った内容と応答が製品の改善に使われ、人が読むことがあるとされています。未公開のプロトコルなど機密の内容は送らないでください。');
+    expect(container.querySelector('.gemini-data-notice a')?.getAttribute('href')).toBe('https://ai.google.dev/gemini-api/terms');
     expect(store['llm.selectedModel']).toBe('gemini-2.0-flash');
     expect(store['gemini.detectedTier']).toBe('free');
     expect(
