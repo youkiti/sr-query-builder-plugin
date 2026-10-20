@@ -1,4 +1,4 @@
-import { renderOptimizationReview } from './queryOptimizationReview';
+import { buildAdoptConfirmContent, renderOptimizationReview } from './queryOptimizationReview';
 import { createDraftView } from './draftView';
 import { INITIAL_STATE, type QueryOptimizationRunState } from '../store';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
@@ -21,6 +21,41 @@ function run(status: 'achieved' | 'needs_review' | 'stopped' | 'error'): QueryOp
 }
 const actions = { adopt: jest.fn(async () => {}), edit: jest.fn(), blocks: jest.fn() };
 beforeEach(() => { jest.clearAllMocks(); });
+
+describe('条件を満たさない結果の保存確認の説明', () => {
+  test('目安件数を超え、シードを取りこぼしたときは、目安と実測・取りこぼし件数を示す', () => {
+    const current = run('needs_review');
+    const best = current.result!.best!;
+    best.measurement = { ...best.measurement, totalHits: 2500, capturedPmids: ['1'], missedPmids: ['2'] };
+    best.evaluation = { ...best.evaluation, seedPmids: ['1', '2'] };
+    current.maxHits = 2000;
+    const text = buildAdoptConfirmContent(document, current).textContent!;
+    expect(text).toContain('完了条件は次の 2 つです');
+    expect(text).toContain('目安件数（2,000 件）以下であること：実測 2,500 件で、目安を 500 件超えています。');
+    expect(text).toContain('既知のシード論文（2 件）をすべて捕捉していること：1 件を捕捉し、1 件を取りこぼしています。');
+    expect(text).toContain('記録された理由：残った確認事項');
+    expect(text).toContain('未知の適格研究をすべて拾えたことにはなりません');
+  });
+
+  test('未測定とシード 0 件は「満たさない」ではなく「確かめられていない」と書く', () => {
+    const current = run('stopped');
+    const best = current.result!.best!;
+    best.measurement = { ...best.measurement, totalHits: null };
+    best.evaluation = { ...best.evaluation, seedPmids: [] };
+    current.seedCount = 0;
+    current.result!.unmetReasons = [];
+    const text = buildAdoptConfirmContent(document, current).textContent!;
+    expect(text).toContain('目安件数（20 件）以下であること：未測定のため確かめられていません。');
+    expect(text).toContain('有効なシード論文が 0 件のため確かめられていません。');
+    expect(text).not.toContain('記録された理由');
+  });
+
+  test('満たしている条件は満たしていると書く', () => {
+    const text = buildAdoptConfirmContent(document, run('needs_review')).textContent!;
+    expect(text).toContain('実測 12 件で、満たしています。');
+    expect(text).toContain('1 件を捕捉し、満たしています。');
+  });
+});
 
 test('4区分と未確認事項を文字で表示し、捕捉の限界は1回だけ示す', () => {
   const container = document.createElement('div');
@@ -446,7 +481,9 @@ test.each(['needs_review', 'stopped', 'error'] as const)('結果 %s の採用保
   const adopt = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '採用して保存')!;
   adopt.click();
   expect(actions.adopt).not.toHaveBeenCalled();
-  expect(document.querySelector('[role=dialog]')?.textContent).toContain('この候補は条件を満たしていません。人が確かめたうえで保存しますか？');
+  const dialogText = document.querySelector('[role=dialog]')?.textContent ?? '';
+  expect(dialogText.includes('自動調整の完了条件をすべては満たしていません')).toBe(true);
+  expect(dialogText.includes('人が最終式を確かめたうえで保存しますか？')).toBe(true);
   Array.from(document.querySelectorAll('button')).find((b) => b.textContent === '中止する')!.click();
   await Promise.resolve();
   expect(actions.adopt).not.toHaveBeenCalled();
