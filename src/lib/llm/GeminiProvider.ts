@@ -1,3 +1,4 @@
+import { requestMetadata } from './requestMetadata';
 import {
   LlmProviderError,
   type ChatMessage,
@@ -28,6 +29,7 @@ const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
 const ENDPOINT_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 interface GeminiResponse {
+  modelVersion?: string;
   candidates?: Array<{
     content?: { parts?: Array<{ text?: string }>; role?: string };
     finishReason?: string;
@@ -56,6 +58,7 @@ export class GeminiProvider implements LLMProvider {
       this.apiKey
     )}`;
     const body = this.buildRequestBody(messages, options);
+    options.onRequestSent?.(requestMetadata(body));
     const fetchFn = this.fetchImpl ?? globalThis.fetch;
     const res = await fetchFn(url, {
       method: 'POST',
@@ -82,6 +85,7 @@ export class GeminiProvider implements LLMProvider {
       tokensIn: json.usageMetadata?.promptTokenCount ?? null,
       tokensOut: json.usageMetadata?.candidatesTokenCount ?? null,
       raw: json,
+      modelReported: json.modelVersion ?? null,
     };
   }
 

@@ -73,8 +73,11 @@ export const SHEET_HEADERS: Record<SheetTabName, readonly string[]> = {
     'created_by',
     'created_at',
     'note',
-    // model は後付け列。既存シートの行データと位置互換を保つため必ず末尾に置く
+    // 後付け列は既存の列順を保って末尾に追加する
     'model',
+    'saved_by',
+    'app_version',
+    'models_used',
   ],
   ValidationLog: [
     'validation_id',
@@ -109,6 +112,9 @@ export const SHEET_HEADERS: Record<SheetTabName, readonly string[]> = {
     'latency_ms',
     'cost_estimate_usd',
     'error',
+    'model_reported',
+    'prompt_version',
+    'executed_by',
   ],
   Config: ['key', 'value'],
 };

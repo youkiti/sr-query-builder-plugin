@@ -1,4 +1,4 @@
-# hosted/ — GitHub Pages 配信ファイル（公開ページ）
+# hosted/ 。 GitHub Pages 配信ファイル（公開ページ）
 
 GitHub Pages で配信する、ランディング・使い方ガイド・プライバシーポリシー・利用規約 4 ページと、**Google Picker 許可ページ**（`picker.html`）の正典置き場。
 
@@ -65,7 +65,7 @@ python -m http.server 8080 --directory hosted       # http://localhost:8080/pick
 
 - **プライバシーポリシーの正典は [../docs/store/privacy-policy.md](../docs/store/privacy-policy.md)**。`privacy-policy.html` はその転記＋英訳なので、**内容を変えるときは両方を直す**（乖離するとストア審査で参照される URL の内容とリポジトリの原稿がずれる）
 - 文言を足すときは **ja / en の両方**を書く（`.ja` / `.en` の span 対、または `data-en-*` 属性）。「日本語 / English」のような 1 要素内での併記は作らない（切替で片方だけを見せられなくなる）
-- `help.html` の内容は**ワークフローレベル**に留める（画面細部は拡張内のリード文が担う）。冒頭の「最終更新 / 対象バージョン」は内容を変えたら更新する
+- `help.html` の内容は**ワークフローレベル**に留める（画面細部は拡張内のリード文が担う）。冒頭の「最終更新」と各ファイル冒頭の `version:` は更新日に揃える（今回: 2026-10-20）。「対象バージョン」の数字は書かず、`src/manifest.json` の `version` を `tools/hosted/inject-version.mjs` で配信用 `_site/` にだけ差し込む
 - 各ファイル冒頭コメントの `version:` を更新日に書き換える（デプロイ版の識別用）
 - **操作解説動画の埋め込みは `index.html` と `help.html` の 2 か所にある**（`.video-frame` +
   `https://www.youtube-nocookie.com/embed/<動画ID>`。現行の動画 ID は `RqUFlmncuIE`）。
@@ -111,7 +111,7 @@ workflow がやること:
 `npm run shots`（Playwright + stub 環境。実 API を叩かず無人実行）、実 API の応答を見せたいときは
 `npm run manual:check -- --shots`（詳細は [docs/manual-testing.md](../docs/manual-testing.md)）。
 
-### 旧方式（`gh-pages` ブランチへの手動 push）— 廃止
+### 旧方式（`gh-pages` ブランチへの手動 push）。 廃止
 
 2026-08-09 まではこの方式だった。`git worktree` で `gh-pages` 専用ディレクトリを作り、`hosted/` の内容と
 空の `.nojekyll` をコピーして push する運用で、**反映漏れが実際に起きた**（操作解説動画の埋め込みを

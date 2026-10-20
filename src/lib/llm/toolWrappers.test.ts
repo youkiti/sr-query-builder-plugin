@@ -42,7 +42,7 @@ test('重ねたラッパーでも試行ごとの signal・通知・要求と応�
   expect(deps.appendLogEntry).toHaveBeenCalledTimes(2);
   expect(deps.uploadJson).toHaveBeenCalledTimes(4);
   expect(JSON.parse(deps.uploadJson.mock.calls[0]![0].content)).toMatchObject({ system: 'system', messages, tools: [] });
-  expect(JSON.parse(deps.uploadJson.mock.calls[3]![0].content)).toEqual(response.raw);
+  expect(JSON.parse(deps.uploadJson.mock.calls[3]![0].content)).toEqual({ model_reported: null, provider_reported: null, raw: response.raw });
   expect(deps.appendLogEntry.mock.calls[1]![0]).toMatchObject({ purpose: 'draft_agent', tokensIn: 12, tokensOut: 5,
     promptSummary: buildPromptSummary([{ role: 'user', content: '結果\n' + 'a'.repeat(600) }]) });
   expect(deps.appendLogEntry.mock.calls[1]![0].promptSummary).toHaveLength(500);

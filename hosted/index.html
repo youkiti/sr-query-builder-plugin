@@ -2,12 +2,12 @@
 <!-- SR Query Builder Plugin ランディングページ（GitHub Pages 配信）。
      正典はこのファイル（master の hosted/）。デプロイ手順は hosted/README.md を参照。
      ja / en は両方を持ち、表示は lang.js + CSS が片方だけに絞る（併記しない）。
-     version: 2026-08-11 -->
+     version: 2026-10-20 -->
 <html lang="ja">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title data-en="SR Query Builder Plugin — a Chrome extension for building PubMed search strategies">SR Query Builder Plugin — PubMed 検索式の作成・検証を支援する Chrome 拡張</title>
+    <title data-en="SR Query Builder Plugin / a Chrome extension for building PubMed search strategies">SR Query Builder Plugin / PubMed 検索式の作成・検証を支援する Chrome 拡張</title>
     <meta
       name="description"
       content="研究プロトコルから PubMed 検索式のドラフトを生成し、NCBI E-utilities で検証、各データベース向けに変換する MIT ライセンスの Chrome 拡張。"
@@ -23,8 +23,8 @@
         <!-- 言語切替ボタンは lang.js が組み立てる（JS 無効時は空のまま = 両言語が並ぶ） -->
         <div class="lang-switch lang-switch--hero" data-lang-switch></div>
         <p class="hero-meta">
-          <span class="ja" lang="ja">最終更新: 2026-08-11 / 対象バージョン: v0.3.0</span>
-          <span class="en" lang="en">Last updated: 2026-08-11 / Covers v0.3.0</span>
+          <span class="ja" lang="ja">最終更新: 2026-10-20 / 対象バージョン: v<span data-app-version>__APP_VERSION__</span></span>
+          <span class="en" lang="en">Last updated: 2026-10-20 / Covers v<span data-app-version>__APP_VERSION__</span></span>
         </p>
         <h1>SR Query Builder Plugin</h1>
         <p class="subtitle">
@@ -32,7 +32,7 @@
             >研究プロトコルの入力から <strong>PubMed 検索式のドラフト生成</strong>・検証・各データベース向け変換までを支援する Chrome 拡張</span
           >
           <span class="en" lang="en"
-            >A Chrome extension that takes you from a research protocol to a drafted, validated PubMed search strategy — and converts it for other databases</span
+            >A Chrome extension that takes you from a research protocol to a drafted, validated PubMed search strategy, and converts it for other databases</span
           >
         </p>
         <div class="hero-buttons">
@@ -260,7 +260,7 @@
                   >「<code>drive.file</code>」のみ。Drive 全体や全スプレッドシートを読む権限は要求しません。</span
                 >
                 <span class="en" lang="en"
-                  >Just <code>drive.file</code> — never full Drive or all-spreadsheet access.</span
+                  >Just <code>drive.file</code>, never full Drive or all-spreadsheet access.</span
                 >
               </p>
             </div>
@@ -272,12 +272,12 @@
               <p>
                 <span class="ja" lang="ja"
                   >検索式ドラフト生成には選択した LLM プロバイダ（既定は Anthropic の Claude。Gemini・OpenRouter への切替も可）のキーが必須、NCBI
-                  API キーは検証時のレート制限緩和用（任意）です。キーはブラウザ内にのみ保存されます。</span
+                  API キーは検証時のレート制限緩和用（任意）です。キーは端末内に保存し、開発者には送りません。各キーはその送り先（LLM のキーは選んだプロバイダ、NCBI のキーは NCBI）へだけ送ります。</span
                 >
                 <span class="en" lang="en"
                   >Drafting the search strategy requires a key for your selected LLM provider (Anthropic's Claude by default;
                   Gemini or OpenRouter can be selected too); an NCBI API key (optional) eases rate limits during validation.
-                  Keys never leave your browser.</span
+                  Keys are stored on your device and are never sent to the developer. Each key is sent only to its destination: the selected LLM provider for its key, or NCBI for the NCBI key.</span
                 >
               </p>
             </div>
@@ -395,9 +395,9 @@
                   application ID. This value is fixed because <code>src/manifest.json</code> ships with a pinned
                   public key (<code>key</code>), so it’s the same regardless of who builds it (step 4’s
                   <code>npm run dev</code> keeps this key in the build, which is exactly why the extension ID stays
-                  fixed — it’s the production build, <code>npm run build</code>, that strips the key, and this guide
+                  fixed, it’s the production build, <code>npm run build</code>, that strips the key, and this guide
                   doesn’t use that). The OAuth consent screen only needs to request the non-sensitive
-                  <code>drive.file</code> scope, so no extra Google verification is required — but you do still need
+                  <code>drive.file</code> scope, so no extra Google verification is required, but you do still need
                   to fill in the basics (app name, support email, etc.).</span
                 >
               </li>
@@ -455,6 +455,33 @@
           </details>
         </div>
       </section>
+      <section id="funding">
+        <div class="container">
+          <h2>
+            <span class="ja" lang="ja">資金源・利益相反</span
+            ><span class="en" lang="en">Funding and competing interests</span>
+          </h2>
+          <p>
+            <span class="ja" lang="ja"
+              >本ツールの開発は JSPS 科研費（JP25K13585）と AMED（課題管理番号
+              26rea522132h0001「大規模言語モデルによる予防・健康づくり領域のシステマティックレビュー民主化」）の助成を受けています。開発者は
+              AI サービスの提供元（Anthropic、Google、OpenRouter）から報酬を受けていません。</span
+            ><span class="en" lang="en"
+              >Development is supported by JSPS KAKENHI Grant Number JP25K13585 and AMED under Grant
+              Number JP26rea522132. The developer receives no compensation from the AI service providers
+              (Anthropic, Google, OpenRouter).</span
+            >
+          </p>
+          <p>
+            <span class="ja" lang="ja"
+              >大規模言語モデルの呼び出しには電力を使います。自動調整の反復上限は必要な分だけにしてください。</span
+            ><span class="en" lang="en"
+              >Calls to large language models use electricity. Set the automatic adjustment iteration
+              limit only as high as needed.</span
+            >
+          </p>
+        </div>
+      </section>
     </main>
 
     <footer class="footer">
@@ -476,7 +503,7 @@
             >
             <a href="https://github.com/youkiti/sr-query-builder-plugin">GitHub</a>
           </div>
-          <p class="copyright">© 2026 youkiti — MIT License</p>
+          <p class="copyright">© 2026 youkiti / MIT License</p>
         </div>
       </div>
     </footer>

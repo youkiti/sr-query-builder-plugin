@@ -197,6 +197,9 @@ https://www.googleapis.com/auth/drive.file          # Sheets 読み書き + LLM 
 | created_at | iso8601 | ✓ | |
 | note | string | | 変更理由・コメント |
 | model | string | | この版の作成を支援した LLM モデル ID（例: `gemini-3.5-flash`）。`ai_draft` では生成に使ったモデル、`user_edit` では元ドラフトのモデルを引き継ぐ。`#/export` の「論文 Methods 用の文案」に埋め込む。**既存シートとの位置互換のため列は必ず末尾に追加する**（列導入前の行は空 = null 扱い） |
+| saved_by | string(email) | | 保存した人のメール。古い行は null |
+| app_version | string | | 保存時の拡張バージョン。Methods 文案で優先する |
+| models_used | string | | 寄与した AI モデル ID を重複なく `;` 区切りで記録。手編集では元の版と採用した AI 提案のモデルを併合する |
 
 > `formula_md` は 50,000 文字上限に当たる可能性は低いが、超えた場合は Drive へ退避して URL を格納する（`LLMApiLog` と同方針）。
 >
@@ -235,7 +238,7 @@ https://www.googleapis.com/auth/drive.file          # Sheets 読み書き + LLM 
 | timestamp | iso8601 | ✓ | |
 | provider | enum | ✓ | `gemini` / `openai` / `anthropic` / `openrouter` |
 | model | string | ✓ | モデル名（例: `gemini-2.5-pro`） |
-| purpose | enum | ✓ | `draft_block` / `suggest_mesh` / `expand_freeword` / `design_filter` / `pick_boundary` / `pick_seed` / `design_specific_query` / `expand_recall` / `interpret_result` / `extract_protocol` / `improve_block` / `annotate_lost_sample` / `other` |
+| purpose | enum | ✓ | `draft_block` / `draft_agent` / `suggest_mesh` / `expand_freeword` / `design_filter` / `pick_boundary` / `pick_seed` / `design_specific_query` / `expand_recall` / `interpret_result` / `extract_protocol` / `improve_block` / `optimize_query` / `annotate_lost_sample` / `other` |
 | prompt_ref | string(url) | ✓ | Drive に保存した full prompt JSON の URL |
 | response_ref | string(url) | ✓ | Drive に保存した full response JSON の URL |
 | prompt_summary | string | | 先頭 500 文字の抜粋（セル内表示用） |
@@ -244,6 +247,13 @@ https://www.googleapis.com/auth/drive.file          # Sheets 読み書き + LLM 
 | latency_ms | int | | |
 | cost_estimate_usd | float | | プロバイダごとの単価で推定 |
 | error | string | | 失敗時のエラーメッセージ |
+| model_reported | string | | 応答が報告した実際のモデル版。応答に無ければ null |
+| prompt_version | string | | purpose ごとのプロンプト版。抽出の分岐は `+anthropic` / `+standard` で区別 |
+| executed_by | string(email) | | 呼び出しを実行した人のメール |
+
+末尾追加の列は後方互換とし、Meta.schema_version は変更しない。追記前にセッション中一度、古い見出しが新見出しの先頭に一致するときだけ更新する。想定外の見出しは警告して維持する。ログ保存失敗は LLM の成功値・元の例外・費用集計に影響しない。
+
+Drive の prompt.json は `log_id`, `timestamp`, `provider`, `model_requested`, `purpose`, `prompt_version`, `executed_by` を先頭に持ち、呼び出し側の値は `options_requested_by_caller`、実際の送信設定は `generation_settings_sent` に区別する。Gemini の変換済みスキーマは `response_schema_sent` に記録する。response.json は `model_reported` と `provider_reported` を持ち、生応答は `raw` に保持する。
 
 > 50,000 文字制限を回避しつつ監査性を確保するため、フル payload は Drive の `{drive_folder_id}/logs/llm/{log_id}.json` として保存し、Sheet には URL と要約のみ格納する。
 

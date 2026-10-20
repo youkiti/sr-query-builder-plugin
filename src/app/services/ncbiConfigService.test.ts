@@ -57,3 +57,15 @@ describe('buildEutilsDeps', () => {
     expect(deps.fetch).toBe(google.fetch);
   });
 });
+
+test.each(['user@example.com', ''])('サインイン中のメールを取得できたときだけ渡す: %s', async (email) => {
+  const profile = { getProfileUserInfo: jest.fn().mockResolvedValue({ email, id: 'id' }) };
+  const deps = await buildEutilsDeps({ google: stubGoogle(), store: memoryStore(), profile });
+  expect(deps.email).toBe(email || undefined);
+});
+
+test('プロフィールの取得失敗でもメールを送らず利用できる', async () => {
+  const profile = { getProfileUserInfo: jest.fn().mockRejectedValue(new Error('unavailable')) };
+  const deps = await buildEutilsDeps({ google: stubGoogle(), store: memoryStore(), profile });
+  expect(deps.email).toBeUndefined();
+});

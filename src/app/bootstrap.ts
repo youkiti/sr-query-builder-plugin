@@ -1,3 +1,5 @@
+import { detectGeminiTier } from '@/lib/llm/geminiTierDetector';
+import { createEnsureAiConsent } from './services/aiConsentService';
 declare const __BUILD_DATE__: string;
 
 /**
@@ -19,6 +21,7 @@ import {
   buildEutilsDeps,
   withExpandApiWait,
   buildLlmProviderFactory,
+  resolveSelectedModelKey,
   clearBlocksDraftBackup,
   createChromeRuntimeDeps,
   getBlocksDraftBackup,
@@ -186,7 +189,7 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
     }
     opts.setHash(buildHash(route));
   };
-  const viewOptions = opts.viewOptions ?? buildDefaultViewOptions(store, runtime, navigate);
+  const viewOptions = opts.viewOptions ?? buildDefaultViewOptions(store, runtime, navigate, doc);
   const views = buildViews(store, viewOptions);
 
   // ヘッダーのアプリタイトル: クリックで #/home へ戻す（docs/ui-flow.md §4）
@@ -322,6 +325,8 @@ async function hydrateCurrentProject(store: AppStore, runtime: ChromeRuntimeDeps
         currentFormulaVersionId: latestFormula.versionId,
         currentFormulaMarkdown: latestFormula.formulaMd,
         currentFormulaModel: latestFormula.model,
+        currentFormulaModelsUsed: latestFormula.modelsUsed ?? null,
+        currentFormulaAppVersion: latestFormula.appVersion ?? null,
         currentFormulaCreatedBy: latestFormula.createdBy,
       }));
     }
@@ -386,15 +391,19 @@ function toBlocksDraft(blocks: ProtocolBlock[], combinationExpression: string): 
 function buildDefaultViewOptions(
   store: AppStore,
   runtime: ChromeRuntimeDeps | null,
-  navigate: (route: RouteName) => void
+  navigate: (route: RouteName) => void,
+  doc: Document
 ): BuildViewsOptions {
   if (!runtime) {
     return {};
   }
   const llmFactoryPromise: Promise<Awaited<ReturnType<typeof buildLlmProviderFactory>>> | null = null;
+  const ensureAiConsent = createEnsureAiConsent(doc, runtime.store);
   const llmFactoryDepsBase = (): Omit<LlmFactoryDeps, 'llmLogFolderId' | 'spreadsheetId'> => ({
     google: runtime.google,
     store: runtime.store,
+    ensureAiConsent,
+    getExecutedBy: () => getCurrentUserEmail(runtime.profile),
     onCostAccumulate: (costUsd) => {
       store.setState((s) => ({
         ...s,
@@ -469,13 +478,13 @@ function buildDefaultViewOptions(
         });
       },
       onOptimize: (settings, resumeRunId) => runOptimizeQuery(store, runtime, llmFactoryDepsBase(), settings, resumeRunId),
-      onAdoptOptimization: () => adoptQueryOptimization({ store, google: runtime.google }),
+      onAdoptOptimization: () => adoptQueryOptimization({ store, google: runtime.google, getSavedBy: () => getCurrentUserEmail(runtime.profile) }),
       onEditOptimization: () => { if (editQueryOptimization(store)) navigate('edit'); },
       onBlocksFromOptimization: () => navigate('blocks'),
       onDecideOutsideCandidate: (pmid, decision) => runDecideOutsideCandidate(store, runtime, pmid, decision),
       onReadjustOptimization: () => runReadjustOptimization(store, runtime, llmFactoryDepsBase()),
       // 保留候補（issue #172）の 3 つの出口。ゲート・除外済みの判定はサービス側で行う。
-      onAdoptHeldOptimizationCandidate: (candidateId) => adoptHeldOptimizationCandidate({ store, google: runtime.google }, candidateId),
+      onAdoptHeldOptimizationCandidate: (candidateId) => adoptHeldOptimizationCandidate({ store, google: runtime.google, getSavedBy: () => getCurrentUserEmail(runtime.profile) }, candidateId),
       onReadjustHeldOptimizationCandidate: (candidateId) =>
         runReadjustFromHeldOptimizationCandidate(store, runtime, llmFactoryDepsBase(), candidateId),
       onRejectHeldOptimizationCandidate: (candidateId) => rejectHeldOptimizationCandidate(store, runtime, candidateId),
@@ -547,6 +556,8 @@ function buildDefaultViewOptions(
           currentFormulaVersionId: version.versionId,
           currentFormulaMarkdown: version.formulaMd,
           currentFormulaModel: version.model,
+          currentFormulaModelsUsed: version.modelsUsed ?? null,
+          currentFormulaAppVersion: version.appVersion ?? null,
           currentFormulaCreatedBy: version.createdBy,
         }));
       },
@@ -607,6 +618,15 @@ function buildDefaultViewOptions(
           },
           formulaSave: null,
         }));
+      },
+      onModelUsed: (model) => {
+        const state = store.getState();
+        const draft = state.formulaEditDraft?.formulaVersionId === state.currentFormulaVersionId ? state.formulaEditDraft : null;
+        store.setStateSilently((s) => ({ ...s, formulaEditDraft: {
+          ...draft, formulaVersionId: s.currentFormulaVersionId,
+          markdown: draft?.markdown ?? s.currentFormulaMarkdown ?? '',
+          modelsUsed: [...new Set([...(draft?.modelsUsed ?? []), model])],
+        } }));
       },
       onClearImprovement: () => {
         // 提案（blockImprovement）を引っ込めるタイミング（accept / reject / manualEditApply /
@@ -689,6 +709,10 @@ function buildDefaultViewOptions(
       },
     },
     settings: {
+      detectGeminiTier: async (apiKey) => {
+        await ensureAiConsent('gemini');
+        return detectGeminiTier(apiKey, runtime.google.fetch);
+      },
       readKey: (key) => runtime.store.read<string>(key),
       writeKey: (key, value) => runtime.store.write({ [key]: value }),
       removeKey: (key) => chrome.storage.local.remove(key),
@@ -737,6 +761,7 @@ async function runSaveEditedFormula(
     const result: SaveEditedFormulaResult = await saveEditedFormula(input, {
       google: runtime.google,
       store,
+      getSavedBy: () => getCurrentUserEmail(runtime.profile),
     });
     // 保存成功で currentFormulaVersionId は採番された新しい版へ移っているため、
     // formulaSave もその版で持つ（stale 判定が一致し、確認メッセージが残る）。
@@ -1153,10 +1178,11 @@ async function prepareQueryOptimization(store: AppStore, runtime: ChromeRuntimeD
   store.setState((s) => ({ ...s, queryOptimizationSetup: loading }));
   let checkpoint: Awaited<ReturnType<typeof getQueryOptimizationCheckpoint>> = null;
   try {
-    const [settingsResult, seedsResult, checkpointResult] = await Promise.allSettled([
+    const [settingsResult, seedsResult, checkpointResult, modelResult] = await Promise.allSettled([
       getQueryOptimizationSettings(project.projectId, runtime.store),
       listSeedPapers(project.spreadsheetId, runtime.google),
       getQueryOptimizationCheckpoint(project.projectId, runtime.store),
+      resolveSelectedModelKey(runtime.store),
     ]);
     if (checkpointResult.status === 'fulfilled') checkpoint = checkpointResult.value;
     else throw checkpointResult.reason;
@@ -1169,6 +1195,7 @@ async function prepareQueryOptimization(store: AppStore, runtime: ChromeRuntimeD
     const seedCount = seedPmids.length;
     store.setState((s) => s.project?.projectId !== project.projectId || s.queryOptimizationSetup !== loading ? s : {
       ...s, queryOptimizationSetup: { ...loading, status: 'ready', seedCount, seedPmids, checkpoint,
+        model: modelResult.status === 'fulfilled' ? modelResult.value.model : undefined,
         maxHits: String(settings?.maxHits ?? DEFAULT_QUERY_OPTIMIZATION_SETTINGS.maxHits),
         maxIterations: String(settings?.maxIterations ?? DEFAULT_QUERY_OPTIMIZATION_SETTINGS.maxIterations),
       },
@@ -1802,7 +1829,7 @@ async function maybeProposeExcessFilters(
         ? s
         : {
             ...s,
-            excessFilterProposal: { formulaVersionId: versionId, totalHits, candidates, error: null },
+            excessFilterProposal: { formulaVersionId: versionId, totalHits, candidates, error: null, modelUsed: factory.model },
           }
     );
   } catch (err) {
@@ -1847,9 +1874,10 @@ async function runApplyExcessFilters(
   await saveEditedFormula(
     {
       formulaMd: newMd,
+      modelsUsed: state.excessFilterProposal?.modelUsed ? [state.excessFilterProposal.modelUsed] : [],
       note: `過大ヒット絞り込みフィルタを承認して追加: ${approved.map((c) => c.label).join(', ')}`,
     },
-    { google: runtime.google, store }
+    { google: runtime.google, store, getSavedBy: () => getCurrentUserEmail(runtime.profile) }
   );
   // 新バージョンへ移ったので旧提案は破棄し、更新後の式を検証し直す
   store.setState((s) => ({ ...s, excessFilterProposal: null }));

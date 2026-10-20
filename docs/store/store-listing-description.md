@@ -23,6 +23,8 @@ Chrome ウェブストア デベロッパーダッシュボードの「掲載情
 - NCBI API キー（任意）。検証時のレート制限を緩和したい場合に設定します。
 - Google アカウント。プロトコル・検索式・検証結果などのデータは、開発者のサーバーではなく、利用者ご自身の Google アカウントの Google スプレッドシートと Google Drive に保存されます。
 
+OpenRouter / Anthropic は使うときに Chrome が送信許可を求めます。AI へプロトコル本文・ブロック定義・検索式・PubMed の書誌（タイトル・抄録）・シードと判定を送ります。API キーは端末内に暗号化せず保存し、開発者には送りません。各キーは対応する API 提供元へ送ります。NCBI へ検索式・PMID・取得できた利用者のメール（email）・設定済み NCBI API キーを送ります。
+
 ■対応していないこと
 文献のスクリーニング・重複除去・全文 PDF の取得・PRISMA 用の記述ブロック生成・Rayyan との連携は行いません。各データベースでのダウンロード操作も自動化しておらず、操作先のページまでのご案内にとどまります。
 
@@ -47,6 +49,8 @@ What you'll need
 - An API key for the generative AI provider (Anthropic, or Gemini or OpenRouter if you switch). This extension uses a BYOK (Bring Your Own Key) model: you obtain and save your own key in the options screen, and the extension does not supply one.
 - An NCBI API key (optional), to raise the rate limit during validation.
 - A Google account. Your protocol, search strategy, and validation results are stored in your own Google Sheets and Google Drive, not on a developer-operated server.
+
+Chrome requests optional permission when OpenRouter / Anthropic is used. AI receives protocol text, blocks, queries, PubMed titles and abstracts, seeds and decisions. API keys are stored unencrypted on your device and sent to their respective providers, never to the developer. NCBI receives queries, PMIDs, your signed-in email when available, and the configured NCBI API key.
 
 What it doesn't do
 It does not perform screening, deduplication, full-text PDF retrieval, PRISMA flow-diagram text generation, or Rayyan integration. Downloading from each database is not automated either; the extension only guides you to where to do it.

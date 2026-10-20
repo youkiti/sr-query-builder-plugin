@@ -43,3 +43,5 @@ export {
   type DriveFileRef,
   type DriveMoveResult,
 } from './drive';
+
+export { ensureSheetHeaders } from './ensureSheetHeaders';

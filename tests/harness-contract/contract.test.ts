@@ -1,3 +1,4 @@
+import { AI_CONSENT_VERSION } from '@/lib/llm/aiDisclosure';
 /**
  * tests/harness-contract/contract.ts に宣言した契約を、実際に描画して検証する（issue #183）。
  *
@@ -157,7 +158,9 @@ describe('harness contract > #/draft', () => {
 
   contractTest('draft.block-hits.generation-only', async () => {
     const originalFetch = globalThis.fetch;
-    const data: Record<string, unknown> = {};
+    const data: Record<string, unknown> = { aiConsent: Object.fromEntries(
+      ['gemini', 'anthropic', 'openrouter'].map((provider) => [provider, { version: AI_CONSENT_VERSION, acceptedAt: '2026-10-20T00:00:00Z' }])
+    ) };
     const storageGet = jest.spyOn(chrome.storage.local, 'get').mockImplementation(async () => data);
     const storageSet = jest.spyOn(chrome.storage.local, 'set').mockImplementation(async (items) => {
       Object.assign(data, items);

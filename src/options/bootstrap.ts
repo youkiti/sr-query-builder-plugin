@@ -1,3 +1,7 @@
+import { addLlmPermissionButtons, requestLlmHosts, HOST_PERMISSION_DENIED, type LlmHostPermissions } from '@/lib/llm/hostPermissions';
+import { createChromeStoreDeps } from '@/features/project';
+import { AiConsentDeclinedError, createEnsureAiConsent } from '@/app/services/aiConsentService';
+import { updateGeminiDataNotice } from '@/lib/llm/aiDisclosure';
 /**
  * Options 画面の起動ロジック。
  *
@@ -31,6 +35,7 @@ import { detectGeminiTier, FREE_TIER_MODEL_ID } from '@/lib/llm/geminiTierDetect
 declare const __BUILD_DATE__: string;
 
 export interface OptionsDeps {
+  hostPermissions?: LlmHostPermissions;
   /** chrome.storage.local から既存値を読み取る */
   readKey: (key: string) => Promise<string | undefined>;
   /** chrome.storage.local へ書き込む */
@@ -60,7 +65,7 @@ export const STORAGE_KEY_GEMINI_TIER = 'gemini.detectedTier';
 function populateModelSelect(
   selectEl: HTMLSelectElement,
   customModels: CustomModelEntry[],
-  selectedModelId: string
+  selectedModelId: string | undefined
 ): void {
   selectEl.innerHTML = '';
   // Gemini optgroup（ビルトイン + カスタム Gemini）
@@ -117,6 +122,13 @@ function populateModelSelect(
     anthropicGroup.appendChild(opt);
   });
   selectEl.appendChild(anthropicGroup);
+  if (selectedModelId && !Array.from(selectEl.options).some((option) => option.value === selectedModelId)) {
+    const option = selectEl.ownerDocument.createElement('option');
+    option.value = selectedModelId;
+    option.textContent = `${selectedModelId}（一覧にないモデル）`;
+    option.selected = true;
+    selectEl.appendChild(option);
+  }
 }
 
 function refreshProviderCards(doc: Document, selectedModelId: string): void {
@@ -138,6 +150,7 @@ function updateTierBadge(
 ): void {
   const badge = doc.getElementById('gemini-tier-badge');
   if (!badge) return;
+  updateGeminiDataNotice(badge, state === 'free');
   badge.className = 'options__tier-badge';
   switch (state) {
     case 'checking':
@@ -201,7 +214,8 @@ function buildInitialStatus(
   return parts.join(' / ');
 }
 
-export function createChromeOptionsDeps(): OptionsDeps {
+export function createChromeOptionsDeps(doc: Document = document): OptionsDeps {
+  const ensureAiConsent = createEnsureAiConsent(doc, createChromeStoreDeps());
   return {
     readKey: async (key) => {
       const result = await chrome.storage.local.get(key);
@@ -217,7 +231,10 @@ export function createChromeOptionsDeps(): OptionsDeps {
     openAppTab: () => {
       chrome.tabs.create({ url: chrome.runtime.getURL('app/app.html') });
     },
-    detectGeminiTier: (apiKey) => detectGeminiTier(apiKey),
+    detectGeminiTier: async (apiKey) => {
+      await ensureAiConsent('gemini');
+      return detectGeminiTier(apiKey);
+    },
   };
 }
 
@@ -279,7 +296,12 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
       let tier: 'paid' | 'free' | 'unknown' | 'unavailable';
       try {
         tier = await detect(existingGemini);
-      } catch {
+      } catch (err) {
+        if (err instanceof AiConsentDeclinedError) {
+          updateTierBadge(doc, 'unknown');
+          if (status) status.textContent = err.message;
+          return;
+        }
         tier = 'unknown';
       }
       updateTierBadge(doc, tier);
@@ -317,8 +339,12 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
 
   selectEl?.addEventListener('change', () => {
     const selectedModel = selectEl.value;
+    const hostPermission = requestLlmHosts([resolveProviderId(selectedModel)], deps.hostPermissions);
     void deps.writeKey(STORAGE_KEY_LLM_MODEL, selectedModel);
     refreshProviderCards(doc, selectedModel);
+    void hostPermission.then((allowed) => {
+      if (!allowed && status) status.textContent = HOST_PERMISSION_DENIED;
+    });
   });
 
   addCustomModelBtn?.addEventListener('click', async () => {
@@ -353,7 +379,12 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
     if (status) status.textContent = 'カスタムモデルを追加しました。';
   });
 
+  if (saveBtn?.parentElement) addLlmPermissionButtons(saveBtn.parentElement, deps.hostPermissions, 'options__button');
   saveBtn?.addEventListener('click', () => {
+    const hostPermission = requestLlmHosts([
+      ...((openrouterInput?.value ?? '').trim() ? ['openrouter' as const] : []),
+      ...((anthropicInput?.value ?? '').trim() ? ['anthropic' as const] : []),
+    ], deps.hostPermissions);
     const geminiVal = geminiInput?.value ?? '';
     const openrouterVal = openrouterInput?.value ?? '';
     const anthropicVal = anthropicInput?.value ?? '';
@@ -379,6 +410,14 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
           ...(shouldSaveModel ? [deps.writeKey(STORAGE_KEY_LLM_MODEL, selectedModel)] : []),
         ]);
 
+        const hostAllowed = await hostPermission;
+        if (!hostAllowed) {
+          const notice = doc.createElement('p');
+          notice.setAttribute('role', 'alert');
+          notice.textContent = HOST_PERMISSION_DENIED;
+          saveBtn?.parentElement?.appendChild(notice);
+        }
+
         // Gemini キーが設定されており Gemini モデルが選択されている場合にプラン自動判定
         let modelSwitchedToFree = false;
         let tierUndetermined = false;
@@ -396,7 +435,11 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
           let tier: 'paid' | 'free' | 'unknown' | 'unavailable';
           try {
             tier = await deps.detectGeminiTier(geminiVal);
-          } catch {
+          } catch (err) {
+            if (err instanceof AiConsentDeclinedError) {
+              updateTierBadge(doc, 'unknown');
+              throw err;
+            }
             tier = 'unknown';
           }
 
@@ -427,7 +470,7 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
         const keyForProvider = currentProvider === 'openrouter' ? openrouterVal
           : currentProvider === 'anthropic' ? anthropicVal : geminiVal;
 
-        if (pendingNow === '1' && keyForProvider.trim() !== '') {
+        if (hostAllowed && pendingNow === '1' && keyForProvider.trim() !== '') {
           await deps.removeKey(STORAGE_KEY_PENDING_APP_TAB);
           if (status) {
             status.textContent = '保存しました。トップ画面に戻ります…';

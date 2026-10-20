@@ -137,6 +137,7 @@ export interface EditViewCallbacks
   onDraftChange?: (markdown: string) => void;
   /** ブロック単位 AI 改善の提案を破棄する（accept / reject の両方で呼ぶ） */
   onClearImprovement?: () => void;
+  onModelUsed?: (model: string) => void;
   /**
    * 編集メモを store（formulaEditNote）へ反映する（打鍵のたび＝input イベント）。
    * store 側は setStateSilently で受けるため、この呼び出しは再描画を誘発しない
@@ -1786,6 +1787,7 @@ function renderProposal(
       const next = applyBlockImprovement(editor.getMd(), blockId, manualEditInput.value);
       // accept ボタンと同じ順序（先に提案を引っ込めてから setMd）。理由は下の acceptBtn の
       // コメント参照。
+      if (result.modelUsed) callbacks.onModelUsed?.(result.modelUsed);
       callbacks.onClearImprovement?.();
       editor.setMd(next);
     } catch (err) {
@@ -1911,6 +1913,7 @@ function renderProposal(
       // 提案を先に引っ込めてから setMd する（順序が重要）。setMd はフォールバック経路では
       // ローカル rerenderBlocks を同期的に起こすため、先に引っ込めておかないとその再描画で
       // まだ nullified されていない古い提案を拾って復元してしまう。
+      if (result.modelUsed) callbacks.onModelUsed?.(result.modelUsed);
       callbacks.onClearImprovement?.();
       // setMd が onDraftChange（store 経由の再描画）またはローカル再描画のいずれかで反映する。
       editor.setMd(next);

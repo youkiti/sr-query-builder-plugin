@@ -43,6 +43,38 @@ describe('createSettingsView - Gemini プラン判定', () => {
     document.body.innerHTML = '';
   });
 
+  test('選択が空のとき、空 ID の一覧外モデルを追加しない', async () => {
+    const container = render(buildDeps({}));
+    await flush();
+    const select = container.querySelector('#settings-llm-model') as HTMLSelectElement;
+    select.selectedIndex = -1;
+    (container.querySelector('#settings-custom-model-id') as HTMLInputElement).value = 'vendor/new-model';
+    (container.querySelector('.settings__custom-model-form > button') as HTMLButtonElement).click();
+    await flush();
+    expect(Array.from(select.options).some((option) => option.value === '')).toBe(false);
+    expect(Array.from(select.options).some((option) => option.textContent?.includes('一覧にないモデル'))).toBe(false);
+    expect(Array.from(select.options).some((option) => option.value === 'vendor/new-model')).toBe(true);
+  });
+
+  test.each([false, true])('一覧にない保存モデルを保持する（削除操作=%s）', async (remove) => {
+    const id = 'vendor/removed-model';
+    const data: Record<string, string> = { 'llm.selectedModel': id, 'apiKeys.openrouter': 'fake',
+      'llm.customModels': JSON.stringify(remove ? [{ id, label: '消すモデル' }] : []) };
+    const deps = buildDeps(data);
+    const container = render(deps);
+    await flush();
+    const select = container.querySelector('#settings-llm-model') as HTMLSelectElement;
+    if (remove) {
+      (container.querySelector('#settings-custom-models-list button') as HTMLButtonElement).click();
+      await flush();
+    }
+    expect(select.value).toBe(id);
+    expect(select.selectedOptions[0]!.textContent).toContain('一覧にないモデル');
+    (container.querySelector('#settings-save') as HTMLButtonElement).click();
+    await flush();
+    expect(deps.writeKey).toHaveBeenCalledWith('llm.selectedModel', id);
+  });
+
   test.each([
     ['a', '', 'claude-opus-5-5'],
     ['', 'g', 'gemini-3.5-flash-lite'],
@@ -155,6 +187,8 @@ describe('createSettingsView - Gemini プラン判定', () => {
     expect(detect).toHaveBeenCalledWith('free-key');
     const badge = container.querySelector('#settings-gemini-tier-badge');
     expect(badge?.textContent).toBe('無料プラン');
+    expect(container.querySelector('.gemini-data-notice')?.textContent).toContain('Google の説明では、Gemini API の無料枠では送った内容と応答が製品の改善に使われ、人が読むことがあるとされています。未公開のプロトコルなど機密の内容は送らないでください。');
+    expect(container.querySelector('.gemini-data-notice a')?.getAttribute('href')).toBe('https://ai.google.dev/gemini-api/terms');
     expect(store['llm.selectedModel']).toBe('gemini-2.0-flash');
     expect(store['gemini.detectedTier']).toBe('free');
     expect(
@@ -333,3 +367,50 @@ test.each([['claude-foo', 'Anthropic', 'anthropic'], ['a/b', 'OpenRouter', 'open
     } finally { container.remove(); }
   }
 );
+
+test.each([false, true])('アプリ内の保存クリックで送信許可を求め、拒否しても保存する: %s', async (allowed) => {
+  const data: Record<string, string> = { 'llm.selectedModel': 'vendor/model', 'llm.customModels': '[{"id":"vendor/model"}]' };
+  const hostPermissions = { contains: jest.fn().mockResolvedValue(allowed), request: jest.fn().mockResolvedValue(allowed) };
+  const container = document.createElement('div');
+  createSettingsView({
+    readKey: async (key) => data[key], writeKey: async (key, value) => { data[key] = value; },
+    removeKey: async () => undefined, hostPermissions,
+  })(container, { state: {} as AppState, navigate: jest.fn() });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const input = container.querySelector<HTMLInputElement>('#settings-openrouter-key')!;
+  expect(container.querySelectorAll('.settings__actions > button.settings__btn:not(#settings-save)')).toHaveLength(2);
+  expect(container.querySelectorAll('.settings__actions > p.llm-permission__status[role="status"]')).toHaveLength(2);
+  input.value = 'fake';
+  expect(hostPermissions.request).not.toHaveBeenCalled();
+  container.querySelector<HTMLButtonElement>('#settings-save')!.click();
+  expect(hostPermissions.request).toHaveBeenCalledWith({ origins: ['https://openrouter.ai/*'] });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(data['apiKeys.openrouter']).toBe('fake');
+  expect(data['llm.selectedModel']).toBe('vendor/model');
+  expect(container.textContent?.includes('許可がないため、このプロバイダには送信できません')).toBe(!allowed);
+});
+
+test.each([
+  ['claude-opus-5-5', 'https://api.anthropic.com/*', true],
+  ['claude-opus-5-5', 'https://api.anthropic.com/*', false],
+  ['qwen/qwen3-235b-a22b-2507', 'https://openrouter.ai/*', true],
+  ['qwen/qwen3-235b-a22b-2507', 'https://openrouter.ai/*', false],
+] as const)('アプリ内のモデル変更で許可を先に要求し、即時保存する: %s / %s / %s', async (model, origin, allowed) => {
+  const data: Record<string, string> = { 'llm.selectedModel': 'gemini-3.5-flash-lite' };
+  const hostPermissions = { contains: jest.fn(), request: jest.fn().mockResolvedValue(allowed) };
+  const writeKey = jest.fn(async (key: string, value: string) => { data[key] = value; });
+  const container = document.createElement('div');
+  createSettingsView({
+    readKey: async (key) => data[key], writeKey, removeKey: async () => undefined, hostPermissions,
+  })(container, { state: {} as AppState, navigate: jest.fn() });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(hostPermissions.request).not.toHaveBeenCalled();
+  const select = container.querySelector<HTMLSelectElement>('#settings-llm-model')!;
+  select.value = model;
+  select.dispatchEvent(new Event('change'));
+  expect(hostPermissions.request).toHaveBeenCalledWith({ origins: [origin] });
+  expect(hostPermissions.request.mock.invocationCallOrder[0]).toBeLessThan(writeKey.mock.invocationCallOrder[0]!);
+  expect(data['llm.selectedModel']).toBe(model);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(container.textContent?.includes('許可がないため、このプロバイダには送信できません')).toBe(!allowed);
+});

@@ -74,3 +74,7 @@
 .export__methods-status:empty {
   display: none;
 }
+
+.export__validation-warning a {
+  text-decoration: underline;
+}

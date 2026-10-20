@@ -1,3 +1,4 @@
+import { AI_CONSENT_VERSION } from '@/lib/llm/aiDisclosure';
 import { GeminiProvider } from '@/lib/llm';
 import type { LLMProvider } from '@/lib/llm';
 import { detectGeminiTier } from '@/lib/llm/geminiTierDetector';
@@ -394,7 +395,9 @@ describe('optimize-query フィクスチャ', () => {
 
   it('未生成のプリセットから自動調整・最終レビュー・採用保存・作り直しと検証まで完走する', async () => {
     const originalFetch = globalThis.fetch;
-    const data: Record<string, unknown> = {};
+    const data: Record<string, unknown> = { aiConsent: Object.fromEntries(
+      ['gemini', 'anthropic', 'openrouter'].map((provider) => [provider, { version: AI_CONSENT_VERSION, acceptedAt: '2026-10-20T00:00:00Z' }])
+    ) };
     jest.spyOn(chrome.storage.local, 'get').mockImplementation(async () => data);
     jest.spyOn(chrome.storage.local, 'set').mockImplementation(async (items) => { Object.assign(data, items); });
     // 時間待ちだけを省く。Gemini・Sheets・NCBI の応答はすべて実際のデモ層を通す。

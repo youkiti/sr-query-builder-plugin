@@ -1,3 +1,4 @@
+import { requestMetadata } from './requestMetadata';
 import {
   LlmProviderError,
   type ChatMessage,
@@ -23,6 +24,7 @@ export interface AnthropicProviderOptions {
 const ENDPOINT = 'https://api.anthropic.com/v1/messages';
 
 interface AnthropicResponse {
+  model?: string;
   content?: unknown[];
   stop_reason?: string;
   usage?: {
@@ -68,18 +70,21 @@ export class AnthropicProvider implements LLMProvider {
         ...(this.effort !== undefined ? { effort: this.effort } : {}),
       };
     }
+    options.onRequestSent?.(requestMetadata(body));
     return this.readResponse(await this.request(body, options.signal));
   }
 
   async chatWithTools(system: string, messages: readonly ToolChatMessage[], tools: readonly ToolDefinition[],
     options: ToolChatOptions = {}): Promise<ToolChatResponse> {
-    const json = await this.request({
+    const body = {
       model: this.model, max_tokens: options.maxOutputTokens ?? 16000,
       system, messages, ...this.thinking(),
       tools: tools.map(({ name, description, inputSchema }) => ({ name, description, input_schema: inputSchema })),
       cache_control: { type: 'ephemeral' },
       ...(this.effort !== undefined ? { output_config: { effort: this.effort } } : {}),
-    }, options.signal);
+    };
+    options.onRequestSent?.(requestMetadata(body));
+    const json = await this.request(body, options.signal);
     const content = json.content ?? [];
     const toolCalls: ToolCall[] = [];
     for (const block of content) {
@@ -131,6 +136,7 @@ export class AnthropicProvider implements LLMProvider {
         + (json.usage.cache_read_input_tokens ?? 0) : null,
       tokensOut: json.usage?.output_tokens ?? null,
       raw: json,
+      modelReported: json.model ?? null,
     };
   }
 }

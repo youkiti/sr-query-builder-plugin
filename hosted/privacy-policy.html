@@ -3,12 +3,12 @@
      内容の正典は docs/store/privacy-policy.md。本ファイルはその HTML 転記 + 英訳であり、
      **更新時は必ず両方を直す**（hosted/README.md「公開ページ」参照）。
      ja / en は両方を持ち、表示は lang.js + CSS が片方だけに絞る（併記しない）。
-     version: 2026-08-15 -->
+     version: 2026-10-20 -->
 <html lang="ja">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title data-en="Privacy Policy — SR Query Builder Plugin">プライバシーポリシー — SR Query Builder Plugin</title>
+    <title data-en="Privacy Policy : SR Query Builder Plugin">プライバシーポリシー : SR Query Builder Plugin</title>
     <meta
       name="description"
       content="SR Query Builder Plugin のプライバシーポリシー。開発者サーバーは存在せず、データは利用者の Google アカウントと BYOK の LLM API（Gemini / OpenRouter / Anthropic）・NCBI API の間でのみ流通します。"
@@ -51,12 +51,12 @@
         <!-- 以下、見出し・本文は docs/store/privacy-policy.md の忠実な転記（内容の追加・削除をしない）。
              正典の「SR Query Builder」表記（Plugin を付けない）はそのまま残す -->
         <h1>
-          <span class="ja" lang="ja">プライバシーポリシー — SR Query Builder（sr-query-builder-plugin）</span>
-          <span class="en" lang="en">Privacy Policy — SR Query Builder (sr-query-builder-plugin)</span>
+          <span class="ja" lang="ja">プライバシーポリシー : SR Query Builder（sr-query-builder-plugin）</span>
+          <span class="en" lang="en">Privacy Policy : SR Query Builder (sr-query-builder-plugin)</span>
         </h1>
         <p class="last-updated">
           <span class="ja" lang="ja"
-            >最終更新: 2026-10-08 / 対象バージョン: v0.3.0<br />
+            >最終更新: 2026-10-20 / 対象バージョン: v<span data-app-version>__APP_VERSION__</span><br />
             対象: Chrome 拡張機能「SR Query Builder」（sr-query-builder-plugin）<br />
             配布元: 本拡張は MIT ライセンス（<a
               href="https://github.com/youkiti/sr-query-builder-plugin/blob/master/LICENSE"
@@ -64,7 +64,7 @@
             >）の OSS です。</span
           >
           <span class="en" lang="en"
-            >Last updated: 2026-10-08 / Covers v0.3.0<br />
+            >Last updated: 2026-10-20 / Covers v<span data-app-version>__APP_VERSION__</span><br />
             Applies to: the Chrome extension “SR Query Builder” (sr-query-builder-plugin)<br />
             Distribution: this extension is open-source software under the
             <a href="https://github.com/youkiti/sr-query-builder-plugin/blob/master/LICENSE">MIT licence</a>.</span
@@ -186,35 +186,50 @@
                 </tr>
                 <tr>
                   <td>
-                    <span class="ja" lang="ja">研究プロトコル本文・検索式ブロック定義・検索式ドラフトなど</span>
-                    <span class="en" lang="en">Full protocol text, search block definitions, search draft, and similar content</span>
+                    <span class="ja" lang="ja">研究プロトコル本文・検索式ブロック定義・検索式・PubMed の書誌（タイトル・抄録）・シード論文と判定結果・Gemini API キー</span>
+                    <span class="en" lang="en">Full protocol text, search block definitions, search strategies, PubMed bibliographic data (titles and abstracts), seed papers and decisions, Gemini API key</span>
                   </td>
                   <td>
-                    <span class="ja" lang="ja"
-                      >利用者が選択した LLM プロバイダ（Gemini、OpenRouter、または Anthropic。既定は Anthropic の Claude）の API（BYOK）</span
-                    >
-                    <span class="en" lang="en"
-                      >The LLM provider the user selected (Gemini, OpenRouter, or Anthropic; Anthropic's Claude is the default), via its API
-                      (BYOK)</span
-                    >
+                    <span class="ja" lang="ja">利用者が選択した Google Gemini（<code>generativelanguage.googleapis.com</code>）の API（BYOK）</span>
+                    <span class="en" lang="en">The selected Google Gemini (<code>generativelanguage.googleapis.com</code>) API (BYOK)</span>
                   </td>
                   <td>
-                    <span class="ja" lang="ja"
-                      >AI による検索式ドラフト生成・MeSH 提案・シノニム展開等。本文が外部へ送信されるのはこの経路と
-                      NCBI E-utilities のみです（NLM MeSH RDF へは研究プロトコル本文を送信せず、descriptor
-                      名・tree number のみを送信します）</span
-                    >
-                    <span class="en" lang="en"
-                      >AI-drafted search strategy, MeSH suggestions, synonym expansion, etc. This and NCBI
-                      E-utilities are the only routes by which text leaves the browser (NLM MeSH RDF never receives
-                      the protocol text itself — only descriptor names and tree numbers)</span
-                    >
+                    <span class="ja" lang="ja">AI による検索式ドラフト生成・MeSH 提案・シノニム展開等。プロトコル本文は NCBI E-utilities へ送信しません（NLM MeSH RDF へは研究プロトコル本文を送信せず、descriptor 名・tree number のみを送信します）。</span>
+                    <span class="en" lang="en">AI-drafted search strategy, MeSH suggestions, synonym expansion, etc. NCBI E-utilities does not receive protocol text (NLM MeSH RDF never receives the protocol text itself: only descriptor names and tree numbers).</span>
                   </td>
                 </tr>
                 <tr>
                   <td>
-                    <span class="ja" lang="ja">検索式・PMID</span>
-                    <span class="en" lang="en">Search strategy and PMIDs</span>
+                    <span class="ja" lang="ja">研究プロトコル本文・検索式ブロック定義・検索式・PubMed の書誌（タイトル・抄録）・シード論文と判定結果・Anthropic API キー</span>
+                    <span class="en" lang="en">Full protocol text, search block definitions, search strategies, PubMed bibliographic data (titles and abstracts), seed papers and decisions, Anthropic API key</span>
+                  </td>
+                  <td>
+                    <span class="ja" lang="ja">利用者が選択した Anthropic（<code>api.anthropic.com</code>）の API（BYOK）</span>
+                    <span class="en" lang="en">The selected Anthropic (<code>api.anthropic.com</code>) API (BYOK)</span>
+                  </td>
+                  <td>
+                    <span class="ja" lang="ja">AI による検索式ドラフト生成・MeSH 提案・シノニム展開等。プロトコル本文は NCBI E-utilities へ送信しません（NLM MeSH RDF へは研究プロトコル本文を送信せず、descriptor 名・tree number のみを送信します）。使うときに Chrome が任意の送信許可を求めます。</span>
+                    <span class="en" lang="en">AI-drafted search strategy, MeSH suggestions, synonym expansion, etc. NCBI E-utilities does not receive protocol text (NLM MeSH RDF never receives the protocol text itself: only descriptor names and tree numbers). Chrome requests optional host permission when used.</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <span class="ja" lang="ja">研究プロトコル本文・検索式ブロック定義・検索式・PubMed の書誌（タイトル・抄録）・シード論文と判定結果・OpenRouter API キー</span>
+                    <span class="en" lang="en">Full protocol text, search block definitions, search strategies, PubMed bibliographic data (titles and abstracts), seed papers and decisions, OpenRouter API key</span>
+                  </td>
+                  <td>
+                    <span class="ja" lang="ja">利用者が選択した OpenRouter（<code>openrouter.ai</code>）の API（BYOK）。さらに選んだモデルの提供元へ転送</span>
+                    <span class="en" lang="en">The selected OpenRouter (<code>openrouter.ai</code>) API (BYOK), then forwarded to the selected model provider</span>
+                  </td>
+                  <td>
+                    <span class="ja" lang="ja">AI による検索式ドラフト生成・MeSH 提案・シノニム展開等。プロトコル本文は NCBI E-utilities へ送信しません（NLM MeSH RDF へは研究プロトコル本文を送信せず、descriptor 名・tree number のみを送信します）。使うときに Chrome が任意の送信許可を求めます。</span>
+                    <span class="en" lang="en">AI-drafted search strategy, MeSH suggestions, synonym expansion, etc. NCBI E-utilities does not receive protocol text (NLM MeSH RDF never receives the protocol text itself: only descriptor names and tree numbers). Chrome requests optional host permission when used.</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <span class="ja" lang="ja">検索式・PMID・利用者のメール（<code>email</code>）・設定済み NCBI API キー</span>
+                    <span class="en" lang="en">Search strategy, PMIDs, user email (<code>email</code>) and configured NCBI API key</span>
                   </td>
                   <td>
                     <span class="ja" lang="ja">NCBI E-utilities（<code>eutils.ncbi.nlm.nih.gov</code>）</span>
@@ -240,13 +255,11 @@
                   </td>
                   <td>
                     <span class="ja" lang="ja"
-                      >MeSH 階層（親子関係）の解析。ブロック内の用語重複・カテゴリ分散の検出（次回の拡張機能更新から適用。現在配信中の
-                      v0.3.0 はこの通信を行いません）</span
+                      >MeSH 階層（親子関係）の解析。ブロック内の用語重複・カテゴリ分散の検出</span
                     >
                     <span class="en" lang="en"
                       >Analyzing the MeSH hierarchy (parent/child relationships); detecting term overlap and category
-                      spread within a block (takes effect from the next extension update; the version currently
-                      distributed, v0.3.0, does not perform this communication)</span
+                      spread within a block</span
                     >
                   </td>
                 </tr>
@@ -272,13 +285,10 @@
                   <td>
                     <span class="ja" lang="ja"
                       >Google
-                      ピッカーで対象ファイルを選択し、そのファイルだけにアクセスを許可するため（次回の拡張機能更新から適用。現在配信中の
-                      v0.3.0 はこの画面を使いません）</span
+                      ピッカーで対象ファイルを選択し、そのファイルだけにアクセスを許可するため</span
                     >
                     <span class="en" lang="en"
-                      >Selecting the file in the Google Picker so that access is granted to that file only (takes
-                      effect from the next extension update; the version currently distributed, v0.3.0, does not use
-                      this screen)</span
+                      >Selecting the file in the Google Picker so that access is granted to that file only</span
                     >
                   </td>
                 </tr>
@@ -288,8 +298,8 @@
                     <span class="en" lang="en">Google OAuth token</span>
                   </td>
                   <td>
-                    <span class="ja" lang="ja">利用者のブラウザ内（<code>chrome.storage</code>）</span>
-                    <span class="en" lang="en">Inside the user’s browser (<code>chrome.storage</code>)</span>
+                    <span class="ja" lang="ja">Chrome 自身（<code>chrome.identity</code>）が管理（拡張は自分で保存しません）</span>
+                    <span class="en" lang="en">Managed by Chrome itself (<code>chrome.identity</code>); the extension does not store it itself</span>
                   </td>
                   <td>
                     <span class="ja" lang="ja">Google API 認証。開発者へは送信されません</span>
@@ -302,12 +312,12 @@
                     <span class="en" lang="en">LLM provider (Gemini / OpenRouter / Anthropic) API key and NCBI API key</span>
                   </td>
                   <td>
-                    <span class="ja" lang="ja">利用者のブラウザ内（<code>chrome.storage</code>）</span>
-                    <span class="en" lang="en">Inside the user’s browser (<code>chrome.storage</code>)</span>
+                    <span class="ja" lang="ja">利用者のブラウザ内（<code>chrome.storage.local</code>）に暗号化せず保存</span>
+                    <span class="en" lang="en">Stored without encryption in the user’s browser (<code>chrome.storage.local</code>)</span>
                   </td>
                   <td>
-                    <span class="ja" lang="ja">各 API の認証（BYOK）。開発者へは送信されません</span>
-                    <span class="en" lang="en">Authenticating each API (BYOK); never sent to the developer</span>
+                    <span class="ja" lang="ja">各 API の認証（BYOK）。開発者へは送信されませんが、LLM キーは対応する LLM プロバイダ、NCBI キーは NCBI へ送信します</span>
+                    <span class="en" lang="en">Authenticating each API (BYOK); never sent to the developer, but LLM keys are sent to their respective LLM providers, and the NCBI key to NCBI</span>
                   </td>
                 </tr>
               </tbody>
@@ -327,13 +337,13 @@
           <ul>
             <li>
               <span class="ja" lang="ja"
-                ><code>https://www.googleapis.com/auth/drive.file</code> —
+                ><code>https://www.googleapis.com/auth/drive.file</code> :
                 <strong>利用者が作成に関与したファイル（本拡張が作成したスプレッドシート・Drive フォルダ・ログファイル、および利用者が Google ピッカーで明示的に選択したファイル）だけ</strong>
                 にアクセスします。Drive 全体を読むスコープ（<code>drive.readonly</code> 等）や、全スプレッドシートへ
                 アクセスできる <code>https://www.googleapis.com/auth/spreadsheets</code> スコープは要求しません。</span
               >
               <span class="en" lang="en"
-                ><code>https://www.googleapis.com/auth/drive.file</code> — access limited to
+                ><code>https://www.googleapis.com/auth/drive.file</code> : access limited to
                 <strong>files the user was involved in creating (spreadsheets, Drive folders and log files created by
                 the extension, plus any file the user explicitly selects in the Google Picker)</strong>. Broader
                 scopes such as <code>drive.readonly</code>, or the
@@ -347,15 +357,6 @@
             <span class="ja" lang="ja">共有スプレッドシートを開くとき（Google ピッカー）</span>
             <span class="en" lang="en">Opening a shared spreadsheet (Google Picker)</span>
           </h3>
-          <p>
-            <span class="ja" lang="ja"
-              >（次回の拡張機能更新から適用。現在配信中の v0.3.0 はこの画面を使いません）</span
-            >
-            <span class="en" lang="en"
-              >(Applies from the next extension update; v0.3.0, the version currently published, does not use this
-              screen.)</span
-            >
-          </p>
           <p>
             <span class="ja" lang="ja"
               >他の利用者が作成して共有したスプレッドシートは、上記スコープの性質上、<strong>利用者がそのファイルを明示的に選択するまで本拡張からは読めません</strong>。このため、共有スプレッドシートを開こうとしたときに
@@ -394,17 +395,10 @@
           </p>
           <p>
             <span class="ja" lang="ja"
-              >サインイン中アカウントのメールアドレスは OAuth スコープではなく、Chrome 拡張 API の
-              <code>chrome.identity.getProfileUserInfo()</code>（<code>identity.email</code> permission）で取得します。これは
-              Chrome プロファイルの同期アカウント情報を読むだけで、OAuth スコープを広げるものではありません。取得したメールアドレスは
-              <code>FormulaVersions</code> 等の記録者列に書き込む目的にのみ使用し、開発者へ送信することはありません。</span
+              >サインイン中アカウントのメールアドレスは OAuth スコープではなく、Chrome 拡張 API の <code>chrome.identity.getProfileUserInfo()</code>（<code>identity.email</code> permission）で取得します。これは Chrome プロファイルの同期アカウント情報を読むだけで、OAuth スコープを広げるものではありません。取得したメールアドレスは、Meta・Protocol の <code>created_by</code>、SeedPapers の <code>decided_by</code>、FormulaVersions の <code>saved_by</code>、LLMApiLog の <code>executed_by</code>、Drive のログ JSON の <code>executed_by</code> に記録します。Google ピッカーでのアカウント確認、および NCBI E-utilities の <code>email</code> パラメータにも使用します。開発者へ送信することはありません。</span
             >
             <span class="en" lang="en"
-              >The signed-in account’s email address is not obtained via an OAuth scope; it comes from the Chrome
-              extension API <code>chrome.identity.getProfileUserInfo()</code> (the <code>identity.email</code>
-              permission). This only reads the Chrome profile’s synced account information and does not widen the
-              OAuth scope. The email address obtained is used only to populate recorder columns such as those in
-              <code>FormulaVersions</code>, and is never sent to the developer.</span
+              >The signed-in account’s email address is not obtained via an OAuth scope; it comes from the Chrome extension API <code>chrome.identity.getProfileUserInfo()</code> (the <code>identity.email</code> permission). This only reads the Chrome profile’s synced account information and does not widen the OAuth scope. The email address obtained is recorded in <code>created_by</code> in Meta and Protocol, <code>decided_by</code> in SeedPapers, <code>saved_by</code> in FormulaVersions, <code>executed_by</code> in LLMApiLog, and <code>executed_by</code> in Drive log JSON. It is also used to verify the account in Google Picker and as the NCBI E-utilities <code>email</code> parameter, and is never sent to the developer.</span
             >
           </p>
           <p>
@@ -414,7 +408,7 @@
             >
             <span class="en" lang="en"
               >User data obtained through Google APIs is <strong>never</strong> used for anything beyond the features
-              described above — no advertising, analytics, transfer to third parties, or model training. The
+              described above : no advertising, analytics, transfer to third parties, or model training. The
               extension complies with the Google API Services User Data Policy, including its Limited Use
               requirements.</span
             >
@@ -430,14 +424,14 @@
             <li>
               <span class="ja" lang="ja"
                 ><strong>LLM プロバイダ（Gemini、OpenRouter、または Anthropic。既定は Anthropic の Claude）</strong>:
-                検索式のドラフト生成や検証結果の解釈補助を実行すると、研究プロトコルの本文・検索式ブロック定義・検索式ドラフトなどが、利用者が選択した
+                検索式のドラフト生成や検証結果の解釈補助を実行すると、研究プロトコル本文・検索式ブロック定義・検索式・PubMed の書誌（タイトル・抄録）・シード論文と判定結果が、利用者が選択した
                 LLM プロバイダの API キー（BYOK）を用いて、そのプロバイダ（Google の Gemini API、OpenRouter、または Anthropic の API）へ送信されます。送信先によるデータの取り扱いは、各プロバイダ自身のプライバシーポリシー・利用規約に従います。本拡張はプロバイダを仲介せず、利用者のブラウザから直接
                 API を呼び出します。</span
               >
               <span class="en" lang="en"
                 ><strong>LLM provider (Gemini, OpenRouter, or Anthropic; Anthropic's Claude is the default)</strong>: running search-strategy
                 drafting or getting help interpreting validation results sends the protocol text, search block
-                definitions and search draft to the LLM provider the user selected — Google’s Gemini API, OpenRouter, or Anthropic’s API — using that provider’s API key (BYOK). How that destination handles the data is governed
+                definitions, search strategies, PubMed titles and abstracts, seed papers and decisions to the LLM provider the user selected : Google’s Gemini API, OpenRouter, or Anthropic’s API : using that provider’s API key (BYOK). How that destination handles the data is governed
                 by that provider’s own privacy policy and terms. The extension does not proxy the request: the call
                 is made directly from the user’s browser.</span
               >
@@ -445,12 +439,12 @@
             <li>
               <span class="ja" lang="ja"
                 ><strong>NCBI E-utilities</strong>: 検索式の検証（ブロックごとのヒット数、シード論文捕捉率、MeSH
-                用語抽出）のため、検索式や PMID を NCBI の E-utilities（<code>eutils.ncbi.nlm.nih.gov</code>）へ送信します。NCBI
+                用語抽出）のため、検索式や PMID、取得できたサインイン中の Google アカウントのメール（<code>email</code>）、設定済み NCBI API キーを NCBI の E-utilities（<code>eutils.ncbi.nlm.nih.gov</code>）へ送信します。NCBI
                 API キーは任意で BYOK として設定でき、レート制限緩和のために使用します。</span
               >
               <span class="en" lang="en"
                 ><strong>NCBI E-utilities</strong>: to validate the search strategy (per-block hit counts, seed-paper
-                capture rate, MeSH term extraction), the search strategy and PMIDs are sent to NCBI’s E-utilities
+                capture rate, MeSH term extraction), the search strategy, PMIDs, the signed-in Google account email (<code>email</code>) when available, and configured NCBI API key are sent to NCBI’s E-utilities
                 (<code>eutils.ncbi.nlm.nih.gov</code>). An NCBI API key can optionally be configured as BYOK to ease
                 rate limits.</span
               >
@@ -470,6 +464,38 @@
                 authentication or API key is required.</span
               >
             </li>
+          </ul>
+          <p>
+            <span class="ja" lang="ja">初回の AI 送信前に、送り先・送る内容・各社のデータの扱いを示す同意モーダルを表示します。同意しなければ送信しません。OpenRouter / Anthropic は、そのモデルの選択時またはキーの保存時に Chrome が任意の送信許可を求めます。拒否してもキー・モデルは保存できます。設定画面の「許可する」から再度許可でき、許可がない間は送信せず、自動再試行もしません。</span>
+            <span class="en" lang="en">Before the first AI transmission, a consent dialog explains the destination, data and provider practices. No data is sent without consent. Chrome requests optional host permission for OpenRouter / Anthropic when selecting that provider’s model or saving its key. Keys and models can still be saved after refusal. Permission can be granted later using the allow button in settings; no requests or automatic retries occur without permission.</span>
+          </p>
+          <p>
+            <span class="ja" lang="ja">同意モーダル、任意の許可、NCBI の email、実行者の記録の追加は、次回の拡張機能の更新から適用します。</span>
+            <span class="en" lang="en">The consent dialog, optional host permissions, NCBI email and added executor records apply from the next extension update.</span>
+          </p>
+          <p>
+            <span class="ja" lang="ja">Google の説明では、Gemini API の無料枠では、送った内容と応答が Google の製品の改善に使われ、人が読むことがあるとされています。有料枠では改善に使わないとされています。未公開のプロトコルなど機密の内容は、無料枠で送らないでください。EEA・スイス・英国では無料枠でも有料枠と同じ扱いとされています。</span>
+            <span class="en" lang="en">According to Google, Gemini API free-tier inputs and responses may be used to improve products and may be read by humans. Paid-tier content is not used for improvement. Do not send confidential unpublished protocols through the free tier. In the EEA, Switzerland and UK, paid-tier data treatment applies even to free services.</span>
+          </p>
+          <p>
+            <span class="ja" lang="ja">Anthropic の説明では、API の入力と出力は、既定ではモデルの学習に使わないとされています。保持期間などは Anthropic の説明を確かめてください。Anthropic の説明では、API の入力と出力は、受け取りまたは生成から 30 日以内にバックエンドから自動で削除されるとされています（利用ポリシー違反の確認や法令上の必要などの例外があります）。</span>
+            <span class="en" lang="en">According to Anthropic, API inputs and outputs are not used for model training by default. Check Anthropic’s explanation of retention and other practices. According to Anthropic, API inputs and outputs are automatically deleted from its backend within 30 days of receipt or generation, with exceptions such as enforcing its Usage Policy or legal requirements.</span>
+          </p>
+          <p>
+            <span class="ja" lang="ja">OpenRouter の説明では、OpenRouter 自身は既定ではプロンプトと応答を保存しないとされています。転送先の提供元の扱いは提供元ごとに異なり、OpenRouter のプライバシー設定で学習に使う提供元を除外できます。</span>
+            <span class="en" lang="en">According to OpenRouter, it does not store prompts and responses by default. Data handling by downstream providers varies; OpenRouter privacy settings can exclude providers that use data for training.</span>
+          </p>
+          <p>
+            <span class="ja" lang="ja">抄録などの著作権は各著作者・出版社にあります。AI への送信は利用者の判断と責任で行い、送り先の利用条件に従ってください。</span>
+            <span class="en" lang="en">Copyright in abstracts and other works belongs to their authors and publishers. Sending them to AI is your decision and responsibility; follow the destination’s terms.</span>
+          </p>
+          <ul>
+            <li><a href="https://ai.google.dev/gemini-api/terms">Gemini API terms</a></li>
+            <li><a href="https://ai.google.dev/gemini-api/docs/pricing">Gemini API pricing</a></li>
+            <li><a href="https://privacy.claude.com/en/articles/7996868-is-my-data-used-for-model-training">Anthropic model training</a></li>
+            <li><a href="https://privacy.claude.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data">Anthropic retention</a></li>
+            <li><a href="https://openrouter.ai/docs/guides/privacy/provider-logging">OpenRouter provider logging and training</a></li>
+            <li><a href="https://openrouter.ai/docs/guides/features/zdr">OpenRouter ZDR</a></li>
           </ul>
         </section>
 
@@ -560,7 +586,7 @@
             >
             <a href="https://github.com/youkiti/sr-query-builder-plugin">GitHub</a>
           </div>
-          <p class="copyright">© 2026 youkiti — MIT License</p>
+          <p class="copyright">© 2026 youkiti : MIT License</p>
         </div>
       </div>
     </footer>

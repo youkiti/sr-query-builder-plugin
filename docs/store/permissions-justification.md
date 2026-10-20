@@ -1,13 +1,13 @@
 # 権限の使用理由説明（Chrome ウェブストア審査フォーム用）
 
-- **最終更新**: 2026-08-15
+- **最終更新**: 2026-10-20
 - **用途**: Chrome ウェブストアのアイテム登録時、各権限に求められる「使用理由（justification）」欄へそのまま貼り付けるための原稿。日本語と英語を併記します。
 - **正典**: 権限の一覧は [src/manifest.json](../../src/manifest.json)、データフローは [privacy-policy.md](privacy-policy.md) を参照。
 
 ## 単一用途（Single purpose）
 
-- **JA**: 本拡張の単一の用途は、研究プロトコル（リサーチクエスチョン・PICO 等）から PubMed 検索式を生成・検証し、他データベース（CENTRAL / Embase(Dialog) / ClinicalTrials.gov / ICTRP）向けに変換する作業の支援です。ユーザーが入力した研究プロトコルをもとに、ユーザー自身の API キー（BYOK）で生成 AI（Gemini）が検索式ドラフトを作成し、NCBI E-utilities を用いてヒット数・シード論文の捕捉率・MeSH 用語を検証、最終的な検索式を各データベース向けの構文へ変換して出力します。すべての機能（プロトコル入力、検索式ブロック承認、シード論文登録、検索式ドラフト生成・検証、各 DB への変換・エクスポート）はこの単一のワークフローを構成する段階であり、これ以外の用途（ブラウジング支援、他サイトの改変等）はありません。
-- **EN**: The single purpose of this extension is to support generating and validating a PubMed search strategy from a research protocol (research question, PICO, etc.), and converting it for other databases (CENTRAL / Embase(Dialog) / ClinicalTrials.gov / ICTRP). Based on the protocol the user enters, a generative AI (Gemini), called with the user's own API key (BYOK), drafts a search strategy; NCBI E-utilities are used to validate line-by-line hit counts, seed-paper capture rate, and MeSH terms; the finalized strategy is then converted into the syntax of each target database and exported. Every feature (protocol input, search-block approval, seed-paper registration, draft generation and validation, per-database conversion and export) is a stage of this single workflow; the extension does nothing else (no browsing assistance, no modification of other sites).
+- **JA**: 本拡張の単一の用途は、研究プロトコル（リサーチクエスチョン・PICO 等）から PubMed 検索式を生成・検証し、他データベース（CENTRAL / Embase(Dialog) / ClinicalTrials.gov / ICTRP）向けに変換する作業の支援です。ユーザーが入力した研究プロトコルをもとに、ユーザー自身の API キー（BYOK）で生成 AI（Gemini / OpenRouter / Anthropic）が検索式ドラフトを作成し、NCBI E-utilities を用いてヒット数・シード論文の捕捉率・MeSH 用語を検証、最終的な検索式を各データベース向けの構文へ変換して出力します。すべての機能（プロトコル入力、検索式ブロック承認、シード論文登録、検索式ドラフト生成・検証、各 DB への変換・エクスポート）はこの単一のワークフローを構成する段階であり、これ以外の用途（ブラウジング支援、他サイトの改変等）はありません。
+- **EN**: The single purpose of this extension is to support generating and validating a PubMed search strategy from a research protocol (research question, PICO, etc.), and converting it for other databases (CENTRAL / Embase(Dialog) / ClinicalTrials.gov / ICTRP). Based on the protocol the user enters, a generative AI (Gemini / OpenRouter / Anthropic), called with the user's own API key (BYOK), drafts a search strategy; NCBI E-utilities are used to validate line-by-line hit counts, seed-paper capture rate, and MeSH terms; the finalized strategy is then converted into the syntax of each target database and exported. Every feature (protocol input, search-block approval, seed-paper registration, draft generation and validation, per-database conversion and export) is a stage of this single workflow; the extension does nothing else (no browsing assistance, no modification of other sites).
 
 ## リモートコード使用の申告
 
@@ -21,25 +21,25 @@
 
 ### `identity` / `identity.email`
 
-- **JA**: 通常のサインインには Google OAuth 2.0（`chrome.identity.getAuthToken`）を使用し、Chrome プロファイルに紐づく Google アカウントでプロジェクト DB である Google Sheets とファイル実体の Google Drive にアクセスします。`identity.email` は `chrome.identity.getProfileUserInfo()` により、サインイン中アカウントのメールアドレスを取得するために使用します。取得したメールアドレスは `FormulaVersions` 等の記録者列（誰が検索式を作成・判定したか）に書き込む監査証跡目的、および下記の Picker 許可フローでのアカウント照合（`login_hint` と一致確認）に使用し、OAuth スコープとしては要求しません。加えて、他人が作成した共有スプレッドシートを開こうとして 403/404 になった場合に限り、`chrome.identity.launchWebAuthFlow` を使用します。これは GitHub Pages で配信する Picker 許可ページ（`hosted/picker.html`）を開き、利用者がそのページ上で選択したファイルの ID を `https://<拡張ID>.chromiumapp.org/picker#picked=<ファイルID>` へのリダイレクトで受け取るためのもので、この用途でアクセストークン自体が拡張機能へ渡ることはありません（拡張が受け取るのはファイル ID のみ）。いずれの経路でも、メールアドレスやアクセストークンを開発者サーバーへ送信することはありません（開発者サーバーは存在しません）。
-- **EN**: For ordinary sign-in, this extension uses Google OAuth 2.0 (`chrome.identity.getAuthToken`), which signs in with the Google account associated with the Chrome profile to access the user's Google Sheets (used as the project database) and Google Drive (used to store files). `identity.email` is used via `chrome.identity.getProfileUserInfo()` to obtain the signed-in account's email address, which is written to audit-trail columns (e.g., `FormulaVersions`) to record who created or judged a given search strategy, and is also used for account matching (as a `login_hint` and for verification) in the Picker grant flow described below; it is not requested as an OAuth scope. In addition, `chrome.identity.launchWebAuthFlow` is used only when opening a spreadsheet shared by someone else results in a 403/404. It opens a Picker grant page hosted on GitHub Pages (`hosted/picker.html`) and receives the ID of the file the user selected there via a redirect to `https://<extension-id>.chromiumapp.org/picker#picked=<fileId>`; the access token itself is never handed to the extension in this flow (only the file ID is received). In neither path is the email address or any access token sent to a developer-operated server (there is none).
+- **JA**: 通常のサインインには Google OAuth 2.0（`chrome.identity.getAuthToken`）を使用し、Chrome プロファイルに紐づく Google アカウントでプロジェクト DB である Google Sheets とファイル実体の Google Drive にアクセスします。`identity.email` は `chrome.identity.getProfileUserInfo()` により、サインイン中アカウントのメールアドレスを取得するために使用します。取得したメールアドレスは `FormulaVersions` 等の記録者列（誰が検索式を作成・判定したか）に書き込む監査証跡目的、および下記の Picker 許可フローでのアカウント照合（`login_hint` と一致確認）に使用し、NCBI E-utilities の email パラメータにも送信します（取得できなければ省略）。OAuth スコープとしては要求しません。加えて、他人が作成した共有スプレッドシートを開こうとして 403/404 になった場合に限り、`chrome.identity.launchWebAuthFlow` を使用します。これは GitHub Pages で配信する Picker 許可ページ（`hosted/picker.html`）を開き、利用者がそのページ上で選択したファイルの ID を `https://<拡張ID>.chromiumapp.org/picker#picked=<ファイルID>` へのリダイレクトで受け取るためのもので、この用途でアクセストークン自体が拡張機能へ渡ることはありません（拡張が受け取るのはファイル ID のみ）。いずれの経路でも、メールアドレスやアクセストークンを開発者サーバーへ送信することはありません（開発者サーバーは存在しません）。
+- **EN**: For ordinary sign-in, this extension uses Google OAuth 2.0 (`chrome.identity.getAuthToken`), which signs in with the Google account associated with the Chrome profile to access the user's Google Sheets (used as the project database) and Google Drive (used to store files). `identity.email` is used via `chrome.identity.getProfileUserInfo()` to obtain the signed-in account's email address, which is written to audit-trail columns (e.g., `FormulaVersions`) to record who created or judged a given search strategy, and is also used for account matching (as a `login_hint` and for verification) in the Picker grant flow described below; it is also sent as the NCBI E-utilities email parameter when available. It is not requested as an OAuth scope. In addition, `chrome.identity.launchWebAuthFlow` is used only when opening a spreadsheet shared by someone else results in a 403/404. It opens a Picker grant page hosted on GitHub Pages (`hosted/picker.html`) and receives the ID of the file the user selected there via a redirect to `https://<extension-id>.chromiumapp.org/picker#picked=<fileId>`; the access token itself is never handed to the extension in this flow (only the file ID is received). In neither path is the email address or any access token sent to a developer-operated server (there is none).
 
 ### `storage`
 
-- **JA**: ユーザーの API キー（Gemini・NCBI、BYOK）や認証状態などのアプリ設定を、ブラウザローカル（`chrome.storage`）に保存するために使用します。これらは端末外へ送信されません。
-- **EN**: Used to store application settings in the browser's local storage (`chrome.storage`), such as the user's API keys (Gemini, NCBI; BYOK) and authentication state. None of these leave the user's device.
+- **JA**: ユーザーの API キー（Gemini・OpenRouter・Anthropic・NCBI、BYOK）や同意記録などのアプリ設定を、ブラウザローカル（`chrome.storage`）に保存するために使用します。API キーは chrome.storage.local に暗号化せず保存し、開発者には送りません。各キーは対応する API 提供元への認証に送信します。OAuth トークンは Chrome 自身が管理し、拡張は保存しません。
+- **EN**: Used to store application settings in the browser's local storage (`chrome.storage`), such as the user's API keys (Gemini, OpenRouter, Anthropic, NCBI; BYOK) and consent records. API keys are stored without encryption in chrome.storage.local and sent only to their respective API provider for authentication, never to the developer. Chrome manages OAuth tokens; the extension does not store them.
 
 ## host_permissions
 
 ### `https://sheets.googleapis.com/*` / `https://www.googleapis.com/*`
 
-- **JA**: プロジェクト DB である Google Sheets（研究プロトコル・検索式ブロック・シード論文・検索式バージョン・検証結果・変換結果・LLM API ログ等）の読み書き、および Google Drive へのファイル（LLM API ログの JSON 等）の保存・取得に使用します。アクセス範囲は OAuth スコープ `drive.file`（本拡張が作成したファイルのみ）に限定されます。
-- **EN**: Used to read/write the user's Google Sheets (the project database: research protocol, search-strategy blocks, seed papers, formula versions, validation results, conversion results, LLM API logs, etc.), and to store/retrieve files (such as LLM API log JSON) in Google Drive. Access is limited by the OAuth scope `drive.file` (only files created by this extension).
+- **JA**: プロジェクト DB である Google Sheets（研究プロトコル・検索式ブロック・シード論文・検索式バージョン・検証結果・変換結果・LLM API ログ等）の読み書き、および Google Drive へのファイル（LLM API ログの JSON 等）の保存・取得に使用します。アクセス範囲は OAuth スコープ `drive.file`（本拡張が作成した、または Picker で選択したファイルのみ）に限定されます。
+- **EN**: Used to read/write the user's Google Sheets (the project database: research protocol, search-strategy blocks, seed papers, formula versions, validation results, conversion results, LLM API logs, etc.), and to store/retrieve files (such as LLM API log JSON) in Google Drive. Access is limited by the OAuth scope `drive.file` (only files created by this extension or selected in Picker).
 
 ### `https://eutils.ncbi.nlm.nih.gov/*`
 
-- **JA**: NCBI E-utilities を用いて、検索式のブロックごとのヒット数検証・MeSH 用語の取得・シード論文の捕捉率計算に使用します。
-- **EN**: Used to call NCBI E-utilities for line-by-line hit-count validation of the search strategy, MeSH term retrieval, and seed-paper capture-rate calculation.
+- **JA**: NCBI E-utilities を用いて、検索式のブロックごとのヒット数検証・MeSH 用語の取得・シード論文の捕捉率計算に使用します。検索式・PMID、取得できた利用者のメール（email）、設定済み NCBI API キーを送信します。
+- **EN**: Used to call NCBI E-utilities for line-by-line hit-count validation of the search strategy, MeSH term retrieval, and seed-paper capture-rate calculation. Requests contain queries, PMIDs, the signed-in user email when available, and the configured NCBI API key.
 
 ### `https://generativelanguage.googleapis.com/*`
 
@@ -60,3 +60,10 @@
 `https://www.googleapis.com/auth/spreadsheets` のような全スプレッドシートへアクセスできるスコープは要求しません。取得したデータは、機能提供以外の目的（広告・分析・第三者提供・モデル学習）には使用しません。Google API Services User Data Policy（Limited Use を含む）を遵守します。
 
 **補足（Picker 許可ページの OAuth クライアントについて）**: 上記は拡張機能本体（`src/manifest.json` の `oauth2` 設定）が要求するスコープであり、`drive.file` 1 本のままです。これとは別に、GitHub Pages で配信する Picker 許可ページ（`hosted/picker.html` / [src/picker/picker.ts](../../src/picker/picker.ts)）は、拡張機能とは異なる（ウェブアプリ型の）OAuth クライアントを使い、`drive.file` に加えて `userinfo.email` を要求します。`userinfo.email` は「拡張機能でログイン中のアカウントと同一のアカウントで許可されたか」を照合するためだけに使用し、照合およびファイル選択（Google Picker の表示）が終わった時点でこのページの用は済み、トークンはページの遷移とともに失われます。拡張機能側へアクセストークンが渡ることはなく、拡張が受け取るのは選択されたファイルの ID のみです。なお、このウェブ用 OAuth クライアントは拡張機能の OAuth クライアントと同一の GCP プロジェクトに属している必要があります（`drive.file` の付与がプロジェクト単位のため）。
+
+## optional_host_permissions
+
+### `https://openrouter.ai/*` / `https://api.anthropic.com/*`
+
+- **JA**: OpenRouter / Anthropic を選んだ場合に、利用者自身のキーで研究プロトコル本文・ブロック定義・検索式・PubMed の書誌（タイトル・抄録）・シードと判定を送り、下書き生成・解釈補助に使います。OpenRouter は選んだモデルの提供元に転送します。使うときに設定の保存操作から Chrome に許可を求めます。拒否時も設定は保存できますが、許可するまで送信しません。
+- **EN**: When selected, OpenRouter / Anthropic receive protocol text, blocks, queries, PubMed titles and abstracts, seeds and decisions with the user’s own API key for drafting and interpretation. OpenRouter forwards to the selected model provider. Chrome requests optional host permission through the save operation when used. Settings can be saved after refusal, but no data is sent until permission is granted.

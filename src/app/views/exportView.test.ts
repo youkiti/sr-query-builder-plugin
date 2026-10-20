@@ -252,6 +252,18 @@ describe('createExportView', () => {
       expect(container.querySelectorAll('.export__methods-copy')).toHaveLength(2);
     });
 
+    test('表示中の保存版から拡張版と複数モデルを表示する', () => {
+      const view = createExportView();
+      const container = buildContainer();
+      view(container, { state: stateWithDraft({ currentFormulaModel: 'legacy',
+        currentFormulaAppVersion: '1.2.3', currentFormulaModelsUsed: 'model-a;model-b' }), navigate: jest.fn() });
+      const texts = container.querySelectorAll<HTMLElement>('.export__methods-text');
+      expect(texts[0]!.textContent).toContain('version 1.2.3');
+      expect(texts[0]!.textContent).toContain('model-a, model-b');
+      expect(texts[1]!.textContent).toContain('バージョン 1.2.3');
+      expect(texts[1]!.textContent).toContain('model-a、model-b');
+    });
+
     test('モデル情報が無い旧バージョンではプレースホルダと置換案内を出す', () => {
       const view = createExportView();
       const container = buildContainer();
@@ -388,14 +400,14 @@ describe('buildValidationWarning（fix-plan 2-3）', () => {
     expect(warning).toContain('2/3 件');
   });
 
-  test('有効 seed 0 件（分母なし）は捕捉率警告を出さない', () => {
+  test('有効 seed 0 件は既知文献での未検証を警告する', () => {
     const state = stateWithDraft({
       validationResult: {
         formulaVersionId: 'v-1',
         summary: summaryWith({ captureRate: null, capturedPmids: [], missedPmids: [] }),
       },
     });
-    expect(buildValidationWarning(state)).toBeNull();
+    expect(buildValidationWarning(state)).toContain('既知の文献（シード論文）での検証をしていません');
   });
 
   test('シードがあるが捕捉 0 件の場合は 0.0% の警告を出す', () => {
@@ -417,4 +429,22 @@ describe('buildValidationWarning（fix-plan 2-3）', () => {
     });
     expect(buildValidationWarning(state)).toBeNull();
   });
+});
+
+test.each(['ai_draft', 'auto_optimize', 'user_edit'] as const)('版の作成元 %s に応じて人による確認を案内し、変換は許可する', (createdBy) => {
+  const container = buildContainer();
+  createExportView()(container, { state: stateWithDraft({ currentFormulaCreatedBy: createdBy }), navigate: jest.fn() });
+  expect(container.textContent?.includes('この版は AI が作ったままで、人が確かめていません。')).toBe(createdBy !== 'user_edit');
+  expect(container.querySelector('a[href="#/edit"]')?.textContent ?? null).toBe(createdBy === 'user_edit' ? null : '編集画面');
+  expect(container.querySelector<HTMLButtonElement>('.export__actions button')?.disabled).toBe(false);
+  expect(container.querySelector('.export__methods-text strong')?.textContent).toContain('Describe how the authors');
+});
+
+test('変換が規則によることを明示し、警告がある結果だけを開く', async () => {
+  const container = buildContainer();
+  createExportView({ onExport: async () => sampleResult() })(container, { state: stateWithDraft(), navigate: jest.fn() });
+  container.querySelector<HTMLButtonElement>('.export__actions button')!.click();
+  await flushAsync();
+  expect(container.querySelector('.export__results')?.textContent).toContain('この変換は規則に基づくもので、AI は使っていません。');
+  expect(Array.from(container.querySelectorAll<HTMLDetailsElement>('.export__result')).map((node) => node.open)).toEqual([false, true]);
 });

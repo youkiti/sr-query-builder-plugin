@@ -1,3 +1,4 @@
+import * as extensionVersion from '@/utils/extensionVersion';
 import { SHEET_HEADERS } from '@/domain/sheetsSchema';
 import {
   createStore,
@@ -205,6 +206,21 @@ describe('saveEditedFormula', () => {
     expect(store.getState().currentFormulaModel).toBe('gemini-3.5-flash');
   });
 
+  test('元のモデル群と採用した AI 提案のモデルを重複なく保存する', async () => {
+    const manifest = jest.spyOn(extensionVersion, 'getExtensionVersion').mockReturnValue('1.2.3');
+    const store = createStore(makeState({ currentFormulaModelsUsed: 'original;prior',
+      formulaEditDraft: { formulaVersionId: 'parent-v', markdown: VALID_MD, modelsUsed: ['prior', 'new-model'] } }));
+    const fetch = jest.fn().mockResolvedValue(jsonResponse({}));
+    const google = { fetch, getAccessToken: async () => 'fake' };
+    await saveEditedFormula({ formulaMd: VALID_MD, note: '' }, { google, store, getSavedBy: async () => 'editor@example.com' });
+    const row = getAppendBody(fetch).values[0]!;
+    expect(row[SHEET_HEADERS.FormulaVersions.indexOf('models_used')]).toBe('original;prior;new-model');
+    expect(row[SHEET_HEADERS.FormulaVersions.indexOf('saved_by')]).toBe('editor@example.com');
+    expect(row[SHEET_HEADERS.FormulaVersions.indexOf('app_version')]).toBe('1.2.3');
+    manifest.mockRestore();
+    expect(store.getState().currentFormulaModelsUsed).toBe('original;prior;new-model');
+  });
+
   test('note 空白は null として保存される', async () => {
     const store = createStore(makeState());
     const fetchMock = jest.fn().mockResolvedValue(jsonResponse({}));
@@ -362,6 +378,7 @@ describe('requestBlockImprovement', () => {
     const result = await requestBlockImprovement({ blockId: '1' }, deps);
     expect(captured.purpose).toBe('improve_block');
     expect(result).toEqual({
+      modelUsed: 'gemini-test',
       blockId: '1',
       currentExpression: 'asthma[tiab]',
       proposedExpression: '"Asthma"[Mesh] OR asthma*[tiab]',

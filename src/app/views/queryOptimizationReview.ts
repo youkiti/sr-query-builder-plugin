@@ -1,3 +1,4 @@
+import { showConfirmationModal } from '../ui/confirmationModal';
 import { renderGenerationNotice } from './generationNotice';
 import { blockDiagnosisLines } from '@/features/validation/blockDiagnosis';
 import type { OptimizationTrial } from '@/features/formula/skills/optimizeQuery';
@@ -122,6 +123,48 @@ function renderHeldCandidateCard(
   return card;
 }
 
+/**
+ * 条件を満たさない結果を保存する前の確認文。自動調整の完了条件（目安件数以下・既知シードの全件捕捉）を
+ * 1 つずつ、目安と実測を並べて示す。未測定は「満たさない」と取り違えないよう別に書く。
+ */
+export function buildAdoptConfirmContent(doc: Document, run: QueryOptimizationRunState): HTMLElement {
+  const content = doc.createElement('div');
+  const paragraph = (text: string): void => {
+    const p = doc.createElement('p');
+    p.textContent = text;
+    content.appendChild(p);
+  };
+  paragraph('この候補は、自動調整の完了条件をすべては満たしていません。完了条件は次の 2 つです。');
+  const measurement = run.result?.best?.measurement;
+  const hits = measurement?.totalHits ?? null;
+  const captured = measurement?.capturedPmids?.length ?? null;
+  const missed = measurement?.missedPmids?.length ?? null;
+  const seedTotal = run.result?.best?.evaluation.seedPmids.length ?? run.seedCount;
+  const hitsLine = hits === null
+    ? `ヒット件数が目安件数（${run.maxHits.toLocaleString()} 件）以下であること：未測定のため確かめられていません。`
+    : `ヒット件数が目安件数（${run.maxHits.toLocaleString()} 件）以下であること：実測 ${hits.toLocaleString()} 件で、`
+      + (hits <= run.maxHits ? '満たしています。' : `目安を ${(hits - run.maxHits).toLocaleString()} 件超えています。`);
+  const seedLine = !seedTotal
+    ? '既知のシード論文をすべて捕捉していること：有効なシード論文が 0 件のため確かめられていません。'
+    : captured === null || missed === null
+      ? `既知のシード論文（${seedTotal} 件）をすべて捕捉していること：未測定のため確かめられていません。`
+      : `既知のシード論文（${seedTotal} 件）をすべて捕捉していること：${captured} 件を捕捉し、`
+        + (missed === 0 ? '満たしています。' : `${missed} 件を取りこぼしています。`);
+  const list = doc.createElement('ul');
+  for (const line of [hitsLine, seedLine]) {
+    const item = doc.createElement('li');
+    item.textContent = line;
+    list.appendChild(item);
+  }
+  content.appendChild(list);
+  const reasons = run.result?.unmetReasons ?? [];
+  if (reasons.length) paragraph(`記録された理由：${reasons.join('／')}`);
+  paragraph('目安件数を超えること自体は検索式の誤りではありません。取りこぼしたシード論文があれば、その論文が研究基準に合うかと、どのブロックで落ちているかを確かめてください。'
+    + 'どちらの条件を満たしても、未知の適格研究をすべて拾えたことにはなりません。');
+  paragraph('人が最終式を確かめたうえで保存しますか？');
+  return content;
+}
+
 /** 最終候補と初期式を直接比較する。却下案や途中で戻した変更は最終差分へ混ぜない。 */
 export function renderOptimizationReview(
   container: HTMLElement, run: QueryOptimizationRunState | null, actions: OptimizationReviewActions
@@ -171,7 +214,7 @@ export function renderOptimizationReview(
   const seeds = best?.evaluation.seedPmids.length ?? run.seedCount;
   const review = buildOptimizationReviewSections(run);
   subheading('確認の状況');
-  const stateLabels: Record<ReviewSectionState, string> = { confirmed: '確認済み', unmet: '未達', needs_decision: '判定待ち', decided: '判定済み（残件あり）', unconfirmed: '未確認' };
+  const stateLabels: Record<ReviewSectionState, string> = { no_human_decision: '人の判定なし', confirmed: '確認済み', unmet: '未達', needs_decision: '判定待ち', decided: '判定済み（残件あり）', unconfirmed: '未確認' };
   for (const item of review.sections) {
     const group = doc.createElement('section');
     group.className = 'optimization__review-section';
@@ -337,9 +380,16 @@ export function renderOptimizationReview(
   adopt.type = 'button';
   adopt.textContent = '採用して保存';
   adopt.disabled = !best || !actions.adopt || run.save?.status === 'saving' || run.save?.status === 'saved';
-  adopt.addEventListener('click', () => {
+  adopt.addEventListener('click', async () => {
     if (adopt.disabled) return;
     adopt.disabled = true;
+    if (result?.status !== 'achieved') {
+      const content = buildAdoptConfirmContent(doc, run);
+      const accepted = await showConfirmationModal(doc, {
+        title: '保存前の確認', content, acceptLabel: '確かめたうえで保存する', cancelLabel: '中止する',
+      });
+      if (!accepted) { adopt.disabled = false; return; }
+    }
     void actions.adopt?.();
   });
   const edit = doc.createElement('button');

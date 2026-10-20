@@ -81,7 +81,25 @@
 
 .options__actions {
   display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
   justify-content: flex-end;
+}
+
+.options__actions > button {
+  flex: none;
+}
+
+/* 状態文は DOM 上ボタンの間にあるため、order で全ボタンの後ろ（行の下）へ回す。 */
+.options__actions > .llm-permission__status {
+  flex-basis: 100%;
+  order: 1;
+  margin: 0;
+}
+
+.options__actions > .llm-permission__status:empty {
+  display: none;
 }
 
 .options__button {

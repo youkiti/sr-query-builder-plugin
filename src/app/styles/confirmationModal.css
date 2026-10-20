@@ -1,0 +1,28 @@
+.confirmation-modal:not([hidden]) {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+  background: rgb(0 0 0 / 40%);
+}
+
+.confirmation-modal__panel {
+  max-width: 720px;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: var(--space-5);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.confirmation-modal__panel a {
+  text-decoration: underline;
+}
+
+.confirmation-modal__panel button {
+  margin: var(--space-2);
+}

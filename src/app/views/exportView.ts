@@ -59,6 +59,18 @@ export function createExportView(callbacks: ExportViewCallbacks = {}): RenderVie
       container.appendChild(banner);
     }
 
+    if (ctx.state.currentFormulaCreatedBy === 'ai_draft' || ctx.state.currentFormulaCreatedBy === 'auto_optimize') {
+      const notice = doc.createElement('p');
+      notice.className = 'export__validation-warning';
+      notice.setAttribute('role', 'note');
+      notice.append('⚠ この版は AI が作ったままで、人が確かめていません。');
+      const edit = doc.createElement('a');
+      edit.href = '#/edit';
+      edit.textContent = '編集画面';
+      notice.append(edit, ' で確かめてから使ってください。');
+      container.appendChild(notice);
+    }
+
     const actions = doc.createElement('div');
     actions.className = 'export__actions';
     const exportBtn = doc.createElement('button');
@@ -87,7 +99,7 @@ export function createExportView(callbacks: ExportViewCallbacks = {}): RenderVie
     results.className = 'export__results';
     container.appendChild(results);
 
-    container.appendChild(buildMethodsSection(doc, ctx.state.currentFormulaModel));
+    container.appendChild(buildMethodsSection(doc, ctx.state.currentFormulaModel, ctx.state.currentFormulaModelsUsed, ctx.state.currentFormulaAppVersion));
 
     exportBtn.addEventListener('click', () => {
       if (!callbacks.onExport) {
@@ -123,7 +135,8 @@ export function createExportView(callbacks: ExportViewCallbacks = {}): RenderVie
  * - validationResult が無い、または現在のバージョンと不一致（stale） → 「未検証」警告
  * - 検証済みでも final_query が失敗している → 捕捉率未確認の警告
  * - 検証済みで有効 seed があり捕捉率 < 100% → 捕捉率 N% の警告
- * - 検証済みで問題なし（100% または seed 0 件で分母なし） → null（バナー非表示）
+ * - 検証済みで seed 0 件 → 既知文献で未検証の警告
+ * - 検証済みで問題なし（100%） → null（バナー非表示）
  *
  * テストから直接検証できるよう純関数として export する。
  */
@@ -138,6 +151,7 @@ export function buildValidationWarning(state: AppState): string | null {
   }
   const captured = summary.finalQuery.capturedPmids.length;
   const seedTotal = captured + summary.finalQuery.missedPmids.length;
+  if (seedTotal === 0) return '⚠ 既知の文献（シード論文）での検証をしていません';
   if (seedTotal > 0 && summary.finalQuery.captureRate !== null && summary.finalQuery.captureRate < 1) {
     const percent = (summary.finalQuery.captureRate * 100).toFixed(1);
     return `⚠ シード捕捉率が ${percent}%（${captured}/${seedTotal} 件）です。未捕捉シードの原因を #/draft で確認してからのエクスポートを推奨します。`;
@@ -146,9 +160,13 @@ export function buildValidationWarning(state: AppState): string | null {
 }
 
 function renderResults(doc: Document, container: HTMLElement, result: ExportResult): void {
+  const note = doc.createElement('p');
+  note.textContent = 'この変換は規則に基づくもので、AI は使っていません。各行を、変換先のデータベースで確かめてください。';
+  container.appendChild(note);
   for (const conversion of result.conversions) {
     const details = doc.createElement('details');
     details.className = 'export__result';
+    details.open = conversion.warnings.length > 0;
     details.dataset['db'] = conversion.targetDb;
     const summary = doc.createElement('summary');
     summary.textContent = dbLabel(conversion.targetDb);
@@ -183,11 +201,11 @@ function renderResults(doc: Document, container: HTMLElement, result: ExportResu
 
 /**
  * 論文 Methods 用の定型文セクション。
- * 「AI 支援で下書き → 著者がレビューして確定」の開示文を英/日で表示し、
+ * AI 支援の開示文と人による確認方法の記入欄を英/日で表示し、
  * ボタン 1 つでクリップボードへコピーできるようにする。
  */
-function buildMethodsSection(doc: Document, model: string | null): HTMLElement {
-  const texts = buildMethodsTexts({ model, version: getExtensionVersion() });
+function buildMethodsSection(doc: Document, model: string | null, modelsUsed?: string | null, appVersion?: string | null): HTMLElement {
+  const texts = buildMethodsTexts({ model, modelsUsed, appVersion, version: getExtensionVersion() });
   const section = doc.createElement('section');
   section.className = 'export__methods';
 
@@ -202,6 +220,9 @@ function buildMethodsSection(doc: Document, model: string | null): HTMLElement {
       ? '検索式の下書きに生成 AI を使ったことを論文の方法（Methods）に記載するための定型文です。この検索式にはモデル情報が記録されていないため、{ } の部分は使用したモデル名に置き換えてください。'
       : '検索式の下書きに生成 AI を使ったことを論文の方法（Methods）に記載するための定型文です。必要に応じて調整して使ってください。';
   section.appendChild(note);
+  const fillIn = doc.createElement('strong');
+  fillIn.textContent = '［ ］内に、著者が AI の下書きをどう確かめ、直したかを必ず記入してください。';
+  section.appendChild(fillIn);
 
   const status = doc.createElement('p');
   status.className = 'export__methods-status';
@@ -218,7 +239,13 @@ function buildMethodsSection(doc: Document, model: string | null): HTMLElement {
     const text = doc.createElement('p');
     text.className = 'export__methods-text';
     text.lang = variant.lang;
-    text.textContent = variant.text;
+    const placeholder = variant.lang === 'en'
+      ? '[Describe how the authors checked and revised the AI-generated drafts.]'
+      : '［著者が AI の下書きをどう確かめ、直したかを記入］';
+    const [before, after] = variant.text.split(placeholder);
+    const emphasis = doc.createElement('strong');
+    emphasis.textContent = placeholder;
+    text.append(before ?? '', emphasis, after ?? '');
     item.appendChild(text);
 
     const copyBtn = doc.createElement('button');

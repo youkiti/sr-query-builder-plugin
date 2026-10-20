@@ -13,6 +13,7 @@
     "https://generativelanguage.googleapis.com/*",
     "https://id.nlm.nih.gov/*"
   ],
+  "optional_host_permissions": ["https://openrouter.ai/*", "https://api.anthropic.com/*"],
   "oauth2": {
     "client_id": "__OAUTH_CLIENT_ID__",
     "scopes": ["https://www.googleapis.com/auth/drive.file"]

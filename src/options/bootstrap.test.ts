@@ -41,6 +41,38 @@ describe('startOptions', () => {
     };
   }
 
+  test('選択が空のとき、空 ID の一覧外モデルを追加しない', async () => {
+    const doc = buildDocument();
+    await startOptions(doc, readStoredValues({}));
+    const select = doc.querySelector('#llm-model-select') as HTMLSelectElement;
+    select.selectedIndex = -1;
+    (doc.querySelector('#custom-model-id') as HTMLInputElement).value = 'vendor/new-model';
+    (doc.querySelector('#add-custom-model') as HTMLButtonElement).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(Array.from(select.options).some((option) => option.value === '')).toBe(false);
+    expect(Array.from(select.options).some((option) => option.textContent?.includes('一覧にないモデル'))).toBe(false);
+    expect(Array.from(select.options).some((option) => option.value === 'vendor/new-model')).toBe(true);
+  });
+
+  test.each([false, true])('一覧にない保存モデルを保持する（削除操作=%s）', async (remove) => {
+    const id = 'vendor/removed-model';
+    const data: Record<string, string> = { 'llm.selectedModel': id, 'apiKeys.openrouter': 'fake',
+      'llm.customModels': JSON.stringify(remove ? [{ id, label: '消すモデル' }] : []) };
+    const deps = readStoredValues(data);
+    const doc = buildDocument();
+    await startOptions(doc, deps);
+    const select = doc.querySelector('#llm-model-select') as HTMLSelectElement;
+    if (remove) {
+      (doc.querySelector('#custom-models-list button') as HTMLButtonElement).click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(select.value).toBe(id);
+    expect(select.selectedOptions[0]!.textContent).toContain('一覧にないモデル');
+    (doc.querySelector('#save-keys') as HTMLButtonElement).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(deps.writeKey).toHaveBeenCalledWith('llm.selectedModel', id);
+  });
+
   test.each([
     ['a', '', 'claude-opus-5-5'],
     ['', 'g', 'gemini-3.5-flash-lite'],
@@ -535,6 +567,8 @@ describe('startOptions', () => {
     expect(detectGeminiTierMock).toHaveBeenCalledWith('free-key');
     const badge = doc.getElementById('gemini-tier-badge');
     expect(badge?.textContent).toBe('無料プラン');
+    expect(doc.querySelector('.gemini-data-notice')?.textContent).toContain('Google の説明では、Gemini API の無料枠では送った内容と応答が製品の改善に使われ、人が読むことがあるとされています。未公開のプロトコルなど機密の内容は送らないでください。');
+    expect(doc.querySelector('.gemini-data-notice a')?.getAttribute('href')).toBe('https://ai.google.dev/gemini-api/terms');
     expect(badge?.classList.contains('options__tier-badge--free')).toBe(true);
     expect(store[STORAGE_KEY_LLM_MODEL]).toBe('gemini-2.0-flash');
     expect((doc.getElementById('llm-model-select') as HTMLSelectElement).value).toBe('gemini-2.0-flash');
@@ -840,3 +874,76 @@ test.each([['claude-foo', 'Anthropic', 'anthropic'], ['a/b', 'OpenRouter', 'open
     expect(doc.querySelector(`#${provider}-card`)?.classList.contains('options__provider-card--active')).toBe(true);
   }
 );
+
+test('Options のプラン判定も同意拒否では Gemini へ送らない', async () => {
+  const { AiConsentDeclinedError } = await import('@/app/services/aiConsentService');
+  const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+  const fetch = jest.fn(async () => { throw new Error('送信してはいけません'); });
+  Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true, value: fetch });
+  const doc = document.implementation.createHTMLDocument('同意');
+  const storageGet = jest.spyOn(chrome.storage.local, 'get').mockImplementation(async () => ({}));
+  try {
+    const deps = createChromeOptionsDeps(doc);
+    const request = deps.detectGeminiTier!('fake');
+    const rejected = expect(request).rejects.toBeInstanceOf(AiConsentDeclinedError);
+    for (let i = 0; i < 12; i += 1) await Promise.resolve();
+    Array.from(doc.querySelectorAll('button')).find((button) => button.textContent === '送らずに中止する')!.click();
+    await rejected;
+    expect(fetch).not.toHaveBeenCalled();
+  } finally {
+    if (originalFetch) Object.defineProperty(globalThis, 'fetch', originalFetch);
+    else Reflect.deleteProperty(globalThis, 'fetch');
+    storageGet.mockRestore();
+  }
+});
+
+test.each([false, true])('Options の保存クリックで送信許可を求め、拒否しても保存する: %s', async (allowed) => {
+  const doc = document.implementation.createHTMLDocument('permissions');
+  doc.body.innerHTML = '<p id="options-status"></p><input id="anthropic-api-key" value="fake" /><button id="save-keys">保存</button>';
+  const data: Record<string, string> = {};
+  const hostPermissions = { contains: jest.fn().mockResolvedValue(allowed), request: jest.fn().mockResolvedValue(allowed) };
+  const deps: OptionsDeps = {
+    readKey: async (key) => data[key], writeKey: async (key, value) => { data[key] = value; },
+    removeKey: async () => undefined, openAppTab: jest.fn(), hostPermissions,
+  };
+  await startOptions(doc, deps);
+  expect(hostPermissions.request).not.toHaveBeenCalled();
+  expect(doc.querySelectorAll('button.options__button')).toHaveLength(2);
+  expect(doc.querySelectorAll('p.llm-permission__status[role="status"]')).toHaveLength(2);
+  doc.querySelector<HTMLButtonElement>('#save-keys')!.click();
+  expect(hostPermissions.request).toHaveBeenCalledWith({ origins: ['https://api.anthropic.com/*'] });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(data['apiKeys.anthropic']).toBe('fake');
+  expect(data['llm.selectedModel']).toBe('claude-opus-5-5');
+  expect(doc.body.textContent?.includes('許可がないため、このプロバイダには送信できません')).toBe(!allowed);
+  hostPermissions.request.mockResolvedValue(true);
+  Array.from(doc.querySelectorAll('button')).find((button) => button.textContent?.startsWith('Anthropic への'))!.click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(doc.body.textContent).toContain('許可しました。');
+});
+
+test.each([
+  ['claude-opus-5-5', 'https://api.anthropic.com/*', true],
+  ['claude-opus-5-5', 'https://api.anthropic.com/*', false],
+  ['qwen/qwen3-235b-a22b-2507', 'https://openrouter.ai/*', true],
+  ['qwen/qwen3-235b-a22b-2507', 'https://openrouter.ai/*', false],
+] as const)('Options のモデル変更で許可を先に要求し、即時保存する: %s / %s / %s', async (model, origin, allowed) => {
+  const doc = document.implementation.createHTMLDocument('permissions');
+  doc.body.innerHTML = '<p id="options-status"></p><select id="llm-model-select"></select><button id="save-keys">保存</button>';
+  const data: Record<string, string> = { 'llm.selectedModel': 'gemini-3.5-flash-lite' };
+  const hostPermissions = { contains: jest.fn(), request: jest.fn().mockResolvedValue(allowed) };
+  const writeKey = jest.fn(async (key: string, value: string) => { data[key] = value; });
+  await startOptions(doc, {
+    readKey: async (key) => data[key], writeKey,
+    removeKey: async () => undefined, openAppTab: jest.fn(), hostPermissions,
+  });
+  expect(hostPermissions.request).not.toHaveBeenCalled();
+  const select = doc.querySelector<HTMLSelectElement>('#llm-model-select')!;
+  select.value = model;
+  select.dispatchEvent(new Event('change'));
+  expect(hostPermissions.request).toHaveBeenCalledWith({ origins: [origin] });
+  expect(hostPermissions.request.mock.invocationCallOrder[0]).toBeLessThan(writeKey.mock.invocationCallOrder[0]!);
+  expect(data['llm.selectedModel']).toBe(model);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(doc.body.textContent?.includes('許可がないため、このプロバイダには送信できません')).toBe(!allowed);
+});

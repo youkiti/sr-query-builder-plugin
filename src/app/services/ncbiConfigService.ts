@@ -1,6 +1,6 @@
 import type { EutilsDeps } from '@/lib/ncbi';
 import type { ProjectStoreDeps } from '@/features/project';
-import type { GoogleApiDeps } from '@/lib/google';
+import { createChromeProfileDeps, getCurrentUserEmail, type GoogleApiDeps, type ProfileDeps } from '@/lib/google';
 
 /**
  * NCBI E-utilities 用の設定サービス。
@@ -25,6 +25,7 @@ export async function getNcbiApiKey(store: ProjectStoreDeps): Promise<string | n
 
 export interface BuildEutilsDepsOptions {
   google: GoogleApiDeps;
+  profile?: ProfileDeps;
   store: ProjectStoreDeps;
 }
 
@@ -38,5 +39,7 @@ export async function buildEutilsDeps(opts: BuildEutilsDepsOptions): Promise<Eut
   if (apiKey !== null) {
     deps.apiKey = apiKey;
   }
+  const email = await getCurrentUserEmail(opts.profile ?? createChromeProfileDeps()).catch(() => null);
+  if (email) deps.email = email;
   return deps;
 }

@@ -1,3 +1,4 @@
+import { requestMetadata } from './requestMetadata';
 import {
   LlmProviderError,
   type ChatMessage,
@@ -27,6 +28,8 @@ export interface OpenRouterProviderOptions {
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 
 interface OpenRouterResponse {
+  model?: string;
+  provider?: string;
   choices?: Array<{
     message?: { role?: string; content?: string | null };
     finish_reason?: string;
@@ -52,6 +55,7 @@ export class OpenRouterProvider implements LLMProvider {
 
   async chat(messages: readonly ChatMessage[], options: ChatOptions = {}): Promise<ChatResponse> {
     const body = this.buildRequestBody(messages, options);
+    options.onRequestSent?.(requestMetadata(body));
     const fetchFn = this.fetchImpl ?? globalThis.fetch;
     const res = await fetchFn(ENDPOINT, {
       method: 'POST',
@@ -83,6 +87,8 @@ export class OpenRouterProvider implements LLMProvider {
       tokensIn: json.usage?.prompt_tokens ?? null,
       tokensOut: json.usage?.completion_tokens ?? null,
       raw: json,
+      modelReported: json.model ?? null,
+      providerReported: json.provider ?? null,
     };
   }
 

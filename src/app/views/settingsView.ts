@@ -1,3 +1,6 @@
+import { addLlmPermissionButtons, requestLlmHosts, HOST_PERMISSION_DENIED, type LlmHostPermissions } from '@/lib/llm/hostPermissions';
+import { AiConsentDeclinedError } from '../services/aiConsentService';
+import { updateGeminiDataNotice } from '@/lib/llm/aiDisclosure';
 import {
   BUILTIN_MODELS,
   DEFAULT_MODEL,
@@ -24,6 +27,7 @@ const KEY_PENDING = 'pendingOpenAppTab';
 const KEY_GEMINI_TIER = 'gemini.detectedTier';
 
 export interface SettingsViewCallbacks {
+  hostPermissions?: LlmHostPermissions;
   readKey: (key: string) => Promise<string | undefined>;
   writeKey: (key: string, value: string) => Promise<void>;
   removeKey: (key: string) => Promise<void>;
@@ -46,7 +50,7 @@ function parseCustomModels(raw: string | undefined): CustomModel[] {
 function populateModelSelect(
   selectEl: HTMLSelectElement,
   customModels: CustomModel[],
-  selectedModelId: string
+  selectedModelId: string | undefined
 ): void {
   selectEl.innerHTML = '';
   const geminiGroup = selectEl.ownerDocument.createElement('optgroup');
@@ -102,6 +106,13 @@ function populateModelSelect(
     anthropicGroup.appendChild(opt);
   });
   selectEl.appendChild(anthropicGroup);
+  if (selectedModelId && !Array.from(selectEl.options).some((option) => option.value === selectedModelId)) {
+    const option = selectEl.ownerDocument.createElement('option');
+    option.value = selectedModelId;
+    option.textContent = `${selectedModelId}（一覧にないモデル）`;
+    option.selected = true;
+    selectEl.appendChild(option);
+  }
 }
 
 function refreshProviderCards(doc: Document, selectedModelId: string): void {
@@ -121,6 +132,7 @@ function updateTierBadge(
   badge: HTMLElement,
   state: 'checking' | 'paid' | 'free' | 'unknown' | 'unavailable'
 ): void {
+  updateGeminiDataNotice(badge, state === 'free');
   badge.className = 'settings__tier-badge';
   switch (state) {
     case 'checking':
@@ -468,7 +480,12 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
         let tier: 'paid' | 'free' | 'unknown' | 'unavailable';
         try {
           tier = await detectTier(gemini);
-        } catch {
+        } catch (err) {
+          if (err instanceof AiConsentDeclinedError) {
+            updateTierBadge(tierBadge, 'unknown');
+            status.textContent = err.message;
+            return;
+          }
           tier = 'unknown';
         }
         updateTierBadge(tierBadge, tier);
@@ -491,8 +508,13 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
     }
 
     modelSelect.addEventListener('change', () => {
-      void callbacks.writeKey(KEY_LLM_MODEL, modelSelect.value);
-      refreshProviderCards(doc, modelSelect.value);
+      const selectedModel = modelSelect.value;
+      const hostPermission = requestLlmHosts([resolveProvider(selectedModel)], callbacks.hostPermissions);
+      void callbacks.writeKey(KEY_LLM_MODEL, selectedModel);
+      refreshProviderCards(doc, selectedModel);
+      void hostPermission.then((allowed) => {
+        if (!allowed) status.textContent = HOST_PERMISSION_DENIED;
+      });
     });
 
     addCustomModelBtn.addEventListener('click', () => {
@@ -524,7 +546,12 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
       })();
     });
 
+    if (saveBtn?.parentElement) addLlmPermissionButtons(saveBtn.parentElement, callbacks.hostPermissions, 'settings__btn');
     saveBtn.addEventListener('click', () => {
+      const hostPermission = requestLlmHosts([
+        ...((orInput.value ?? '').trim() ? ['openrouter' as const] : []),
+        ...((anthropicInput.value ?? '').trim() ? ['anthropic' as const] : []),
+      ], callbacks.hostPermissions);
       void (async () => {
         const savedModel = await callbacks.readKey(KEY_LLM_MODEL);
         const geminiVal = geminiInput.value;
@@ -547,6 +574,14 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
           ...(shouldSaveModel ? [callbacks.writeKey(KEY_LLM_MODEL, selectedModel)] : []),
         ]);
 
+        const hostAllowed = await hostPermission;
+        if (!hostAllowed) {
+          const notice = doc.createElement('p');
+          notice.setAttribute('role', 'alert');
+          notice.textContent = HOST_PERMISSION_DENIED;
+          saveBtn?.parentElement?.appendChild(notice);
+        }
+
         // Gemini キーが設定されており Gemini モデルが選択されている場合にプラン自動判定
         let modelSwitchedToFree = false;
         let tierUndetermined = false;
@@ -562,7 +597,11 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
           let tier: 'paid' | 'free' | 'unknown' | 'unavailable';
           try {
             tier = await detectTier(geminiVal);
-          } catch {
+          } catch (err) {
+            if (err instanceof AiConsentDeclinedError) {
+              updateTierBadge(tierBadge, 'unknown');
+              throw err;
+            }
             tier = 'unknown';
           }
 
@@ -593,7 +632,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
         const keyForProvider = provider === 'openrouter' ? orVal
           : provider === 'anthropic' ? anthropicVal : geminiVal;
 
-        if (pendingNow === '1' && keyForProvider.trim() !== '') {
+        if (hostAllowed && pendingNow === '1' && keyForProvider.trim() !== '') {
           await callbacks.removeKey(KEY_PENDING);
           status.textContent = '保存しました。ホーム画面に戻ります…';
           banner.hidden = true;

@@ -1,3 +1,4 @@
+import { AI_CONSENT_VERSION } from '@/lib/llm/aiDisclosure';
 import { DEFAULT_QUERY_OPTIMIZATION_SETTINGS } from './services/queryOptimizationSettingsService';
 import {
   buildContextLabel,
@@ -328,7 +329,9 @@ describe('startApp - wiring 層', () => {
     data: Record<string, unknown>;
     fetchMock: jest.Mock;
   } {
-    const data = { ...initialStore };
+    const data: Record<string, unknown> = { aiConsent: Object.fromEntries(
+      ['gemini', 'openrouter', 'anthropic'].map((provider) => [provider, { version: AI_CONSENT_VERSION, acceptedAt: '2026-10-20T00:00:00Z' }])
+    ), ...initialStore };
     const fetchMock = jest.fn();
     return {
       data,

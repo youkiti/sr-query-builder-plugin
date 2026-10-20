@@ -1,3 +1,4 @@
+import * as extensionVersion from '@/utils/extensionVersion';
 import { SHEET_HEADERS } from '@/domain/sheetsSchema';
 import type { ChatMessage, ChatResponse, LLMProvider } from '@/lib/llm';
 import { createStore, type AppState } from '../store';
@@ -755,6 +756,25 @@ describe('Anthropic の道具による生成', () => {
     expect(JSON.stringify(s.chatWithTools.mock.calls[0])).not.toMatch(/使わないシード|12345/);
   });
 
+  test('長い報告は status を残したまま note の 500 字以内に収める', async () => {
+    const s = setup([reply('write_formula', { content }), reply('tool', { command: 'submit' }), reply(undefined, {}, '報告'.repeat(500))]);
+    await generateDraft(s.deps);
+    const call = s.fetchMock.mock.calls.find(([url]) => String(url).includes('FormulaVersions') && String(url).includes('append'))!;
+    const note = JSON.parse(call[1].body).values[0][SHEET_HEADERS.FormulaVersions.indexOf('note')];
+    expect(note).toHaveLength(500);
+    expect(note).toMatch(/^agent_draft: status=completed;/);
+  });
+
+  test('提出後の呼び出し失敗の note を保存版へ残す', async () => {
+    const s = setup();
+    s.chatWithTools.mockResolvedValueOnce(reply('write_formula', { content }))
+      .mockResolvedValueOnce(reply('tool', { command: 'submit' })).mockRejectedValueOnce(new Error('失敗'));
+    await generateDraft(s.deps);
+    const call = s.fetchMock.mock.calls.find(([url]) => String(url).includes('FormulaVersions') && String(url).includes('append'))!;
+    expect(JSON.parse(call[1].body).values[0][SHEET_HEADERS.FormulaVersions.indexOf('note')])
+      .toContain('agent_draft: status=completed; note=提出のあとのモデルの呼び出しに失敗しました');
+  });
+
   test('上限に達しても受け付け済みの提出を返す', async () => {
     const s = setup([reply('write_formula', { content }), reply('tool', { command: 'submit' })]);
     expect((await generateDraftFormula(s.input, s.deps)).markdown).toContain('disease[tiab]');
@@ -780,14 +800,19 @@ describe('Anthropic の道具による生成', () => {
   });
 
   test('FormulaVersions に ai_draft とモデルを保存して save / done を通知する', async () => {
+    const manifest = jest.spyOn(extensionVersion, 'getExtensionVersion').mockReturnValue('1.2.3');
     const s = setup();
-    const result = await generateDraft(s.deps);
+    const result = await generateDraft({ ...s.deps, llmFactory: { ...s.deps.llmFactory, executedBy: 'author@example.com' } });
     expect(s.store.getState()).toMatchObject({ currentFormulaMarkdown: result.markdown, currentFormulaModel: 'claude-test', currentFormulaCreatedBy: 'ai_draft' });
     const call = s.fetchMock.mock.calls.find(([url]) => String(url).includes('FormulaVersions') && String(url).includes('append'))!;
     const row = JSON.parse(call[1].body).values[0];
     expect(row[SHEET_HEADERS.FormulaVersions.indexOf('created_by')]).toBe('ai_draft');
     expect(row[SHEET_HEADERS.FormulaVersions.indexOf('model')]).toBe('claude-test');
-    expect(row[SHEET_HEADERS.FormulaVersions.indexOf('note')]).toBe('');
+    expect(row[SHEET_HEADERS.FormulaVersions.indexOf('note')]).toBe('agent_draft: status=completed; finalReport=完了');
+    expect(row[SHEET_HEADERS.FormulaVersions.indexOf('models_used')]).toBe('claude-test');
+    expect(row[SHEET_HEADERS.FormulaVersions.indexOf('app_version')]).toBe('1.2.3');
+    expect(row[SHEET_HEADERS.FormulaVersions.indexOf('saved_by')]).toBe('author@example.com');
+    manifest.mockRestore();
     expect(s.deps.onProgress.mock.calls.slice(-2).map(([p]) => p.step)).toEqual(['save', 'done']);
   });
 });

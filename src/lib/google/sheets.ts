@@ -131,14 +131,15 @@ export async function updateRow(
 }
 
 /**
- * 指定タブの全行を 2 次元配列で取得する。`majorDimension=ROWS`。
+ * 指定タブの値を 2 次元配列で取得する。既定は全行、cellRange で範囲を指定できる。
  */
 export async function getSheetValues(
   spreadsheetId: string,
   tab: string,
-  deps: GoogleApiDeps
+  deps: GoogleApiDeps,
+  cellRange = 'A1:Z'
 ): Promise<string[][]> {
-  const range = `${tab}!A1:Z`;
+  const range = `${tab}!${cellRange}`;
   const url = `${API_BASE}/${spreadsheetId}/values/${encodeURIComponent(range)}`;
   const res = await googleFetch(url, { method: 'GET' }, deps);
   const json = (await res.json()) as { values?: string[][] };

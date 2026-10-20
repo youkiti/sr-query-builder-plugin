@@ -12,6 +12,8 @@ on:
     paths:
       # 公開ページの正典が変わったときだけ動かす（本体の実装変更では走らせない）
       - 'hosted/**'
+      - 'src/manifest.json'
+      - 'tools/hosted/**'
       - '.github/workflows/deploy-pages.yml'
       # Picker 許可ページ（hosted/picker.html）の JS は src/ からビルドして配信する。
       # ここに入れておかないと、picker.ts を直しても配信物が古いままになる
@@ -94,6 +96,7 @@ jobs:
         run: |
           mkdir -p _site
           cp -R hosted/. _site/
+          node tools/hosted/inject-version.mjs _site
           rm -f _site/README.md _site/screenshots/.gitkeep
 
       - name: 配信ファイルがそろっているか確認する
