@@ -41,6 +41,38 @@ describe('startOptions', () => {
     };
   }
 
+  test('選択が空のとき、空 ID の一覧外モデルを追加しない', async () => {
+    const doc = buildDocument();
+    await startOptions(doc, readStoredValues({}));
+    const select = doc.querySelector('#llm-model-select') as HTMLSelectElement;
+    select.selectedIndex = -1;
+    (doc.querySelector('#custom-model-id') as HTMLInputElement).value = 'vendor/new-model';
+    (doc.querySelector('#add-custom-model') as HTMLButtonElement).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(Array.from(select.options).some((option) => option.value === '')).toBe(false);
+    expect(Array.from(select.options).some((option) => option.textContent?.includes('一覧にないモデル'))).toBe(false);
+    expect(Array.from(select.options).some((option) => option.value === 'vendor/new-model')).toBe(true);
+  });
+
+  test.each([false, true])('一覧にない保存モデルを保持する（削除操作=%s）', async (remove) => {
+    const id = 'vendor/removed-model';
+    const data: Record<string, string> = { 'llm.selectedModel': id, 'apiKeys.openrouter': 'fake',
+      'llm.customModels': JSON.stringify(remove ? [{ id, label: '消すモデル' }] : []) };
+    const deps = readStoredValues(data);
+    const doc = buildDocument();
+    await startOptions(doc, deps);
+    const select = doc.querySelector('#llm-model-select') as HTMLSelectElement;
+    if (remove) {
+      (doc.querySelector('#custom-models-list button') as HTMLButtonElement).click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(select.value).toBe(id);
+    expect(select.selectedOptions[0]!.textContent).toContain('一覧にないモデル');
+    (doc.querySelector('#save-keys') as HTMLButtonElement).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(deps.writeKey).toHaveBeenCalledWith('llm.selectedModel', id);
+  });
+
   test.each([
     ['a', '', 'claude-opus-5-5'],
     ['', 'g', 'gemini-3.5-flash-lite'],

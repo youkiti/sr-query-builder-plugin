@@ -20,7 +20,7 @@ test('道具の要求と応答を扱い、thinking を含む配列を次の往�
   const tools = [{ name: 'tool', description: '道具', inputSchema: { type: 'object' } }];
   const signal = new AbortController().signal;
   const result = await provider.chatWithTools('system', [{ role: 'user', content: 'start' }], tools, { signal });
-  expect(result).toEqual({ content, raw, text: 'ab', stopReason: 'tool_use', tokensIn: 80, tokensOut: 20,
+  expect(result).toEqual({ content, raw, modelReported: null, text: 'ab', stopReason: 'tool_use', tokensIn: 80, tokensOut: 20,
     toolCalls: [{ id: 'toolu_1', name: 'tool', input: { command: 'check' } }] });
   expect(result.content).toBe(content);
   expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
@@ -84,7 +84,7 @@ test('Messages API のヘッダ・ロール・system・既定値を送り、text
     model: 'claude-opus-5-5', max_tokens: 16000, thinking: { type: 'adaptive' },
     system: 's1\n\ns2', messages: [{ role: 'user', content: 'q' }, { role: 'assistant', content: 'a' }],
   });
-  expect(result).toEqual({ text: 'ab', tokensIn: 80, tokensOut: 20, raw });
+  expect(result).toEqual({ modelReported: null, text: 'ab', tokensIn: 80, tokensOut: 20, raw });
   expect(result.raw).toBe(raw);
 });
 
@@ -105,7 +105,7 @@ test('effort 単独指定、usage・content の省略とキャッシュ使用量
   const fetch = jest.fn().mockResolvedValueOnce(jsonResponse({}))
     .mockResolvedValueOnce(jsonResponse({ usage: { input_tokens: 2, output_tokens: 3 } }));
   const provider = new AnthropicProvider({ apiKey: 'test-key', model: 'claude-foo', fetch, effort: 'high' });
-  expect(await provider.chat([])).toEqual({ text: '', tokensIn: null, tokensOut: null, raw: {} });
+  expect(await provider.chat([])).toEqual({ text: '', tokensIn: null, tokensOut: null, raw: {}, modelReported: null });
   expect(JSON.parse(fetch.mock.calls[0][1].body).output_config).toEqual({ effort: 'high' });
   expect(await provider.chat([])).toMatchObject({ tokensIn: 2, tokensOut: 3 });
 });
@@ -156,4 +156,26 @@ test('fetch 未注入なら globalThis.fetch を使う', async () => {
   } finally {
     globalThis.fetch = original;
   }
+});
+
+test('記録する生成設定は chat と道具呼び出しの送信本文に一致する', async () => {
+  const fetch = jest.fn().mockResolvedValue(jsonResponse({ model: 'claude-actual' }));
+  const provider = new AnthropicProvider({ apiKey: 'fake', model: 'claude-opus-5-5', effort: 'medium', fetch });
+  const onRequestSent = jest.fn();
+  const response = await provider.chat([], { temperature: 0.1, responseSchema: { type: 'object' }, onRequestSent });
+  expect(response.modelReported).toBe('claude-actual');
+  await provider.chatWithTools('', [], [], { onRequestSent });
+  for (let i = 0; i < 2; i++) {
+    const body = JSON.parse(fetch.mock.calls[i]![1].body);
+    delete body.messages;
+    delete body.system;
+    delete body.tools;
+    if (body.output_config.format) delete body.output_config.format.schema;
+    expect(onRequestSent.mock.calls[i]![0].generationSettingsSent).toEqual(body);
+    expect(body.max_tokens).toBe(16000);
+    expect(body.output_config.effort).toBe('medium');
+    expect(body.thinking).toEqual({ type: 'adaptive' });
+    expect(body).not.toHaveProperty('temperature');
+  }
+  expect(onRequestSent.mock.calls[1]![0].generationSettingsSent.cache_control).toEqual({ type: 'ephemeral' });
 });

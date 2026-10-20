@@ -548,6 +548,20 @@ describe('createEditView - AI 改善の進捗・提案・エラーは state.bloc
     expect(row.querySelector('.edit__block-rationale')?.textContent).toContain('（改善ポイント');
   });
 
+  test.each(['edit__block-accept', 'edit__block-ai-manual-edit-apply', 'edit__block-reject'])(
+    '採用した提案だけモデルを通知する: %s', (action) => {
+      const onModelUsed = jest.fn();
+      const proposal = improvementFor('ready');
+      proposal.result = { ...proposal.result!, modelUsed: 'improvement-model' };
+      const view = createEditView({ onImproveBlock: jest.fn(), onDraftChange: jest.fn(), onModelUsed });
+      const container = buildContainer();
+      view(container, { state: { ...stateReadyFull, blockImprovement: proposal }, navigate: jest.fn() });
+      blockRow(container, '1').querySelector<HTMLButtonElement>(`.${action}`)!.click();
+      if (action === 'edit__block-reject') expect(onModelUsed).not.toHaveBeenCalled();
+      else expect(onModelUsed).toHaveBeenCalledWith('improvement-model');
+    }
+  );
+
   test('accept: onDraftChange が置換後 md 全文で呼ばれ、onClearImprovement も呼ばれる', () => {
     const onDraftChange = jest.fn();
     const onClearImprovement = jest.fn();

@@ -36,4 +36,7 @@ export interface LlmApiLogEntry {
   latencyMs: number | null;
   costEstimateUsd: number | null;
   error: string | null;
+  modelReported?: string | null;
+  promptVersion?: string | null;
+  executedBy?: string | null;
 }

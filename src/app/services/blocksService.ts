@@ -71,6 +71,8 @@ export async function approveBlocks(deps: BlocksServiceDeps): Promise<ApprovedPr
     protocolDraftPersisted: true,
     currentFormulaVersionId: null,
     currentFormulaMarkdown: null,
+    currentFormulaModelsUsed: null,
+    currentFormulaAppVersion: null,
     currentFormulaCreatedBy: null,
     validationResult: null,
     missedAnalysis: null,

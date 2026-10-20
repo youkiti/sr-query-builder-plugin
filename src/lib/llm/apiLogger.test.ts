@@ -113,7 +113,7 @@ describe('withLogging', () => {
     expect(recorded.uploads[0]?.filename).toBe('log-1.prompt.json');
     expect(recorded.uploads[1]?.filename).toBe('log-1.response.json');
     const responseUpload = JSON.parse(recorded.uploads[1]!.content);
-    expect(responseUpload).toEqual({ candidates: ['x'] });
+    expect(responseUpload).toEqual({ model_reported: null, provider_reported: null, raw: { candidates: ['x'] } });
 
     expect(recorded.entries).toHaveLength(1);
     const entry = recorded.entries[0]!;
@@ -126,6 +126,7 @@ describe('withLogging', () => {
     // gemini-2.5-pro: 入力 $1.25 / 出力 $10.00 per 1M → 5*1.25/1e6 + 7*10/1e6
     expect(entry.costEstimateUsd).toBeCloseTo(5 * 1.25e-6 + 7 * 10e-6, 12);
     expect(entry.error).toBeNull();
+    expect(entry.promptVersion).toBeNull();
     expect(entry.promptRef).toBe('https://drive/log-1.prompt.json');
     expect(entry.responseRef).toBe('https://drive/log-1.response.json');
     expect(entry.promptSummary).toContain('[user] q');
@@ -146,7 +147,7 @@ describe('withLogging', () => {
     expect(recorded.entries[0]?.error).toContain('status=503');
     expect(recorded.entries[0]?.tokensIn).toBeNull();
     const responseUpload = JSON.parse(recorded.uploads[1]!.content);
-    expect(responseUpload).toEqual({ error: expect.stringContaining('status=503') });
+    expect(responseUpload).toEqual({ model_reported: null, provider_reported: null, raw: { error: expect.stringContaining('status=503') } });
   });
 
   test('LlmProviderError の status=null は n/a として記録される', async () => {
@@ -221,4 +222,45 @@ describe('withLogging', () => {
       text: 'ok',
     });
   });
+});
+
+test.each(['drive', 'sheets'] as const)('%s の保存失敗が成功値・元の例外・費用通知を変えない', async (failure) => {
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  try {
+    for (const success of [true, false]) {
+      const response: ChatResponse = { text: 'ok', tokensIn: 5, tokensOut: 7, raw: {} };
+      const original = new Error('元の失敗');
+      const provider = makeProvider(async () => { if (!success) throw original; return response; });
+      const { deps, recorded } = makeDeps();
+      const onResponse = jest.fn();
+      const logging = withLogging(provider, 'draft_block', {
+        ...deps, onResponse,
+        uploadJson: failure === 'drive' ? async () => { throw new Error('秘密のトークン'); } : deps.uploadJson,
+        appendLogEntry: failure === 'sheets' ? async () => { throw new Error('秘密のトークン'); } : deps.appendLogEntry,
+      });
+      if (success) await expect(logging.chat([])).resolves.toBe(response);
+      else await expect(logging.chat([])).rejects.toBe(original);
+      expect(onResponse).toHaveBeenCalledTimes(success ? 1 : 0);
+      expect(recorded.uploads).toHaveLength(failure === 'sheets' ? 2 : 0);
+    }
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('秘密のトークン');
+  } finally { warn.mockRestore(); }
+});
+
+test('送信設定・版・実行者と応答モデル版を JSON と行へ記録する', async () => {
+  const { deps, recorded } = makeDeps();
+  const provider = makeProvider(async (_messages, options) => {
+    options?.onRequestSent?.({ generationSettingsSent: { temperature: 0.2 }, responseSchemaSent: { type: 'OBJECT' } });
+    return { text: 'ok', tokensIn: 1, tokensOut: 2, raw: { modelVersion: 'actual' }, modelReported: 'actual' };
+  });
+  await withLogging(provider, 'extract_protocol', { ...deps, executedBy: 'me@example.com', promptVersion: 'injected-version' }).chat([], { temperature: 0.2 });
+  const prompt = JSON.parse(recorded.uploads[0]!.content);
+  expect(Object.keys(prompt).slice(0, 7)).toEqual(['log_id', 'timestamp', 'provider', 'model_requested', 'purpose', 'prompt_version', 'executed_by']);
+  expect(prompt).toMatchObject({ log_id: 'log-1', purpose: 'extract_protocol', prompt_version: 'injected-version',
+    executed_by: 'me@example.com', options_requested_by_caller: { temperature: 0.2 },
+    generation_settings_sent: { temperature: 0.2 }, response_schema_sent: { type: 'OBJECT' } });
+  expect(prompt).not.toHaveProperty('options');
+  expect(JSON.parse(recorded.uploads[1]!.content)).toMatchObject({ model_reported: 'actual', raw: { modelVersion: 'actual' } });
+  expect(recorded.entries[0]).toMatchObject({ modelReported: 'actual', promptVersion: 'injected-version', executedBy: 'me@example.com' });
 });

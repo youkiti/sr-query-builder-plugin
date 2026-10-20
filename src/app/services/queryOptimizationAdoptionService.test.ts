@@ -1,3 +1,4 @@
+import * as extensionVersion from '@/utils/extensionVersion';
 import { createStore, INITIAL_STATE, type QueryOptimizationRunState } from '../store';
 import { adoptHeldOptimizationCandidate, adoptQueryOptimization, editQueryOptimization } from './queryOptimizationAdoptionService';
 import { saveEditedFormula } from './editService';
@@ -475,4 +476,15 @@ test.each(['best', 'held'] as const)('版保存失敗後に %s から別の保�
   expect(JSON.parse(f.upload.mock.calls[1]![0].content).heldAdoption.candidateId).toBe('candidate-2');
   expect(f.validation.mock.calls[1]![1]).toMatchObject({ versionId: 'r-held-candidate-2', totalHits: 12 });
   expect(f.store.getState().currentFormulaVersionId).toBe('r-held-candidate-2');
+});
+
+
+test('自動調整のモデル・保存者・保存時の拡張版を記録する', async () => {
+  const f = setup();
+  jest.spyOn(extensionVersion, 'getExtensionVersion').mockReturnValue('1.2.3');
+  f.run.inputSnapshot = { ...f.run.inputSnapshot!, model: 'optimization-model' };
+  await adoptQueryOptimization({ ...f, getSavedBy: async () => 'saver@example.com' });
+  expect(f.append).toHaveBeenCalledWith('s', expect.objectContaining({
+    savedBy: 'saver@example.com', appVersion: '1.2.3', modelsUsed: 'optimization-model',
+  }), f.google);
 });

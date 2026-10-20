@@ -1,3 +1,4 @@
+import { getExtensionVersion } from '@/utils/extensionVersion';
 import type { AppStore, ProtocolDraft, BlocksDraft } from '../store';
 import type { MeshResolution } from '@/lib/ncbi/mesh';
 import { blockTermCount, buildMeshTag, meshDescriptor, needsParentheses } from '@/features/formula/assembleFormulaMd';
@@ -117,6 +118,7 @@ export interface DraftServiceDeps {
 }
 
 export interface DraftGeneration {
+  agentNote?: string;
   formula: AssembledFormula['formula'];
   markdown: string;
   filter: FilterDesignerResult;
@@ -195,6 +197,7 @@ export async function generateDraft(deps: DraftServiceDeps, options: DraftGenera
       createdBy: 'ai_draft',
       createdAt,
       note: [
+        generated.agentNote,
         generated.removedMeshHeadings.length > 0
           ? `MeSH 辞書に無い見出しを外しました: ${generated.removedMeshHeadings.map((item) => `#${item.blockId} ${item.descriptor}`).join('、')}` : '',
         generated.replacedMeshHeadings.length > 0
@@ -202,8 +205,11 @@ export async function generateDraft(deps: DraftServiceDeps, options: DraftGenera
         generated.filterNotice,
         generated.parenthesizedTerms.length > 0
           ? `検索語の中の AND / OR を括弧で囲みました: ${generated.parenthesizedTerms.map((item) => `#${item.blockId} ${item.blockLabel}: (${item.term})`).join('、')}` : '',
-      ].filter(Boolean).join('／') || null,
+      ].filter(Boolean).join('／').slice(0, generated.agentNote ? 500 : undefined) || null,
       model,
+      modelsUsed: model,
+      appVersion: getExtensionVersion(),
+      savedBy: deps.llmFactory.executedBy ?? null,
     },
     deps.google
   );
@@ -213,6 +219,8 @@ export async function generateDraft(deps: DraftServiceDeps, options: DraftGenera
     currentFormulaVersionId: versionId,
     currentFormulaMarkdown: generated.markdown,
     currentFormulaModel: model,
+    currentFormulaModelsUsed: model,
+    currentFormulaAppVersion: getExtensionVersion(),
     currentFormulaCreatedBy: 'ai_draft',
   }));
 
@@ -429,7 +437,9 @@ async function generateAgentDraftFormula(input: DraftGenerationInput, deps: Draf
     throw new Error(`AI が検索式を提出できませんでした（モデルの呼び出し ${result.modelCalls} 回、測定 ${result.measurements} 回、提出の試行 ${result.submissions} 回）`);
   }
   const markdown = result.submission.md;
-  return { markdown, formula: parsePubmedFormulaMd(markdown), filter, filterNotice, blockSkeletons,
+  return { agentNote: [`agent_draft: status=${result.status}`, result.note ? `note=${result.note}` : '',
+    result.finalReport ? `finalReport=${result.finalReport}` : ''].filter(Boolean).join('; ').slice(0, 500),
+    markdown, formula: parsePubmedFormulaMd(markdown), filter, filterNotice, blockSkeletons,
     meshSuggestions: blocks.blocks.map(() => []), freewordSuggestions: blocks.blocks.map(() => []),
     parenthesizedTerms: [], removedMeshHeadings: [], replacedMeshHeadings: [], blockHits: [] };
 }

@@ -19,4 +19,7 @@ export interface FormulaVersion {
    * user_edit では元ドラフトのモデルを引き継ぐ。model 列導入前の行では null
    */
   model: string | null;
+  savedBy?: string | null;
+  appVersion?: string | null;
+  modelsUsed?: string | null;
 }

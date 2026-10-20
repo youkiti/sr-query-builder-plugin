@@ -60,7 +60,7 @@ export const STORAGE_KEY_GEMINI_TIER = 'gemini.detectedTier';
 function populateModelSelect(
   selectEl: HTMLSelectElement,
   customModels: CustomModelEntry[],
-  selectedModelId: string
+  selectedModelId: string | undefined
 ): void {
   selectEl.innerHTML = '';
   // Gemini optgroup（ビルトイン + カスタム Gemini）
@@ -117,6 +117,13 @@ function populateModelSelect(
     anthropicGroup.appendChild(opt);
   });
   selectEl.appendChild(anthropicGroup);
+  if (selectedModelId && !Array.from(selectEl.options).some((option) => option.value === selectedModelId)) {
+    const option = selectEl.ownerDocument.createElement('option');
+    option.value = selectedModelId;
+    option.textContent = `${selectedModelId}（一覧にないモデル）`;
+    option.selected = true;
+    selectEl.appendChild(option);
+  }
 }
 
 function refreshProviderCards(doc: Document, selectedModelId: string): void {

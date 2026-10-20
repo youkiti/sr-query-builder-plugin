@@ -39,7 +39,7 @@ describe('appendFormulaVersion', () => {
   test('SHEET_HEADERS.FormulaVersions 順で 1 行追記する', async () => {
     const d = deps();
     await appendFormulaVersion('sid', fixture, d);
-    const [url, init] = d.fetch.mock.calls[0];
+    const [url, init] = d.fetch.mock.calls.find(([url]) => url.includes(':append'))!;
     expect(url).toContain('FormulaVersions');
     expect(url).toContain(':append');
     const body = JSON.parse((init as RequestInit).body as string) as {
@@ -66,7 +66,7 @@ describe('appendFormulaVersion', () => {
       { ...fixture, parentVersionId: 'v0', note: 'memo', createdBy: 'user_edit' },
       d
     );
-    const body = JSON.parse((d.fetch.mock.calls[0][1] as RequestInit).body as string) as {
+    const body = JSON.parse((d.fetch.mock.calls.find(([url]) => url.includes(':append'))![1] as RequestInit).body as string) as {
       values: (string | number | boolean | null)[][];
     };
     const row = body.values[0]!;
@@ -79,10 +79,10 @@ describe('appendFormulaVersion', () => {
     expect(map['created_by']).toBe('user_edit');
   });
 
-  test('model ありは末尾の model 列に反映される', async () => {
+  test('model ありは model 列に反映される', async () => {
     const d = deps();
     await appendFormulaVersion('sid', { ...fixture, model: 'gemini-3.5-flash' }, d);
-    const body = JSON.parse((d.fetch.mock.calls[0][1] as RequestInit).body as string) as {
+    const body = JSON.parse((d.fetch.mock.calls.find(([url]) => url.includes(':append'))![1] as RequestInit).body as string) as {
       values: (string | number | boolean | null)[][];
     };
     const row = body.values[0]!;
@@ -290,4 +290,33 @@ describe('getFormulaVersionById', () => {
     const result = await getFormulaVersionById('sid', 'v1', d);
     expect(result?.versionId).toBe('v1');
   });
+});
+
+test('古い行の追加列は null、新しい行では末尾のメタ情報を復元する', async () => {
+  const header = SHEET_HEADERS.FormulaVersions;
+  const row = ['v1', '', '1', 'snapshot', 'md', 'ai_draft', 'time', '', 'model'];
+  const old = await getLatestFormulaVersion('s', deps({ values: [header.slice(0, 9), row] }));
+  expect(old).toMatchObject({ savedBy: null, appVersion: null, modelsUsed: null });
+  const current = await getLatestFormulaVersion('s', deps({ values: [header, [...row, 'saver@example.com', '1.2.3', 'model;other']] }));
+  expect(current).toMatchObject({ savedBy: 'saver@example.com', appVersion: '1.2.3', modelsUsed: 'model;other' });
+});
+
+test.each(['GET', 'PUT'])('見出しの %s 失敗でも検索式の版を追記し、次回は見出しを再確認する', async (method) => {
+  const d = deps();
+  let failed = false;
+  d.fetch.mockImplementation(async (_url: string, init: RequestInit) => {
+    if (!failed && init.method === method) {
+      failed = true;
+      throw new Error('見出しの通信失敗');
+    }
+    return jsonResponse({ values: [SHEET_HEADERS.FormulaVersions.slice(0, -3)] });
+  });
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  try {
+    await expect(appendFormulaVersion('s', fixture, d)).resolves.toBeUndefined();
+    await expect(appendFormulaVersion('s', { ...fixture, versionId: 'v2' }, d)).resolves.toBeUndefined();
+    expect(d.fetch.mock.calls.filter(([url]) => url.includes(':append'))).toHaveLength(2);
+    expect(d.fetch.mock.calls.filter(([, init]) => init.method === 'GET')).toHaveLength(2);
+    expect(warn).toHaveBeenCalledTimes(1);
+  } finally { warn.mockRestore(); }
 });

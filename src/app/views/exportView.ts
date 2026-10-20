@@ -87,7 +87,7 @@ export function createExportView(callbacks: ExportViewCallbacks = {}): RenderVie
     results.className = 'export__results';
     container.appendChild(results);
 
-    container.appendChild(buildMethodsSection(doc, ctx.state.currentFormulaModel));
+    container.appendChild(buildMethodsSection(doc, ctx.state.currentFormulaModel, ctx.state.currentFormulaModelsUsed, ctx.state.currentFormulaAppVersion));
 
     exportBtn.addEventListener('click', () => {
       if (!callbacks.onExport) {
@@ -186,8 +186,8 @@ function renderResults(doc: Document, container: HTMLElement, result: ExportResu
  * 「AI 支援で下書き → 著者がレビューして確定」の開示文を英/日で表示し、
  * ボタン 1 つでクリップボードへコピーできるようにする。
  */
-function buildMethodsSection(doc: Document, model: string | null): HTMLElement {
-  const texts = buildMethodsTexts({ model, version: getExtensionVersion() });
+function buildMethodsSection(doc: Document, model: string | null, modelsUsed?: string | null, appVersion?: string | null): HTMLElement {
+  const texts = buildMethodsTexts({ model, modelsUsed, appVersion, version: getExtensionVersion() });
   const section = doc.createElement('section');
   section.className = 'export__methods';
 

@@ -66,3 +66,13 @@ describe('getExtensionVersion', () => {
     expect(getExtensionVersion()).toBeNull();
   });
 });
+
+test('保存版の拡張バージョンを優先し、寄与したモデルを和文・英文に列挙する', () => {
+  const texts = buildMethodsTexts({ model: 'legacy', version: '9.0.0', appVersion: '1.2.3', modelsUsed: 'model-a;model-b' });
+  expect(texts.en).toContain('(model-a, model-b)');
+  expect(texts.ja).toContain('（model-a、model-b）');
+  expect(texts.en).toContain('version 1.2.3');
+  expect(texts.ja).toContain('バージョン 1.2.3');
+  expect(texts.en).not.toContain('9.0.0');
+  expect(texts.en).toContain('All AI-generated output was reviewed, edited, and approved by the authors.');
+});

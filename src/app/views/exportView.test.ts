@@ -252,6 +252,18 @@ describe('createExportView', () => {
       expect(container.querySelectorAll('.export__methods-copy')).toHaveLength(2);
     });
 
+    test('表示中の保存版から拡張版と複数モデルを表示する', () => {
+      const view = createExportView();
+      const container = buildContainer();
+      view(container, { state: stateWithDraft({ currentFormulaModel: 'legacy',
+        currentFormulaAppVersion: '1.2.3', currentFormulaModelsUsed: 'model-a;model-b' }), navigate: jest.fn() });
+      const texts = container.querySelectorAll<HTMLElement>('.export__methods-text');
+      expect(texts[0]!.textContent).toContain('version 1.2.3');
+      expect(texts[0]!.textContent).toContain('model-a, model-b');
+      expect(texts[1]!.textContent).toContain('バージョン 1.2.3');
+      expect(texts[1]!.textContent).toContain('model-a、model-b');
+    });
+
     test('モデル情報が無い旧バージョンではプレースホルダと置換案内を出す', () => {
       const view = createExportView();
       const container = buildContainer();

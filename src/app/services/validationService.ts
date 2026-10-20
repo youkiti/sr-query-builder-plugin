@@ -166,6 +166,8 @@ export async function runValidation(deps: ValidationServiceDeps): Promise<Valida
   notify({ step: 'logging' });
   const uuidFn = deps.newUuid ?? newUuid;
   const nowFn = deps.now ?? nowIso;
+  const validationId = uuidFn();
+  const executedAt = nowFn();
   const loggedValidationIds: string[] = [];
   const version = state.currentFormulaVersionId;
 
@@ -174,9 +176,9 @@ export async function runValidation(deps: ValidationServiceDeps): Promise<Valida
   const detailRef = await uploadValidationDetail(
     {
       driveFolderId: state.project.driveFolderId,
-      validationId: uuidFn(),
+      validationId,
       versionId: version,
-      executedAt: nowFn(),
+      executedAt,
       lineHits,
       finalQuery,
       finalQueryError,
@@ -188,10 +190,10 @@ export async function runValidation(deps: ValidationServiceDeps): Promise<Valida
 
   const logEntry = async (entry: Omit<ValidationLogEntry, 'validationId' | 'versionId' | 'executedAt'>): Promise<void> => {
     const full: ValidationLogEntry = {
-      validationId: uuidFn(),
+      validationId,
       versionId: version,
       ...entry,
-      executedAt: nowFn(),
+      executedAt,
     };
     await appendValidationLog(state.project!.spreadsheetId, full, deps.google);
     loggedValidationIds.push(full.validationId);

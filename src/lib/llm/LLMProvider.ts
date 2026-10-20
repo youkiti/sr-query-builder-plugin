@@ -21,7 +21,14 @@ export type ResponseFormat = 'text' | 'json';
  */
 export type JsonSchema = Record<string, unknown>;
 
+export interface RequestMetadata {
+  generationSettingsSent: Record<string, unknown>;
+  responseSchemaSent?: unknown;
+}
+
 export interface ChatOptions {
+  /** HTTP 送信直前に、本文から取り出した設定を通知する。 */
+  onRequestSent?: (metadata: RequestMetadata) => void;
   signal?: AbortSignal;
   temperature?: number;
   maxOutputTokens?: number;
@@ -44,6 +51,8 @@ export interface ChatResponse {
   tokensOut: number | null;
   /** プロバイダ生レスポンス（apiLogger が Drive へそのまま保存する） */
   raw: unknown;
+  modelReported?: string | null;
+  providerReported?: string | null;
 }
 
 export interface LLMProvider {
@@ -64,7 +73,7 @@ export interface ToolDefinition {
   inputSchema: JsonSchema;
 }
 
-export type ToolChatOptions = Pick<ChatOptions, 'signal' | 'maxOutputTokens'>;
+export type ToolChatOptions = Pick<ChatOptions, 'signal' | 'maxOutputTokens' | 'onRequestSent'>;
 export interface ToolCall { id: string; name: string; input: unknown }
 export interface ToolChatResponse extends ChatResponse {
   content: readonly unknown[];

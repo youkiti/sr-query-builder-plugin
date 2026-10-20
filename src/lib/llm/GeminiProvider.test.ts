@@ -39,6 +39,7 @@ describe('GeminiProvider.chat', () => {
       tokensIn: 10,
       tokensOut: 20,
       raw: expect.any(Object),
+      modelReported: null,
     });
     expect(provider.providerId).toBe('gemini');
     expect(provider.model).toBe('gemini-3.5-flash-lite');
@@ -275,4 +276,19 @@ test.each(['AbortError', 'TimeoutError'])('fetch とエラー本文の %s を包
     await expect(provider.chat([], { signal: controller.signal })).rejects.toBe(error);
     expect(fetch).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ signal: controller.signal }));
   }
+});
+
+test('記録する設定と変換済みスキーマが送信本文に一致する', async () => {
+  const fetch = jest.fn().mockResolvedValue(jsonResponse({ modelVersion: 'gemini-actual' }));
+  const provider = new GeminiProvider({ apiKey: 'fake', model: 'gemini-test', fetch });
+  const onRequestSent = jest.fn();
+  const result = await provider.chat([], { temperature: 0.2, maxOutputTokens: 123,
+    responseSchema: { type: 'object', additionalProperties: false, properties: { answer: { type: 'string' } } }, onRequestSent });
+  const body = JSON.parse(fetch.mock.calls[0]![1].body);
+  const schema = body.generationConfig.responseSchema;
+  delete body.generationConfig.responseSchema;
+  delete body.contents;
+  expect(onRequestSent.mock.calls[0]![0]).toEqual({ generationSettingsSent: body, responseSchemaSent: schema });
+  expect(schema).toEqual({ type: 'OBJECT', properties: { answer: { type: 'STRING' } } });
+  expect(result.modelReported).toBe('gemini-actual');
 });

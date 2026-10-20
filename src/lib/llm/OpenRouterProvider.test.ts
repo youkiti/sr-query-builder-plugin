@@ -44,6 +44,8 @@ describe('OpenRouterProvider.chat', () => {
       tokensIn: 10,
       tokensOut: 20,
       raw: expect.any(Object),
+      modelReported: null,
+      providerReported: null,
     });
     expect(provider.providerId).toBe('openrouter');
     expect(provider.model).toBe('qwen/qwen3-235b-a22b-2507');
@@ -187,4 +189,17 @@ test.each(['AbortError', 'TimeoutError'])('fetch とエラー本文の %s を包
     await expect(provider.chat([], { signal: controller.signal })).rejects.toBe(error);
     expect(fetch).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ signal: controller.signal }));
   }
+});
+
+test('記録する設定が送信本文に一致し、モデルと提供者の報告を取り出す', async () => {
+  const fetch = jest.fn().mockResolvedValue(jsonResponse({ model: 'actual/model', provider: 'actual-provider' }));
+  const provider = new OpenRouterProvider({ apiKey: 'fake', model: 'requested/model', fetch });
+  const onRequestSent = jest.fn();
+  const result = await provider.chat([], { temperature: 0.3, maxOutputTokens: 456,
+    responseSchema: { type: 'object' }, onRequestSent });
+  const body = JSON.parse(fetch.mock.calls[0]![1].body);
+  delete body.messages;
+  delete body.response_format.json_schema.schema;
+  expect(onRequestSent.mock.calls[0]![0].generationSettingsSent).toEqual(body);
+  expect(result).toMatchObject({ modelReported: 'actual/model', providerReported: 'actual-provider' });
 });

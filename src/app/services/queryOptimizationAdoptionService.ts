@@ -1,3 +1,4 @@
+import { getExtensionVersion } from '@/utils/extensionVersion';
 import { appendFormulaVersion, getFormulaVersionById } from '@/features/formula';
 import { appendValidationLog } from '@/features/validation';
 import { ensureChildFolder, findChildFile, getSheetValues, uploadTextFile } from '@/lib/google';
@@ -102,6 +103,9 @@ async function performOptimizationAdoption(deps: EditServiceDeps, selection: Ado
         formulaMd: serializePubmedFormulaMd(selection.formula), createdBy: 'auto_optimize', createdAt,
         note: `自動調整 run: ${run.runId}${selection.noteSuffix}\n実行ログ・最終検証: ${detailRef}`,
         model: run.inputSnapshot?.model ?? state.currentFormulaModel,
+        modelsUsed: run.inputSnapshot?.model ?? state.currentFormulaModel,
+        appVersion: getExtensionVersion(),
+        savedBy: await deps.getSavedBy?.().catch(() => null) ?? null,
       };
       await appendFormulaVersion(project.spreadsheetId, version, deps.google);
     }
@@ -112,6 +116,7 @@ async function performOptimizationAdoption(deps: EditServiceDeps, selection: Ado
       ...(s.currentFormulaVersionId === state.currentFormulaVersionId ? {
         currentFormulaVersionId: saved.versionId, currentFormulaMarkdown: saved.formulaMd,
         currentFormulaCreatedBy: saved.createdBy, currentFormulaModel: saved.model,
+        currentFormulaModelsUsed: saved.modelsUsed ?? null, currentFormulaAppVersion: saved.appVersion ?? null,
       } : {}),
       queryOptimizationRun: { ...s.queryOptimizationRun!, save: withTarget({ formulaVersionId: saved.versionId, status: 'saved', error: null }) },
     }));

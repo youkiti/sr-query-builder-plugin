@@ -207,6 +207,8 @@ describe('buildLlmProviderFactory', () => {
       .mockResolvedValueOnce(jsonResponse({ id: 'd1', webViewLink: 'https://drive/p' }))
       // Drive: response.json
       .mockResolvedValueOnce(jsonResponse({ id: 'd2', webViewLink: 'https://drive/r' }))
+      // Sheets: 見出し確認
+      .mockResolvedValueOnce(jsonResponse({ values: [SHEET_HEADERS.LLMApiLog] }))
       // Sheets: append LLMApiLog
       .mockResolvedValueOnce(jsonResponse({}));
     const google = {
@@ -227,7 +229,7 @@ describe('buildLlmProviderFactory', () => {
     expect(result.text).toBe('OK');
 
     const calls = fetchMock.mock.calls.map((c) => c[0] as string);
-    // 1: Gemini, 2: Drive prompt, 3: Drive response, 4: Sheets append
+    // Gemini、Drive 2 件、見出し確認、Sheets 追記の順
     expect(calls[0]).toContain('generativelanguage.googleapis.com');
     expect(calls[1]).toContain('/upload/drive/v3/files');
     expect(calls[2]).toContain('/upload/drive/v3/files');
@@ -239,7 +241,7 @@ describe('buildLlmProviderFactory', () => {
 
     // Sheets へ書き込まれる行が SHEET_HEADERS.LLMApiLog の順
     const sheetBody = JSON.parse(
-      (fetchMock.mock.calls[3][1] as RequestInit).body as string
+      (fetchMock.mock.calls[4][1] as RequestInit).body as string
     ) as { values: (string | number | boolean | null)[][] };
     const row = sheetBody.values[0]!;
     expect(row).toHaveLength(SHEET_HEADERS.LLMApiLog.length);
@@ -281,7 +283,7 @@ test('optimize_query は送信ごとに hook と新しい signal を使い、ロ
   expect(result.text).toBe('OK');
   expect(signals).toHaveLength(2);
   expect(signals[0]).not.toBe(signals[1]);
-  expect(fetch.mock.calls.filter(([url]) => (url as string).includes('/values/LLMApiLog'))).toHaveLength(2);
+  expect(fetch.mock.calls.filter(([url]) => (url as string).includes('/values/LLMApiLog') && (url as string).includes(':append'))).toHaveLength(2);
   expect(fetch.mock.calls.filter(([url]) => (url as string).includes('/upload/drive/'))).toHaveLength(4);
 });
 
@@ -321,4 +323,59 @@ test.each([
   const body = JSON.parse(fetch.mock.calls[0]![1].body);
   if (providerId === 'anthropic') expect(body.output_config.effort).toBe('medium');
   else expect(body.output_config).toBeUndefined();
+});
+
+test.each(['drive', 'sheets'] as const)('%s の保存失敗でも応答トークンから費用を通知する', async (failure) => {
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  try {
+    const { store } = memoryStore({ [STORAGE_KEY_GEMINI]: 'fake' });
+    const fetch = jest.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('generativelanguage')) return jsonResponse({ usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20 } });
+      if (url.includes('/upload/drive')) {
+        if (failure === 'drive') throw new Error('保存失敗');
+        return jsonResponse({ id: 'log', webViewLink: 'fake-link' });
+      }
+      if (init?.method === 'GET') return jsonResponse({ values: [SHEET_HEADERS.LLMApiLog] });
+      throw new Error('保存失敗');
+    });
+    const onCostAccumulate = jest.fn();
+    const factory = await buildLlmProviderFactory({ store, google: { fetch: fetch as typeof globalThis.fetch,
+      getAccessToken: async () => 'fake' }, llmLogFolderId: 'folder', spreadsheetId: 'sheet', onCostAccumulate });
+    await expect(factory.forPurpose('draft_block').chat([])).resolves.toMatchObject({ tokensIn: 10, tokensOut: 20 });
+    expect(onCostAccumulate).toHaveBeenCalledTimes(1);
+    expect(onCostAccumulate.mock.calls[0]![0]).toBeGreaterThan(0);
+  } finally { warn.mockRestore(); }
+});
+
+test.each([
+  ['gemini-test', 'apiKeys.gemini', '1.0.0+standard'],
+  ['claude-test', 'apiKeys.anthropic', '1.0.0+anthropic'],
+])('見出し確認が失敗してもログ追記とプロンプト版の解決を続ける: %s', async (model, key, promptVersion) => {
+  const { store } = memoryStore({ [STORAGE_KEY_LLM_MODEL]: model, [key]: 'fake' });
+  let headerFailed = false;
+  const fetch = jest.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes('/upload/drive')) return jsonResponse({ id: 'log', webViewLink: 'fake-link' });
+    if (url.includes('/values/LLMApiLog') && init?.method === 'GET') {
+      if (!headerFailed) { headerFailed = true; throw new Error('見出しの通信失敗'); }
+      return jsonResponse({ values: [SHEET_HEADERS.LLMApiLog] });
+    }
+    return jsonResponse({});
+  });
+  const google = { fetch: fetch as typeof globalThis.fetch, getAccessToken: async () => 'fake' };
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  try {
+    const factory = await buildLlmProviderFactory({ store, google, llmLogFolderId: 'folder', spreadsheetId: 'sheet' });
+    await factory.forPurpose('extract_protocol').chat([]);
+    await factory.forPurpose('extract_protocol').chat([]);
+    const appends = fetch.mock.calls.filter(([url]) => url.includes(':append'));
+    expect(appends).toHaveLength(2);
+    for (const [, init] of appends) {
+      const row = JSON.parse(init!.body as string).values[0];
+      expect(row[SHEET_HEADERS.LLMApiLog.indexOf('prompt_version')]).toBe(promptVersion);
+    }
+    const uploads = fetch.mock.calls.filter(([url]) => url.includes('/upload/drive'));
+    expect(uploads[0]![1]!.body).toContain(promptVersion);
+    expect(fetch.mock.calls.filter(([, init]) => init?.method === 'GET')).toHaveLength(2);
+    expect(warn).toHaveBeenCalledTimes(1);
+  } finally { warn.mockRestore(); }
 });

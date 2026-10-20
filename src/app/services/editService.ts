@@ -1,3 +1,4 @@
+import { getExtensionVersion } from '@/utils/extensionVersion';
 import {
   appendFormulaVersion,
   getFormulaVersionById,
@@ -24,6 +25,7 @@ import type { AppState, AppStore } from '../store';
  */
 
 export interface EditServiceDeps {
+  getSavedBy?: () => Promise<string | null>;
   google: GoogleApiDeps;
   store: AppStore;
   newUuid?: () => string;
@@ -31,6 +33,7 @@ export interface EditServiceDeps {
 }
 
 export interface SaveEditedFormulaInput {
+  modelsUsed?: string[];
   /** 編集後の formula_md 全文（`## PubMed/MEDLINE` セクションを含む） */
   formulaMd: string;
   /** ユーザー記入の編集メモ。空文字なら null 保存 */
@@ -65,6 +68,12 @@ export async function saveEditedFormula(
   const origin = draft?.formulaVersionId === state.currentFormulaVersionId
     && draft.optimizationOrigin?.projectId === state.project.projectId ? draft.optimizationOrigin : null;
   const model = origin?.model ?? state.currentFormulaModel;
+  const modelsUsed = [...new Set([...(parentVersionId ? (state.currentFormulaModelsUsed ?? state.currentFormulaModel ?? '').split(';') : []),
+    ...(origin?.model ? [origin.model] : []),
+    ...(draft?.formulaVersionId === parentVersionId ? draft.modelsUsed ?? [] : []),
+    ...(input.modelsUsed ?? [])].filter(Boolean))].join(';') || null;
+  const appVersion = getExtensionVersion();
+  const savedBy = await deps.getSavedBy?.().catch(() => null) ?? null;
   const note = [input.note.trim(), ...(origin ? [`自動調整 run: ${origin.runId} から編集`] : [])]
     .filter(Boolean).join('\n');
 
@@ -80,7 +89,7 @@ export async function saveEditedFormula(
       createdAt,
       note: note || null,
       // 自動調整由来ならそのモデル、それ以外は元の保存版を支援したモデルを引き継ぐ。
-      model,
+      model, modelsUsed, appVersion, savedBy,
     },
     deps.google
   );
@@ -91,6 +100,8 @@ export async function saveEditedFormula(
     currentFormulaMarkdown: input.formulaMd,
     currentFormulaCreatedBy: 'user_edit',
     currentFormulaModel: model,
+    currentFormulaModelsUsed: modelsUsed,
+    currentFormulaAppVersion: appVersion,
   }));
 
   return { versionId, parentVersionId };
@@ -319,6 +330,7 @@ function collectValidationContext(store: AppStore): ValidationContext | null {
 }
 
 export interface BlockImprovementResult {
+  modelUsed?: string;
   blockId: string;
   /** 改善前の expression（formula_md から抽出したもの） */
   currentExpression: string;
@@ -391,6 +403,7 @@ export async function requestBlockImprovement(
   return {
     blockId: input.blockId,
     currentExpression: context.currentExpression,
+    modelUsed: deps.llmFactory.model,
     proposedExpression: proposal.proposedExpression,
     rationale: proposal.rationale,
   };

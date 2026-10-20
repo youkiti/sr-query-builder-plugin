@@ -94,6 +94,7 @@ export interface MissedAnalysisEntry {
  * formulaVersionId が currentFormulaVersionId と一致するときだけ有効。
  */
 export interface ExcessFilterProposalEntry {
+  modelUsed?: string;
   formulaVersionId: string;
   /** 提案時点の最終検索式の総ヒット数 */
   totalHits: number;
@@ -298,6 +299,7 @@ export interface ExpandApiWait {
  * （別バージョンを読み込み直した後に古い draft を表示しないため。ValidationResultEntry と同じ判定）。
  */
 export interface FormulaEditDraft {
+  modelsUsed?: string[];
   /** 自動調整から持ち込んだ下書きだけが持つ由来。手入力の下書きでは省略する。 */
   optimizationOrigin?: { projectId: string; runId: string; model: string | null };
   /** null は、まだ保存版のない式の編集下書き。 */
@@ -460,6 +462,8 @@ export interface AppState {
    * export 画面の Methods 文案に埋め込む。model 列導入前の旧バージョンでは null
    */
   currentFormulaModel: string | null;
+  currentFormulaModelsUsed?: string | null;
+  currentFormulaAppVersion?: string | null;
   /**
    * 現在の検索式が AI 生成そのまま（`ai_draft`）か、AI 生成結果に手を加えて保存した版
    * （`user_edit`）かを表す（FormulaVersions.created_by 由来）。`user_edit` になる経路は
@@ -528,6 +532,8 @@ export const INITIAL_STATE: AppState = {
   currentFormulaVersionId: null,
   currentFormulaMarkdown: null,
   currentFormulaModel: null,
+  currentFormulaModelsUsed: null,
+  currentFormulaAppVersion: null,
   currentFormulaCreatedBy: null,
   draftRun: null,
   expandRun: null,

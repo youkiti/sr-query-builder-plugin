@@ -157,6 +157,8 @@ describe('runValidation', () => {
       if (hasSeed) eutilsFetchMock.mockResolvedValueOnce(jsonResponse({ esearchresult: { count: '0', idlist: [] } }));
     }
     if (hasSeed) eutilsFetchMock.mockResolvedValueOnce(xmlResponse('<PubmedArticleSet></PubmedArticleSet>'));
+    let tick = 0;
+    deps.now = () => `検証時刻-${++tick}`;
     const summary = await runValidation(deps);
     expect(summary.finalQuery.captureRate).toBe(expectedRate);
     expect(summary.finalQueryError).toBe(fails ? 'NCBI down' : null);
@@ -174,7 +176,9 @@ describe('runValidation', () => {
     const upload = sheetsFetchMock.mock.calls.find((c) => (c[0] as string).includes('/upload/drive/v3/files'))!;
     const multipart = (upload[1] as RequestInit).body as string;
     const payload = multipart.split('\r\n\r\n')[2]!.split('\r\n--')[0]!;
-    const detail = JSON.parse(payload) as { final_query: unknown };
+    const detail = JSON.parse(payload) as { final_query: unknown; validation_id: string; executed_at: string };
+    expect(new Set(rows.map((row) => row[SHEET_HEADERS.ValidationLog.indexOf('validation_id')]))).toEqual(new Set([detail.validation_id]));
+    expect(new Set(rows.map((row) => row[SHEET_HEADERS.ValidationLog.indexOf('executed_at')]))).toEqual(new Set([detail.executed_at]));
     expect(detail.final_query).toEqual(fails ? { error: 'NCBI down' } : {
       final_query: summary.finalQuery.finalQuery,
       total_hits: 10,

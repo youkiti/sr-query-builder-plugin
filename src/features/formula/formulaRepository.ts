@@ -1,6 +1,6 @@
 import type { FormulaVersion } from '@/domain/formulaVersion';
 import { SHEET_HEADERS } from '@/domain/sheetsSchema';
-import { appendRow, getSheetValues, type GoogleApiDeps } from '@/lib/google';
+import { appendRow, ensureSheetHeaders, getSheetValues, type GoogleApiDeps } from '@/lib/google';
 
 /**
  * FormulaVersions タブの読み書き。requirements.md §3.1 の列順を保ち、
@@ -20,6 +20,7 @@ export async function appendFormulaVersion(
   version: FormulaVersionRow,
   deps: GoogleApiDeps
 ): Promise<void> {
+  await ensureSheetHeaders(spreadsheetId, 'FormulaVersions', HEADER, deps);
   await appendRow(spreadsheetId, 'FormulaVersions', toRow(version), deps);
 }
 
@@ -98,6 +99,9 @@ function toRow(v: FormulaVersionRow): (string | number | boolean | null)[] {
     created_at: v.createdAt,
     note: v.note,
     model: v.model,
+    saved_by: v.savedBy ?? null,
+    app_version: v.appVersion ?? null,
+    models_used: v.modelsUsed ?? null,
   };
   return HEADER.map((key) => map[key] ?? null);
 }
@@ -126,5 +130,8 @@ function fromRow(row: readonly string[]): FormulaVersion {
     note: cell('note') === '' ? null : cell('note'),
     // model 列導入前に書かれた行は列自体が無い（'' になる）ので null 扱い
     model: cell('model') === '' ? null : cell('model'),
+    savedBy: cell('saved_by') || null,
+    appVersion: cell('app_version') || null,
+    modelsUsed: cell('models_used') || null,
   };
 }

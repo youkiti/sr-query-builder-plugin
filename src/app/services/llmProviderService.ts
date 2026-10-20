@@ -1,9 +1,12 @@
+import { getPromptVersion } from '@/features/formula/skills/promptVersions';
 import type { LlmApiLogEntry, LlmPurpose, LlmProviderId } from '@/domain/llmApiLog';
 import type { LlmRequestState, RetryOptions } from '@/lib/llm/retry';
+import { estimateCostUsd } from '@/lib/llm/pricing';
 import { SHEET_HEADERS } from '@/domain/sheetsSchema';
 import type { ProjectStoreDeps } from '@/features/project';
 import {
   appendRow,
+  ensureSheetHeaders,
   uploadTextFile,
   type GoogleApiDeps,
 } from '@/lib/google';
@@ -46,6 +49,8 @@ export class LlmApiKeyMissingError extends Error {
 }
 
 export interface LlmFactoryDeps {
+  executedBy?: string | null;
+  getExecutedBy?: () => Promise<string | null>;
   google: GoogleApiDeps;
   store: ProjectStoreDeps;
   /** ログ JSON を置く Drive フォルダ ID（通常は logs/llm/ 配下）。 */
@@ -63,6 +68,7 @@ export interface LlmFactoryDeps {
 export type LlmAttemptOptions = Pick<RetryOptions, 'beforeAttempt' | 'createSignal' | 'sleep'>;
 
 export interface LlmProviderFactory {
+  executedBy?: string | null;
   providerId?: LlmProviderId;
   /** 指定 purpose 用のロガー付きプロバイダを返す */
   forPurpose: (purpose: LlmPurpose, onRequestState?: (state: LlmRequestState) => void,
@@ -127,6 +133,7 @@ export async function resolveSelectedModelKey(store: ProjectStoreDeps): Promise<
  * @throws {LlmApiKeyMissingError} 解決したプロバイダの API キーが chrome.storage に無いとき
  */
 export async function buildLlmProviderFactory(deps: LlmFactoryDeps): Promise<LlmProviderFactory> {
+  const executedBy = deps.executedBy ?? await deps.getExecutedBy?.().catch(() => null) ?? null;
   const selectedModel =
     deps.model ?? resolveEffectiveModel(await deps.store.read<string>(STORAGE_KEY_LLM_MODEL), {
       anthropic: await getAnthropicApiKey(deps.store),
@@ -155,10 +162,17 @@ export async function buildLlmProviderFactory(deps: LlmFactoryDeps): Promise<Llm
   // 期限の層はログより内側に置き、ログ保存の待ちを期限に含めない。
   return {
     model: selectedModel,
+    executedBy,
     providerId,
     forPurpose: (purpose, onRequestState, attempts) =>
       withRetry(
         withLogging(withSignalDeadline(baseProvider), purpose, {
+          executedBy,
+          promptVersion: getPromptVersion(purpose, providerId),
+          onResponse: (response) => {
+            const cost = estimateCostUsd(selectedModel, response.tokensIn, response.tokensOut);
+            if (cost !== null) deps.onCostAccumulate?.(cost);
+          },
           uploadJson: async ({ filename, content }) => {
             const file = await uploadTextFile(
               {
@@ -172,10 +186,8 @@ export async function buildLlmProviderFactory(deps: LlmFactoryDeps): Promise<Llm
             return { webViewLink: file.webViewLink };
           },
           appendLogEntry: async (entry) => {
+            await ensureSheetHeaders(deps.spreadsheetId, 'LLMApiLog', LLM_LOG_HEADER, deps.google);
             await appendRow(deps.spreadsheetId, 'LLMApiLog', toLogRow(entry), deps.google);
-            if (entry.costEstimateUsd !== null) {
-              deps.onCostAccumulate?.(entry.costEstimateUsd);
-            }
           },
         }),
         { ...attempts, onRequestState: onRequestState ?? deps.onRequestState }
@@ -198,6 +210,9 @@ function toLogRow(entry: LlmApiLogEntry): (string | number | boolean | null)[] {
     latency_ms: entry.latencyMs,
     cost_estimate_usd: entry.costEstimateUsd,
     error: entry.error,
+    model_reported: entry.modelReported ?? null,
+    prompt_version: entry.promptVersion ?? null,
+    executed_by: entry.executedBy ?? null,
   };
   return LLM_LOG_HEADER.map((key) => map[key] ?? null);
 }

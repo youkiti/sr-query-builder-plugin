@@ -322,6 +322,8 @@ async function hydrateCurrentProject(store: AppStore, runtime: ChromeRuntimeDeps
         currentFormulaVersionId: latestFormula.versionId,
         currentFormulaMarkdown: latestFormula.formulaMd,
         currentFormulaModel: latestFormula.model,
+        currentFormulaModelsUsed: latestFormula.modelsUsed ?? null,
+        currentFormulaAppVersion: latestFormula.appVersion ?? null,
         currentFormulaCreatedBy: latestFormula.createdBy,
       }));
     }
@@ -395,6 +397,7 @@ function buildDefaultViewOptions(
   const llmFactoryDepsBase = (): Omit<LlmFactoryDeps, 'llmLogFolderId' | 'spreadsheetId'> => ({
     google: runtime.google,
     store: runtime.store,
+    getExecutedBy: () => getCurrentUserEmail(runtime.profile),
     onCostAccumulate: (costUsd) => {
       store.setState((s) => ({
         ...s,
@@ -469,13 +472,13 @@ function buildDefaultViewOptions(
         });
       },
       onOptimize: (settings, resumeRunId) => runOptimizeQuery(store, runtime, llmFactoryDepsBase(), settings, resumeRunId),
-      onAdoptOptimization: () => adoptQueryOptimization({ store, google: runtime.google }),
+      onAdoptOptimization: () => adoptQueryOptimization({ store, google: runtime.google, getSavedBy: () => getCurrentUserEmail(runtime.profile) }),
       onEditOptimization: () => { if (editQueryOptimization(store)) navigate('edit'); },
       onBlocksFromOptimization: () => navigate('blocks'),
       onDecideOutsideCandidate: (pmid, decision) => runDecideOutsideCandidate(store, runtime, pmid, decision),
       onReadjustOptimization: () => runReadjustOptimization(store, runtime, llmFactoryDepsBase()),
       // 保留候補（issue #172）の 3 つの出口。ゲート・除外済みの判定はサービス側で行う。
-      onAdoptHeldOptimizationCandidate: (candidateId) => adoptHeldOptimizationCandidate({ store, google: runtime.google }, candidateId),
+      onAdoptHeldOptimizationCandidate: (candidateId) => adoptHeldOptimizationCandidate({ store, google: runtime.google, getSavedBy: () => getCurrentUserEmail(runtime.profile) }, candidateId),
       onReadjustHeldOptimizationCandidate: (candidateId) =>
         runReadjustFromHeldOptimizationCandidate(store, runtime, llmFactoryDepsBase(), candidateId),
       onRejectHeldOptimizationCandidate: (candidateId) => rejectHeldOptimizationCandidate(store, runtime, candidateId),
@@ -547,6 +550,8 @@ function buildDefaultViewOptions(
           currentFormulaVersionId: version.versionId,
           currentFormulaMarkdown: version.formulaMd,
           currentFormulaModel: version.model,
+          currentFormulaModelsUsed: version.modelsUsed ?? null,
+          currentFormulaAppVersion: version.appVersion ?? null,
           currentFormulaCreatedBy: version.createdBy,
         }));
       },
@@ -607,6 +612,15 @@ function buildDefaultViewOptions(
           },
           formulaSave: null,
         }));
+      },
+      onModelUsed: (model) => {
+        const state = store.getState();
+        const draft = state.formulaEditDraft?.formulaVersionId === state.currentFormulaVersionId ? state.formulaEditDraft : null;
+        store.setStateSilently((s) => ({ ...s, formulaEditDraft: {
+          ...draft, formulaVersionId: s.currentFormulaVersionId,
+          markdown: draft?.markdown ?? s.currentFormulaMarkdown ?? '',
+          modelsUsed: [...new Set([...(draft?.modelsUsed ?? []), model])],
+        } }));
       },
       onClearImprovement: () => {
         // 提案（blockImprovement）を引っ込めるタイミング（accept / reject / manualEditApply /
@@ -737,6 +751,7 @@ async function runSaveEditedFormula(
     const result: SaveEditedFormulaResult = await saveEditedFormula(input, {
       google: runtime.google,
       store,
+      getSavedBy: () => getCurrentUserEmail(runtime.profile),
     });
     // 保存成功で currentFormulaVersionId は採番された新しい版へ移っているため、
     // formulaSave もその版で持つ（stale 判定が一致し、確認メッセージが残る）。
@@ -1802,7 +1817,7 @@ async function maybeProposeExcessFilters(
         ? s
         : {
             ...s,
-            excessFilterProposal: { formulaVersionId: versionId, totalHits, candidates, error: null },
+            excessFilterProposal: { formulaVersionId: versionId, totalHits, candidates, error: null, modelUsed: factory.model },
           }
     );
   } catch (err) {
@@ -1847,9 +1862,10 @@ async function runApplyExcessFilters(
   await saveEditedFormula(
     {
       formulaMd: newMd,
+      modelsUsed: state.excessFilterProposal?.modelUsed ? [state.excessFilterProposal.modelUsed] : [],
       note: `過大ヒット絞り込みフィルタを承認して追加: ${approved.map((c) => c.label).join(', ')}`,
     },
-    { google: runtime.google, store }
+    { google: runtime.google, store, getSavedBy: () => getCurrentUserEmail(runtime.profile) }
   );
   // 新バージョンへ移ったので旧提案は破棄し、更新後の式を検証し直す
   store.setState((s) => ({ ...s, excessFilterProposal: null }));
