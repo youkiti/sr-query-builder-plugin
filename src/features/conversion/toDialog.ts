@@ -1,7 +1,11 @@
 import type { PubmedFormula } from '@/lib/search-formula-md';
 import type { ConversionResult } from './types';
 import { appendResidualTagWarning } from './residualPubmedTags';
-import { DIALOG_RCT_FILTER, PUBMED_RCT_PT_REGEX } from './dialogRctFilter';
+import {
+  DIALOG_RCT_FILTER_LINES,
+  PUBMED_RCT_PT_REGEX,
+  renumberDialogRctFilter,
+} from './dialogRctFilter';
 import { replaceProximityOperators } from './proximityOperator';
 
 /** MeSH → Emtree の恒等写像に対する注意喚起。自動マッピングは行わない（スコープ外）。 */
@@ -23,6 +27,8 @@ const EMTREE_MAPPING_WARNING =
  *   PubMed 側の行番号が連番でなくても、Dialog 上で実際に検索式を投入する順序と
  *   一致した S 番号になる。
  * - `[ad]`（所属） → 削除 + 警告
+ * - RCT 出版タイプフィルタ（`randomized controlled trial[pt]`）を含むブロック →
+ *   Cochrane の Embase RCT フィルタ（Dialog 版、35 行）に展開
  */
 export function convertToDialog(formula: PubmedFormula): ConversionResult {
   const warnings: string[] = [];
@@ -31,14 +37,27 @@ export function convertToDialog(formula: PubmedFormula): ConversionResult {
   // ブロック ID をそのまま `S<id>` にすると、ID が連番でない場合
   // （例: 欠番がある / "2A" のような枝番）に Dialog の実際の集合番号と
   // ずれて誤った集合を参照してしまう。
+  // RCT 出版タイプフィルタのブロックは Cochrane の Dialog 版フィルタ（35 行）に
+  // 展開するため、そのブロックは複数の S 番号を使い、結果を表す最終行の番号を
+  // そのブロックの番号として後続の参照に使う。
   const lineMapping = new Map<string, string>();
-  formula.blocks.forEach((block, index) => {
-    lineMapping.set(block.id, `S${index + 1}`);
-  });
-
+  const convertedLines: string[] = [];
+  let nextNumber = 1;
   let hadMeshConversion = false;
-  const convertedLines = formula.blocks.map((block) => {
-    const dialogId = lineMapping.get(block.id) as string;
+  for (const block of formula.blocks) {
+    if (PUBMED_RCT_PT_REGEX.test(block.expression)) {
+      // 元の PubMed 式（`"Randomized Controlled Trial"[pt]` 等）はブロックごと置換し、
+      // 残存タグ警告も Emtree 警告も出さない（Cochrane Handbook 由来の検証済みフィルタであり、
+      // MeSH → Emtree の素朴な仮置きではないため）。
+      const filterLines = renumberDialogRctFilter(nextNumber);
+      filterLines.forEach((line, i) => convertedLines.push(`S${nextNumber + i} ${line}`));
+      nextNumber += DIALOG_RCT_FILTER_LINES.length;
+      lineMapping.set(block.id, `S${nextNumber - 1}`);
+      continue;
+    }
+    const dialogId = `S${nextNumber}`;
+    nextNumber += 1;
+    lineMapping.set(block.id, dialogId);
     const { expression, warnings: w, hadMesh } = convertDialogExpression(block.expression);
     if (hadMesh) {
       hadMeshConversion = true;
@@ -46,8 +65,8 @@ export function convertToDialog(formula: PubmedFormula): ConversionResult {
     for (const msg of w) {
       warnings.push(`${dialogId}: ${msg}`);
     }
-    return `${dialogId} ${expression}`;
-  });
+    convertedLines.push(`${dialogId} ${expression}`);
+  }
 
   // #N 参照を SN へ書き換える（境界安全。ID が他の ID の接頭辞になるケースに備えて長い順）。
   const finalLines = convertedLines.map((line) => rewriteBlockReferences(line, lineMapping));
@@ -70,14 +89,6 @@ function convertDialogExpression(src: string): {
   warnings: string[];
   hadMesh: boolean;
 } {
-  // RCT 出版タイプフィルタを検知した場合は Cochrane Dialog RCT フィルタで代替する。
-  // 元の PubMed 式（`"Randomized Controlled Trial"[pt]` 等）はブロックごと置換し、
-  // 残存タグ警告も Emtree 警告も出さない（Cochrane Handbook 由来の検証済みフィルタであり、
-  // MeSH → Emtree の素朴な仮置きではないため）。
-  if (PUBMED_RCT_PT_REGEX.test(src)) {
-    return { expression: DIALOG_RCT_FILTER, warnings: [], hadMesh: false };
-  }
-
   const warnings: string[] = [];
   let out = src;
 

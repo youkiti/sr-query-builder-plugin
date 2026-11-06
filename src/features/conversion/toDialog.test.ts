@@ -1,6 +1,8 @@
 import type { PubmedFormula } from '@/lib/search-formula-md';
 import { convertToDialog } from './toDialog';
-import { DIALOG_RCT_FILTER } from './dialogRctFilter';
+import { DIALOG_RCT_FILTER_LINES, renumberDialogRctFilter } from './dialogRctFilter';
+
+const RCT_FILTER_FROM_S1 = DIALOG_RCT_FILTER_LINES.map((line, i) => `S${i + 1} ${line}`).join('\n');
 
 function makeFormula(blocks: Array<{ id: string; expression: string }>): PubmedFormula {
   return {
@@ -70,11 +72,12 @@ describe('convertToDialog', () => {
     });
   });
 
-  test('RCT [pt] を含むブロックは Cochrane Dialog RCT フィルタで代替し警告なし', () => {
+  test('RCT [pt] を含むブロックは Cochrane Dialog RCT フィルタ（35 行）に展開し警告なし', () => {
     const result = convertToDialog(
       makeFormula([{ id: '1', expression: 'randomized controlled trial[pt] OR "controlled clinical trial"[pt]' }])
     );
-    expect(result.convertedFormula).toBe(`S1 ${DIALOG_RCT_FILTER}`);
+    expect(result.convertedFormula).toBe(RCT_FILTER_FROM_S1);
+    expect(result.convertedFormula.split('\n')).toHaveLength(35);
     expect(result.warnings).toHaveLength(0);
   });
 
@@ -82,8 +85,42 @@ describe('convertToDialog', () => {
     const result = convertToDialog(
       makeFormula([{ id: '1', expression: '"Randomized Controlled Trial"[pt] OR random*[tiab]' }])
     );
-    expect(result.convertedFormula).toBe(`S1 ${DIALOG_RCT_FILTER}`);
+    expect(result.convertedFormula).toBe(RCT_FILTER_FROM_S1);
     expect(result.warnings).toHaveLength(0);
+  });
+
+  test('フィルタは利用者提供の更新版（S1〜S35）と一致する', () => {
+    const lines = RCT_FILTER_FROM_S1.split('\n');
+    expect(lines[1]).toBe('S2 EMB.EXACT.EXPLODE("controlled clinical study")');
+    expect(lines[9]).toBe(
+      'S10 TI((double OR single OR doubly OR singly) NEAR/0 (blind OR blinded OR blindly)) OR AB((double OR single OR doubly OR singly) NEAR/0 (blind OR blinded OR blindly))'
+    );
+    expect(lines[19]).toBe(
+      'S20 S1 OR S2 OR S3 OR S4 OR S5 OR S6 OR S7 OR S8 OR S9 OR S10 OR S11 OR S12 OR S13 OR S14 OR S15 OR S16 OR S17 OR S18 OR S19'
+    );
+    expect(lines[33]).toBe(
+      'S34 S21 OR S22 OR S23 OR S24 OR S25 OR S26 OR S27 OR S28 OR S29 OR S30 OR S31 OR S32 OR S33'
+    );
+    expect(lines[34]).toBe('S35 S20 NOT S34');
+  });
+
+  test('前にブロックがあるとフィルタ内の参照をずらし、後続の参照はフィルタの最終行を指す', () => {
+    const result = convertToDialog(
+      makeFormula([
+        { id: '1', expression: 'aspirin[tiab]' },
+        { id: 'RCTfilter', expression: 'randomized controlled trial[pt]' },
+        { id: '2', expression: '#1 AND #RCTfilter' },
+      ])
+    );
+    const lines = result.convertedFormula.split('\n');
+    expect(lines).toHaveLength(37);
+    expect(lines[0]).toBe('S1 (TI(aspirin) OR AB(aspirin))');
+    expect(lines.slice(1, 36)).toEqual(renumberDialogRctFilter(2).map((line, i) => `S${i + 2} ${line}`));
+    expect(lines[20]).toBe(
+      'S21 S2 OR S3 OR S4 OR S5 OR S6 OR S7 OR S8 OR S9 OR S10 OR S11 OR S12 OR S13 OR S14 OR S15 OR S16 OR S17 OR S18 OR S19 OR S20'
+    );
+    expect(lines[35]).toBe('S36 S21 NOT S35');
+    expect(lines[36]).toBe('S37 S1 AND S36');
   });
 
   test('[pt] が RCT 以外（例: "letter"[pt]）なら残存タグ警告を出す', () => {
