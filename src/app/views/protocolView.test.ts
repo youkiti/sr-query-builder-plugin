@@ -1,12 +1,25 @@
 import type { Protocol } from '@/domain/protocol';
+import { setUiLanguage } from '@/lib/i18n';
 import { INITIAL_STATE, type AppState } from '../store';
 import { createProtocolView, renderProtocolView } from './protocolView';
+
+afterEach(() => setUiLanguage('ja'));
 
 function buildContainer(): HTMLElement {
   const doc = document.implementation.createHTMLDocument('test');
   const div = doc.createElement('div');
   doc.body.appendChild(div);
   return div;
+}
+
+function expectEnglishUi(container: HTMLElement): void {
+  const japanese = /[\u3040-\u30ff\u4e00-\u9fff]/;
+  expect(container.textContent).not.toMatch(japanese);
+  for (const el of container.querySelectorAll('[aria-label], [title], [placeholder]')) {
+    for (const attr of ['aria-label', 'title', 'placeholder']) {
+      expect(el.getAttribute(attr) ?? '').not.toMatch(japanese);
+    }
+  }
 }
 
 const stateWithProject: AppState = {
@@ -391,6 +404,104 @@ function makeProtocol(version: number, overrides: Partial<Protocol> = {}): Proto
 async function flushPromises(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
+
+describe('protocol language and unsaved inputs', () => {
+  test('renders English form and saved protocol labels', () => {
+    setUiLanguage('en');
+    const container = buildContainer();
+    const view = createProtocolView();
+    const state = { ...persistedState, protocolDraft: {
+      ...PROTOCOL_DRAFT, researchQuestion: 'RQ', inclusionCriteria: 'Adults',
+      exclusionCriteria: 'Children', rawTextPreview: 'Preview', rawTextInline: 'Protocol text',
+    } };
+    const ctx = { state, navigate: jest.fn() };
+    view(container, ctx);
+    expect(container.querySelector('h2')?.textContent).toBe('Protocol input');
+    expectEnglishUi(container);
+    container.querySelector<HTMLButtonElement>('.protocol__edit')!.click();
+    expect(container.querySelector('.protocol__submit')?.textContent).toBe('Save as a new version');
+    expect(container.querySelector('.protocol__revise-confirm')?.getAttribute('aria-label'))
+      .toBe('Choose what to do with the search blocks');
+    expectEnglishUi(container);
+  });
+
+  test.each(['ja', 'en'] as const)('keeps manual text, source mode and file safely on %s re-render', (language) => {
+    const view = createProtocolView();
+    const container = buildContainer();
+    const ctx = { state: stateWithProject, navigate: jest.fn() };
+    view(container, ctx);
+    const text = container.querySelector<HTMLTextAreaElement>('#inline')!;
+    text.value = 'Unsaved protocol';
+    text.dispatchEvent(new Event('input'));
+    selectSourceMode(container, 'file');
+    const file = container.querySelector<HTMLInputElement>('#file')!;
+    Object.defineProperty(file, 'files', { value: [new File(['text'], 'protocol.md')] });
+    file.dispatchEvent(new Event('change'));
+    setUiLanguage(language);
+    expect(() => view(container, ctx)).not.toThrow();
+    expect(container.querySelector<HTMLTextAreaElement>('#inline')!.value).toBe('Unsaved protocol');
+    expect(container.querySelector<HTMLInputElement>('input[value=file]')!.checked).toBe(true);
+  });
+
+  test('keeps the edit form and its previous-version base when the language changes', async () => {
+    const view = createProtocolView({ onListVersions: async () => [makeProtocol(2), makeProtocol(1)] });
+    const container = buildContainer();
+    const ctx = { state: persistedState, navigate: jest.fn() };
+    view(container, ctx);
+    container.querySelector<HTMLButtonElement>('.protocol__load-versions')!.click();
+    await flushPromises();
+    const versions = container.querySelector<HTMLSelectElement>('#protocol-version-select')!;
+    versions.value = '1';
+    versions.dispatchEvent(new Event('change'));
+    container.querySelector<HTMLButtonElement>('.protocol__edit')!.click();
+    const text = container.querySelector<HTMLTextAreaElement>('#inline')!;
+    text.value = 'Revised text';
+    text.dispatchEvent(new Event('input'));
+    setUiLanguage('en');
+    view(container, ctx);
+    expect(container.querySelector('.protocol__readonly')).toBeNull();
+    expect(container.querySelector('.protocol__notice')?.textContent).toContain('Editing v1.');
+    expect(container.querySelector<HTMLTextAreaElement>('#inline')!.value).toBe('Revised text');
+  });
+
+  test('clears consumed text after success and keeps newer edits during submission', async () => {
+    let resolve!: () => void;
+    const view = createProtocolView({ onSubmit: () => new Promise<void>((done) => { resolve = done; }) });
+    const container = buildContainer();
+    const ctx = { state: stateWithProject, navigate: jest.fn() };
+    view(container, ctx);
+    const text = container.querySelector<HTMLTextAreaElement>('#inline')!;
+    text.value = 'Submitted';
+    text.dispatchEvent(new Event('input'));
+    container.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }));
+    text.value = 'Newer edit';
+    text.dispatchEvent(new Event('input'));
+    resolve();
+    await flushPromises();
+    view(container, ctx);
+    expect(container.querySelector<HTMLTextAreaElement>('#inline')!.value).toBe('Newer edit');
+    container.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }));
+    resolve();
+    await flushPromises();
+    view(container, ctx);
+    expect(container.querySelector<HTMLTextAreaElement>('#inline')!.value).toBe('');
+  });
+
+  test('returns to the saved display after a successful revision updates the store', async () => {
+    const container = buildContainer();
+    const ctx = { state: persistedState, navigate: jest.fn() };
+    const view = createProtocolView({ onReviseKeepBlocks: async () => {
+      view(container, { ...ctx, state: { ...persistedState, currentProtocolVersion: 3 } });
+    } });
+    view(container, ctx);
+    container.querySelector<HTMLButtonElement>('.protocol__edit')!.click();
+    container.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }));
+    container.querySelector<HTMLButtonElement>('.protocol__revise-keep')!.click();
+    await flushPromises();
+    expect(container.querySelector('.protocol__form')).toBeNull();
+    expect(container.querySelector('.protocol__version-label')?.textContent).toContain('v3');
+  });
+});
 
 describe('createProtocolView - 読み取り専用表示（承認済みプロトコル）', () => {
   test('persisted=true なら読み取り専用表示になり、フォームは出ない', () => {

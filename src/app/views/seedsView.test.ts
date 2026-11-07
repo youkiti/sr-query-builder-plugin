@@ -1,8 +1,11 @@
 import type { IngestSummary, SeedPaperWithRow } from '@/app/services';
 import type { SeedPaper } from '@/domain/seedPaper';
+import { setUiLanguage } from '@/lib/i18n';
 import type { EfetchArticle } from '@/lib/ncbi';
 import { INITIAL_STATE, type AppState } from '../store';
 import { createSeedsView, detectFileMode } from './seedsView';
+
+afterEach(() => setUiLanguage('ja'));
 
 function buildContainer(): HTMLElement {
   const doc = document.implementation.createHTMLDocument('test');
@@ -74,6 +77,109 @@ function makeFakeFile(name: string, body: string): File {
 }
 
 describe('createSeedsView', () => {
+  test('renders English labels and accessible attributes', async () => {
+    setUiLanguage('en');
+    const view = createSeedsView({ onListSeeds: async () => [
+      { rowIndex: 2, seed: sampleSummary().added[0]! },
+    ] });
+    const container = buildContainer();
+    view(container, { state: stateWithProject, navigate: jest.fn() });
+    await flushAsync();
+    expect(container.querySelector('h2')?.textContent).toBe('Seed papers');
+    expect(container.textContent).toContain('Upload and register');
+    expect(container.querySelector('textarea')?.getAttribute('aria-label')).toBe('PMID input');
+    const japanese = /[\u3040-\u30ff\u4e00-\u9fff]/;
+    expect(container.textContent).not.toMatch(japanese);
+    for (const el of container.querySelectorAll('[aria-label], [title], [placeholder]')) {
+      for (const attr of ['aria-label', 'title', 'placeholder']) {
+        expect(el.getAttribute(attr) ?? '').not.toMatch(japanese);
+      }
+    }
+  });
+
+  test.each(['ja', 'en'] as const)('keeps PMID text, file and open inline input on %s re-render', async (language) => {
+    const view = createSeedsView({ onListSeeds: async () => [
+      { rowIndex: 2, seed: { ...sampleSummary().added[0]!, pmid: null, isValid: false, exclusionReason: 'no_pmid_resolved' } },
+    ] });
+    const container = buildContainer();
+    const ctx = { state: stateWithProject, navigate: jest.fn() };
+    view(container, ctx);
+    const text = container.querySelector<HTMLTextAreaElement>('.seeds__pmid-input')!;
+    text.value = '111, 222';
+    text.dispatchEvent(new Event('input'));
+    const file = container.querySelector<HTMLInputElement>('.seeds__file')!;
+    Object.defineProperty(file, 'files', { value: [new File(['PMID- 111'], 'papers.nbib')] });
+    file.dispatchEvent(new Event('change'));
+    await flushAsync();
+    const toggle = container.querySelector<HTMLInputElement>('.seeds__show-invalid')!;
+    toggle.checked = true;
+    toggle.dispatchEvent(new Event('change'));
+    await flushAsync();
+    container.querySelector<HTMLButtonElement>('.seeds__list-fill-pmid')!.click();
+    const inline = container.querySelector<HTMLInputElement>('.seeds__fill-pmid-input')!;
+    inline.value = '333';
+    inline.dispatchEvent(new Event('input'));
+    setUiLanguage(language);
+    expect(() => view(container, ctx)).not.toThrow();
+    await flushAsync();
+    expect(container.querySelector<HTMLTextAreaElement>('.seeds__pmid-input')!.value).toBe('111, 222');
+    expect(container.querySelector<HTMLInputElement>('.seeds__fill-pmid-input')!.value).toBe('333');
+    expect(container.querySelector<HTMLInputElement>('.seeds__fill-pmid-input')!.hidden).toBe(false);
+  });
+
+  test('clears registered PMID text and preserves text entered during registration', async () => {
+    let resolve!: (summary: IngestSummary) => void;
+    const view = createSeedsView({ onIngest: () => new Promise((done) => { resolve = done; }) });
+    const container = buildContainer();
+    const ctx = { state: stateWithProject, navigate: jest.fn() };
+    view(container, ctx);
+    const text = container.querySelector<HTMLTextAreaElement>('.seeds__pmid-input')!;
+    text.value = '111';
+    text.dispatchEvent(new Event('input'));
+    container.querySelector<HTMLButtonElement>('.seeds__primary')!.click();
+    text.value = '222';
+    text.dispatchEvent(new Event('input'));
+    resolve(sampleSummary());
+    await flushAsync();
+    view(container, ctx);
+    expect(container.querySelector<HTMLTextAreaElement>('.seeds__pmid-input')!.value).toBe('222');
+    container.querySelector<HTMLButtonElement>('.seeds__primary')!.click();
+    view(container, ctx);
+    resolve(sampleSummary());
+    await flushAsync();
+    expect(container.querySelector<HTMLTextAreaElement>('.seeds__pmid-input')!.value).toBe('');
+    view(container, ctx);
+    expect(container.querySelector<HTMLTextAreaElement>('.seeds__pmid-input')!.value).toBe('');
+  });
+
+  test('clears the kept inline PMID after successful completion across a store re-render', async () => {
+    const container = buildContainer();
+    const ctx = { state: stateWithProject, navigate: jest.fn() };
+    const view = createSeedsView({
+      onListSeeds: async () => [{ rowIndex: 2, seed: {
+        ...sampleSummary().added[0]!, pmid: null, isValid: false, exclusionReason: 'no_pmid_resolved',
+      } }],
+      onFillPmid: async () => {
+        view(container, ctx);
+        return sampleSummary();
+      },
+    });
+    view(container, ctx);
+    await flushAsync();
+    const toggle = container.querySelector<HTMLInputElement>('.seeds__show-invalid')!;
+    toggle.checked = true;
+    toggle.dispatchEvent(new Event('change'));
+    await flushAsync();
+    container.querySelector<HTMLButtonElement>('.seeds__list-fill-pmid')!.click();
+    const input = container.querySelector<HTMLInputElement>('.seeds__fill-pmid-input')!;
+    input.value = '111';
+    input.dispatchEvent(new Event('input'));
+    container.querySelector<HTMLButtonElement>('.seeds__fill-pmid-confirm')!.click();
+    await flushAsync();
+    expect(container.querySelector<HTMLInputElement>('.seeds__fill-pmid-input')!.hidden).toBe(true);
+    expect(container.querySelector<HTMLInputElement>('.seeds__fill-pmid-input')!.value).toBe('');
+  });
+
   test('プロジェクト未選択時は警告のみ', () => {
     const view = createSeedsView();
     const container = buildContainer();

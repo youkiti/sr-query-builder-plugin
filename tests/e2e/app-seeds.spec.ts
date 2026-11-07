@@ -45,6 +45,16 @@ function seedRow(pmid: string, isValid: boolean, exclusionReason = ''): string[]
 }
 
 test.describe('app-seeds (#/seeds)', () => {
+  test('saved English language: seed forms and axe', async ({ page }) => {
+    await injectAppStub(page, scenarioWithProject({ extraStorage: { uiLanguage: 'en' } }));
+    await page.goto(APP_URL);
+    await expect(page.locator('#app-content h2')).toHaveText('Seed papers');
+    await expect(page.getByRole('textbox', { name: 'PMID input' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Upload and register' })).toBeVisible();
+    const result = await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze();
+    expect(result.violations, JSON.stringify(result.violations, null, 2)).toEqual([]);
+  });
+
   test('プロジェクト未選択: guard プレースホルダ', async ({ page }) => {
     await injectAppStub(page, { authed: true });
     await page.goto(APP_URL);

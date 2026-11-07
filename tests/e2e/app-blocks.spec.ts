@@ -11,6 +11,16 @@ import { fullStateScenario, FULL_PROTOCOL_DRAFT } from './fixtures/scenarios/ful
 const APP_URL = '/app/app.html#/blocks';
 
 test.describe('app-blocks (#/blocks)', () => {
+  test('saved English language: block approval and axe', async ({ page }) => {
+    await injectAppStub(page, fullStateScenario({ extraStorage: { uiLanguage: 'en' } }));
+    await page.goto(APP_URL);
+    await expect(page.locator('#app-content h2')).toHaveText('Search block approval');
+    await expect(page.locator('.blocks__section-title')).toHaveText('① Block list');
+    await expect(page.locator('.blocks__btn-primary')).toHaveText('Approve and go to seed papers →');
+    const result = await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze();
+    expect(result.violations, JSON.stringify(result.violations, null, 2)).toEqual([]);
+  });
+
   test('プロトコル未入力: guard プレースホルダ', async ({ page }) => {
     await injectAppStub(page, scenarioWithProject());
     await page.goto(APP_URL);
