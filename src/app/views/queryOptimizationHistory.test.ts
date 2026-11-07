@@ -3,6 +3,31 @@ import { createQueryOptimizationInputIdentity } from '../services/queryOptimizat
 import { INITIAL_STATE, type AppState } from '../store';
 import type { OptimizationMeasurement, OptimizationMeshNode, OptimizationTrial } from '@/features/formula/skills/optimizeQuery';
 import { buildPubmedSearchUrl } from '@/lib/ncbi/pubmedUrl';
+import { setUiLanguage } from '@/lib/i18n';
+import { optimizationApiLabel } from './queryOptimizationHistory';
+
+afterEach(() => setUiLanguage('ja'));
+
+test('language rerender translates cached rows and retains details and scroll', () => {
+  const f = setup();
+  f.render();
+  const row = f.container.querySelector('.optimization__history li');
+  f.container.querySelector<HTMLDetailsElement>('.optimization__history details')!.open = true;
+  const viewport = f.container.querySelector<HTMLElement>('.optimization__history-scroll')!;
+  Object.defineProperty(viewport, 'scrollHeight', { configurable: true, value: 1000 });
+  Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 100 });
+  viewport.scrollTop = 123;
+  viewport.dispatchEvent(new Event('scroll'));
+  setUiLanguage('en');
+  f.render();
+  expect(f.container.querySelector('.optimization__history h3')!.textContent).toBe('Trial history');
+  expect(viewport.getAttribute('aria-label')).toBe('Auto-tuning trial history');
+  expect(f.container.querySelector('.optimization__history li')).not.toBe(row);
+  expect(f.container.querySelector('.optimization__history li')!.textContent).toContain('Trial 1 — hits before and after:');
+  expect(f.container.querySelector<HTMLDetailsElement>('.optimization__history details')!.open).toBe(true);
+  expect(viewport.scrollTop).toBe(123);
+  expect(optimizationApiLabel({ source: 'PubMed', status: 'retry' })).toBe('PubMed: Retrying');
+});
 
 const measurement = (totalHits: number, capturedPmids: string[]): OptimizationMeasurement => ({
   id: 'm', fingerprint: 'f', measuredAt: '2026-09-11', totalHits, capturedPmids,

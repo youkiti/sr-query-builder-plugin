@@ -1,3 +1,4 @@
+import { t } from '@/lib/i18n';
 import { showConfirmationModal } from '../ui/confirmationModal';
 import { renderGenerationNotice } from './generationNotice';
 import { blockDiagnosisLines } from '@/features/validation/blockDiagnosis';
@@ -35,7 +36,7 @@ function renderHeldCandidateCard(
   const card = doc.createElement('article');
   card.className = 'optimization__held-candidate';
   card.dataset.tour = 'draft-held-candidates';
-  card.setAttribute('aria-label', `保留候補 ${trial.candidateId} の操作`);
+  card.setAttribute('aria-label', t('draft.review.actionsForHeldCandidate', { candidateId: trial.candidateId }));
   const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions, {
     bestCapturedPmids: run.result?.best?.measurement.capturedPmids,
     unjudgedSeedPmids: run.outsideCheck?.unjudgedSeedPmids,
@@ -43,8 +44,8 @@ function renderHeldCandidateCard(
   const impact = trial.impact;
   const unconfirmed = impact?.lostHits != null ? impact.lostHits - gate.judgedCount : null;
   const summary = doc.createElement('p');
-  summary.textContent = `保留候補 ${trial.candidateId}: 失う ${impact?.lostHits ?? '未測定'} 件・増える ${impact?.gainedHits ?? '未測定'} 件・`
-    + `判定済み ${gate.judgedCount} 件・未確認 ${unconfirmed ?? '不明'} 件`;
+  summary.textContent = t('draft.review.heldCandidateHitsLostHits', { candidateId: trial.candidateId, lostHits: impact?.lostHits ?? t('draft.review.notMeasured'), gainedHits: impact?.gainedHits ?? t('draft.review.notMeasured') })
+    + t('draft.review.judgedUnconfirmed', { judgedCount: gate.judgedCount, unconfirmedCount: unconfirmed ?? t('draft.review.unknown') });
   card.appendChild(summary);
   if (impact?.annotation) {
     const annotation = doc.createElement('p');
@@ -67,8 +68,8 @@ function renderHeldCandidateCard(
   if (!gate.exceedsMaxLostHits) {
     const adoptButton = doc.createElement('button');
     adoptButton.type = 'button';
-    adoptButton.textContent = 'この候補を採用して保存';
-    adoptButton.setAttribute('aria-label', `保留候補 ${trial.candidateId} を採用して保存`);
+    adoptButton.textContent = t('draft.review.adoptThisCandidateAndSave');
+    adoptButton.setAttribute('aria-label', t('draft.review.adoptHeldCandidateAndSave', { candidateId: trial.candidateId }));
     adoptButton.disabled = !actions.adoptHeld || !!rejected || !gate.allowed
       || run.save?.status === 'saving' || run.save?.status === 'saved';
     adoptButton.addEventListener('click', () => {
@@ -80,12 +81,12 @@ function renderHeldCandidateCard(
   }
   const readjustButton = doc.createElement('button');
   readjustButton.type = 'button';
-  readjustButton.textContent = 'これを初期式に再調整';
+  readjustButton.textContent = t('draft.review.reTuneFromThis');
   readjustButton.disabled = !actions.readjustHeld || !!rejected || savingGlobal;
   readjustButton.addEventListener('click', () => { if (!readjustButton.disabled) void actions.readjustHeld?.(trial.candidateId); });
   const rejectButton = doc.createElement('button');
   rejectButton.type = 'button';
-  rejectButton.textContent = rejected ? '除外を取り消す' : '除外';
+  rejectButton.textContent = rejected ? t('draft.review.undoExclusion') : t('draft.review.exclude');
   rejectButton.disabled = !!run.heldRejectionSaving || (rejected ? !actions.undoRejectHeld : !actions.rejectHeld);
   rejectButton.addEventListener('click', () => {
     if (rejectButton.disabled) return;
@@ -96,7 +97,7 @@ function renderHeldCandidateCard(
   if (run.heldRejectionSaving) {
     const notice = doc.createElement('p');
     notice.setAttribute('role', 'status');
-    notice.textContent = '除外・取り消しを保存中…';
+    notice.textContent = t('draft.review.savingExclusionChange');
     card.appendChild(notice);
   }
   if (!gate.allowed && gate.reason) {
@@ -107,7 +108,7 @@ function renderHeldCandidateCard(
   }
   if (rejected) {
     const notice = doc.createElement('p');
-    notice.textContent = `人がこの変更を除外しました（${rejected.rejectedAt}）。次にこの run を再開すると、この式は測定せずに却下されます。`;
+    notice.textContent = t('draft.review.aPersonExcludedThisChange', { rejectedAt: rejected.rejectedAt });
     card.appendChild(notice);
   }
   const saveTarget = run.save?.target;
@@ -115,9 +116,9 @@ function renderHeldCandidateCard(
   if (isThisSave) {
     const status = doc.createElement('p');
     status.setAttribute('aria-live', 'polite');
-    status.textContent = run.save?.status === 'saving' ? '保存中…'
-      : run.save?.status === 'saved' ? `保存しました（version_id: ${run.save.formulaVersionId}）`
-        : run.save?.status === 'error' ? `保存エラー：${run.save.error}` : '';
+    status.textContent = run.save?.status === 'saving' ? t('draft.review.saving')
+      : run.save?.status === 'saved' ? t('draft.review.savedVersionId', { versionId: String(run.save.formulaVersionId) })
+        : run.save?.status === 'error' ? t('draft.review.saveError', { error: String(run.save.error) }) : '';
     card.appendChild(status);
   }
   return card;
@@ -134,22 +135,22 @@ export function buildAdoptConfirmContent(doc: Document, run: QueryOptimizationRu
     p.textContent = text;
     content.appendChild(p);
   };
-  paragraph('この候補は、自動調整の完了条件をすべては満たしていません。完了条件は次の 2 つです。');
+  paragraph(t('draft.review.thisCandidateDoesNotMeet'));
   const measurement = run.result?.best?.measurement;
   const hits = measurement?.totalHits ?? null;
   const captured = measurement?.capturedPmids?.length ?? null;
   const missed = measurement?.missedPmids?.length ?? null;
   const seedTotal = run.result?.best?.evaluation.seedPmids.length ?? run.seedCount;
   const hitsLine = hits === null
-    ? `ヒット件数が目安件数（${run.maxHits.toLocaleString()} 件）以下であること：未測定のため確かめられていません。`
-    : `ヒット件数が目安件数（${run.maxHits.toLocaleString()} 件）以下であること：実測 ${hits.toLocaleString()} 件で、`
-      + (hits <= run.maxHits ? '満たしています。' : `目安を ${(hits - run.maxHits).toLocaleString()} 件超えています。`);
+    ? t('draft.review.hitCountAtOrBelow', { targetHits: run.maxHits.toLocaleString() })
+    : t('draft.review.hitCountAtOrBelow2', { targetHits: run.maxHits.toLocaleString(), hitCount: hits.toLocaleString() })
+      + (hits <= run.maxHits ? t('draft.review.conditionMet') : t('draft.review.hitsAboveTheTarget', { count: (hits - run.maxHits).toLocaleString() }));
   const seedLine = !seedTotal
-    ? '既知のシード論文をすべて捕捉していること：有効なシード論文が 0 件のため確かめられていません。'
+    ? t('draft.review.captureAllKnownSeedPapers')
     : captured === null || missed === null
-      ? `既知のシード論文（${seedTotal} 件）をすべて捕捉していること：未測定のため確かめられていません。`
-      : `既知のシード論文（${seedTotal} 件）をすべて捕捉していること：${captured} 件を捕捉し、`
-        + (missed === 0 ? '満たしています。' : `${missed} 件を取りこぼしています。`);
+      ? t('draft.review.captureAllKnownSeedPapers2', { seedCount: seedTotal })
+      : t('draft.review.captureAllKnownSeedPapers3', { seedCount: seedTotal, capturedCount: captured })
+        + (missed === 0 ? t('draft.review.conditionMet') : t('draft.review.seedsMissed', { count: missed }));
   const list = doc.createElement('ul');
   for (const line of [hitsLine, seedLine]) {
     const item = doc.createElement('li');
@@ -158,10 +159,10 @@ export function buildAdoptConfirmContent(doc: Document, run: QueryOptimizationRu
   }
   content.appendChild(list);
   const reasons = run.result?.unmetReasons ?? [];
-  if (reasons.length) paragraph(`記録された理由：${reasons.join('／')}`);
-  paragraph('目安件数を超えること自体は検索式の誤りではありません。取りこぼしたシード論文があれば、その論文が研究基準に合うかと、どのブロックで落ちているかを確かめてください。'
-    + 'どちらの条件を満たしても、未知の適格研究をすべて拾えたことにはなりません。');
-  paragraph('人が最終式を確かめたうえで保存しますか？');
+  if (reasons.length) paragraph(t('draft.review.recordedReasons', { reasons: reasons.join('／') }));
+  paragraph(t('draft.review.goingOverTheTargetHit')
+    + t('draft.review.meetingEitherConditionDoesNot'));
+  paragraph(t('draft.review.saveAfterAPersonHas'));
   return content;
 }
 
@@ -174,19 +175,19 @@ export function renderOptimizationReview(
   const section = doc.createElement('section');
   section.className = 'optimization__review';
   section.dataset.tour = 'draft-optimize-review';
-  section.setAttribute('aria-label', '自動調整の最終レビュー');
+  section.setAttribute('aria-label', t('draft.review.autoTuningFinalReview'));
   const result = run.result;
   const best = result?.best;
   const heading = doc.createElement('h3');
-  const labels = { achieved: '目安件数と既知シードの捕捉を満たしました', needs_review: '要確認', stopped: '停止', error: 'エラー' };
-  heading.textContent = `最終レビュー：${labels[result?.status ?? 'error']}`;
+  const labels = { achieved: t('draft.review.targetHitCountAndKnown'), needs_review: t('draft.review.needsReview'), stopped: t('draft.review.stopped'), error: t('draft.review.error') };
+  heading.textContent = t('draft.review.finalReview', { status: labels[result?.status ?? 'error'] });
   section.appendChild(heading);
   const paragraph = (text: string): void => {
     const p = doc.createElement('p');
     p.textContent = text;
     section.appendChild(p);
   };
-  if (result?.status === 'achieved') paragraph('既知シードを捕捉したことは、未知の適格研究を網羅したことを意味しません。');
+  if (result?.status === 'achieved') paragraph(t('draft.review.capturingTheKnownSeedsDoes'));
   const subheading = (text: string): void => {
     const h = doc.createElement('h4');
     h.textContent = text;
@@ -194,27 +195,27 @@ export function renderOptimizationReview(
   };
   const diagnosis = result?.blockDiagnosis ?? run.blockDiagnosis;
   if (diagnosis) {
-    subheading('ブロック構造の診断');
+    subheading(t('draft.review.blockStructureDiagnosis'));
     for (const line of blockDiagnosisLines(diagnosis)) paragraph(line);
   }
   if (run.generationNotices) {
     const notice = renderGenerationNotice(doc, run.generationNotices);
     if (notice) {
-      subheading('初期式の生成で行った変更');
+      subheading(t('draft.review.changesMadeWhenDraftingThe'));
       section.appendChild(notice);
     }
   }
-  subheading('最終式');
+  subheading(t('draft.review.finalFormula'));
   if (best) {
     const formula = doc.createElement('pre');
     formula.className = 'optimization__final-formula';
     formula.textContent = serializePubmedFormulaMd(best.formula);
     section.appendChild(formula);
-  } else paragraph('実測済みの候補がありません。');
+  } else paragraph(t('draft.review.noMeasuredCandidates'));
   const seeds = best?.evaluation.seedPmids.length ?? run.seedCount;
   const review = buildOptimizationReviewSections(run);
-  subheading('確認の状況');
-  const stateLabels: Record<ReviewSectionState, string> = { no_human_decision: '人の判定なし', confirmed: '確認済み', unmet: '未達', needs_decision: '判定待ち', decided: '判定済み（残件あり）', unconfirmed: '未確認' };
+  subheading(t('draft.review.checkStatus'));
+  const stateLabels: Record<ReviewSectionState, string> = { no_human_decision: t('draft.review.noHumanDecision'), confirmed: t('draft.review.confirmed'), unmet: t('draft.review.unmet'), needs_decision: t('draft.review.awaitingDecision'), decided: t('draft.review.judgedItemsRemain'), unconfirmed: t('draft.review.unconfirmed') };
   for (const item of review.sections) {
     const group = doc.createElement('section');
     group.className = 'optimization__review-section';
@@ -238,8 +239,8 @@ export function renderOptimizationReview(
     }
     section.appendChild(group);
   }
-  subheading('未確認事項');
-  if (!review.unconfirmed.length) paragraph('未確認事項はありません');
+  subheading(t('draft.review.unconfirmedItems'));
+  if (!review.unconfirmed.length) paragraph(t('draft.review.noUnconfirmedItems'));
   else {
     const list = doc.createElement('ul');
     for (const text of review.unconfirmed) {
@@ -249,24 +250,24 @@ export function renderOptimizationReview(
     }
     section.appendChild(list);
   }
-  subheading('外側の確認と失う文献の判定');
+  subheading(t('draft.review.outsideCheckAndReviewOf'));
   const check = run.outsideCheck;
-  if (!check) paragraph('外側の確認は未実行です');
-  else if (check.status !== 'ready') paragraph(check.reason ?? '外側の確認を実行中です');
-  if (check && !check.candidates.length) paragraph('判定候補はありません');
+  if (!check) paragraph(t('draft.review.outsideCheckHasNotRun'));
+  else if (check.status !== 'ready') paragraph(check.reason ?? t('draft.review.outsideCheckIsRunning'));
+  if (check && !check.candidates.length) paragraph(t('draft.review.noPapersToJudge'));
   for (const candidate of check?.candidates ?? []) {
     const card = doc.createElement('article');
     card.className = 'optimization__candidate';
-    card.setAttribute('aria-label', `判定候補 PMID ${candidate.pmid}`);
+    card.setAttribute('aria-label', t('draft.review.paperToJudgePmid', { pmid: candidate.pmid }));
     const link = doc.createElement('a');
     link.href = buildPubmedSearchUrl(`${candidate.pmid}[uid]`);
     link.target = '_blank';
     link.rel = 'noopener noreferrer';
-    link.textContent = `PMID ${candidate.pmid}（${candidate.year ?? '年不明'}）${candidate.title ?? 'タイトル未取得'}`;
+    link.textContent = t('draft.review.article', { pmid: candidate.pmid, year: candidate.year ?? t('draft.review.unknownYear'), title: candidate.title ?? t('draft.review.titleNotRetrieved') });
     card.appendChild(link);
     const source = doc.createElement('p');
-    source.textContent = candidate.source === 'outside' ? '式の外側（AI が選んだ境界事例）'
-      : `保留候補 ${candidate.heldCandidateId} で失う文献`;
+    source.textContent = candidate.source === 'outside' ? t('draft.review.outsideTheFormulaAiSelected')
+      : t('draft.review.papersLostByHeldCandidate', { candidateId: String(candidate.heldCandidateId) });
     card.appendChild(source);
     if (candidate.source === 'outside') {
       const reason = doc.createElement('p');
@@ -275,9 +276,9 @@ export function renderOptimizationReview(
     }
     const details = doc.createElement('details');
     const summary = doc.createElement('summary');
-    summary.textContent = '抄録';
+    summary.textContent = t('draft.review.abstract');
     const abstract = doc.createElement('p');
-    abstract.textContent = candidate.abstract ?? '抄録は取得されていません';
+    abstract.textContent = candidate.abstract ?? t('draft.review.abstractNotRetrieved');
     details.append(summary, abstract);
     card.appendChild(details);
     const selected = check?.decisions[candidate.pmid];
@@ -296,9 +297,9 @@ export function renderOptimizationReview(
     }
     const status = doc.createElement('p');
     status.setAttribute('aria-live', 'polite');
-    status.textContent = selected?.status === 'saving' ? `${selected.decision} を保存中…`
-      : selected?.status === 'saved' ? `${selected.decision}：保存済み`
-        : selected?.status === 'error' ? `保存エラー：${selected.error}（再試行できます）` : '未判定';
+    status.textContent = selected?.status === 'saving' ? t('draft.review.saving2', { decision: selected.decision })
+      : selected?.status === 'saved' ? t('draft.review.saved', { decision: selected.decision })
+        : selected?.status === 'error' ? t('draft.review.saveErrorYouCanRetry', { error: String(selected.error) }) : t('draft.review.notJudged');
     card.append(buttons, status);
     section.appendChild(card);
   }
@@ -306,16 +307,16 @@ export function renderOptimizationReview(
   if (decisions.some((item) => item.status === 'saved' && item.decision === 'include')) {
     const button = doc.createElement('button');
     button.type = 'button';
-    button.textContent = 'include した文献を保護して再調整する';
+    button.textContent = t('draft.review.reTuneWhileProtectingPapers');
     button.disabled = !actions.readjust || decisions.some((item) => item.status === 'saving') || run.save?.status === 'saving';
     button.addEventListener('click', () => { if (!button.disabled) void actions.readjust?.(); });
     section.appendChild(button);
-    paragraph('現在の最終候補は保存されません。残す場合は先に「採用して保存」してください');
+    paragraph(t('draft.review.theCurrentFinalCandidateWill'));
   }
 
-  subheading('変更一覧（初期式 → 最終式）');
+  subheading(t('draft.review.changesInitialFinalFormula'));
   const initial = run.trials.find((trial) => trial.kind === 'initial')?.formula;
-  if (!initial || !best) paragraph('比較できる初期式または最終式がありません。');
+  if (!initial || !best) paragraph(t('draft.review.noInitialOrFinalFormula'));
   else {
     const list = doc.createElement('ul');
     const ids = new Set([...initial.blocks, ...best.formula.blocks].map((block) => block.id));
@@ -324,25 +325,25 @@ export function renderOptimizationReview(
       const after = best.formula.blocks.find((block) => block.id === id)?.expression;
       if (before === after) continue;
       const item = doc.createElement('li');
-      item.textContent = `#${id}: ${before ?? 'なし'} → ${after ?? 'なし'}`;
+      item.textContent = `#${id}: ${before ?? t('draft.review.none')} → ${after ?? t('draft.review.none')}`;
       list.appendChild(item);
     }
     if (initial.combinationExpression !== best.formula.combinationExpression) {
       const item = doc.createElement('li');
-      item.textContent = `結合式: ${initial.combinationExpression ?? 'なし'} → ${best.formula.combinationExpression ?? 'なし'}`;
+      item.textContent = t('draft.review.combination', { before: initial.combinationExpression ?? t('draft.review.none'), after: best.formula.combinationExpression ?? t('draft.review.none') });
       list.appendChild(item);
     }
-    if (!list.children.length) paragraph('初期式からの変更はありません。');
+    if (!list.children.length) paragraph(t('draft.review.noChangesFromTheInitial'));
     else section.appendChild(list);
   }
-  subheading('未捕捉シードの診断');
+  subheading(t('draft.review.missedSeedDiagnosis'));
   const diagnoses = result?.seedDiagnoses;
-  if (diagnoses === undefined) paragraph('未捕捉シードの診断は記録されていません');
-  else if (!diagnoses.length) paragraph(seeds === 0 ? '検証対象シードがないため診断はありません' : '未捕捉シードはありません');
+  if (diagnoses === undefined) paragraph(t('draft.review.noMissedSeedDiagnosisRecorded'));
+  else if (!diagnoses.length) paragraph(seeds === 0 ? t('draft.review.noDiagnosisBecauseThereAre') : t('draft.review.noMissedSeeds'));
   for (const diagnosis of diagnoses ?? []) {
     const p = doc.createElement('p');
     const link = doc.createElement('a');
-    link.textContent = `PMID ${diagnosis.pmid}（${diagnosis.year ?? '年不明'}）${diagnosis.title ?? 'タイトル未取得'}`;
+    link.textContent = t('draft.review.article', { pmid: diagnosis.pmid, year: diagnosis.year ?? t('draft.review.unknownYear'), title: diagnosis.title ?? t('draft.review.titleNotRetrieved') });
     link.href = buildPubmedSearchUrl(`${diagnosis.pmid}[uid]`);
     link.target = '_blank';
     link.rel = 'noopener noreferrer';
@@ -351,20 +352,20 @@ export function renderOptimizationReview(
     paragraph(diagnosis.note);
   }
   if (diagnoses?.some((diagnosis) => diagnosis.recoverableByTerms === false)) {
-    paragraph('語の調整では回収できないシードがあります。検索概念・フィルタが強すぎる可能性があるため、ブロック承認で見直してください。');
+    paragraph(t('draft.review.someSeedsCannotBeRecovered'));
     const buttons = doc.createElement('div');
     buttons.className = 'optimization__review-actions';
     const blocks = doc.createElement('button');
     blocks.type = 'button';
-    blocks.textContent = 'ブロック承認へ戻る';
+    blocks.textContent = t('draft.review.returnToBlockApproval');
     blocks.disabled = !actions.blocks;
     blocks.addEventListener('click', () => actions.blocks?.());
     buttons.appendChild(blocks);
     section.appendChild(buttons);
   }
-  subheading('残った懸念');
+  subheading(t('draft.review.remainingConcerns'));
   const reasons = result?.unmetReasons ?? (run.error ? [run.error] : []);
-  if (!reasons.length) paragraph('記録された未達理由はありません。研究基準との整合性を最後に確認してください。');
+  if (!reasons.length) paragraph(t('draft.review.noUnmetConditionsRecordedCheck'));
   else {
     const list = doc.createElement('ul');
     for (const reason of reasons) {
@@ -378,7 +379,7 @@ export function renderOptimizationReview(
   buttons.className = 'optimization__review-actions';
   const adopt = doc.createElement('button');
   adopt.type = 'button';
-  adopt.textContent = '採用して保存';
+  adopt.textContent = t('draft.review.adoptAndSave');
   adopt.disabled = !best || !actions.adopt || run.save?.status === 'saving' || run.save?.status === 'saved';
   adopt.addEventListener('click', async () => {
     if (adopt.disabled) return;
@@ -386,7 +387,7 @@ export function renderOptimizationReview(
     if (result?.status !== 'achieved') {
       const content = buildAdoptConfirmContent(doc, run);
       const accepted = await showConfirmationModal(doc, {
-        title: '保存前の確認', content, acceptLabel: '確かめたうえで保存する', cancelLabel: '中止する',
+        title: t('draft.review.confirmBeforeSaving'), content, acceptLabel: t('draft.review.saveAfterChecking'), cancelLabel: t('draft.review.cancel'),
       });
       if (!accepted) { adopt.disabled = false; return; }
     }
@@ -394,7 +395,7 @@ export function renderOptimizationReview(
   });
   const edit = doc.createElement('button');
   edit.type = 'button';
-  edit.textContent = '編集して確認';
+  edit.textContent = t('draft.review.editAndCheck');
   edit.disabled = !best || !actions.edit || run.save?.status === 'saving';
   edit.addEventListener('click', () => actions.edit?.());
   buttons.append(adopt, edit);
@@ -403,9 +404,9 @@ export function renderOptimizationReview(
   status.className = 'optimization__save-status';
   status.setAttribute('aria-live', 'polite');
   // 保留候補の採用も最良候補の保存も run につき 1 回のため、どちらが保存されたか明示する。
-  const savedLabel = run.save?.target?.kind === 'held' ? `保留候補 ${run.save.target.candidateId} の式` : '最良候補';
-  status.textContent = run.save?.status === 'saving' ? '保存中…'
-    : run.save?.status === 'saved' ? `${savedLabel}を採用して保存しました（version_id: ${run.save.formulaVersionId}）` : '';
+  const savedLabel = run.save?.target?.kind === 'held' ? t('draft.review.formulaFromHeldCandidate', { candidateId: run.save.target.candidateId }) : t('draft.review.bestCandidate');
+  status.textContent = run.save?.status === 'saving' ? t('draft.review.saving')
+    : run.save?.status === 'saved' ? t('draft.review.adoptedAndSavedVersionId', { candidate: savedLabel, versionId: String(run.save.formulaVersionId) }) : '';
   const error = doc.createElement('p');
   error.className = 'optimization__save-error';
   error.setAttribute('aria-live', 'polite');

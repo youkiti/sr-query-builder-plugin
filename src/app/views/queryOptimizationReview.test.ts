@@ -2,6 +2,20 @@ import { buildAdoptConfirmContent, renderOptimizationReview } from './queryOptim
 import { createDraftView } from './draftView';
 import { INITIAL_STATE, type QueryOptimizationRunState } from '../store';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
+import { setUiLanguage } from '@/lib/i18n';
+
+afterEach(() => setUiLanguage('ja'));
+
+test('English final review and adoption confirmation use the current language', () => {
+  setUiLanguage('en');
+  const current = run('needs_review');
+  const container = document.createElement('div');
+  renderOptimizationReview(container, current, actions);
+  expect(container.querySelector('h3')!.textContent).toBe('Final review: Needs review');
+  expect(container.querySelector('.optimization__review')!.getAttribute('aria-label')).toBe('Auto-tuning final review');
+  expect(container.textContent).toContain('Adopt and save');
+  expect(buildAdoptConfirmContent(document, current).textContent).toContain('Hit count at or below the target (20 hits): measured 12 hits; condition met.');
+});
 
 function run(status: 'achieved' | 'needs_review' | 'stopped' | 'error'): QueryOptimizationRunState {
   const initial = parsePubmedFormulaMd('## PubMed/MEDLINE\n```\n#1 a[tiab] OR b[tiab]\n```');

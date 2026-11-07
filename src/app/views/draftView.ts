@@ -1,3 +1,4 @@
+import { t } from '@/lib/i18n';
 import { MODEL_BENCHMARK_URL } from '@/lib/llm/modelRegistry';
 import { renderGenerationNotice } from './generationNotice';
 import { renderOptimizationReview } from './queryOptimizationReview';
@@ -81,7 +82,21 @@ export interface DraftViewCallbacks extends ValidationResultsCallbacks {
 export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView {
   const renderHistory = createOptimizationHistoryRenderer();
   let stopElapsedTimer = (): void => {};
+  let advancedOpen = false;
+  let discardVisible = false;
+  let proposalVersionId: string | null = null;
+  let checkedCandidates: number[] = [];
   return (container, ctx) => {
+    const advanced = container.querySelector<HTMLDetailsElement>('.optimization__setup details');
+    if (advanced) advancedOpen = advanced.open;
+    const proposal = readStoredProposal(ctx.state);
+    if (proposalVersionId !== proposal?.formulaVersionId) {
+      checkedCandidates = [];
+      proposalVersionId = proposal?.formulaVersionId ?? null;
+    } else if (container.querySelector('.draft__excess')) {
+      checkedCandidates = Array.from(container.querySelectorAll<HTMLInputElement>('.draft__excess-check'))
+        .filter((input) => input.checked).map((input) => Number(input.dataset.index));
+    }
     // 同じビューの再描画では古いタイマーを即時解除し、次の tick まで重ねない。
     stopElapsedTimer();
     stopElapsedTimer = () => {};
@@ -100,14 +115,14 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
     if (!ctx.state.project) {
       const warn = doc.createElement('p');
       warn.className = 'view__placeholder';
-      warn.textContent = '先にプロジェクトを選択してください。';
+      warn.textContent = t('draft.view.selectAProjectFirst');
       container.appendChild(warn);
       return;
     }
     if (!ctx.state.blocksDraft) {
       const warn = doc.createElement('p');
       warn.className = 'view__placeholder';
-      warn.textContent = 'ブロック承認を先に済ませてください。';
+      warn.textContent = t('draft.view.completeBlockApprovalFirst');
       container.appendChild(warn);
       return;
     }
@@ -116,7 +131,7 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
     if (existing) {
       const info = doc.createElement('p');
       info.className = 'draft__info';
-      info.textContent = `現在の version: ${ctx.state.currentFormulaVersionId ?? '(未保存)'}`;
+      info.textContent = t('draft.view.currentVersion', { versionId: ctx.state.currentFormulaVersionId ?? t('draft.view.unsaved') });
       container.appendChild(info);
       container.appendChild(renderFormula(doc, existing));
     }
@@ -141,7 +156,7 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
       secondaryActions.dataset.tour = 'draft-secondary-actions';
       const label = doc.createElement('span');
       label.className = 'draft__actions-label';
-      label.textContent = 'その他の操作:';
+      label.textContent = t('draft.view.otherActions');
       secondaryActions.appendChild(label);
 
       // 「検証のみ再実行」(issue #40 症状 A): 検証失敗からのリカバリ導線に限定せず、
@@ -155,7 +170,7 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
         const revalidateBtn = doc.createElement('button');
         revalidateBtn.type = 'button';
         revalidateBtn.className = 'draft__revalidate';
-        revalidateBtn.textContent = '検証のみ再実行（生成はやり直しません）';
+        revalidateBtn.textContent = t('draft.view.reRunValidationOnly');
         revalidateBtn.addEventListener('click', () => {
           if (!callbacks.onRevalidate || revalidateBtn.disabled) {
             return;
@@ -169,7 +184,7 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
       generateBtn = doc.createElement('button');
       generateBtn.type = 'button';
       generateBtn.className = 'draft__generate';
-      generateBtn.textContent = running ? '実行中…' : '最初から作り直す';
+      generateBtn.textContent = running ? t('draft.view.running') : t('draft.view.rebuildFromScratch');
       generateBtn.disabled = running || ctx.state.queryOptimizationRun?.status === 'running';
       secondaryActions.appendChild(generateBtn);
 
@@ -181,12 +196,7 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
       // 断定しない）。ai_draft / null（未生成含む）のときは従来どおり即実行する
       // （余計なクリックを増やさない）。
       //
-      // ローカル DOM 状態（store 非経由）: setState による再描画が起きるとこのパネルは
-      // 閉じる。現状 #/draft はパネル表示中に setState を起こすアイドル更新を持たない
-      // （cumulativeCostUsd の再集計は LLM 呼び出し完了時のみ走り、確認中は LLM を呼んで
-      // いないため issue #39 のような消失は起きない）。将来アイドル時の setState（定期更新等）
-      // を #/draft に持ち込むときは、この状態を store（formulaEditNote 等と同様の設計）へ
-      // 移すこと。
+      // 表示中かどうかは closure に保持し、言語変更などの再描画後にも復元する。
       discardConfirm = doc.createElement('div');
       discardConfirm.className = 'draft__discard-confirm';
       discardConfirm.hidden = true;
@@ -203,11 +213,11 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
       discardConfirmBtn = doc.createElement('button');
       discardConfirmBtn.type = 'button';
       discardConfirmBtn.className = 'draft__discard-confirm-btn';
-      discardConfirmBtn.textContent = '破棄して再生成する';
+      discardConfirmBtn.textContent = t('draft.view.discardAndRegenerate');
       discardCancelBtn = doc.createElement('button');
       discardCancelBtn.type = 'button';
       discardCancelBtn.className = 'draft__discard-cancel';
-      discardCancelBtn.textContent = 'やめる';
+      discardCancelBtn.textContent = t('draft.view.cancel');
       discardActions.appendChild(discardConfirmBtn);
       discardActions.appendChild(discardCancelBtn);
       discardConfirm.appendChild(discardActions);
@@ -235,6 +245,7 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
       renderCurrentHistory({ ...ctx.state, queryOptimizationSetup: ctx.state.queryOptimizationSetup
         ? { ...ctx.state.queryOptimizationSetup, ...values } : null });
     });
+    container.querySelector<HTMLDetailsElement>('.optimization__setup details')!.open = advancedOpen;
     if (secondaryActions) container.appendChild(secondaryActions);
     if (discardConfirm) container.appendChild(discardConfirm);
     renderCurrentHistory(ctx.state);
@@ -273,8 +284,8 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
         status.textContent = runningStatusText(run.phase, progressLabel, run.startedAtMs);
         startElapsedTicker(status, run.phase, progressLabel, run.startedAtMs);
       } else if (run.status === 'error') {
-        const phaseLabel = run.phase === 'validating' ? '検証' : '生成';
-        errorBox.textContent = `${phaseLabel}に失敗しました: ${run.error ?? '不明なエラー'}`;
+        const phaseLabel = run.phase === 'validating' ? t('draft.view.validation') : t('draft.view.generation');
+        errorBox.textContent = t('draft.view.failed', { phase: phaseLabel, error: run.error ?? t('draft.view.unknownError') });
         // 「検証のみ再実行」ボタンは実行状態から独立して補助操作行
         // （.draft__actions--secondary）に描画する（issue #40 症状 A）。
         // 現式が無ければ補助操作行ごと出ないため、その場合の再試行は
@@ -285,9 +296,8 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
     // 過大ヒット時の絞り込みフィルタ承認 UI（fix-plan 2-1）。検証完了後、総ヒット数が
     // 閾値を超えたときだけ store.excessFilterProposal に候補が入る。承認された候補のみ
     // 式へ追記され、見送れば式は変更されない（requirements.md §4.4 の承認ゲート）。
-    const proposal = readStoredProposal(ctx.state);
     if (proposal && !running) {
-      container.appendChild(renderExcessFilterProposal(doc, proposal, callbacks));
+      container.appendChild(renderExcessFilterProposal(doc, proposal, callbacks, checkedCandidates));
     }
 
     // ブロックごとのライブヒット数。実行中（生成フェーズ）に「出来上がったブロックから順に
@@ -334,18 +344,18 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
     //   「内容の変更」を検知して announce できるようにする
     // - discardConfirmBtn.focus() でキーボード / スクリーンリーダー利用者にも
     //   パネルの出現が伝わるようにする
-    const showDiscardConfirm = (): void => {
+    const showDiscardConfirm = (focus = true): void => {
       if (!discardConfirm || !discardMessage || !discardConfirmBtn) {
         return;
       }
-      discardMessage.textContent = `AI の生成結果に手を加えた版（version: ${
-        ctx.state.currentFormulaVersionId ?? '(未保存)'
-      }）です。再生成するとこの版は破棄され、ブロック定義から作り直されます。よろしいですか？`;
+      discardMessage.textContent = t('draft.view.thisVersionVersionIncludesChanges', { versionId: ctx.state.currentFormulaVersionId ?? t('draft.view.unsaved') });
       discardConfirm.hidden = false;
-      discardConfirmBtn.focus();
+      discardVisible = true;
+      if (focus) discardConfirmBtn.focus();
     };
 
     const hideDiscardConfirm = (): void => {
+      discardVisible = false;
       if (!discardConfirm || !discardMessage) {
         return;
       }
@@ -355,6 +365,8 @@ export function createDraftView(callbacks: DraftViewCallbacks = {}): RenderView 
       // 発火しないことを避けるため）。
       discardMessage.textContent = '';
     };
+
+    if (discardVisible) showDiscardConfirm(false);
 
     generateBtn?.addEventListener('click', () => {
       if (!generateBtn || generateBtn.disabled) {
@@ -408,19 +420,20 @@ export function readStoredProposal(state: AppState): ExcessFilterProposalEntry |
 function renderExcessFilterProposal(
   doc: Document,
   proposal: ExcessFilterProposalEntry,
-  callbacks: DraftViewCallbacks
+  callbacks: DraftViewCallbacks,
+  checkedCandidates: number[]
 ): HTMLElement {
   const section = doc.createElement('section');
   section.className = 'draft__excess';
 
   const h3 = doc.createElement('h3');
-  h3.textContent = `⚠ ヒット数が多すぎます（${proposal.totalHits.toLocaleString()} 件 > ${HIT_THRESHOLD.toLocaleString()} 件）`;
+  h3.textContent = t('draft.view.tooManyHitsHitsHits', { hitCount: proposal.totalHits.toLocaleString(), threshold: HIT_THRESHOLD.toLocaleString() });
   section.appendChild(h3);
 
   const note = doc.createElement('p');
   note.className = 'draft__excess-note';
   note.textContent =
-    '検索式を絞り込む候補フィルタです。承認した候補だけが式へ追加されます（承認しない限り式は変更されません）。言語・年代などの制限は感度を下げるリスクがあるため、根拠を確認してから承認してください。';
+    t('draft.view.theseFiltersCanNarrowThe');
   section.appendChild(note);
 
   const statusBox = doc.createElement('p');
@@ -432,11 +445,11 @@ function renderExcessFilterProposal(
   errorBox.setAttribute('role', 'alert');
 
   if (proposal.error !== null) {
-    errorBox.textContent = `候補の取得に失敗しました: ${proposal.error}`;
+    errorBox.textContent = t('draft.view.couldNotRetrieveCandidates', { error: proposal.error });
   } else if (proposal.candidates.length === 0) {
     const empty = doc.createElement('p');
     empty.className = 'draft__excess-empty';
-    empty.textContent = '候補が得られませんでした。#/edit から手動で絞り込んでください。';
+    empty.textContent = t('draft.view.noCandidatesFoundNarrowThe');
     section.appendChild(empty);
   }
 
@@ -453,6 +466,7 @@ function renderExcessFilterProposal(
       input.type = 'checkbox';
       input.className = 'draft__excess-check';
       input.dataset['index'] = String(index);
+      input.checked = checkedCandidates.includes(index);
       label.appendChild(input);
       const name = doc.createElement('strong');
       name.textContent = ` ${candidate.label}`;
@@ -481,13 +495,13 @@ function renderExcessFilterProposal(
   const applyBtn = doc.createElement('button');
   applyBtn.type = 'button';
   applyBtn.className = 'draft__excess-apply';
-  applyBtn.textContent = '承認した候補を式に追加して再検証';
+  applyBtn.textContent = t('draft.view.addApprovedCandidatesAndRe');
   applyBtn.disabled = true;
 
   const dismissBtn = doc.createElement('button');
   dismissBtn.type = 'button';
   dismissBtn.className = 'draft__excess-dismiss';
-  dismissBtn.textContent = '見送る（式を変更しない）';
+  dismissBtn.textContent = t('draft.view.skipKeepTheFormula');
 
   if (proposal.candidates.length > 0) {
     actions.appendChild(applyBtn);
@@ -503,6 +517,7 @@ function renderExcessFilterProposal(
   for (const entry of checkboxes) {
     entry.input.addEventListener('change', syncApplyDisabled);
   }
+  syncApplyDisabled();
 
   applyBtn.addEventListener('click', () => {
     const approved = checkboxes
@@ -513,10 +528,10 @@ function renderExcessFilterProposal(
     }
     applyBtn.disabled = true;
     dismissBtn.disabled = true;
-    statusBox.textContent = '式を更新して再検証しています…';
+    statusBox.textContent = t('draft.view.updatingTheFormulaAndRe');
     callbacks.onApplyExcessFilters(approved).catch((err: unknown) => {
       statusBox.textContent = '';
-      errorBox.textContent = `式の更新に失敗しました: ${err instanceof Error ? err.message : String(err)}`;
+      errorBox.textContent = t('draft.view.couldNotUpdateTheFormula', { error: err instanceof Error ? err.message : String(err) });
       applyBtn.disabled = false;
       dismissBtn.disabled = false;
     });
@@ -543,7 +558,7 @@ function renderLiveBlockHits(
   const section = doc.createElement('section');
   section.className = 'draft__block-hits';
   const h3 = doc.createElement('h3');
-  h3.textContent = 'ブロックごとのヒット数';
+  h3.textContent = t('draft.view.hitsByBlock');
   section.appendChild(h3);
 
   const byIndex = new Map<number, DraftBlockHit>();
@@ -556,16 +571,16 @@ function renderLiveBlockHits(
   labels.forEach((block, index) => {
     const li = doc.createElement('li');
     const hit = byIndex.get(index);
-    const label = block.blockLabel || `ブロック ${index + 1}`;
+    const label = block.blockLabel || t('draft.view.block', { blockNumber: index + 1 });
     if (hit && hit.error !== null) {
       li.className = 'draft__block-hit draft__block-hit--error';
-      li.textContent = `#${index + 1} ${label}: エラー — ${hit.error}`;
+      li.textContent = t('draft.view.error', { blockNumber: index + 1, label: label, error: hit.error });
     } else if (hit && hit.hitCount !== null) {
       li.className = 'draft__block-hit draft__block-hit--done';
-      li.textContent = `#${index + 1} ${label}: ${hit.hitCount.toLocaleString()} 件`;
+      li.textContent = t('draft.view.hits', { blockNumber: index + 1, label: label, hitCount: hit.hitCount.toLocaleString() });
     } else if (running) {
       li.className = 'draft__block-hit draft__block-hit--pending';
-      li.textContent = `#${index + 1} ${label}: 計測中…`;
+      li.textContent = t('draft.view.measuring', { blockNumber: index + 1, label: label });
     } else {
       li.className = 'draft__block-hit draft__block-hit--pending';
       li.textContent = `#${index + 1} ${label}: —`;
@@ -585,24 +600,24 @@ const GEN_TAIL = ['filter-designer', 'assemble', 'save'] as const;
 /** 検証フェーズのステップ（順序固定） */
 const VAL_STEPS = ['line_hits', 'final_query', 'mesh', 'mesh_hierarchy', 'logging'] as const;
 
-const GEN_SUBSTEP_LABELS: Record<(typeof GEN_SUBSTEPS)[number], string> = {
-  'block-designer': '骨格',
+const genSubstepLabels = (): Record<(typeof GEN_SUBSTEPS)[number], string> => ({
+  'block-designer': t('draft.view.structure'),
   'mesh-suggester': 'MeSH',
-  'freeword-designer': 'フリーワード',
-  'line-hits': '件数',
-};
-const GEN_TAIL_LABELS: Record<(typeof GEN_TAIL)[number], string> = {
-  'filter-designer': 'フィルタ決定',
-  assemble: '組み立て',
-  save: '保存',
-};
-const VAL_STEP_LABELS: Record<(typeof VAL_STEPS)[number], string> = {
-  line_hits: '各行ヒット数',
-  final_query: '捕捉率',
-  mesh: 'MeSH 抽出',
-  mesh_hierarchy: 'MeSH 階層',
-  logging: '記録',
-};
+  'freeword-designer': t('draft.view.freeTextTerms'),
+  'line-hits': t('draft.view.hits2'),
+});
+const genTailLabels = (): Record<(typeof GEN_TAIL)[number], string> => ({
+  'filter-designer': t('draft.view.chooseFilters'),
+  assemble: t('draft.view.assemble'),
+  save: t('draft.view.save'),
+});
+const valStepLabels = (): Record<(typeof VAL_STEPS)[number], string> => ({
+  line_hits: t('draft.view.hitsByLine'),
+  final_query: t('draft.view.captureRate'),
+  mesh: t('draft.view.extractMesh'),
+  mesh_hierarchy: t('draft.view.meshHierarchy'),
+  logging: t('draft.view.logResults'),
+});
 
 type StepState = 'done' | 'active' | 'pending';
 
@@ -691,10 +706,10 @@ function renderProgressTracker(doc: Document, state: AppState, run: DraftRunStat
   bar.className = 'draft__progressbar';
   bar.max = total;
   bar.value = Math.min(current, total);
-  bar.setAttribute('aria-label', '全体の進捗');
+  bar.setAttribute('aria-label', t('draft.view.overallProgress'));
   const counter = doc.createElement('span');
   counter.className = 'draft__step-counter';
-  counter.textContent = `ステップ ${Math.min(current + 1, total)} / ${total}`;
+  counter.textContent = t('draft.view.step', { step: Math.min(current + 1, total), total: total });
   header.appendChild(bar);
   header.appendChild(counter);
   section.appendChild(header);
@@ -704,7 +719,7 @@ function renderProgressTracker(doc: Document, state: AppState, run: DraftRunStat
   genGroup.className = 'draft__phase';
   const genLabel = doc.createElement('span');
   genLabel.className = 'draft__phase-label';
-  genLabel.textContent = '生成';
+  genLabel.textContent = t('draft.view.generation');
   genGroup.appendChild(genLabel);
 
   blocks.forEach((block, i) => {
@@ -717,14 +732,14 @@ function renderProgressTracker(doc: Document, state: AppState, run: DraftRunStat
     row.className = `draft__step-block draft__step-block--${blockState}`;
     const name = doc.createElement('span');
     name.className = 'draft__step-block-label';
-    name.textContent = `#${i + 1} ${block.blockLabel || `ブロック ${i + 1}`}`;
+    name.textContent = `#${i + 1} ${block.blockLabel || t('draft.view.block', { blockNumber: i + 1 })}`;
     row.appendChild(name);
 
     const subWrap = doc.createElement('div');
     subWrap.className = 'draft__substeps';
     GEN_SUBSTEPS.forEach((sub, j) => {
       subWrap.appendChild(
-        renderStepChip(doc, GEN_SUBSTEP_LABELS[sub], stepStateFor(startIdx + j, current))
+        renderStepChip(doc, genSubstepLabels()[sub], stepStateFor(startIdx + j, current))
       );
     });
     row.appendChild(subWrap);
@@ -735,7 +750,7 @@ function renderProgressTracker(doc: Document, state: AppState, run: DraftRunStat
   tailWrap.className = 'draft__substeps draft__substeps--tail';
   GEN_TAIL.forEach((s, k) => {
     tailWrap.appendChild(
-      renderStepChip(doc, GEN_TAIL_LABELS[s], stepStateFor(blockCount * GEN_SUBSTEPS.length + k, current))
+      renderStepChip(doc, genTailLabels()[s], stepStateFor(blockCount * GEN_SUBSTEPS.length + k, current))
     );
   });
   genGroup.appendChild(tailWrap);
@@ -746,14 +761,14 @@ function renderProgressTracker(doc: Document, state: AppState, run: DraftRunStat
   valGroup.className = 'draft__phase';
   const valLabel = doc.createElement('span');
   valLabel.className = 'draft__phase-label';
-  valLabel.textContent = '検証';
+  valLabel.textContent = t('draft.view.validation');
   valGroup.appendChild(valLabel);
 
   const valWrap = doc.createElement('div');
   valWrap.className = 'draft__substeps';
   const valBase = blockCount * GEN_SUBSTEPS.length + GEN_TAIL.length;
   VAL_STEPS.forEach((s, k) => {
-    valWrap.appendChild(renderStepChip(doc, VAL_STEP_LABELS[s], stepStateFor(valBase + k, current)));
+    valWrap.appendChild(renderStepChip(doc, valStepLabels()[s], stepStateFor(valBase + k, current)));
   });
   valGroup.appendChild(valWrap);
   section.appendChild(valGroup);
@@ -826,7 +841,7 @@ function buildLegend(doc: Document): HTMLElement {
   legend.className = 'draft__legend';
   for (const [kind, label] of [
     ['mesh', 'MeSH'],
-    ['freeword', 'フリーワード'],
+    ['freeword', t('draft.view.freeTextTerms')],
   ] as const) {
     const item = doc.createElement('span');
     item.className = `draft__legend-item draft__term--${kind}`;
@@ -863,37 +878,37 @@ function startElapsedTicker(
 type DraftRunPhase = 'generating' | 'validating';
 
 function runningStatusText(phase: DraftRunPhase, label: string, startedAtMs: number): string {
-  const phaseLabel = phase === 'validating' ? '検証' : '生成';
-  return `[${phaseLabel}] ${label}（経過 ${formatElapsed(Date.now() - startedAtMs)}）`;
+  const phaseLabel = phase === 'validating' ? t('draft.view.validation') : t('draft.view.generation');
+  return t('draft.view.elapsed', { phase: phaseLabel, label: label, elapsed: formatElapsed(Date.now() - startedAtMs) });
 }
 
 function formatElapsed(ms: number): string {
   const totalSec = Math.max(0, Math.floor(ms / 1000));
   const min = Math.floor(totalSec / 60);
   const sec = totalSec % 60;
-  return min > 0 ? `${min}分${sec}秒` : `${sec}秒`;
+  return min > 0 ? t('draft.view.mS', { minutes: min, seconds: sec }) : t('draft.view.s', { seconds: sec });
 }
 
 /** DraftProgress を表示用ラベルへ変換する（bootstrap が draftRun.progressLabel に入れる） */
 export function formatDraftProgress(progress: DraftProgress): string {
   if (progress.step === 'agent') {
     const agent = progress.agent;
-    const operations = { write_formula: '式の書き込み', check: '書式の検査', count: '件数の測定', mesh: 'MeSH の照会', submit: '提出' };
-    const label = `AI が検索式を作成中（測定 ${agent?.measurements ?? 0} / ${agent?.maxMeasurements ?? 20} 回、提出 ${agent?.submissions ?? 0} / ${agent?.maxSubmissions ?? 4} 回）`;
-    return agent?.lastCommand ? `${label} 直前の操作: ${operations[agent.lastCommand]}` : label;
+    const operations = { write_formula: t('draft.view.writeFormula'), check: t('draft.view.checkSyntax'), count: t('draft.view.measureHits'), mesh: t('draft.view.lookUpMesh'), submit: t('draft.view.submit') };
+    const label = t('draft.view.aiIsDraftingTheSearch', { measurements: agent?.measurements ?? 0, maxMeasurements: agent?.maxMeasurements ?? 20, submissions: agent?.submissions ?? 0, maxSubmissions: agent?.maxSubmissions ?? 4 });
+    return agent?.lastCommand ? t('draft.view.lastAction', { label: label, operation: operations[agent.lastCommand] }) : label;
   }
   const label = {
-    'block-designer': 'ブロック骨格を設計中',
-    'mesh-suggester': 'MeSH を提案中',
-    'freeword-designer': 'フリーワードを展開中',
-    'line-hits': 'ブロックのヒット数を計測中',
-    'filter-designer': 'フィルタを決定中',
-    assemble: '検索式を組み立て中',
-    save: 'FormulaVersions に保存中',
-    done: '完了',
+    'block-designer': t('draft.view.designingBlockStructure'),
+    'mesh-suggester': t('draft.view.suggestingMeshTerms'),
+    'freeword-designer': t('draft.view.expandingFreeTextTerms'),
+    'line-hits': t('draft.view.measuringBlockHits'),
+    'filter-designer': t('draft.view.choosingFilters'),
+    assemble: t('draft.view.assemblingTheSearchFormula'),
+    save: t('draft.view.savingToFormulaversions'),
+    done: t('draft.view.done'),
   }[progress.step];
   if (progress.blockIndex !== undefined) {
-    return `${label}（ブロック ${progress.blockIndex + 1}/${progress.blockCount}）`;
+    return t('draft.view.block2', { label: label, blockNumber: progress.blockIndex + 1, blockCount: progress.blockCount });
   }
   return label;
 }
@@ -915,7 +930,7 @@ function renderQueryOptimization(container: HTMLElement, state: AppState, callba
     for (const child of Array.from(status.children)) {
       if (!child.matches('.optimization__announcement, .optimization__stop')) child.remove();
     }
-    status.setAttribute('aria-label', '自動調整の進捗');
+    status.setAttribute('aria-label', t('draft.optimize.autoTuningProgress'));
     status.setAttribute('aria-live', 'polite');
     status.setAttribute('aria-atomic', 'false');
     status.setAttribute('aria-relevant', 'text');
@@ -923,11 +938,11 @@ function renderQueryOptimization(container: HTMLElement, state: AppState, callba
     metrics.className = 'optimization__metrics';
     metrics.setAttribute('aria-live', 'off');
     for (const [label, value] of [
-      ['目安件数', `${run.maxHits.toLocaleString()} 件`],
-      ['現在の最良候補の件数', run.progress.bestTotalHits === null ? '未計測' : `${run.progress.bestTotalHits.toLocaleString()} 件`],
-      ['既知シード捕捉数', `${run.progress.bestCapturedSeedCount ?? '未計測'} / ${run.seedCount ?? '確認中'}`],
-      ['試行回数', `${run.progress.evaluatedTrials ?? run.trials.filter((trial) => trial.kind === 'proposal').length} / 最大 ${run.maxIterations}`],
-      ['情報取得', `${run.progress.informationTrials ?? run.trials.filter((trial) => trial.kind === 'information').length} / 最大 ${MAX_INFORMATION_TRIALS} 回`],
+      [t('draft.optimize.targetHitCount'), t('draft.optimize.hits3', { count: run.maxHits.toLocaleString() })],
+      [t('draft.optimize.currentBestCandidateHitCount'), run.progress.bestTotalHits === null ? t('draft.optimize.notMeasured') : t('draft.optimize.hits3', { count: run.progress.bestTotalHits.toLocaleString() })],
+      [t('draft.optimize.knownSeedsCaptured'), `${run.progress.bestCapturedSeedCount ?? t('draft.optimize.notMeasured')} / ${run.seedCount ?? t('draft.optimize.checking')}`],
+      [t('draft.optimize.trials'), t('draft.optimize.maximum', { count: run.progress.evaluatedTrials ?? run.trials.filter((trial) => trial.kind === 'proposal').length, limit: run.maxIterations })],
+      [t('draft.optimize.contextRequests'), t('draft.optimize.maximumRequests', { count: run.progress.informationTrials ?? run.trials.filter((trial) => trial.kind === 'information').length, limit: MAX_INFORMATION_TRIALS })],
     ]) {
       const item = doc.createElement('span');
       item.textContent = `${label}: ${value}`;
@@ -935,7 +950,7 @@ function renderQueryOptimization(container: HTMLElement, state: AppState, callba
     }
     const elapsed = doc.createElement('span');
     const updateElapsed = (): void => {
-      elapsed.textContent = `経過時間: ${formatElapsed((run.finishedAtMs ?? Date.now()) - run.startedAtMs)}`;
+      elapsed.textContent = t('draft.optimize.elapsed2', { elapsed: formatElapsed((run.finishedAtMs ?? Date.now()) - run.startedAtMs) });
     };
     updateElapsed();
     metrics.appendChild(elapsed);
@@ -952,8 +967,8 @@ function renderQueryOptimization(container: HTMLElement, state: AppState, callba
     stages.className = 'optimization__stages';
     stages.setAttribute('aria-live', 'off');
     for (const [step, label] of [
-      ['initial_formula', '初期式作成'], ['measuring', '実測'], ['adjusting', '調整'],
-      ['revalidating', '再検証'], ['outside_check', '外側の確認'], ['review', 'レビュー'],
+      ['initial_formula', t('draft.optimize.draftInitialFormula')], ['measuring', t('draft.optimize.measure')], ['adjusting', t('draft.optimize.autoTune')],
+      ['revalidating', t('draft.optimize.revalidate')], ['outside_check', t('draft.optimize.outsideCheck')], ['review', t('draft.optimize.review')],
     ]) {
       const item = doc.createElement('li');
       item.textContent = label!;
@@ -963,20 +978,20 @@ function renderQueryOptimization(container: HTMLElement, state: AppState, callba
     status.insertBefore(stages, status.querySelector('.optimization__announcement'));
     const message = status.querySelector<HTMLElement>('.optimization__announcement') ?? doc.createElement('p');
     message.className = 'optimization__announcement';
-    const messageText = running ? (run.stopRequested ? '停止要求済み。処理の区切りで停止します。' : '自動調整を実行中です。')
-      : run.status === 'error' ? '自動調整を続行できませんでした。'
-        : run.result?.status === 'stopped' ? '停止しました。候補を保持しています。'
-          : run.result?.status === 'achieved' ? '完了しました。実測で条件を達成しました。'
-            : '実行が終了しました。条件未達の候補を保持しています。';
+    const messageText = running ? (run.stopRequested ? t('draft.optimize.stopRequestedTheRunWill') : t('draft.optimize.autoTuningIsRunning'))
+      : run.status === 'error' ? t('draft.optimize.autoTuningCouldNotContinue')
+        : run.result?.status === 'stopped' ? t('draft.optimize.stoppedCandidatesHaveBeenKept')
+          : run.result?.status === 'achieved' ? t('draft.optimize.completeMeasurementsMetTheConditions')
+            : t('draft.optimize.runEndedCandidatesThatDo');
     const currentStage = stages.querySelector('[aria-current=step]')?.textContent;
-    const announcement = `${messageText} 現在: ${currentStage}。履歴 ${run.trials.length}件。`;
+    const announcement = t('draft.optimize.currentStageHistoryEntries', { message: messageText, stage: String(currentStage), count: run.trials.length });
     if (message.textContent !== announcement) message.textContent = announcement;
     if (!message.parentElement) status.appendChild(message);
     if (run.progress.task) {
       const task = run.progress.task;
       const detail = doc.createElement('p');
       detail.setAttribute('aria-live', 'off');
-      detail.textContent = `${task.kind === 'terms' ? '語別件数' : 'シード確認'} ${task.completed}/${task.total}${task.kind === 'terms' ? '語' : '件'}`;
+      detail.textContent = `${task.kind === 'terms' ? t('draft.optimize.termHits') : t('draft.optimize.seedCheck')} ${task.completed}/${task.total}${task.kind === 'terms' ? t('draft.optimize.terms') : t('draft.optimize.seeds')}`;
       status.insertBefore(detail, status.querySelector('.optimization__stop'));
     }
     if (run.progress.apiWaiting && running) {
@@ -994,13 +1009,13 @@ function renderQueryOptimization(container: HTMLElement, state: AppState, callba
     if (run.costUsd !== undefined && Number.isFinite(run.costUsd)) {
       const cost = doc.createElement('p');
       cost.setAttribute('aria-live', 'off');
-      cost.textContent = `この実行の概算 AI 費用（取得分）: $${run.costUsd.toFixed(4)}`;
+      cost.textContent = t('draft.optimize.estimatedAiCostForThis', { cost: run.costUsd.toFixed(4) });
       status.insertBefore(cost, status.querySelector('.optimization__stop'));
     }
     if (run.seedCount === 0) {
       const warning = doc.createElement('p');
       warning.setAttribute('aria-live', 'off');
-      warning.textContent = '検証対象シードがありません。シード捕捉を確認した完了とは判定できません。';
+      warning.textContent = t('draft.optimize.thereAreNoSeedsTo');
       status.insertBefore(warning, status.querySelector('.optimization__stop'));
     }
     if (running) {
@@ -1008,7 +1023,7 @@ function renderQueryOptimization(container: HTMLElement, state: AppState, callba
       const stop = existingStop ?? doc.createElement('button');
       stop.type = 'button';
       stop.className = 'optimization__stop';
-      stop.textContent = '停止して候補を確認';
+      stop.textContent = t('draft.optimize.stopAndReviewCandidates');
       stop.disabled = run.stopRequested;
       if (!existingStop) {
         stop.addEventListener('click', () => callbacks.onStopOptimization?.());
@@ -1023,15 +1038,15 @@ function renderQueryOptimization(container: HTMLElement, state: AppState, callba
   section.className = 'optimization__setup';
   section.dataset.tour = 'draft-optimize-settings';
   const heading = doc.createElement('h3');
-  heading.textContent = '検索式の自動調整';
+  heading.textContent = t('draft.optimize.autoTuningTheSearchFormula');
   section.appendChild(heading);
   for (const [label, value] of [
-    ['RQ', state.protocolDraft?.researchQuestion || '未設定'],
-    ['組入基準', state.protocolDraft?.inclusionCriteria || '未設定'],
-    ['除外基準', state.protocolDraft?.exclusionCriteria || '未設定'],
-    ['承認済みブロック', state.protocolDraftPersisted
-      ? state.blocksDraft?.blocks.map((block, index) => `#${index + 1} ${block.blockLabel}`).join(' / ') : '未承認'],
-    ['検証対象シード件数', setup?.seedCount == null ? '確認中' : `${setup.seedCount} 件`],
+    ['RQ', state.protocolDraft?.researchQuestion || t('draft.optimize.notSet')],
+    [t('draft.optimize.inclusionCriteria'), state.protocolDraft?.inclusionCriteria || t('draft.optimize.notSet')],
+    [t('draft.optimize.exclusionCriteria'), state.protocolDraft?.exclusionCriteria || t('draft.optimize.notSet')],
+    [t('draft.optimize.approvedBlocks'), state.protocolDraftPersisted
+      ? state.blocksDraft?.blocks.map((block, index) => `#${index + 1} ${block.blockLabel}`).join(' / ') : t('draft.optimize.notApproved')],
+    [t('draft.optimize.seedsToValidate'), setup?.seedCount == null ? t('draft.optimize.checking') : t('draft.optimize.seedCount', { count: setup.seedCount })],
   ]) {
     const line = doc.createElement('p');
     line.textContent = `${label}: ${value}`;
@@ -1039,7 +1054,7 @@ function renderQueryOptimization(container: HTMLElement, state: AppState, callba
   }
   if (setup?.seedCount === 0 && !running) {
     const warning = doc.createElement('p');
-    warning.textContent = 'シードなしで実行できますが、シード捕捉を確認した完了とは判定できません。';
+    warning.textContent = t('draft.optimize.youCanRunWithoutSeeds');
     section.appendChild(warning);
   }
   const form = doc.createElement('form');
@@ -1057,18 +1072,18 @@ function renderQueryOptimization(container: HTMLElement, state: AppState, callba
     label.appendChild(input);
     return label;
   };
-  const hitsLabel = makeInput('目安件数', setup?.maxHits ?? String(DEFAULT_QUERY_OPTIMIZATION_SETTINGS.maxHits));
-  const iterationsLabel = makeInput('反復上限', setup?.maxIterations ?? String(DEFAULT_QUERY_OPTIMIZATION_SETTINGS.maxIterations));
+  const hitsLabel = makeInput(t('draft.optimize.targetHitCount'), setup?.maxHits ?? String(DEFAULT_QUERY_OPTIMIZATION_SETTINGS.maxHits));
+  const iterationsLabel = makeInput(t('draft.optimize.iterationLimit'), setup?.maxIterations ?? String(DEFAULT_QUERY_OPTIMIZATION_SETTINGS.maxIterations));
   const hits = hitsLabel.querySelector('input')!;
   const hitsNote = doc.createElement('p');
   hitsNote.id = 'optimization-hits-note';
   hitsNote.className = 'draft__excess-note';
-  hitsNote.textContent = 'スクリーニングする量の目安です。超えても検索式の誤りではなく、適格な文献を落としてまで合わせるものではありません。';
+  hitsNote.textContent = t('draft.optimize.aGuideToHowMuch');
   hits.setAttribute('aria-describedby', hitsNote.id);
   const iterations = iterationsLabel.querySelector('input')!;
   const details = doc.createElement('details');
   const summary = doc.createElement('summary');
-  summary.textContent = '詳細設定';
+  summary.textContent = t('draft.optimize.advancedSettings');
   details.append(summary, iterationsLabel);
   const inputChanged = (): void => {
     const values = { maxHits: hits.value, maxIterations: iterations.value };
@@ -1081,7 +1096,7 @@ function renderQueryOptimization(container: HTMLElement, state: AppState, callba
   start.type = 'submit';
   start.className = 'optimization__start';
   start.dataset.tour = 'draft-optimize-start';
-  start.textContent = '検索式を作成・自動調整する';
+  start.textContent = t('draft.optimize.createAndAutoTuneThe');
   start.disabled = running || run?.save?.status === 'saving' || setup?.status !== 'ready' || state.draftRun?.status === 'running' || !state.protocolDraftPersisted;
   form.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -1091,15 +1106,15 @@ function renderQueryOptimization(container: HTMLElement, state: AppState, callba
   });
   const draftNotice = doc.createElement('p');
   draftNotice.className = 'optimization__notice';
-  draftNotice.textContent = '⚠ AI が作る検索式は下書きです。使う前に、人が検索式を確かめてください。';
+  draftNotice.textContent = t('draft.optimize.aiGeneratedSearchFormulasAre');
   const costNotice = doc.createElement('p');
   costNotice.className = 'optimization__cost-notice';
   costNotice.textContent = setup?.model === 'claude-opus-5-5'
-    ? '目安: 初期式の生成 1 回あたり約 0.28 ドル以下（2026-10-08 の料金表・キャッシュ割引なしの上限、README のベンチマーク）。自動調整の反復ごとに追加の費用がかかり、この目安には含まれません。'
-    : 'このモデルの費用の目安は測っていません。実行後の概算はヘッダーに出ます。';
+    ? t('draft.optimize.guideAboutOrLessPer')
+    : t('draft.optimize.costsHaveNotBeenBenchmarked');
   const benchmark = doc.createElement('a');
   benchmark.href = MODEL_BENCHMARK_URL;
-  benchmark.textContent = 'README のベンチマーク';
+  benchmark.textContent = t('draft.optimize.readmeBenchmark');
   benchmark.target = '_blank';
   benchmark.rel = 'noopener noreferrer';
   costNotice.append(' ', benchmark);
@@ -1115,13 +1130,13 @@ function renderQueryOptimization(container: HTMLElement, state: AppState, callba
   if (setup?.status === 'loading') {
     const loading = doc.createElement('p');
     loading.setAttribute('aria-live', 'polite');
-    loading.textContent = '設定と検証対象シードを読み込んでいます。';
+    loading.textContent = t('draft.optimize.loadingSettingsAndSeedsTo');
     section.appendChild(loading);
   }
   if (setup?.status === 'error') {
     const retry = doc.createElement('button');
     retry.type = 'button';
-    retry.textContent = '開始設定を再読み込み';
+    retry.textContent = t('draft.optimize.reloadStartSettings');
     retry.addEventListener('click', () => { void callbacks.onPrepareOptimization?.(true); });
     section.appendChild(retry);
   }

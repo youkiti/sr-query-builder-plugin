@@ -1,5 +1,24 @@
 import { createDraftView } from './draftView';
 import { INITIAL_STATE, type AppState } from '../store';
+import { setUiLanguage } from '@/lib/i18n';
+
+afterEach(() => setUiLanguage('ja'));
+
+test('language rerender updates retained announcements and stop button', () => {
+  jest.useFakeTimers();
+  const container = document.createElement('div');
+  const current = state();
+  const view = createDraftView();
+  view(container, { state: current, navigate: jest.fn() });
+  const announcement = container.querySelector('.optimization__announcement');
+  const stop = container.querySelector('.optimization__stop');
+  setUiLanguage('en');
+  view(container, { state: current, navigate: jest.fn() });
+  expect(container.querySelector('.optimization__announcement')).toBe(announcement);
+  expect(announcement!.textContent).toContain('Auto-tuning is running.');
+  expect(container.querySelector('.optimization__stop')).toBe(stop);
+  expect(stop!.textContent).toBe('Stop and review candidates');
+});
 
 function state(): AppState {
   return { ...INITIAL_STATE,
