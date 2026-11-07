@@ -1,3 +1,4 @@
+import { getUiLanguage, t } from '@/lib/i18n';
 import {
   applyBlockImprovement,
   type BlockImprovementContext,
@@ -7,7 +8,6 @@ import {
   type SaveEditedFormulaInput,
 } from '@/app/services';
 import {
-  formatCombinationError,
   normalizeCombinationExpression,
   tokenizeCombination,
   validateCombinationExpression,
@@ -333,7 +333,26 @@ function resolveBlockLabel(blocksDraft: BlocksDraft | null, blockId: string): st
 
 export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
   const inspector = createInspectorRuntime();
+  let renderedLanguage = getUiLanguage();
   return (container, ctx) => {
+    const language = getUiLanguage();
+    const keptValues = new Map<string, string | boolean>();
+    const openAiForms = new Set<string>();
+    // チップの beginInlineEdit・buildAddControl（editableBlock.ts）と語の beginDeltaEdit（blockInspector.ts）は blur で確定する。
+    // 別タブへの移動やツアー一覧の言語切替でフォーカスが外れると入力は確定して store に残るため、
+    // これらの入力欄はここで退避・復元しない。
+    if (renderedLanguage !== language) {
+      for (const form of Array.from(container.querySelectorAll<HTMLElement>('[data-keep-ai-block]'))) {
+        openAiForms.add(form.dataset.keepAiBlock!);
+      }
+      for (const element of Array.from(container.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLDetailsElement>('[data-keep-key]'))) {
+        const key = element.dataset.keepKey!;
+        keptValues.set(key, element.tagName === 'DETAILS'
+          ? (element as HTMLDetailsElement).open
+          : (element as HTMLInputElement | HTMLTextAreaElement).value);
+      }
+    }
+    renderedLanguage = language;
     container.innerHTML = '';
     const doc = container.ownerDocument;
     const heading = doc.createElement('h2');
@@ -343,14 +362,14 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
     if (!ctx.state.project) {
       const warn = doc.createElement('p');
       warn.className = 'view__placeholder';
-      warn.textContent = '先にプロジェクトを選択してください。';
+      warn.textContent = t('edit.selectProject');
       container.appendChild(warn);
       return;
     }
     if (!resolveMarkdown(ctx.state, ctx.state.currentFormulaMarkdown ?? '')) {
       const warn = doc.createElement('p');
       warn.className = 'view__placeholder';
-      warn.textContent = '先に /draft で検索式を生成するか、/history で読み込んでください。';
+      warn.textContent = t('edit.loadFormula');
       container.appendChild(warn);
       return;
     }
@@ -358,7 +377,7 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
     const lead = doc.createElement('p');
     lead.className = 'edit__lead';
     lead.textContent =
-      '各ブロックは鉛筆アイコンでチップ編集するか、「AI に改善させる」で再設計できます。最後に「新バージョンとして保存」を押すと FormulaVersions に user_edit として追記されます。';
+      t('edit.lead');
     container.appendChild(lead);
 
     // 表示する md は store（formulaEditDraft）優先、無ければ現在の formula。
@@ -413,7 +432,7 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
     blocksSection.className = 'edit__blocks';
     blocksSection.dataset.tour = 'edit-blocks';
     const blocksHeading = doc.createElement('h3');
-    blocksHeading.textContent = 'ブロック';
+    blocksHeading.textContent = t('edit.blocks');
     blocksSection.appendChild(blocksHeading);
     // MeSH / フリーワードの色分け凡例（読み取り表示・チップ編集・AI 差分の 3 か所で共通）。
     blocksSection.appendChild(buildLegend(doc));
@@ -430,11 +449,11 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
     const noteRow = doc.createElement('p');
     noteRow.className = 'edit__note-row';
     const noteLabel = doc.createElement('label');
-    noteLabel.textContent = '編集メモ:';
+    noteLabel.textContent = t('edit.note');
     const noteInput = doc.createElement('input');
     noteInput.type = 'text';
     noteInput.className = 'edit__note-input';
-    noteInput.placeholder = '変更理由・気づきなど（任意）';
+    noteInput.placeholder = t('edit.notePlaceholder');
     noteInput.value = resolveNote(ctx.state);
     // 打鍵のたび（input）に store へ送る。onNoteChange は setStateSilently で書き込むため
     // 再描画は起きず、開いている鉛筆編集フォームや AI 指示欄を壊さない。
@@ -454,7 +473,7 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
     actions.className = 'edit__actions';
     const saveBtn = doc.createElement('button');
     saveBtn.type = 'button';
-    saveBtn.textContent = '新バージョンとして保存';
+    saveBtn.textContent = t('edit.saveVersion');
     saveBtn.dataset.tour = 'edit-save';
     // 保存中の二重起動防止（実行そのものの排他は bootstrap 側の guard が担う）。
     saveBtn.disabled = save?.status === 'saving';
@@ -470,7 +489,7 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
     const errorBox = doc.createElement('p');
     errorBox.className = 'edit__error';
     errorBox.setAttribute('aria-live', 'polite');
-    errorBox.textContent = save?.status === 'error' ? (save.error ?? '不明なエラー') : '';
+    errorBox.textContent = save?.status === 'error' ? (save.error ?? t('edit.unknownError')) : '';
     container.appendChild(errorBox);
 
     function rerenderBlocks(): void {
@@ -486,6 +505,23 @@ export function createEditView(callbacks: EditViewCallbacks = {}): RenderView {
       );
     }
     rerenderBlocks();
+    for (const row of Array.from(container.querySelectorAll<HTMLElement>('.edit__block-row'))) {
+      if (openAiForms.has(row.dataset.blockId!) && !row.querySelector('.edit__block-ai-form')) {
+        row.querySelector<HTMLButtonElement>('.edit__block-improve')?.click();
+      }
+    }
+    for (const element of Array.from(container.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLDetailsElement>('[data-keep-key]'))) {
+      const value = keptValues.get(element.dataset.keepKey!);
+      if (typeof value === 'boolean' && element.tagName === 'DETAILS') {
+        (element as HTMLDetailsElement).open = value;
+      } else if (typeof value === 'string' && element.tagName !== 'DETAILS') {
+        (element as HTMLInputElement | HTMLTextAreaElement).value = value;
+        // 組み合わせ方の検証表示も、復元した入力に合わせる。
+        const event = doc.createEvent('Event');
+        event.initEvent('input', true, false);
+        element.dispatchEvent(event);
+      }
+    }
 
     saveBtn.addEventListener('click', () => {
       if (!callbacks.onSave) {
@@ -506,10 +542,10 @@ function formatSaveStatus(save: FormulaSaveState | null): string {
     return '';
   }
   if (save.status === 'saving') {
-    return '保存中…';
+    return t('edit.saving');
   }
   // saved の formulaVersionId は保存で採番された新しい版そのもの（store.ts の doc コメント参照）。
-  return `保存しました（version_id: ${save.formulaVersionId}）`;
+  return t('edit.saved', { versionId: String(save.formulaVersionId) });
 }
 
 /**
@@ -538,14 +574,14 @@ function renderBlockList(
   } catch (err) {
     const warn = doc.createElement('li');
     warn.className = 'edit__block-error';
-    warn.textContent = `現状の検索式が PubMed セクション形式としてパースできません: ${formatError(err)}`;
+    warn.textContent = t('edit.parseFailed', { error: formatError(err) });
     ul.appendChild(warn);
     return;
   }
   if (formula.blocks.length === 0) {
     const empty = doc.createElement('li');
     empty.className = 'edit__block-empty';
-    empty.textContent = 'ブロックがありません。';
+    empty.textContent = t('edit.noBlocks');
     ul.appendChild(empty);
     return;
   }
@@ -652,15 +688,15 @@ function renderConsistencyNotices(doc: Document, slot: HTMLElement, formula: Pub
     slot.appendChild(
       buildConsistencyNotice(
         doc,
-        '⚠ ブロックを掛け合わせる行（例: #3 #1 AND #2）がありません。このままでは最後の行だけが検索式として扱われます。'
+        t('edit.missingCombination')
       )
     );
   }
   const unreachable = findUnreachableBlockIds(formula);
   if (unreachable.length > 0) {
-    const list = unreachable.map((id) => `#${id}`).join('、');
+    const list = unreachable.map((id) => `#${id}`).join(t('edit.listSeparator'));
     slot.appendChild(
-      buildConsistencyNotice(doc, `⚠ ${list} はどの行からも参照されていません。検索に反映されません。`)
+      buildConsistencyNotice(doc, t('edit.unreferenced', { blockIds: list }))
     );
   }
 }
@@ -715,7 +751,7 @@ function buildBlockRow(
     li.appendChild(currentPre);
     const note = doc.createElement('p');
     note.className = 'edit__block-combination-note';
-    const refList = combinationRefs.map((id) => `#${id}`).join('、');
+    const refList = combinationRefs.map((id) => `#${id}`).join(t('edit.listSeparator'));
 
     // 参照 / 演算子（AND OR NOT）/ 括弧だけで構成される「純粋な掛け合わせ行」か、
     // `#4 #1 AND #2 AND humans[mh]` のように参照とリテラル検索語が混在する行かを判定する。
@@ -734,8 +770,8 @@ function buildBlockRow(
       // （assertReferenceIntegrity）はここでも変わらず効く。
       note.textContent =
         refList === ''
-          ? 'この行には参照以外の検索語が混ざっているため「組み合わせ方を編集」は使えません。下の詳細編集（生テキスト）で式を直接書き換えてください。'
-          : `この行は ${refList} を参照していますが、参照以外の検索語も混ざっているため「組み合わせ方を編集」は使えません。下の詳細編集（生テキスト）で式を直接書き換えてください。`;
+          ? t('edit.mixedCombination')
+          : t('edit.mixedReferences', { blockIds: refList });
       li.appendChild(note);
 
       const rawEditSlot = doc.createElement('div');
@@ -754,14 +790,14 @@ function buildBlockRow(
 
     note.textContent =
       refList === ''
-        ? 'この行は他のブロックを掛け合わせる行です。組み合わせ方は編集できますが、語の編集は各ブロックで行ってください。'
-        : `この行は ${refList} の掛け合わせです。組み合わせ方は編集できますが、語の編集は各ブロックで行ってください。`;
+        ? t('edit.combinationNotice')
+        : t('edit.combinationReferences', { blockIds: refList });
     li.appendChild(note);
 
     const combinationToggle = doc.createElement('button');
     combinationToggle.type = 'button';
     combinationToggle.className = 'edit__block-combination-toggle';
-    combinationToggle.textContent = '組み合わせ方を編集';
+    combinationToggle.textContent = t('edit.editCombination');
     combinationToggle.setAttribute('aria-expanded', 'false');
     li.appendChild(combinationToggle);
 
@@ -817,14 +853,14 @@ function buildBlockRow(
   const editToggle = doc.createElement('button');
   editToggle.type = 'button';
   editToggle.className = 'edit__block-edit-toggle';
-  editToggle.textContent = '✏️';
-  editToggle.title = 'このブロックを編集';
-  editToggle.setAttribute('aria-label', `ブロック #${blockId} を編集`);
+  editToggle.textContent = t('edit.pencil');
+  editToggle.title = t('edit.editBlockTitle');
+  editToggle.setAttribute('aria-label', t('edit.editBlock', { blockId: blockId }));
   tools.appendChild(editToggle);
   const improveBtn = doc.createElement('button');
   improveBtn.type = 'button';
   improveBtn.className = 'edit__block-improve';
-  improveBtn.textContent = 'AI に改善させる';
+  improveBtn.textContent = t('edit.improve');
   // 進行中は二重起動を防ぐため disabled にする（状態は store.blockImprovement 由来）。
   improveBtn.disabled = improvement?.status === 'running';
   tools.appendChild(improveBtn);
@@ -897,13 +933,13 @@ function buildBlockRow(
       return;
     }
     if (next === '') {
-      onError?.('ブロックを空にすることはできません。');
+      onError?.(t('edit.emptyBlock'));
       return;
     }
     try {
       editor.setMd(applyBlockImprovement(editor.getMd(), blockId, next));
     } catch (err) {
-      onError?.(`更新に失敗しました: ${formatError(err)}`);
+      onError?.(t('edit.updateFailed', { error: formatError(err) }));
       return;
     }
     restoreChipFocus(doc, blockId, focusTerm);
@@ -1140,7 +1176,7 @@ function renderEditPanel(
   const dedupeBtn = doc.createElement('button');
   dedupeBtn.type = 'button';
   dedupeBtn.className = 'edit__block-quicktool';
-  dedupeBtn.textContent = '重複する語を整理';
+  dedupeBtn.textContent = t('edit.dedupe');
   const deduped = dedupeOperands(expression);
   dedupeBtn.disabled = deduped.trim() === expression.trim();
   dedupeBtn.addEventListener('click', () => commitExpression(deduped, null));
@@ -1149,7 +1185,7 @@ function renderEditPanel(
   const sortBtn = doc.createElement('button');
   sortBtn.type = 'button';
   sortBtn.className = 'edit__block-quicktool';
-  sortBtn.textContent = 'MeSH を先頭に並べ替え';
+  sortBtn.textContent = t('edit.meshFirst');
   const sorted = sortOperandsMeshFirst(expression);
   sortBtn.disabled = sorted.trim() === expression.trim();
   sortBtn.addEventListener('click', () => commitExpression(sorted, null));
@@ -1178,16 +1214,17 @@ function buildRawEditForm(
   wrap.className = 'edit__block-rawedit';
   const label = doc.createElement('p');
   label.className = 'edit__block-rawedit-label';
-  label.textContent = '詳細編集（生テキスト）';
+  label.textContent = t('edit.rawEdit');
   wrap.appendChild(label);
 
   const form = doc.createElement('div');
   form.className = 'edit__block-edit-form';
   const input = doc.createElement('textarea');
   input.className = 'edit__block-edit-input';
+  input.dataset.keepKey = `rawedit:#${blockId}`;
   input.rows = 3;
   input.value = expression;
-  input.setAttribute('aria-label', `ブロック #${blockId} の式`);
+  input.setAttribute('aria-label', t('edit.blockFormula', { blockId: blockId }));
   form.appendChild(input);
 
   const editActions = doc.createElement('div');
@@ -1195,11 +1232,11 @@ function buildRawEditForm(
   const saveBtn = doc.createElement('button');
   saveBtn.type = 'button';
   saveBtn.className = 'edit__block-edit-save';
-  saveBtn.textContent = '保存';
+  saveBtn.textContent = t('edit.save');
   const cancelBtn = doc.createElement('button');
   cancelBtn.type = 'button';
   cancelBtn.className = 'edit__block-edit-cancel';
-  cancelBtn.textContent = 'キャンセル';
+  cancelBtn.textContent = t('edit.cancel');
   editActions.appendChild(saveBtn);
   editActions.appendChild(cancelBtn);
   form.appendChild(editActions);
@@ -1214,7 +1251,7 @@ function buildRawEditForm(
   saveBtn.addEventListener('click', () => {
     const next = input.value.trim();
     if (next === '') {
-      editError.textContent = '式が空です。内容を入力してください。';
+      editError.textContent = t('edit.emptyFormula');
       return;
     }
     try {
@@ -1224,7 +1261,7 @@ function buildRawEditForm(
       // 新しい行はチップ編集面が開いたまま再構築される）。
       editor.setMd(updated);
     } catch (err) {
-      editError.textContent = `保存に失敗しました: ${formatError(err)}`;
+      editError.textContent = t('edit.saveFailed', { error: formatError(err) });
     }
   });
 
@@ -1233,6 +1270,36 @@ function buildRawEditForm(
   });
 
   return wrap;
+}
+
+/** パターンは parse.ts の tokenizeCombination・validateParens・validateReferences・validateGrammar の診断に対応する。
+ * それらのメッセージの文面を変えるときは、ここのパターンも更新する。 */
+export function localizeCombinationError(error: { message: string; position: number }): string {
+  const patterns = [
+    ["^不正な文字: \"(.+)\"$", 'edit.invalidCharacter', ['character']],
+    ["^予期しないキーワード: \"(.+)\"（許可: AND / OR / NOT）$", 'edit.unexpectedKeyword', ['keyword']],
+    ["^対応する `\\(` が無い `\\)`$", 'edit.unmatchedClose', []],
+    ["^閉じ括弧 `\\)` が不足している `\\(`$", 'edit.unmatchedOpen', []],
+    ["^未定義のブロック ID: #(.+)$", 'edit.undefinedBlock', ['blockId']],
+    ["^空の結合式です$", 'edit.emptyCombination', []],
+    ["^先頭に二項演算子 (.+) は置けません$", 'edit.leadingOperator', ['operator']],
+    ["^二項演算子が連続しています: (.+) (.+)$", 'edit.consecutiveOperators', ['previousOperator', 'operator']],
+    ["^ここには二項演算子 (.+) は置けません$", 'edit.unexpectedOperator', ['operator']],
+    ["^被演算子が必要です$", 'edit.operandRequired', []],
+    ["^被演算子の直後に NOT は置けません（AND/OR が必要）$", 'edit.notAfterOperand', []],
+    ["^被演算子が連続しています（演算子 AND/OR が必要）$", 'edit.consecutiveOperands', []],
+    ["^末尾が演算子 (.+) で終わっています$", 'edit.trailingOperator', ['operator']],
+    ["^末尾で被演算子が不足しています$", 'edit.missingLastOperand', []],
+  ] as const;
+  let message = error.message;
+  for (const [pattern, key, params] of patterns) {
+    const match = new RegExp(pattern).exec(error.message);
+    if (match) {
+      message = t(key, Object.fromEntries(params.map((name, index) => [name, match[index + 1] ?? ''])));
+      break;
+    }
+  }
+  return t('edit.errorPosition', { position: error.position + 1, message: message });
 }
 
 /**
@@ -1267,6 +1334,7 @@ function buildRawEditForm(
  * `throw new Error('検索式ブロックの参照が循環しています: #N')` に当たる。保存前に
  * {@link wouldCreateReferenceCycle} でこの画面自身が拒否する。
  */
+
 function buildCombinationEditPanel(
   doc: Document,
   blockId: string,
@@ -1282,14 +1350,15 @@ function buildCombinationEditPanel(
   const hint = doc.createElement('p');
   hint.className = 'edit__block-combination-hint';
   hint.textContent =
-    '使える記号: AND / OR / NOT / ( ) と #番号だけです。キーワードは各ブロック（#1〜）で編集してください。';
+    t('edit.combinationHint');
   wrap.appendChild(hint);
 
   const input = doc.createElement('input');
   input.type = 'text';
   input.className = 'edit__block-combination-input';
+  input.dataset.keepKey = `combination:#${blockId}`;
   input.value = expression;
-  input.setAttribute('aria-label', `ブロック #${blockId} の組み合わせ方`);
+  input.setAttribute('aria-label', t('edit.blockCombination', { blockId: blockId }));
   wrap.appendChild(input);
 
   const status = doc.createElement('p');
@@ -1310,10 +1379,10 @@ function buildCombinationEditPanel(
     errorList.innerHTML = '';
     if (validation.errors.length > 0) {
       status.className = 'edit__block-combination-status edit__block-combination-status--error';
-      status.textContent = `⚠ ${validation.errors.length} 件のエラーがあります`;
+      status.textContent = t('edit.combinationErrors', { count: validation.errors.length });
       for (const err of validation.errors) {
         const li = doc.createElement('li');
-        li.textContent = formatCombinationError(err);
+        li.textContent = localizeCombinationError(err);
         errorList.appendChild(li);
       }
       return { validation, hasCycle: false };
@@ -1321,15 +1390,15 @@ function buildCombinationEditPanel(
     const hasCycle = wouldCreateReferenceCycle(formula, blockId, input.value);
     if (hasCycle) {
       status.className = 'edit__block-combination-status edit__block-combination-status--error';
-      status.textContent = '⚠ この組み合わせ方は参照の循環を作ります';
+      status.textContent = t('edit.combinationCycle');
       const li = doc.createElement('li');
       li.textContent =
-        '他のブロックの掛け合わせ行を辿ると自分自身に戻ってしまいます。参照先を見直してください。';
+        t('edit.cycleHint');
       errorList.appendChild(li);
       return { validation, hasCycle: true };
     }
     status.className = 'edit__block-combination-status edit__block-combination-status--ok';
-    status.textContent = '✓ 構文 OK';
+    status.textContent = t('edit.syntaxOk');
     return { validation, hasCycle: false };
   }
   refreshValidation();
@@ -1342,11 +1411,11 @@ function buildCombinationEditPanel(
   const saveBtn = doc.createElement('button');
   saveBtn.type = 'button';
   saveBtn.className = 'edit__block-combination-save';
-  saveBtn.textContent = '保存';
+  saveBtn.textContent = t('edit.save');
   const cancelBtn = doc.createElement('button');
   cancelBtn.type = 'button';
   cancelBtn.className = 'edit__block-combination-cancel';
-  cancelBtn.textContent = 'キャンセル';
+  cancelBtn.textContent = t('edit.cancel');
   actions.appendChild(saveBtn);
   actions.appendChild(cancelBtn);
   wrap.appendChild(actions);
@@ -1361,7 +1430,7 @@ function buildCombinationEditPanel(
       editor.setMd(applyBlockImprovement(editor.getMd(), blockId, next));
     } catch (err) {
       status.className = 'edit__block-combination-status edit__block-combination-status--error';
-      status.textContent = `保存に失敗しました: ${formatError(err)}`;
+      status.textContent = t('edit.saveFailed', { error: formatError(err) });
     }
   });
 
@@ -1412,14 +1481,15 @@ function openAiPromptForm(
   const overlaps = computeSiblingOverlaps(expression, siblings);
   const form = doc.createElement('div');
   form.className = 'edit__block-ai-form';
+  form.dataset.keepAiBlock = blockId;
 
   const instructionLabel = doc.createElement('label');
   instructionLabel.className = 'edit__block-ai-instruction-label';
-  instructionLabel.textContent = 'AI への指示（任意）:';
+  instructionLabel.textContent = t('edit.instruction');
   const instruction = doc.createElement('textarea');
   instruction.className = 'edit__block-ai-instruction';
   instruction.rows = 2;
-  instruction.placeholder = '例: 同義語をもっと増やして / MeSH を減らして tiab 中心に';
+  instruction.placeholder = t('edit.instructionPlaceholder');
   instruction.value = initialInstruction;
   instruction.addEventListener('input', () => {
     onInstructionChange?.(blockId, instruction.value);
@@ -1431,12 +1501,13 @@ function openAiPromptForm(
   if (onGetImproveContext) {
     const details = doc.createElement('details');
     details.className = 'edit__block-ai-context';
+    details.dataset.keepKey = `context:#${blockId}`;
     const summary = doc.createElement('summary');
-    summary.textContent = 'AI に渡す内容を見る';
+    summary.textContent = t('edit.showContext');
     details.appendChild(summary);
     const loading = doc.createElement('p');
     loading.className = 'edit__block-ai-context-loading';
-    loading.textContent = '読み込み中…';
+    loading.textContent = t('edit.loading');
     details.appendChild(loading);
     form.appendChild(details);
     onGetImproveContext(blockId, overlaps)
@@ -1445,7 +1516,7 @@ function openAiPromptForm(
         details.appendChild(buildContextBody(doc, context, expression, overlaps));
       })
       .catch(() => {
-        loading.textContent = '文脈の取得に失敗しました（改善は実行できます）。';
+        loading.textContent = t('edit.contextFailed');
       });
   }
 
@@ -1454,11 +1525,11 @@ function openAiPromptForm(
   const submitBtn = doc.createElement('button');
   submitBtn.type = 'button';
   submitBtn.className = 'edit__block-ai-submit';
-  submitBtn.textContent = '改善案を取得';
+  submitBtn.textContent = t('edit.getProposal');
   const cancelBtn = doc.createElement('button');
   cancelBtn.type = 'button';
   cancelBtn.className = 'edit__block-ai-cancel';
-  cancelBtn.textContent = 'キャンセル';
+  cancelBtn.textContent = t('edit.cancel');
   aiActions.appendChild(submitBtn);
   aiActions.appendChild(cancelBtn);
   form.appendChild(aiActions);
@@ -1517,10 +1588,10 @@ function buildContextBody(
   const label = context?.blockLabel?.trim();
   const desc = context?.blockDescription?.trim();
   const current = (context?.currentExpression ?? fallbackExpression).trim();
-  appendContextItem(doc, dl, 'RQ', rq && rq !== '' ? rq : '(未設定)');
-  appendContextItem(doc, dl, 'ブロックの役割', label && label !== '' ? label : '(自動推定)');
-  appendContextItem(doc, dl, '説明', desc && desc !== '' ? desc : '(自動推定)');
-  appendContextItem(doc, dl, '現在の式', current);
+  appendContextItem(doc, dl, t('edit.rq'), rq && rq !== '' ? rq : t('edit.notSet'));
+  appendContextItem(doc, dl, t('edit.blockRole'), label && label !== '' ? label : t('edit.inferred'));
+  appendContextItem(doc, dl, t('edit.description'), desc && desc !== '' ? desc : t('edit.inferred'));
+  appendContextItem(doc, dl, t('edit.currentFormula'), current);
   wrapper.appendChild(dl);
 
   // 他ブロック（issue #89: 重複を根拠づけるため AI にも見せる文脈と同じものを表示する）。
@@ -1530,7 +1601,7 @@ function buildContextBody(
   const siblings = context?.siblings ?? fallbackSiblings;
   const siblingsHeading = doc.createElement('p');
   siblingsHeading.className = 'edit__block-ai-context-subheading';
-  siblingsHeading.textContent = `他ブロック（${siblings.length} 件）`;
+  siblingsHeading.textContent = t('edit.siblingCount', { count: siblings.length });
   wrapper.appendChild(siblingsHeading);
   if (siblings.length === 0) {
     const none = doc.createElement('p');
@@ -1538,7 +1609,7 @@ function buildContextBody(
     // ブロックが自分だけ）ため、意図的に別クラスにする（既存の .edit__block-ai-context-empty
     // との querySelector 衝突も避ける）。
     none.className = 'edit__block-ai-context-siblings-empty';
-    none.textContent = '(他ブロックなし)';
+    none.textContent = t('edit.noSiblings');
     wrapper.appendChild(none);
   } else {
     const siblingList = doc.createElement('ul');
@@ -1549,8 +1620,8 @@ function buildContextBody(
       const sharedText =
         sib.sharedTerms.length > 0
           ? sib.sharedTerms.map((t) => t.term).join(', ')
-          : '完全一致の重複なし';
-      item.textContent = `#${sib.id}${sibLabel}: ${sib.expression}（共有語: ${sharedText}）`;
+          : t('edit.noExactOverlap');
+      item.textContent = t('edit.siblingContext', { blockId: sib.id, label: sibLabel, expression: sib.expression, sharedTerms: sharedText });
       siblingList.appendChild(item);
     }
     wrapper.appendChild(siblingList);
@@ -1560,20 +1631,20 @@ function buildContextBody(
   const seeds = context?.seedPapers ?? [];
   const seedsHeading = doc.createElement('p');
   seedsHeading.className = 'edit__block-ai-context-subheading';
-  seedsHeading.textContent = `シード論文（${seeds.length} 件）`;
+  seedsHeading.textContent = t('edit.seedCount', { count: seeds.length });
   wrapper.appendChild(seedsHeading);
   if (seeds.length === 0) {
     const none = doc.createElement('p');
     none.className = 'edit__block-ai-context-empty';
-    none.textContent = '(登録なし)';
+    none.textContent = t('edit.noSeeds');
     wrapper.appendChild(none);
   } else {
     const seedList = doc.createElement('ul');
     seedList.className = 'edit__block-ai-context-seeds';
     for (const seed of seeds) {
       const item = doc.createElement('li');
-      const tag = seed.source === 'interactive' ? '対話拡張' : '初期';
-      item.textContent = `PMID ${seed.pmid}（${tag}・${seed.decision}）: ${seed.title}`;
+      const tag = seed.source === 'interactive' ? t('edit.interactiveSource') : t('edit.initialSource');
+      item.textContent = t('edit.seedContext', { pmid: seed.pmid, source: tag, decision: seed.decision, title: seed.title });
       seedList.appendChild(item);
     }
     wrapper.appendChild(seedList);
@@ -1583,20 +1654,20 @@ function buildContextBody(
   const validation = context?.validation ?? null;
   const valHeading = doc.createElement('p');
   valHeading.className = 'edit__block-ai-context-subheading';
-  valHeading.textContent = '直近の検証結果';
+  valHeading.textContent = t('edit.latestValidation');
   wrapper.appendChild(valHeading);
   const valBody = doc.createElement('p');
   valBody.className = 'edit__block-ai-context-validation';
   if (validation === null) {
-    valBody.textContent = '(未検証)';
+    valBody.textContent = t('edit.notValidated');
   } else if (validation.captureRate === null) {
-    valBody.textContent = '捕捉率: （有効シード 0 件のため未計測）';
+    valBody.textContent = t('edit.noValidSeeds');
   } else {
     const ratePct = Math.round(validation.captureRate * 1000) / 10;
     const total = validation.capturedPmids.length + validation.missedPmids.length;
     const missed =
-      validation.missedPmids.length === 0 ? 'なし' : validation.missedPmids.join(', ');
-    valBody.textContent = `捕捉率 ${ratePct}%（${validation.capturedPmids.length}/${total}）／取りこぼし PMID: ${missed}`;
+      validation.missedPmids.length === 0 ? t('edit.none') : validation.missedPmids.join(', ');
+    valBody.textContent = t('edit.captureRate', { rate: ratePct, captured: validation.capturedPmids.length, total: total, missed: missed });
   }
   wrapper.appendChild(valBody);
 
@@ -1641,14 +1712,14 @@ function renderImprovementState(
   if (improvement.status === 'running') {
     const pending = doc.createElement('p');
     pending.className = 'edit__block-pending';
-    pending.textContent = '改善提案を取得中…';
+    pending.textContent = t('edit.proposalLoading');
     slot.appendChild(pending);
     return;
   }
   if (improvement.status === 'error') {
     const errEl = doc.createElement('p');
     errEl.className = 'edit__block-error';
-    errEl.textContent = `改善提案の取得に失敗しました: ${improvement.error ?? '不明なエラー'}`;
+    errEl.textContent = t('edit.proposalFailed', { error: improvement.error ?? t('edit.unknownError') });
     slot.appendChild(errEl);
     return;
   }
@@ -1704,7 +1775,7 @@ function renderProposal(
   slot.innerHTML = '';
   const rationale = doc.createElement('p');
   rationale.className = 'edit__block-rationale';
-  rationale.textContent = result.rationale === '' ? '（改善ポイントの説明なし）' : result.rationale;
+  rationale.textContent = result.rationale === '' ? t('edit.noRationale') : result.rationale;
   slot.appendChild(rationale);
 
   const tokenDiff = diffExpressions(result.currentExpression, result.proposedExpression);
@@ -1714,7 +1785,7 @@ function renderProposal(
   const before = doc.createElement('div');
   before.className = 'edit__block-diff-before';
   const beforeHeader = doc.createElement('strong');
-  beforeHeader.textContent = 'Before:';
+  beforeHeader.textContent = t('edit.before');
   before.appendChild(beforeHeader);
   const beforePre = doc.createElement('pre');
   renderDiffSideInto(beforePre, tokenDiff.beforeTokens);
@@ -1723,7 +1794,7 @@ function renderProposal(
   const after = doc.createElement('div');
   after.className = 'edit__block-diff-after';
   const afterHeader = doc.createElement('strong');
-  afterHeader.textContent = 'After:';
+  afterHeader.textContent = t('edit.after');
   after.appendChild(afterHeader);
   const afterPre = doc.createElement('pre');
   renderDiffSideInto(afterPre, tokenDiff.afterTokens);
@@ -1753,17 +1824,18 @@ function renderProposal(
   // 従来どおり result.proposedExpression を初期値にする。
   const manualEditDetails = doc.createElement('details');
   manualEditDetails.className = 'edit__block-ai-manual-edit';
+  manualEditDetails.dataset.keepKey = `manual-proposal:#${blockId}`;
   // draft が残っている（＝手を触れたことがある）なら、再描画をまたいでも開いたままにする。
   // そうしないと値自体は復元されても <details> が閉じ直り、消えたように見えてしまう。
   manualEditDetails.open = manualEditDraft !== null;
   const manualEditSummary = doc.createElement('summary');
-  manualEditSummary.textContent = '提案を編集してから採用する';
+  manualEditSummary.textContent = t('edit.manualProposal');
   manualEditDetails.appendChild(manualEditSummary);
   const manualEditInput = doc.createElement('textarea');
   manualEditInput.className = 'edit__block-ai-manual-edit-input';
   manualEditInput.rows = 3;
   manualEditInput.value = manualEditDraft ?? result.proposedExpression;
-  manualEditInput.setAttribute('aria-label', `ブロック #${blockId} の提案を編集`);
+  manualEditInput.setAttribute('aria-label', t('edit.editProposal', { blockId: blockId }));
   manualEditInput.addEventListener('input', () => {
     callbacks.onManualEditChange?.(blockId, manualEditInput.value);
   });
@@ -1773,7 +1845,7 @@ function renderProposal(
   const manualEditApplyBtn = doc.createElement('button');
   manualEditApplyBtn.type = 'button';
   manualEditApplyBtn.className = 'edit__block-ai-manual-edit-apply';
-  manualEditApplyBtn.textContent = '編集した内容で置き換える';
+  manualEditApplyBtn.textContent = t('edit.replaceEdited');
   manualEditActions.appendChild(manualEditApplyBtn);
   manualEditDetails.appendChild(manualEditActions);
   const manualEditError = doc.createElement('p');
@@ -1791,7 +1863,7 @@ function renderProposal(
       callbacks.onClearImprovement?.();
       editor.setMd(next);
     } catch (err) {
-      manualEditError.textContent = `置き換えに失敗しました: ${formatError(err)}`;
+      manualEditError.textContent = t('edit.replaceFailed', { error: formatError(err) });
     }
   });
 
@@ -1801,17 +1873,17 @@ function renderProposal(
   const acceptBtn = doc.createElement('button');
   acceptBtn.type = 'button';
   acceptBtn.className = 'edit__block-accept';
-  acceptBtn.textContent = 'この提案で置き換える';
+  acceptBtn.textContent = t('edit.replaceProposal');
   const rejectBtn = doc.createElement('button');
   rejectBtn.type = 'button';
   rejectBtn.className = 'edit__block-reject';
-  rejectBtn.textContent = '破棄';
+  rejectBtn.textContent = t('edit.discard');
 
   // proposed == current なら accept の意味が無いので無効化
   if (result.proposedExpression.trim() === '' ||
       result.proposedExpression.trim() === result.currentExpression.trim()) {
     acceptBtn.disabled = true;
-    acceptBtn.title = '提案が空、または現式と同じです';
+    acceptBtn.title = t('edit.unchangedProposal');
   }
 
   actions.appendChild(acceptBtn);
@@ -1829,8 +1901,9 @@ function renderProposal(
   if (history.length > 0) {
     const historyDetails = doc.createElement('details');
     historyDetails.className = 'edit__block-ai-history';
+    historyDetails.dataset.keepKey = `history:#${blockId}`;
     const historySummary = doc.createElement('summary');
-    historySummary.textContent = `これまでのやり取り（${history.length} 回）`;
+    historySummary.textContent = t('edit.historyCount', { count: history.length });
     historyDetails.appendChild(historySummary);
     const historyList = doc.createElement('ol');
     historyList.className = 'edit__block-ai-history-list';
@@ -1838,11 +1911,11 @@ function renderProposal(
       const item = doc.createElement('li');
       const instructionP = doc.createElement('p');
       instructionP.className = 'edit__block-ai-history-instruction';
-      instructionP.textContent = `指示: ${turn.instruction.trim() === '' ? '(特になし)' : turn.instruction}`;
+      instructionP.textContent = t('edit.historyInstruction', { instruction: turn.instruction.trim() === '' ? t('edit.noInstruction') : turn.instruction });
       item.appendChild(instructionP);
       const rationaleP = doc.createElement('p');
       rationaleP.className = 'edit__block-ai-history-rationale';
-      rationaleP.textContent = turn.rationale === '' ? '（改善ポイントの説明なし）' : turn.rationale;
+      rationaleP.textContent = turn.rationale === '' ? t('edit.noRationale') : turn.rationale;
       item.appendChild(rationaleP);
       historyList.appendChild(item);
     }
@@ -1858,11 +1931,11 @@ function renderProposal(
   redoWrap.className = 'edit__block-ai-redo';
   const redoLabel = doc.createElement('label');
   redoLabel.className = 'edit__block-ai-redo-label';
-  redoLabel.textContent = '指示を追加してやり直す:';
+  redoLabel.textContent = t('edit.redoLabel');
   const redoInstruction = doc.createElement('textarea');
   redoInstruction.className = 'edit__block-ai-redo-instruction';
   redoInstruction.rows = 2;
-  redoInstruction.placeholder = '例: それは違う、代わりに MeSH を先頭に';
+  redoInstruction.placeholder = t('edit.redoPlaceholder');
   redoInstruction.value = instructionDraft;
   redoInstruction.addEventListener('input', () => {
     callbacks.onInstructionChange?.(blockId, redoInstruction.value);
@@ -1874,7 +1947,7 @@ function renderProposal(
   const redoBtn = doc.createElement('button');
   redoBtn.type = 'button';
   redoBtn.className = 'edit__block-ai-redo-submit';
-  redoBtn.textContent = 'この指示でやり直す';
+  redoBtn.textContent = t('edit.redo');
   redoActions.appendChild(redoBtn);
   redoWrap.appendChild(redoActions);
   slot.appendChild(redoWrap);
@@ -1918,7 +1991,7 @@ function renderProposal(
       // setMd が onDraftChange（store 経由の再描画）またはローカル再描画のいずれかで反映する。
       editor.setMd(next);
     } catch (err) {
-      feedback.textContent = `置き換えに失敗しました: ${formatError(err)}`;
+      feedback.textContent = t('edit.replaceFailed', { error: formatError(err) });
     }
   });
 
@@ -1941,14 +2014,14 @@ function buildDiffSummaryLine(doc: Document, diff: ExpressionDiff): HTMLElement 
   }
   let sentence: string;
   if (diff.removed.length > 0 && diff.added.length > 0) {
-    sentence = `この提案で ${diff.removed.length} 語が削除され、${diff.added.length} 語が追加されます`;
+    sentence = t('edit.diffBoth', { removed: diff.removed.length, added: diff.added.length });
   } else if (diff.removed.length > 0) {
-    sentence = `この提案で ${diff.removed.length} 語が削除されます`;
+    sentence = t('edit.diffRemoved', { count: diff.removed.length });
   } else {
-    sentence = `この提案で ${diff.added.length} 語が追加されます`;
+    sentence = t('edit.diffAdded', { count: diff.added.length });
   }
   if (diff.removed.length > 0) {
-    sentence += `（削除: ${summarizeOperandKinds(diff.removed)}）`;
+    sentence = t('edit.removedBreakdown', { summary: sentence, breakdown: summarizeOperandKinds(diff.removed) });
   }
   const p = doc.createElement('p');
   p.className = 'edit__block-diff-summary';
@@ -1974,9 +2047,9 @@ function summarizeOperandKinds(texts: readonly string[]): string {
       other += 1;
     }
   }
-  const parts = [`MeSH ${mesh}`, `フリーワード ${freeword}`];
+  const parts = [t('edit.meshCount', { count: mesh }), t('edit.freewordCount', { count: freeword })];
   if (other > 0) {
-    parts.push(`その他 ${other}`);
+    parts.push(t('edit.otherCount', { count: other }));
   }
   return parts.join(' / ');
 }

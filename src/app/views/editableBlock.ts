@@ -10,6 +10,7 @@
  * ブロック一覧ごと再描画する前提（このモジュールは 1 回の描画ぶんだけを組む）。
  */
 
+import { t } from '@/lib/i18n';
 import { MESH_BROWSER_BASE, tokenizeOperands } from './formulaDisplay';
 import { listOperands, type OperandInfo } from './operandEdit';
 
@@ -27,7 +28,7 @@ function buildTagSuffix(doc: Document, tag: string): HTMLElement {
   suffix.className = 'edit__chip-tag-suffix';
   suffix.textContent = `[${tag}]`;
   suffix.setAttribute('aria-hidden', 'true');
-  suffix.title = `タグ [${tag}] は自動で付きます（入力不要）`;
+  suffix.title = t('edit.autoTag', { tag: tag });
   return suffix;
 }
 
@@ -94,7 +95,7 @@ function buildChip(
     link.href = `${MESH_BROWSER_BASE}${encodeURIComponent(info.term)}`;
     link.target = '_blank';
     link.rel = 'noopener noreferrer';
-    link.title = 'MeSH ブラウザで開く（語の付け替えはインスペクタの MeSH ツリーから）';
+    link.title = t('edit.meshChipLink');
     link.textContent = info.text;
     chip.appendChild(link);
   } else if (info.kind === 'freeword') {
@@ -103,7 +104,7 @@ function buildChip(
     termBtn.type = 'button';
     termBtn.className = 'edit__chip-term edit__chip-term--editable';
     termBtn.textContent = info.text;
-    termBtn.title = 'クリックで語を編集';
+    termBtn.title = t('edit.editTermTitle');
     termBtn.addEventListener('click', () => beginInlineEdit(doc, chip, termBtn, info, handlers));
     chip.appendChild(termBtn);
   } else {
@@ -111,16 +112,16 @@ function buildChip(
     const span = doc.createElement('span');
     span.className = 'edit__chip-term edit__chip-term--static';
     span.textContent = info.text;
-    span.title = 'まとまった句です。語の編集は「詳細編集（生テキスト）」から行えます';
+    span.title = t('edit.compoundHint');
     chip.appendChild(span);
   }
 
   const remove = doc.createElement('button');
   remove.type = 'button';
   remove.className = 'edit__chip-remove';
-  remove.textContent = '×';
-  remove.setAttribute('aria-label', `「${info.term}」を削除`);
-  remove.title = 'この語を削除';
+  remove.textContent = t('edit.removeSymbol');
+  remove.setAttribute('aria-label', t('edit.removeTerm', { term: info.term }));
+  remove.title = t('edit.removeTermTitle');
   remove.addEventListener('click', () => handlers.onRemove(info.index));
   chip.appendChild(remove);
 
@@ -142,7 +143,7 @@ function beginInlineEdit(
   // タグは setOperandTerm が保持するので、語だけ編集すればよい旨を伝える。
   input.setAttribute(
     'aria-label',
-    info.tag === null ? `「${info.term}」を編集` : `「${info.term}」を編集（タグ [${info.tag}] は保持）`
+    info.tag === null ? t('edit.editTerm', { term: info.term }) : t('edit.editTaggedTerm', { term: info.term, tag: info.tag })
   );
 
   // input + 静的タグ接尾辞をひとまとめにし、確定/取消ではラッパーごと差し替える。
@@ -199,17 +200,17 @@ function buildAddControl(doc: Document, handlers: EditableBlockHandlers): HTMLEl
   const btn = doc.createElement('button');
   btn.type = 'button';
   btn.className = 'edit__chip-add-btn';
-  btn.textContent = '＋ 語を追加';
-  btn.title = 'フリーワード（tiab）を OR で追加';
+  btn.textContent = t('edit.addWord');
+  btn.title = t('edit.addWordTitle');
   wrap.appendChild(btn);
 
   btn.addEventListener('click', () => {
     const input = doc.createElement('input');
     input.type = 'text';
     input.className = 'edit__chip-add-input';
-    input.placeholder = '例: asthma*';
+    input.placeholder = t('edit.wordPlaceholder');
     // タグ [tiab] は appendFreeword が自動で付ける。語だけ入力すればよい旨を伝える。
-    input.setAttribute('aria-label', 'フリーワードを追加（タグ [tiab] は自動付与）');
+    input.setAttribute('aria-label', t('edit.addWordLabel'));
 
     // input + 静的 [tiab] 接尾辞をひとまとめにし、確定/取消ではラッパーごと差し替える。
     const wrapper = doc.createElement('span');

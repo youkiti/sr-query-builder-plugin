@@ -1,4 +1,5 @@
 /** 検索式の DOM 描画と、既存呼び出し元向けの純粋関数の再公開。 */
+import { t } from '@/lib/i18n';
 import {
   MESH_BROWSER_BASE, extractMeshTerm, tokenizeExpression, type DiffToken,
 } from '@/lib/search-formula-md/expression';
@@ -11,8 +12,8 @@ export function buildLegend(doc: Document): HTMLElement {
   const legend = doc.createElement('div');
   legend.className = 'draft__legend';
   for (const [kind, label] of [
-    ['mesh', 'MeSH'],
-    ['freeword', 'フリーワード'],
+    ['mesh', t('edit.meshLegend')],
+    ['freeword', t('edit.freewordLegend')],
   ] as const) {
     const item = doc.createElement('span');
     item.className = `draft__legend-item draft__term--${kind}`;
@@ -41,7 +42,7 @@ export function renderExpressionInto(parent: HTMLElement, expr: string): void {
       a.href = `${MESH_BROWSER_BASE}${encodeURIComponent(extractMeshTerm(segment.text))}`;
       a.target = '_blank';
       a.rel = 'noopener noreferrer';
-      a.title = 'MeSH ブラウザで開く';
+      a.title = t('edit.meshLink');
       a.textContent = segment.text;
       parent.appendChild(a);
     } else {

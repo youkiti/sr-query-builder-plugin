@@ -22,9 +22,9 @@
  * 委譲し、結果は edit view から渡されるキャッシュで使い回す（同一式の重複 esearch を防ぐ）。
  */
 
+import { t } from '@/lib/i18n';
 import {
   analyzeFreewordDelta,
-  meshCategoryName,
   type BlockMeshTermMeta,
   type FreewordDeltaResult,
   type FreewordDeltaRow,
@@ -52,6 +52,30 @@ import {
   replaceMeshDescriptor,
 } from './meshExpressionEdit';
 import { findOperandByText, removeOperandAt, setOperandTerm } from './operandEdit';
+
+const CATEGORY_LABELS = {
+  A: 'edit.categoryA',
+  B: 'edit.categoryB',
+  C: 'edit.categoryC',
+  D: 'edit.categoryD',
+  E: 'edit.categoryE',
+  F: 'edit.categoryF',
+  G: 'edit.categoryG',
+  H: 'edit.categoryH',
+  I: 'edit.categoryI',
+  J: 'edit.categoryJ',
+  K: 'edit.categoryK',
+  L: 'edit.categoryL',
+  M: 'edit.categoryM',
+  N: 'edit.categoryN',
+  V: 'edit.categoryV',
+  Z: 'edit.categoryZ',
+} as const;
+
+function localizedMeshCategory(letter: string): string {
+  const key = CATEGORY_LABELS[letter as keyof typeof CATEGORY_LABELS];
+  return key ? t(key) : letter;
+}
 
 /** インスペクタが必要とする計測 callback とキャッシュ。 */
 export interface BlockInspectorDeps {
@@ -133,7 +157,7 @@ export function buildBlockInspector(
 
   const heading = doc.createElement('p');
   heading.className = 'bins__heading';
-  heading.textContent = '🔎 このブロックのインスペクタ';
+  heading.textContent = t('edit.inspector');
   section.appendChild(heading);
 
   // 1. MeSH ツリー
@@ -190,11 +214,11 @@ function buildMeshSection(
   wrap.className = 'bins__section bins__mesh';
   const title = doc.createElement('p');
   title.className = 'bins__section-title';
-  title.textContent = 'MeSH（クリックで置換 / OR追加。▸ で下位を展開）';
+  title.textContent = t('edit.meshHeading');
   wrap.appendChild(title);
 
   if (meshTerms.length === 0) {
-    wrap.appendChild(muted(doc, 'この式に MeSH 用語はありません。'));
+    wrap.appendChild(muted(doc, t('edit.noMesh')));
     return wrap;
   }
 
@@ -202,7 +226,7 @@ function buildMeshSection(
   body.className = 'bins__mesh-body';
   const loading = doc.createElement('p');
   loading.className = 'bins__loading';
-  loading.textContent = 'MeSH 階層を取得中…';
+  loading.textContent = t('edit.meshLoading');
   body.appendChild(loading);
   wrap.appendChild(body);
 
@@ -227,13 +251,13 @@ function buildMeshSection(
       }
       if (analysis.unresolved.length > 0) {
         body.appendChild(
-          muted(doc, `ツリー未解決（MeSH 解決不可）: ${analysis.unresolved.join(', ')}`)
+          muted(doc, t('edit.unresolvedTrees', { terms: analysis.unresolved.join(', ') }))
         );
       }
     })
     .catch((err: unknown) => {
       body.innerHTML = '';
-      body.appendChild(muted(doc, `MeSH 階層の取得に失敗しました: ${formatError(err)}`));
+      body.appendChild(muted(doc, t('edit.meshFailed', { error: formatError(err) })));
     });
 
   return wrap;
@@ -325,15 +349,15 @@ function buildMeshGroup(
   head.appendChild(name);
 
   if (treeNumbers.length > 1) {
-    head.appendChild(badge(doc, `${treeNumbers.length} 系統`, 'bins__badge--multi'));
+    head.appendChild(badge(doc, t('edit.treeCount', { count: treeNumbers.length }), 'bins__badge--multi'));
   }
 
   if (params.onApplyExpression) {
     const del = doc.createElement('button');
     del.type = 'button';
     del.className = 'bins__group-delete';
-    del.textContent = 'この語を削除';
-    del.title = `"${descriptor}" をこのブロックから外す`;
+    del.textContent = t('edit.removeTermTitle');
+    del.title = t('edit.removeFromBlock', { term: descriptor });
     del.addEventListener('click', () => {
       params.onApplyExpression!(removeMeshDescriptor(params.expression, descriptor));
     });
@@ -392,7 +416,7 @@ function buildMeshBranch(
       const originRow = branch.querySelector<HTMLElement>('.bins__row--origin');
       const toggle = originRow?.querySelector<HTMLButtonElement>('.bins__row-toggle');
       if (toggle) {
-        toggle.textContent = '▾';
+        toggle.textContent = t('edit.collapse');
       }
       originRow?.setAttribute('data-expanded', 'true');
       renderChildren(doc, childHost, originTreeNumber, spine.length, originDescriptor, params);
@@ -402,7 +426,7 @@ function buildMeshBranch(
   if (params.onFetchMeshLabels && ancestors.length > 0) {
     const loading = doc.createElement('p');
     loading.className = 'bins__loading';
-    loading.textContent = '枝の名前を取得中…';
+    loading.textContent = t('edit.branchLoading');
     branch.appendChild(loading);
     fetchMeshLabelsCached(params, ancestors)
       .then((labels) => renderAll(labels))
@@ -426,14 +450,14 @@ function renderChildren(
   const loading = doc.createElement('p');
   loading.className = 'bins__loading';
   loading.style.paddingLeft = `${depth * 16}px`;
-  loading.textContent = '下位語を取得中…';
+  loading.textContent = t('edit.childrenLoading');
   host.appendChild(loading);
 
   fetchMeshChildrenCached(params, treeNumber)
     .then((children) => {
       host.innerHTML = '';
       if (children.length === 0) {
-        const none = muted(doc, '（最下層）');
+        const none = muted(doc, t('edit.leaf'));
         none.style.paddingLeft = `${depth * 16}px`;
         host.appendChild(none);
         return;
@@ -462,7 +486,7 @@ function renderChildren(
     })
     .catch((err: unknown) => {
       host.innerHTML = '';
-      host.appendChild(muted(doc, `下位語の取得に失敗しました: ${formatError(err)}`));
+      host.appendChild(muted(doc, t('edit.childrenFailed', { error: formatError(err) })));
     });
 }
 
@@ -502,8 +526,8 @@ function buildBranchRow(doc: Document, opts: BranchRowOptions): HTMLElement {
   toggle.type = 'button';
   toggle.className = 'bins__row-toggle';
   if (opts.expandable) {
-    toggle.textContent = '▸';
-    toggle.setAttribute('aria-label', '下位語を展開');
+    toggle.textContent = t('edit.expand');
+    toggle.setAttribute('aria-label', t('edit.expandChildren'));
     toggle.addEventListener('click', () => toggleRow(doc, row, treeId, depth, originDescriptor, params, toggle));
   } else {
     // インデント揃えのためのプレースホルダ（カテゴリ root と第1階層・葉）。
@@ -517,7 +541,7 @@ function buildBranchRow(doc: Document, opts: BranchRowOptions): HTMLElement {
   if (isCategoryRoot) {
     const cat = doc.createElement('span');
     cat.className = 'bins__row-cat';
-    cat.textContent = `${treeId} ${meshCategoryName(treeId)}`;
+    cat.textContent = `${treeId} ${localizedMeshCategory(treeId)}`;
     row.appendChild(cat);
     return row;
   }
@@ -536,7 +560,7 @@ function buildBranchRow(doc: Document, opts: BranchRowOptions): HTMLElement {
     link.type = 'button';
     link.className = 'bins__row-name';
     link.textContent = text;
-    link.title = `${treeId} ／ クリックでこの語に置換`;
+    link.title = t('edit.replaceTreeTerm', { treeId: treeId });
     link.addEventListener('click', () => {
       params.onApplyExpression!(replaceMeshDescriptor(params.expression, originDescriptor, text));
     });
@@ -551,7 +575,7 @@ function buildBranchRow(doc: Document, opts: BranchRowOptions): HTMLElement {
 
   // 起点語には「起点」バッジ。
   if (isOrigin) {
-    row.appendChild(badge(doc, '起点', 'bins__badge--origin'));
+    row.appendChild(badge(doc, t('edit.origin'), 'bins__badge--origin'));
   }
 
   // 件数（explode）。
@@ -564,8 +588,8 @@ function buildBranchRow(doc: Document, opts: BranchRowOptions): HTMLElement {
     const orBtn = doc.createElement('button');
     orBtn.type = 'button';
     orBtn.className = 'bins__row-or';
-    orBtn.textContent = 'OR追加';
-    orBtn.title = 'この語を別 OR 項としてブロックに足す';
+    orBtn.textContent = t('edit.addOr');
+    orBtn.title = t('edit.addOrTitle');
     orBtn.addEventListener('click', () => {
       params.onApplyExpression!(addMeshDescriptor(params.expression, text));
     });
@@ -594,11 +618,11 @@ function toggleRow(
     // 折りたたむ。
     expanded.delete(treeNumber);
     sub.innerHTML = '';
-    toggle.textContent = '▸';
+    toggle.textContent = t('edit.expand');
     row.removeAttribute('data-expanded');
   } else {
     expanded.add(treeNumber);
-    toggle.textContent = '▾';
+    toggle.textContent = t('edit.collapse');
     row.setAttribute('data-expanded', 'true');
     renderChildren(doc, sub, treeNumber, depth + 1, originDescriptor, params);
   }
@@ -609,11 +633,11 @@ function buildDivergenceLine(doc: Document, categories: readonly string[]): HTML
   const p = doc.createElement('p');
   p.className = 'bins__divergence';
   if (categories.length <= 1) {
-    p.textContent = '↳ 同じ枝にまとまっています（ずれ小）。';
+    p.textContent = t('edit.sameBranch');
   } else {
-    const named = categories.map((c) => `${c} ${meshCategoryName(c)}`).join(' / ');
+    const named = categories.map((c) => `${c} ${localizedMeshCategory(c)}`).join(' / ');
     p.classList.add('bins__divergence--spread');
-    p.textContent = `↳ ${categories.length} カテゴリに分散: ${named}（概念が広すぎないか確認）。`;
+    p.textContent = t('edit.spreadCategories', { count: categories.length, categories: named });
   }
   return p;
 }
@@ -626,7 +650,7 @@ function buildRedundancyLine(
   const lines: string[] = [];
   for (const meta of termMeta.values()) {
     if (meta.subsumedBy.length > 0) {
-      lines.push(`${meta.descriptor}（${meta.subsumedBy.join(', ')}配下）`);
+      lines.push(t('edit.subsumedTerm', { term: meta.descriptor, ancestors: meta.subsumedBy.join(', ') }));
     }
   }
   if (lines.length === 0) {
@@ -634,7 +658,7 @@ function buildRedundancyLine(
   }
   const p = doc.createElement('p');
   p.className = 'bins__divergence bins__divergence--spread';
-  p.textContent = `⚠ 冗長（内包）: ${lines.join(' / ')}`;
+  p.textContent = t('edit.redundant', { terms: lines.join(' / ') });
   return p;
 }
 
@@ -671,12 +695,12 @@ function buildFreewordSection(
   const title = doc.createElement('p');
   title.className = 'bins__section-title';
   title.textContent = params.onApplyExpression
-    ? 'フリーワード（個別ヒット数の多い順 / Δ=純増。語クリックで編集・× で削除）'
-    : 'フリーワード（個別ヒット数の多い順 / Δ=累積に足したときの純増）';
+    ? t('edit.freewordEditableHeading')
+    : t('edit.freewordHeading');
   wrap.appendChild(title);
 
   if (freewordTerms.length === 0) {
-    wrap.appendChild(muted(doc, 'この式にフリーワードはありません。'));
+    wrap.appendChild(muted(doc, t('edit.noFreewords')));
     return wrap;
   }
 
@@ -684,7 +708,7 @@ function buildFreewordSection(
   body.className = 'bins__freeword-body';
   const loading = doc.createElement('p');
   loading.className = 'bins__loading';
-  loading.textContent = '各語のヒット数と Δ を計算中…';
+  loading.textContent = t('edit.deltaLoading');
   body.appendChild(loading);
   wrap.appendChild(body);
 
@@ -702,12 +726,12 @@ function buildFreewordSection(
 
       const total = doc.createElement('p');
       total.className = 'bins__delta-total';
-      total.textContent = `tiab 合計（重複除去後）: ${res.totalDeduped.toLocaleString()} 件`;
+      total.textContent = t('edit.tiabTotal', { count: res.totalDeduped.toLocaleString() });
       body.appendChild(total);
     })
     .catch((err: unknown) => {
       body.innerHTML = '';
-      body.appendChild(muted(doc, `Δ の計算に失敗しました: ${formatError(err)}`));
+      body.appendChild(muted(doc, t('edit.deltaFailed', { error: formatError(err) })));
     });
 
   return wrap;
@@ -738,7 +762,7 @@ function buildDeltaRow(
     termBtn.type = 'button';
     termBtn.className = 'bins__delta-term-btn';
     termBtn.textContent = row.display;
-    termBtn.title = 'クリックで語を編集（タグは保持）';
+    termBtn.title = t('edit.editKeepTag');
     termBtn.addEventListener('click', () =>
       beginDeltaEdit(doc, termCell, termBtn, operand.term, (next) =>
         params.onApplyExpression!(setOperandTerm(params.expression, operand.index, next))
@@ -752,7 +776,7 @@ function buildDeltaRow(
 
   const indCell = doc.createElement('td');
   indCell.className = 'bins__delta-individual';
-  indCell.textContent = `${row.individual.toLocaleString()} 件`;
+  indCell.textContent = t('edit.hitCount', { count: row.individual.toLocaleString() });
   tr.appendChild(indCell);
 
   const deltaCell = doc.createElement('td');
@@ -772,11 +796,11 @@ function buildDeltaRow(
   const flagCell = doc.createElement('td');
   flagCell.className = 'bins__delta-flag';
   if (row.zeroHit) {
-    flagCell.textContent = '⚠ ヒット0（綴り/語形を確認）';
+    flagCell.textContent = t('edit.zeroHits');
   } else if (row.status === 'redundant') {
-    flagCell.textContent = '⚠ 他語に内包（削除候補）';
+    flagCell.textContent = t('edit.subsumed');
   } else if (row.status === 'lowYield') {
-    flagCell.textContent = '△ ほぼ寄与なし';
+    flagCell.textContent = t('edit.lowYield');
   }
   tr.appendChild(flagCell);
 
@@ -787,9 +811,9 @@ function buildDeltaRow(
     const removeBtn = doc.createElement('button');
     removeBtn.type = 'button';
     removeBtn.className = 'bins__delta-remove';
-    removeBtn.textContent = '×';
-    removeBtn.title = 'この語を削除';
-    removeBtn.setAttribute('aria-label', `「${row.display}」を削除`);
+    removeBtn.textContent = t('edit.removeSymbol');
+    removeBtn.title = t('edit.removeTermTitle');
+    removeBtn.setAttribute('aria-label', t('edit.removeTerm', { term: row.display }));
     removeBtn.addEventListener('click', () =>
       params.onApplyExpression!(removeOperandAt(params.expression, operand.index))
     );
@@ -812,7 +836,7 @@ function beginDeltaEdit(
   input.type = 'text';
   input.className = 'bins__delta-input';
   input.value = initialTerm;
-  input.setAttribute('aria-label', `「${initialTerm}」を編集`);
+  input.setAttribute('aria-label', t('edit.editTerm', { term: initialTerm }));
 
   let done = false;
   const commit = (): void => {
@@ -873,7 +897,7 @@ function buildOverlapSection(
   errorLine.setAttribute('aria-live', 'polite');
 
   if (overlaps.length === 0) {
-    wrap.appendChild(muted(doc, '他ブロックと重複する語はありません。'));
+    wrap.appendChild(muted(doc, t('edit.noOverlap')));
     wrap.appendChild(errorLine);
     return wrap;
   }
@@ -882,7 +906,7 @@ function buildOverlapSection(
     const p = doc.createElement('p');
     p.className = 'bins__overlap-line';
     const label = overlap.label ? ` ${overlap.label}` : '';
-    p.appendChild(doc.createTextNode(`⚠ #${overlap.id}${label} と共有: `));
+    p.appendChild(doc.createTextNode(t('edit.overlap', { blockId: overlap.id, label: label })));
     overlap.sharedTerms.forEach((shared, idx) => {
       if (idx > 0) {
         p.appendChild(doc.createTextNode(', '));
@@ -927,9 +951,9 @@ function buildOverlapTerm(
     const removeBtn = doc.createElement('button');
     removeBtn.type = 'button';
     removeBtn.className = 'bins__overlap-remove';
-    removeBtn.textContent = '削除';
-    removeBtn.title = `"${shared.term}" をこのブロックから外す`;
-    removeBtn.setAttribute('aria-label', `「${shared.term}」をこのブロックから削除`);
+    removeBtn.textContent = t('edit.remove');
+    removeBtn.title = t('edit.removeFromBlock', { term: shared.term });
+    removeBtn.setAttribute('aria-label', t('edit.removeBlockTerm', { term: shared.term }));
     removeBtn.addEventListener('click', () => {
       errorLine.textContent = '';
       const next =
@@ -976,16 +1000,16 @@ function buildCountBadge(
   const onCountHits = params.onCountHits!;
   const badgeEl = doc.createElement('span');
   badgeEl.className = 'bins__count bins__count--pending';
-  badgeEl.textContent = '…';
+  badgeEl.textContent = t('edit.pendingCount');
   observeInView(badgeEl, () => {
     cachedCount(onCountHits, params.hitsCache, query, params.hitsSnapshot)
       .then((count) => {
         badgeEl.className = 'bins__count bins__count--done';
-        badgeEl.textContent = `${count.toLocaleString()} 件`;
+        badgeEl.textContent = t('edit.hitCount', { count: count.toLocaleString() });
       })
       .catch(() => {
         badgeEl.className = 'bins__count bins__count--error';
-        badgeEl.textContent = '件数エラー';
+        badgeEl.textContent = t('edit.countFailed');
       });
   });
   return badgeEl;

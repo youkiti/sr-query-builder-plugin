@@ -1,5 +1,7 @@
 import { INITIAL_STATE, type AppState, type BlockImprovementState } from '../store';
-import { createEditView } from './editView';
+import { createEditView, localizeCombinationError } from './editView';
+import { formatCombinationError, validateCombinationExpression } from '@/lib/combination-expression';
+import { setUiLanguage } from '@/lib/i18n';
 import type { BlockImprovementContext, BlockImprovementResult } from '@/app/services';
 
 function buildContainer(): HTMLElement {
@@ -39,6 +41,127 @@ async function flushAsync(): Promise<void> {
 function blockRow(container: HTMLElement, id: string): HTMLElement {
   return container.querySelector<HTMLElement>(`.edit__block-row[data-block-id="${id}"]`)!;
 }
+
+describe('createEditView - 表示言語', () => {
+  afterEach(() => {
+    setUiLanguage('ja');
+  });
+
+  test('英語で主要な操作・凡例・インスペクタを表示する', async () => {
+    setUiLanguage('en');
+    const view = createEditView({ onCountHits: jest.fn().mockResolvedValue(10) });
+    const container = buildContainer();
+    view(container, { state: stateReadyFull, navigate: jest.fn() });
+    expect(container.querySelector('h2')?.textContent).toBe('Edit formula');
+    expect(container.querySelector('.edit__actions button')?.textContent).toBe('Save as a new version');
+    expect(container.querySelector('.edit__block-improve')?.textContent).toBe('Let the AI improve it');
+    expect(container.querySelector('.edit__note-row label')?.textContent).toBe('Edit note:');
+    expect(container.querySelector('.draft__legend')?.textContent).toContain('Free-text');
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!.click();
+    await flushAsync();
+    expect(container.querySelector('.edit__block-rawedit-label')?.textContent).toBe('Advanced edit (raw text)');
+    expect(container.querySelector('.bins__heading')?.textContent).toBe('🔎 This block’s inspector');
+    expect(container.querySelector('.bins__delta-individual')?.textContent).toBe('10 hits');
+  });
+
+  test('言語変更時だけ生テキストと組み合わせ方の未保存入力を保持し、保存にも使う', () => {
+    const onDraftChange = jest.fn();
+    const view = createEditView({ onDraftChange });
+    const container = buildContainer();
+    const ctx = { state: stateReadyFull, navigate: jest.fn() };
+    view(container, ctx);
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-edit-toggle')!.click();
+    blockRow(container, '3').querySelector<HTMLButtonElement>('.edit__block-combination-toggle')!.click();
+    const raw = blockRow(container, '1').querySelector<HTMLTextAreaElement>('.edit__block-edit-input')!;
+    const combination = blockRow(container, '3').querySelector<HTMLInputElement>('.edit__block-combination-input')!;
+    raw.value = 'wheeze[tiab] OR asthma[tiab]';
+    raw.dispatchEvent(new Event('input', { bubbles: true }));
+    combination.value = '#1 OR #2';
+    combination.dispatchEvent(new Event('input', { bubbles: true }));
+    setUiLanguage('en');
+    view(container, ctx);
+    expect(blockRow(container, '1').querySelector<HTMLTextAreaElement>('.edit__block-edit-input')!.value).toBe(raw.value);
+    expect(blockRow(container, '3').querySelector<HTMLInputElement>('.edit__block-combination-input')!.value).toBe(combination.value);
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-edit-save')!.click();
+    expect(onDraftChange).toHaveBeenLastCalledWith(FULL_MD.replace('asthma[tiab]', raw.value));
+    blockRow(container, '3').querySelector<HTMLButtonElement>('.edit__block-combination-save')!.click();
+    expect(onDraftChange).toHaveBeenLastCalledWith(FULL_MD.replace('#1 AND #2', '#1 OR #2'));
+    view(container, ctx);
+    expect(blockRow(container, '1').querySelector<HTMLTextAreaElement>('.edit__block-edit-input')!.value).toBe('asthma[tiab]');
+    expect(blockRow(container, '3').querySelector<HTMLInputElement>('.edit__block-combination-input')!.value).toBe('#1 AND #2');
+  });
+
+  test('復元した不正な組み合わせ方の診断も英語で更新する', () => {
+    const view = createEditView();
+    const container = buildContainer();
+    const ctx = { state: stateReadyFull, navigate: jest.fn() };
+    view(container, ctx);
+    blockRow(container, '3').querySelector<HTMLButtonElement>('.edit__block-combination-toggle')!.click();
+    const input = container.querySelector<HTMLInputElement>('.edit__block-combination-input')!;
+    input.value = '#99 AND';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    setUiLanguage('en');
+    view(container, ctx);
+    expect(container.querySelector('.edit__block-combination-errors')?.textContent).toContain('Undefined block ID: #99');
+    expect(container.querySelector('.edit__block-combination-errors')?.textContent).toContain('The formula ends with AND');
+    expect(container.querySelector('.edit__block-combination-errors')?.textContent).toContain('Character 1:');
+  });
+
+  test('AI 文脈の details の開閉を言語変更時に保持する', () => {
+    const view = createEditView({
+      onImproveBlock: jest.fn(),
+      onGetImproveContext: jest.fn().mockResolvedValue(null),
+    });
+    const container = buildContainer();
+    const ctx = { state: stateReadyFull, navigate: jest.fn() };
+    view(container, ctx);
+    blockRow(container, '1').querySelector<HTMLButtonElement>('.edit__block-improve')!.click();
+    container.querySelector<HTMLDetailsElement>('.edit__block-ai-context')!.open = true;
+    setUiLanguage('en');
+    view(container, ctx);
+    expect(container.querySelector<HTMLDetailsElement>('.edit__block-ai-context')!.open).toBe(true);
+    setUiLanguage('ja');
+    view(container, ctx);
+    expect(container.querySelector<HTMLDetailsElement>('.edit__block-ai-context')!.open).toBe(true);
+    view(container, ctx);
+    expect(container.querySelector('.edit__block-ai-context')).toBeNull();
+  });
+
+  test('提案編集と会話履歴の details はブロックと役割ごとに開閉を保持する', () => {
+    const view = createEditView();
+    const container = buildContainer();
+    const state: AppState = {
+      ...stateReadyFull,
+      blockImprovement: {
+        formulaVersionId: 'v1',
+        blockId: '1',
+        status: 'ready',
+        result: {
+          blockId: '1',
+          currentExpression: 'asthma[tiab]',
+          proposedExpression: 'wheeze[tiab]',
+          rationale: '',
+        },
+        error: null,
+        history: [{ instruction: '', proposedExpression: 'wheeze[tiab]', rationale: '' }],
+      },
+      blockImprovementManualEditDraft: {
+        formulaVersionId: 'v1',
+        blockId: '1',
+        expression: 'edited[tiab]',
+      },
+    };
+    const ctx = { state, navigate: jest.fn() };
+    view(container, ctx);
+    container.querySelector<HTMLDetailsElement>('.edit__block-ai-manual-edit')!.open = false;
+    container.querySelector<HTMLDetailsElement>('.edit__block-ai-history')!.open = true;
+    setUiLanguage('en');
+    view(container, ctx);
+    expect(container.querySelector<HTMLDetailsElement>('.edit__block-ai-manual-edit')!.open).toBe(false);
+    expect(container.querySelector<HTMLDetailsElement>('.edit__block-ai-history')!.open).toBe(true);
+    expect(container.querySelector<HTMLTextAreaElement>('.edit__block-ai-manual-edit-input')!.value).toBe('edited[tiab]');
+  });
+});
 
 describe('createEditView', () => {
   test('プロジェクト未選択時は警告のみ（ブロック一覧は出ない）', () => {
@@ -2399,5 +2522,45 @@ describe('createEditView - 整合性の注意表示（issue #88）', () => {
       navigate: jest.fn(),
     });
     expect(container.querySelector('.edit__consistency-notice')).toBeNull();
+  });
+});
+
+describe('localizeCombinationError', () => {
+  afterEach(() => {
+    setUiLanguage('ja');
+  });
+
+  test.each([
+    ['#1 $', '不正な文字: "$"'],
+    ['#1 XOR #2', '予期しないキーワード: "XOR"（許可: AND / OR / NOT）'],
+    ['#1)', '対応する `(` が無い `)`'],
+    ['(#1', '閉じ括弧 `)` が不足している `(`'],
+    ['#3', '未定義のブロック ID: #3'],
+    ['', '空の結合式です'],
+    ['AND #1', '先頭に二項演算子 AND は置けません'],
+    ['#1 AND OR #2', '二項演算子が連続しています: AND OR'],
+    ['(AND #1)', 'ここには二項演算子 AND は置けません'],
+    ['()', '被演算子が必要です'],
+    ['#1 NOT #2', '被演算子の直後に NOT は置けません（AND/OR が必要）'],
+    ['#1 #2', '被演算子が連続しています（演算子 AND/OR が必要）'],
+    ['#1 AND', '末尾が演算子 AND で終わっています'],
+    ['(', '末尾で被演算子が不足しています'],
+  ])('入力 %p の診断を翻訳する: %s', (input, expectedMessage) => {
+    const { errors } = validateCombinationExpression(input, new Set(['1', '2']));
+    expect(errors.map((error) => error.message)).toContain(expectedMessage);
+    for (const error of errors) {
+      setUiLanguage('ja');
+      expect(localizeCombinationError(error)).toBe(formatCombinationError(error));
+      setUiLanguage('en');
+      expect(localizeCombinationError(error)).not.toMatch(/[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u);
+    }
+  });
+
+  test('未知の診断は日本語の原文を残す', () => {
+    const error = { message: '未知の結合式エラー', position: 4 };
+    setUiLanguage('ja');
+    expect(localizeCombinationError(error)).toBe(formatCombinationError(error));
+    setUiLanguage('en');
+    expect(localizeCombinationError(error)).toBe('Character 5: 未知の結合式エラー');
   });
 });
