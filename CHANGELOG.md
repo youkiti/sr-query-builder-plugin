@@ -2,6 +2,11 @@
 
 ## 未リリース
 
+- ヘルプ相談の土台を追加。
+  固定モデルは Gemini `gemini-3.5-flash-lite`、Anthropic `claude-haiku-5-5`、OpenRouter `deepseek/deepseek-v4-flash`。
+  指示文は `help-consult-v1`、出力上限は 8,192 トークン。
+  この段では画面からはまだ使えない。
+
 - Embase (Dialog) への変換で、RCT 出版タイプフィルタのブロックを Cochrane の Embase RCT フィルタ更新版（35 行）に展開する。旧版は 1 行に畳んだ式で、S2 の Emtree 語（controlled clinical trial → study）、近接距離（NEAR/1 → NEAR/0 など）、除外条件の一部に誤りがあった。展開した分、後続ブロックの S 番号がずれる。
 - AI 呼び出しのモデル応答値 `model_reported`、プロンプトの版 `prompt_version`、実行者 `executed_by` を記録する。検索式の版に `saved_by`、`app_version`、`models_used` を記録する。
 - prompt.json に実際に送信した生成設定を保存する。モデルが報告する版と指定したモデルを区別する。

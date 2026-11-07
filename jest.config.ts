@@ -9,6 +9,7 @@ const config: Config = {
   testPathIgnorePatterns: ['/node_modules/', '<rootDir>/tests/e2e/'],
   setupFiles: ['<rootDir>/tests/setup/chrome-mock.ts'],
   moduleNameMapper: {
+    '^.*help\\.html\\?help-sections&lang=(ja|en)$': '<rootDir>/tests/setup/help-sections-$1.cjs',
     '^@/(.*)$': '<rootDir>/src/$1',
   },
   collectCoverageFrom: ['src/**/*.ts', '!src/**/*.test.ts'],

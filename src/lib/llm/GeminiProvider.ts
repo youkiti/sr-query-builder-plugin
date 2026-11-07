@@ -85,6 +85,7 @@ export class GeminiProvider implements LLMProvider {
       tokensIn: json.usageMetadata?.promptTokenCount ?? null,
       tokensOut: json.usageMetadata?.candidatesTokenCount ?? null,
       raw: json,
+      finishReason: json.candidates?.[0]?.finishReason ?? null,
       modelReported: json.modelVersion ?? null,
     };
   }

@@ -46,6 +46,7 @@ describe('OpenRouterProvider.chat', () => {
       raw: expect.any(Object),
       modelReported: null,
       providerReported: null,
+      finishReason: 'stop',
     });
     expect(provider.providerId).toBe('openrouter');
     expect(provider.model).toBe('qwen/qwen3-235b-a22b-2507');

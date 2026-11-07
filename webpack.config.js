@@ -51,10 +51,17 @@ module.exports = (env, argv) => {
           ? path.resolve(__dirname, 'dist-release')
           : path.resolve(__dirname, 'dist'),
       filename: '[name].js',
+      chunkFilename: 'chunks/[name].js',
       clean: true,
     },
     module: {
       rules: [
+        {
+          test: /help\.html$/,
+          include: path.resolve(__dirname, 'hosted'),
+          resourceQuery: /(?:^|[?&])help-sections(?:&|$)/,
+          use: path.resolve(__dirname, 'tools/webpack/help-sections.cjs'),
+        },
         {
           test: /\.ts$/,
           use: {
