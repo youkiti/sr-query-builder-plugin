@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SR Query Builder Plugin - 設定</title>
+    <title data-i18n="options.title">SR Query Builder Plugin - 設定</title>
     <link rel="stylesheet" href="../styles/tokens.css" />
     <link rel="stylesheet" href="../styles/globals.css" />
     <link rel="stylesheet" href="options.css" />
@@ -13,11 +13,11 @@
     <main class="options">
       <p class="options__brand">SR Query Builder Plugin</p>
       <span class="options__build-date" id="options-build-date"></span>
-      <h1 class="options__title">設定</h1>
-      <p class="options__muted">APIキーは Chrome ローカルストレージに保存されます。</p>
-      <p class="options__status" id="options-status">読み込み中…</p>
+      <h1 class="options__title" data-i18n="options.heading">設定</h1>
+      <p class="options__muted" data-i18n="options.storageHint">APIキーは Chrome ローカルストレージに保存されます。</p>
+      <p class="options__status" id="options-status" data-i18n="options.loading">読み込み中…</p>
       <section class="options__section">
-        <h2>LLM プロバイダ</h2>
+        <h2 data-i18n="options.providers">LLM プロバイダ</h2>
 
         <div class="options__provider-card" id="gemini-card">
           <h3 class="options__provider-title">
@@ -27,18 +27,20 @@
               target="_blank"
               rel="noreferrer"
               class="options__provider-link"
+              data-i18n="options.getKey"
               >APIキーを取得 ↗</a
             >
             <span id="gemini-tier-badge" class="options__tier-badge" aria-live="polite"></span>
           </h3>
           <label class="options__field">
-            <span>API キー</span>
+            <span data-i18n="options.apiKey">API キー</span>
             <input type="password" id="gemini-api-key" autocomplete="off" />
           </label>
           <p class="options__muted">
+            <span data-i18n="options.planIntro">
             キーの保存時（未判定の場合はこの画面を開いたとき）にプランを自動確認します。
             無料プランを検出した場合はモデルを
-            <strong>Gemini 3.5 Flash Lite</strong> に自動切り替えします。
+            </span> <strong>Gemini 3.5 Flash Lite</strong> <span data-i18n="options.planEnd">に自動切り替えします。</span>
           </p>
         </div>
 
@@ -50,32 +52,33 @@
               target="_blank"
               rel="noreferrer"
               class="options__provider-link"
+              data-i18n="options.getKey"
               >APIキーを取得 ↗</a
             >
           </h3>
-          <p class="options__muted">Qwen / DeepSeek などの OSS モデルや多プロバイダを利用できます。</p>
+          <p class="options__muted" data-i18n="options.openrouterHint">Qwen / DeepSeek などの OSS モデルや多プロバイダを利用できます。</p>
           <label class="options__field">
-            <span>API キー</span>
+            <span data-i18n="options.apiKey">API キー</span>
             <input type="password" id="openrouter-api-key" autocomplete="off" />
           </label>
           <div class="options__custom-model-form">
-            <h4>カスタムモデルを追加（上限 20 件）</h4>
-            <p class="options__muted">
+            <h4 data-i18n="options.customHeading">カスタムモデルを追加（上限 20 件）</h4>
+            <p class="options__muted" data-i18n="options.customHint">
               OpenRouter の任意のモデルIDを追加できます（例: meta-llama/llama-3.3-70b）。
               Claude のモデルIDも追加できます（例: claude-opus-5-5）。
               Gemini モデルIDも追加できます（例: gemini-3.5-pro）。
             </p>
             <div class="options__field-row">
               <label class="options__field">
-                <span>モデルID</span>
-                <input type="text" id="custom-model-id" placeholder="gemini-3.5-pro または provider/model-name" autocomplete="off" />
+                <span data-i18n="options.modelId">モデルID</span>
+                <input type="text" id="custom-model-id" placeholder="gemini-3.5-pro または provider/model-name" data-i18n-placeholder="options.idPlaceholder" autocomplete="off" />
               </label>
               <label class="options__field">
-                <span>表示名（任意）</span>
+                <span data-i18n="options.modelLabel">表示名（任意）</span>
                 <input type="text" id="custom-model-label" placeholder="My Model" autocomplete="off" />
               </label>
             </div>
-            <button type="button" id="add-custom-model" class="options__button">追加</button>
+            <button type="button" id="add-custom-model" class="options__button" data-i18n="options.add">追加</button>
             <div id="custom-models-list" class="options__custom-models-list"></div>
           </div>
         </div>
@@ -84,39 +87,39 @@
           <h3 class="options__provider-title">
             Anthropic
             <a href="https://console.anthropic.com/settings/keys" target="_blank"
-              rel="noreferrer" class="options__provider-link">APIキーを取得 ↗</a>
+              rel="noreferrer" class="options__provider-link" data-i18n="options.getKey">APIキーを取得 ↗</a>
           </h3>
           <label class="options__field">
-            <span>API キー</span>
+            <span data-i18n="options.apiKey">API キー</span>
             <input type="password" id="anthropic-api-key" autocomplete="off" />
           </label>
         </div>
 
         <div class="options__field">
           <div class="options__field-head">
-            <label for="llm-model-select">使用モデル</label>
-            <a class="options__help-link" href="https://github.com/youkiti/sr-query-builder-plugin#benchmark" target="_blank" rel="noreferrer" aria-label="モデルごとの成績（ベンチマーク）を GitHub の README で開く" title="モデルごとの成績（ベンチマーク）を GitHub の README で開く">?</a>
+            <label for="llm-model-select" data-i18n="options.model">使用モデル</label>
+            <a class="options__help-link" href="https://github.com/youkiti/sr-query-builder-plugin#benchmark" target="_blank" rel="noreferrer" aria-label="モデルごとの成績（ベンチマーク）を GitHub の README で開く" data-i18n-aria-label="options.benchmark" title="モデルごとの成績（ベンチマーク）を GitHub の README で開く" data-i18n-title="options.benchmark">?</a>
           </div>
           <select id="llm-model-select"></select>
         </div>
       </section>
       <section class="options__section">
         <h2>NCBI E-utilities</h2>
-        <p class="options__muted">
+        <p class="options__muted"><span data-i18n="options.ncbiIntro">
           APIキーを設定してください（任意）。登録すると PubMed API のレート上限が 3 req/s → 10 req/s
           に上がります。未設定でも動作しますが、検証フェーズで rate limit に当たる場合は
-          <a href="https://www.ncbi.nlm.nih.gov/account/settings/" target="_blank" rel="noreferrer">
+          </span> <a href="https://www.ncbi.nlm.nih.gov/account/settings/" target="_blank" rel="noreferrer" data-i18n="options.ncbiAccount">
             NCBI アカウント設定</a
-          >
+          > <span data-i18n="options.ncbiEnd">
           で取得して設定してください。
-        </p>
+        </span></p>
         <label class="options__field">
-          <span>NCBI APIキー</span>
+          <span data-i18n="options.ncbiKey">NCBI APIキー</span>
           <input type="password" id="ncbi-api-key" autocomplete="off" />
         </label>
       </section>
       <div class="options__actions">
-        <button type="button" id="save-keys" class="options__button options__button--primary">
+        <button type="button" id="save-keys" class="options__button options__button--primary" data-i18n="options.save">
           保存
         </button>
       </div>
