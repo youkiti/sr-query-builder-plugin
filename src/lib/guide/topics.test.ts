@@ -22,6 +22,70 @@ test('全トピックの helpAnchor が hosted/help.html に id として実在�
   }
 });
 
+test('ヘルプの全26小節に日英の「こんなとき」が2〜4項目ずつある', () => {
+  const help = new DOMParser().parseFromString(helpHtml, 'text/html');
+  const sections = Array.from(help.querySelectorAll('section[id]'));
+  const simpleSections = sections.filter(section => !section.querySelector('h3, details.faq'));
+  expect(sections).toHaveLength(18);
+  expect(simpleSections.map(section => section.id)).toEqual([
+    'responsible-use', 'video', 'tours', 'install', 'setup', 'project', 'protocol', 'blocks',
+    'seeds', 'draft', 'expand', 'edit', 'export', 'done', 'history', 'funding',
+  ]);
+
+  const headings = Array.from(help.querySelectorAll('#troubleshooting h3'));
+  const faqs = Array.from(help.querySelectorAll('#faq details.faq'));
+  expect(headings).toHaveLength(4);
+  expect(faqs).toHaveLength(6);
+  const troubleshootingUnits = headings.map(heading => {
+    const unit = help.createElement('div');
+    for (let sibling = heading.nextElementSibling; sibling && sibling.tagName !== 'H3'; sibling = sibling.nextElementSibling) {
+      unit.append(sibling.cloneNode(true));
+    }
+    expect(heading.nextElementSibling?.matches('div.help-when')).toBe(true);
+    return unit;
+  });
+  for (const section of simpleSections) {
+    expect(section.querySelector('h2')?.nextElementSibling?.matches('div.help-when')).toBe(true);
+  }
+  for (const faq of faqs) {
+    expect(faq.querySelector('summary')?.nextElementSibling?.matches('div.help-when')).toBe(true);
+  }
+  for (const section of help.querySelectorAll('#troubleshooting, #faq')) {
+    expect(section.querySelector('h2')?.nextElementSibling?.matches('.help-when')).toBe(false);
+  }
+
+  const units = [...simpleSections, ...troubleshootingUnits, ...faqs];
+  expect(units).toHaveLength(26);
+  expect(help.querySelectorAll('.help-when')).toHaveLength(26);
+  for (const unit of units) {
+    const blocks = unit.querySelectorAll('div.help-when');
+    expect(blocks).toHaveLength(1);
+    const items = blocks[0]!.querySelectorAll('li');
+    expect(items.length).toBeGreaterThanOrEqual(2);
+    expect(items.length).toBeLessThanOrEqual(4);
+    for (const item of items) {
+      for (const language of ['ja', 'en']) {
+        const spans = item.querySelectorAll(`span.${language}`);
+        expect(spans).toHaveLength(1);
+        expect(spans[0]!.getAttribute('lang')).toBe(language);
+        expect(spans[0]!.textContent?.trim().length).toBeGreaterThan(0);
+      }
+    }
+  }
+});
+
+test('トラブルシューティングとFAQの小節にidがあり、ヘルプ全体で重複しない', () => {
+  const help = new DOMParser().parseFromString(helpHtml, 'text/html');
+  for (const heading of help.querySelectorAll('#troubleshooting h3')) {
+    expect(heading.id).toMatch(/^troubleshooting-[a-z]+(?:-[a-z]+)*$/);
+  }
+  for (const faq of help.querySelectorAll('#faq details.faq')) {
+    expect(faq.id).toMatch(/^faq-[a-z]+(?:-[a-z]+)*$/);
+  }
+  const ids = Array.from(help.querySelectorAll('[id]'), element => element.id);
+  expect(new Set(ids).size).toBe(ids.length);
+});
+
 test('動画 ID が hosted/help.html と hosted/index.html の埋め込みと一致する', () => {
   const embed = `youtube-nocookie.com/embed/${GUIDE_VIDEO_ID}`;
   expect(helpHtml).toContain(embed);
