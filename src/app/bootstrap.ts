@@ -251,6 +251,7 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
   if (runtime) {
     initGuide({
       store,
+      consultStore: runtime.store,
       win: doc.defaultView ?? window,
       doc,
       navigate,

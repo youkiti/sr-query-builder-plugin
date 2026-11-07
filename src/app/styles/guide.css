@@ -160,3 +160,93 @@
 [data-tour="draft-held-candidates"] {
   scroll-margin-top: 200px;
 }
+
+/* 相談の背景とパネルは確認モーダルに合わせる。 */
+.guide-consult:not([hidden]) {
+  position: fixed;
+  z-index: 1200;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+  background: rgb(0 0 0 / 40%);
+}
+
+.guide-consult__panel {
+  width: min(720px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: var(--space-5);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  color: var(--color-text);
+  background: var(--color-bg);
+}
+
+.guide-consult__header:not([hidden]) {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.guide-consult__panel textarea:not([hidden]) {
+  display: block;
+  width: 100%;
+  min-height: 90px;
+  margin-block: var(--space-2) var(--space-4);
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  background: var(--color-bg);
+}
+
+.guide-consult__actions:not([hidden]) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.guide-consult__btn {
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.guide-consult__btn--primary {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #ffffff;
+}
+
+.guide-consult__btn--primary:hover {
+  background: var(--color-primary-hover);
+}
+
+.guide-consult__btn:disabled {
+  color: var(--color-text-muted);
+  background: var(--color-bg-muted);
+  border-color: var(--color-border);
+  cursor: not-allowed;
+}
+
+.guide-consult__panel a,
+.guide-consult__consent a {
+  text-decoration: underline;
+}
+
+.guide-consult__card {
+  padding: var(--space-3);
+  margin-block: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.guide-consult__answer {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
