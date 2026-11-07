@@ -2,6 +2,10 @@
 
 ## 未リリース
 
+## v0.10.0
+
+- アプリ本体の画面の文言を日英で切り替えられるようにする（#233）。ヘルプツアーは英語表示のときに英語のラベルで画面の要素を引く。AI へ送る指示文は変更しない。
+
 - 停止した `gemini-2.0-flash` を一覧から外し、無料枠の切り替え先を `gemini-3.5-flash-lite`、判定用モデルを `gemini-4-argon` に変更。
   Google が `gemini-3.6-flash` へ転送する `gemini-3.5-flash` も `gemini-3.6-flash` に替え、保存済みの両 ID は読み込み時に置き換える。過去の記録のモデル ID は書き換えない。
   OpenRouter の提供元は固定せず、要求ごとに変わりうることをヘルプに注記する。
@@ -19,6 +23,10 @@
   この段では画面からはまだ使えない。
 
 - Embase (Dialog) への変換で、RCT 出版タイプフィルタのブロックを Cochrane の Embase RCT フィルタ更新版（35 行）に展開する。旧版は 1 行に畳んだ式で、S2 の Emtree 語（controlled clinical trial → study）、近接距離（NEAR/1 → NEAR/0 など）、除外条件の一部に誤りがあった。展開した分、後続ブロックの S 番号がずれる。
+
+## v0.9.0
+
+- リリースの version 更新: `30aa6db`。
 - AI 呼び出しのモデル応答値 `model_reported`、プロンプトの版 `prompt_version`、実行者 `executed_by` を記録する。検索式の版に `saved_by`、`app_version`、`models_used` を記録する。
 - prompt.json に実際に送信した生成設定を保存する。モデルが報告する版と指定したモデルを区別する。
 - 初回の AI 送信前の同意、Gemini 無料枠のデータ利用の注意、未確認の版のエクスポート警告、費用の目安を追加する。
