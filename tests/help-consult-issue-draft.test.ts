@@ -23,8 +23,30 @@ test.each([
   'https://github.com/youkiti/sr-query-builder-plugin',
   'https://github.com/youkiti/sr-query-builder-plugin/issues/1',
   'https://youkiti.github.io/sr-query-builder-plugin/help.html?lang=ja#troubleshooting-shared-spreadsheet',
+  'https://youkiti.github.io/sr-query-builder-plugin/help.html?lang=ja#faq-supported-databases',
 ])('許可 URL は長いアンカーも含めて残す: %s', value => {
   expect(sanitizeForIssue(value + ' sk-abcdefghijklmnopqrstuvwxyz')).toBe(value + ' [REDACTED]');
+});
+
+test.each([
+  [
+    'https://youkiti.github.io/sr-query-builder-plugin/help.html?key=sk-abcdefghijklmnopqrstuvwxyz',
+    'https://youkiti.github.io/sr-query-builder-plugin/help.html?key=sk-[REDACTED]',
+    'abcdefghijklmnopqrstuvwxyz',
+  ],
+  [
+    'https://github.com/youkiti/sr-query-builder-plugin/issues/1#AbCdEfGhIjKlMnOpQrStUvWx12',
+    'https://github.com/youkiti/sr-query-builder-plugin/issues/1#[REDACTED]',
+    'AbCdEfGhIjKlMnOpQrStUvWx12',
+  ],
+])('許可 URL のクエリやフラグメント内の長いキー断片を題と本文で伏せる: %s', (value, expected, secret) => {
+  expect(sanitizeForIssue(value)).toBe(expected);
+  const draft = createIssueDraft({ question: value, answer: value, environment });
+  expect(draft.title).toBe('ヘルプ相談: ' + expected);
+  expect(draft.body).toContain('## 質問 / Question\n' + expected);
+  expect(draft.body).toContain('## AI の回答 / AI answer\n' + expected);
+  expect(draft.title).not.toContain(secret);
+  expect(draft.body).not.toContain(secret);
 });
 
 test('全入力を伏せ、注意と環境を含む本文および題を URL から復元できる', () => {

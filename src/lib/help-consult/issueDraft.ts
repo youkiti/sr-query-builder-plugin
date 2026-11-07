@@ -24,7 +24,7 @@ export function sanitizeForIssue(text: string): string {
         // URL は既定ポートを正規化するため、元の authority も検査する。
         const authority = /^https?:\/\/([^/\s?#]+)/i.exec(value)?.[1] ?? '';
         if (allowed && !url.username && !url.password && !url.port && !authority.includes(':') && !authority.includes('@')) {
-          return value;
+          return value.replace(/[?#][\s\S]*$/, suffix => suffix.replace(/[A-Za-z0-9_]{20,}/g, '[REDACTED]'));
         }
       } catch {
         // 不正な URL や長いキー断片は公開文面へ残さない。
