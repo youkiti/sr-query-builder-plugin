@@ -1,3 +1,5 @@
+import { t } from '@/lib/i18n';
+
 /**
  * メインビューのハッシュルーティング。
  * docs/ui-flow.md §2 の `#/home` 〜 `#/history` を扱う。
@@ -26,17 +28,17 @@ export const SIDEBAR_ROUTES: readonly RouteName[] = ROUTES.filter(
 );
 
 export const ROUTE_LABELS: Record<RouteName, string> = {
-  home: 'ホーム',
-  protocol: 'プロトコル入力',
-  blocks: 'ブロック承認',
-  seeds: 'シード論文',
-  draft: '検索式（生成・検証）',
-  expand: '対話的シード拡張',
-  edit: '検索式編集',
-  export: 'エクスポート',
-  done: '完了',
-  history: 'バージョン履歴',
-  settings: '設定',
+  get home() { return t('shell.route.home'); },
+  get protocol() { return t('shell.route.protocol'); },
+  get blocks() { return t('shell.route.blocks'); },
+  get seeds() { return t('shell.route.seeds'); },
+  get draft() { return t('shell.route.draft'); },
+  get expand() { return t('shell.route.expand'); },
+  get edit() { return t('shell.route.edit'); },
+  get export() { return t('shell.route.export'); },
+  get done() { return t('shell.route.done'); },
+  get history() { return t('shell.route.history'); },
+  get settings() { return t('shell.route.settings'); },
 };
 
 export interface RouterDeps {

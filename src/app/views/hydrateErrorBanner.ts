@@ -1,3 +1,5 @@
+import { t } from '@/lib/i18n';
+
 /**
  * 起動時 hydrate（Sheets からの状態復元）失敗のエラーバナー（fix-plan 1-3）。
  * home / protocol で共用する。Sheets の一時障害が「空プロジェクト」に見えないよう、
@@ -14,7 +16,7 @@ export function buildHydrateErrorBanner(
 
   const text = doc.createElement('p');
   text.className = 'view__hydrate-error-message';
-  text.textContent = `プロジェクトデータの読み込みに失敗しました: ${message}`;
+  text.textContent = t('common.hydrateError', { message });
   banner.appendChild(text);
 
   const hint = doc.createElement('p');
@@ -23,14 +25,14 @@ export function buildHydrateErrorBanner(
   // （403/404）。この経路には許可導線がまだ無く、再試行を何度押しても状況が変わらないため、
   // 許可導線のある popup へ誘導する（#24 のフェーズ 2 で本経路にも導線を足す予定）。
   hint.textContent =
-    '保存済みのプロトコル・検索式が表示されていない可能性があります。再試行してください。共有されたスプレッドシートの場合は、拡張機能のポップアップにある「スプレッドシート ID で開く」からやり直すと、Google での許可の案内が表示されます。';
+    t('common.hydrateHint');
   banner.appendChild(hint);
 
   if (onRetry) {
     const retryBtn = doc.createElement('button');
     retryBtn.type = 'button';
     retryBtn.className = 'view__hydrate-error-retry';
-    retryBtn.textContent = '再試行';
+    retryBtn.textContent = t('common.retry');
     retryBtn.addEventListener('click', () => {
       retryBtn.disabled = true;
       onRetry();

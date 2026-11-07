@@ -1,3 +1,5 @@
+import { buildUiLanguageSection } from './uiLanguageSection';
+import { ROUTE_LABELS } from '../router';
 import { addLlmPermissionButtons, requestLlmHosts, HOST_PERMISSION_DENIED, type LlmHostPermissions } from '@/lib/llm/hostPermissions';
 import { AiConsentDeclinedError } from '../services/aiConsentService';
 import { updateGeminiDataNotice } from '@/lib/llm/aiDisclosure';
@@ -182,7 +184,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
     const header = doc.createElement('div');
     header.className = 'settings__header';
     const h2 = doc.createElement('h2');
-    h2.textContent = '設定';
+    h2.textContent = ROUTE_LABELS.settings;
     h2.className = 'settings__title';
     const backBtn = doc.createElement('button');
     backBtn.type = 'button';
@@ -205,6 +207,8 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
     status.className = 'settings__status';
     status.textContent = '読み込み中…';
     container.appendChild(status);
+
+    container.appendChild(buildUiLanguageSection(doc));
 
     // LLM プロバイダセクション
     const llmSection = doc.createElement('section');

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SR Query Builder Plugin - メインビュー</title>
+    <title data-i18n="shell.title">SR Query Builder Plugin - メインビュー</title>
     <link rel="stylesheet" href="../styles/tokens.css" />
     <link rel="stylesheet" href="../styles/globals.css" />
     <link rel="stylesheet" href="styles/shell.css" />
@@ -31,7 +31,9 @@
           <button
             type="button"
             id="app-home-link"
+            data-i18n="shell.brand"
             class="app__title-link"
+            data-i18n-title="shell.homeTitle"
             title="プロジェクト概要（ホーム）へ戻る"
           >
             SR Query Builder Plugin
@@ -45,26 +47,29 @@
           id="app-open-tours"
           class="app__settings-btn"
           data-tour="tour-list"
+          data-i18n="shell.tours"
         >
           ツアー
         </button>
         <button
           type="button"
           id="app-settings-link"
+          data-i18n="shell.settings"
           class="app__settings-btn"
+          data-i18n-title="shell.settingsTitle"
           title="設定（APIキー・モデル選択）"
         >
           設定
         </button>
         <div class="app__header-status">
-          <span class="app__status" id="app-status">起動中…</span>
+          <span class="app__status" id="app-status" data-i18n="shell.starting">起動中…</span>
           <span class="app__context" id="app-context" aria-live="polite"></span>
         </div>
       </div>
     </header>
     <main class="app__main">
       <aside class="app__sidebar" id="app-sidebar">
-        <nav class="app__nav" aria-label="ステップナビ" data-tour="nav"></nav>
+        <nav class="app__nav" aria-label="ステップナビ" data-i18n-aria-label="shell.nav" data-tour="nav"></nav>
       </aside>
       <section class="app__content" id="app-content"></section>
     </main>

@@ -1,3 +1,4 @@
+import { getUiLanguage, localizeDom, onUiLanguageChange, t } from '@/lib/i18n';
 import { appendOptimizationLog, type OptimizationLogEvent } from '@/features/optimization/optimizationLogRepository';
 import { getExtensionVersion } from '@/utils/extensionVersion';
 import { detectGeminiTier } from '@/lib/llm/geminiTierDetector';
@@ -185,7 +186,7 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
     const guard = evaluateGuards(store.getState())[route];
     if (!guard.enabled) {
       if (status) {
-        status.textContent = `${ROUTE_LABELS[route]}: ${guard.reason}`;
+        status.textContent = t('shell.guardStatus', { route: ROUTE_LABELS[route], reason: guard.reason });
       }
       return;
     }
@@ -204,6 +205,8 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
   }
 
   const render = (): void => {
+    localizeDom(doc);
+    doc.documentElement.lang = getUiLanguage();
     const route = parseRoute(opts.getHash());
     if (route !== store.getState().route) {
       store.setState((s) => ({ ...s, route,
@@ -213,8 +216,8 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
     const snapshot = store.getState();
     const guard = evaluateGuards(snapshot)[route];
     if (status) {
-      const projectName = snapshot.project?.title ?? '(未選択)';
-      status.textContent = `${ROUTE_LABELS[route]} / ${projectName}`;
+      const projectName = snapshot.project?.title ?? t('shell.unselected');
+      status.textContent = t('shell.projectStatus', { route: ROUTE_LABELS[route], project: projectName });
     }
     if (contextEl) {
       contextEl.textContent = buildContextLabel(snapshot);
@@ -245,6 +248,7 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
   render();
   const unlistenHash = opts.onHashChange(render);
   const unsubscribe = store.subscribe(render);
+  const unsubscribeLanguage = onUiLanguageChange(render);
 
   // ヘルプツアー。拡張の実行環境（runtime あり）で入口のボタンがある文書だけで起動し、
   // 失敗してもアプリの起動は止めない。
@@ -278,6 +282,7 @@ export function startApp(doc: Document, opts: AppBootstrapOptions): AppHandle {
       disposeGuide = null;
       unlistenHash();
       unsubscribe();
+      unsubscribeLanguage();
     },
   };
 }
@@ -2061,7 +2066,7 @@ export function buildContextLabel(state: AppState): string {
     parts.push(`Formula ${formulaShort}`);
   }
   if (state.cumulativeCostUsd !== null) {
-    parts.push(`累積 $${state.cumulativeCostUsd.toFixed(4)}`);
+    parts.push(t('shell.cost', { cost: state.cumulativeCostUsd.toFixed(4) }));
   }
   return parts.join(' / ');
 }

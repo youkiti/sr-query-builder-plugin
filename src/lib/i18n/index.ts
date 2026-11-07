@@ -1,4 +1,4 @@
-// ツアー関連の文言を現在の表示言語で引く実行時辞書。
+// 画面の文言を現在の表示言語で引く実行時辞書。
 // - t(key): 現在言語の辞書から文言を引く。未定義キーは ja にフォールバックし、
 //   ja にも無ければキー文字列をそのまま返す（表示が空になるのを防ぐ）
 // - 言語の切り替えは setUiLanguage で行い、onUiLanguageChange の購読者へ同期通知する
@@ -54,4 +54,22 @@ export function t(key: MessageKey, params?: Record<string, string | number>): st
     }
   }
   return text;
+}
+
+const I18N_ATTRIBUTE_TARGETS = [
+  { source: 'data-i18n-placeholder', target: 'placeholder' },
+  { source: 'data-i18n-title', target: 'title' },
+  { source: 'data-i18n-aria-label', target: 'aria-label' },
+] as const;
+
+/** 静的 HTML の文字だけの要素と属性を現在言語で更新する。 */
+export function localizeDom(root: ParentNode): void {
+  for (const node of Array.from(root.querySelectorAll<HTMLElement>('[data-i18n]'))) {
+    node.textContent = t(node.getAttribute('data-i18n') as MessageKey);
+  }
+  for (const { source, target } of I18N_ATTRIBUTE_TARGETS) {
+    for (const node of Array.from(root.querySelectorAll<HTMLElement>(`[${source}]`))) {
+      node.setAttribute(target, t(node.getAttribute(source) as MessageKey));
+    }
+  }
 }

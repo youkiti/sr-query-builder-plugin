@@ -1,3 +1,5 @@
+import { setUiLanguage } from '@/lib/i18n';
+import { loadUiLanguage, subscribeUiLanguage } from '@/lib/i18n/uiLanguageStore';
 import { createLocationOptions, startApp } from './bootstrap';
 import { INITIAL_STATE, createStore, type AppState, type AppStore } from './store';
 
@@ -24,4 +26,12 @@ function buildStore(): AppStore | undefined {
   return createStore({ ...INITIAL_STATE, ...preloaded });
 }
 
-startApp(document, { ...createLocationOptions(window), store: buildStore() });
+void loadUiLanguage().then((language) => {
+  setUiLanguage(language);
+  const unsubscribeLanguage = subscribeUiLanguage();
+  const app = startApp(document, { ...createLocationOptions(window), store: buildStore() });
+  window.addEventListener('pagehide', () => {
+    unsubscribeLanguage();
+    app.dispose();
+  }, { once: true });
+});

@@ -1,4 +1,4 @@
-import { ROUTE_LABELS } from '../router';
+import { t } from '@/lib/i18n';
 import { formatFormulaVersionShort } from './formatHelpers';
 import { buildHydrateErrorBanner } from './hydrateErrorBanner';
 import type { RenderView } from './types';
@@ -28,7 +28,7 @@ export function createHomeView(callbacks: HomeViewCallbacks = {}): RenderView {
     const doc = container.ownerDocument;
 
     const heading = doc.createElement('h2');
-    heading.textContent = ROUTE_LABELS.home;
+    heading.textContent = t('home.title');
     container.appendChild(heading);
 
     if (ctx.state.hydrateError !== null) {
@@ -39,23 +39,23 @@ export function createHomeView(callbacks: HomeViewCallbacks = {}): RenderView {
 
     const projectInfo = doc.createElement('p');
     if (ctx.state.project) {
-      projectInfo.textContent = `現在のプロジェクト: ${ctx.state.project.title} (${ctx.state.project.projectId.slice(0, 8)})`;
+      projectInfo.textContent = t('home.project', { title: ctx.state.project.title, id: ctx.state.project.projectId.slice(0, 8) });
     } else {
-      projectInfo.textContent = 'プロジェクトが選択されていません。Popup から作成または選択してください。';
+      projectInfo.textContent = t('home.noProject');
     }
     container.appendChild(projectInfo);
 
     const summary = doc.createElement('p');
     summary.className = 'home__summary';
     if (!ctx.state.project) {
-      summary.textContent = '最初に Popup でプロジェクトを選択すると、プロトコル入力から開始できます。';
+      summary.textContent = t('home.start');
     } else if (
       ctx.state.currentProtocolVersion === null &&
       ctx.state.currentFormulaVersionId === null
     ) {
-      summary.textContent = 'この画面は概要のみです。作業は左の「プロトコル入力」から始めてください。';
+      summary.textContent = t('home.overview');
     } else {
-      summary.textContent = '現在採番済みのバージョン概要です。';
+      summary.textContent = t('home.versions');
     }
     container.appendChild(summary);
 
@@ -77,8 +77,8 @@ function buildSwitchProjectAction(doc: Document, callbacks: HomeViewCallbacks): 
   const btn = doc.createElement('button');
   btn.type = 'button';
   btn.className = 'home__switch-project';
-  btn.textContent = '別のプロジェクトを開く…';
-  btn.title = 'Popup（プロジェクト選択画面）を新しいタブで開きます';
+  btn.textContent = t('home.switch');
+  btn.title = t('home.switchTitle');
   btn.addEventListener('click', () => {
     callbacks.onOpenPopup?.();
   });
@@ -94,11 +94,11 @@ function buildStatusList(
   dl.className = 'home__status';
 
   if (state.currentProtocolVersion !== null) {
-    appendEntry(doc, dl, 'Protocol version', `v${state.currentProtocolVersion}`);
+    appendEntry(doc, dl, t('home.protocolVersion'), `v${state.currentProtocolVersion}`);
   }
   const formulaShort = formatFormulaVersionShort(state.currentFormulaVersionId);
   if (formulaShort !== null) {
-    appendEntry(doc, dl, 'Formula version', formulaShort);
+    appendEntry(doc, dl, t('home.formulaVersion'), formulaShort);
   }
 
   return dl.childElementCount > 0 ? dl : null;

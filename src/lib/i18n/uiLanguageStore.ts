@@ -1,4 +1,4 @@
-import { isUiLanguage, type UiLanguage } from './index';
+import { setUiLanguage, isUiLanguage, type UiLanguage } from './index';
 
 /** chrome.storage.local に表示言語を保存するキー */
 export const UI_LANGUAGE_STORAGE_KEY = 'uiLanguage';
@@ -39,4 +39,16 @@ export async function saveUiLanguage(language: UiLanguage): Promise<void> {
   } catch (error) {
     console.warn('[i18n] 表示言語の保存に失敗:', error);
   }
+}
+
+/** 他のタブ・ページで保存された表示言語を反映する（戻り値で解除）。 */
+export function subscribeUiLanguage(): () => void {
+  if (typeof chrome === 'undefined' || !chrome.storage?.onChanged) return () => undefined;
+  const event = chrome.storage.onChanged;
+  const listener = (changes: Record<string, chrome.storage.StorageChange>, area: string): void => {
+    const language: unknown = changes[UI_LANGUAGE_STORAGE_KEY]?.newValue;
+    if (area === 'local' && isUiLanguage(language)) setUiLanguage(language);
+  };
+  event.addListener(listener);
+  return () => event.removeListener(listener);
 }

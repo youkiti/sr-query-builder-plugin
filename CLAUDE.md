@@ -171,7 +171,7 @@ src/
 │                   # にあり、views/formulaDisplay.ts はそれを再公開しているだけ（features
 │                   # から views を import させないため。import 元は formulaDisplay のままでよい）
 ├── features/       # ドメインロジック（protocol / seeds / formula / validation / conversion / project）
-├── lib/            # 横断ライブラリ（google: OAuth+Sheets+Drive / llm: LLMProvider 抽象+Gemini / ncbi: E-utilities / api-error: 外部 API 失敗の分類 / combination-expression / search-formula-md / guide: ツアー定義と進捗の純関数 / i18n: ツアーの文面だけの日英辞書）
+├── lib/            # 横断ライブラリ（google: OAuth+Sheets+Drive / llm: LLMProvider 抽象+Gemini / ncbi: E-utilities / api-error: 外部 API 失敗の分類 / combination-expression / search-formula-md / guide: ツアー定義と進捗の純関数 / i18n: 領域別の画面文言の日英辞書と表示言語の保存・同期）
 ├── popup/          # 認証・プロジェクト作成/選択の入口
 ├── options/        # BYOK 設定（Gemini API キー / NCBI API キー）
 ├── background/     # service-worker + Picker 許可フロー（pickerGrant.ts）

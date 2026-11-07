@@ -1,3 +1,39 @@
+import * as i18n from '@/lib/i18n';
+import * as languageStore from '@/lib/i18n/uiLanguageStore';
+import { startApp } from '../bootstrap';
+
+afterEach(() => { i18n.setUiLanguage('ja'); jest.restoreAllMocks(); });
+
+test('アプリの設定で言語を変えて再描画したあとも選択欄にフォーカスを戻す', () => {
+  document.body.innerHTML = '<aside id="app-sidebar"><nav></nav></aside><section id="app-content"></section>';
+  jest.spyOn(languageStore, 'saveUiLanguage').mockResolvedValue(undefined);
+  const app = startApp(document, {
+    getHash: () => '#/settings',
+    onHashChange: () => () => undefined,
+    setHash: jest.fn(),
+    runtime: null,
+    viewOptions: { settings: {
+      readKey: async () => undefined,
+      writeKey: async () => undefined,
+      removeKey: async () => undefined,
+    } },
+  });
+  try {
+    const select = document.querySelector<HTMLSelectElement>('#ui-language')!;
+    select.focus();
+    expect(document.activeElement).toBe(select);
+    select.value = 'en';
+    select.dispatchEvent(new Event('change'));
+    const updatedSelect = document.querySelector<HTMLSelectElement>('#ui-language')!;
+    expect(updatedSelect).not.toBe(select);
+    expect(updatedSelect.value).toBe('en');
+    expect(document.activeElement).toBe(updatedSelect);
+  } finally {
+    app.dispose();
+    document.body.innerHTML = '';
+  }
+});
+
 import { createSettingsView, type SettingsViewCallbacks } from './settingsView';
 import type { ViewContext } from './types';
 import type { AppState } from '../store';
@@ -361,7 +397,7 @@ test.each([['claude-foo', 'Anthropic', 'anthropic'], ['a/b', 'OpenRouter', 'open
       createSettingsView({ readKey: async (k) => store[k], writeKey: jest.fn(),
         removeKey: jest.fn(), detectGeminiTier: jest.fn() })(container, { state: {} as AppState, navigate: jest.fn() });
       await new Promise((r) => setTimeout(r, 0));
-      expect(container.querySelector<HTMLSelectElement>('select')!.value).toBe(id);
+      expect(container.querySelector<HTMLSelectElement>('#settings-llm-model')!.value).toBe(id);
       expect(container.querySelector(`optgroup[label="${group}"] option[value="${id}"]`)).not.toBeNull();
       expect(container.querySelector(`#settings-${provider}-card`)?.classList.contains('settings__provider-card--active')).toBe(true);
     } finally { container.remove(); }
@@ -413,4 +449,21 @@ test.each([
   expect(data['llm.selectedModel']).toBe(model);
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(container.textContent?.includes('許可がないため、このプロバイダには送信できません')).toBe(!allowed);
+});
+
+
+test('表示言語の選択で現在言語を変更し保存する', async () => {
+  const set = jest.spyOn(i18n, 'setUiLanguage');
+  const save = jest.spyOn(languageStore, 'saveUiLanguage').mockResolvedValue(undefined);
+  const container = document.createElement('div');
+  createSettingsView({ readKey: async () => undefined, writeKey: async () => undefined,
+    removeKey: async () => undefined })(container, { state: {} as AppState, navigate: jest.fn() });
+  const select = container.querySelector('#ui-language') as HTMLSelectElement;
+  expect(select.value).toBe('ja');
+  expect(container.querySelector('label[for="ui-language"]')).not.toBeNull();
+  select.value = 'en';
+  select.dispatchEvent(new Event('change'));
+  expect(set).toHaveBeenCalledWith('en');
+  expect(i18n.getUiLanguage()).toBe('en');
+  expect(save).toHaveBeenCalledWith('en');
 });

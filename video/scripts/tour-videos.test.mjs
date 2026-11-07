@@ -1,11 +1,10 @@
 // ブラウザ・ffmpeg・実 API を起動せず、動画生成の入力と時刻計算を検査する。
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import {
     DEFAULT_TOURS, parseArgs, captureArgs, parseDictionary, pickShots, READINGS, toReading,
     silentDuration, frameDuration, srtTime, makeTimeline, frameHtml, requestVoice,
-    speakerNameFor, makeChaptersText, main,
+    speakerNameFor, makeChaptersText, main, parseGuideDictionary, readGuideDictionary,
 } from './tour-videos.mjs';
 
 test('撮影引数: 画面サイズと描画を待つ時間を指定する', () => {
@@ -49,6 +48,12 @@ test('辞書: guide. の単一引用符行を読み、引用符・改行・Unico
     assert.throws(() => parseDictionary(String.raw`'guide.key': '\q',`), /未対応/);
 });
 
+test('日英辞書: 指定言語の値を読み、日英の境がなければ理由を示す', () => {
+    assert.equal(readGuideDictionary('ja')['guide.next'], '次へ');
+    assert.equal(readGuideDictionary('en')['guide.next'], 'Next');
+    assert.throws(() => parseGuideDictionary("'guide.next': '次へ',", 'ja'), /export const guideEn 宣言が見つかりません/);
+});
+
 const messages = {
     'guide.tourGettingStartedTitle': '題',
     'guide.tourGettingStartedDesc': '説明',
@@ -90,7 +95,7 @@ const leftover = text => text.replace(new RegExp(`[${READABLE_CHARS}]+`, 'gu'), 
 test('現在の日英辞書: 全ツアーに題・説明・手順があり、日本語の文面は読み替え後に英字・特殊記号が残らない', () => {
     const used = new Set();
     for (const lang of ['ja', 'en']) {
-        const dictionary = parseDictionary(readFileSync(new URL(`../../src/lib/i18n/${lang}.ts`, import.meta.url), 'utf8'));
+        const dictionary = readGuideDictionary(lang);
         for (const id of DEFAULT_TOURS) {
             const base = 'guide.tour' + id.split('-').map(word => word[0].toUpperCase() + word.slice(1)).join('');
             assert.ok(dictionary[`${base}Title`]);

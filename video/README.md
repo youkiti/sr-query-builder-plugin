@@ -607,7 +607,7 @@ CONTRACT の全文と ctx API の詳細は `video/scripts/record.mjs` の先頭�
 
 ## 操作ツアーの解説動画（`npm run video:tours`）
 
-ヘルプツアー 1 本につき、短い解説動画を 1 本作る。映像は通し検査（`npm run check:tours`、`tools/guide-tour-check/`）が手順ごとに残す画像、原稿は `src/lib/i18n/ja.ts` / `en.ts` のツアーのカード文言を使う。手書きのシーン・原稿から作る長編（`record` → `tts` → `assemble`）とは別の経路で、ツアーの画面や文言を変えたら再生成で追従する。
+ヘルプツアー 1 本につき、短い解説動画を 1 本作る。映像は通し検査（`npm run check:tours`、`tools/guide-tour-check/`）が手順ごとに残す画像、原稿は `src/lib/i18n/messages/guide.ts` のツアーのカード文言を使う。手書きのシーン・原稿から作る長編（`record` → `tts` → `assemble`）とは別の経路で、ツアーの画面や文言を変えたら再生成で追従する。
 
 ```bash
 npm run build:demo

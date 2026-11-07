@@ -1,4 +1,4 @@
-import { getUiLanguage, isUiLanguage, onUiLanguageChange, setUiLanguage, t, type MessageKey } from './index';
+import { getUiLanguage, localizeDom, isUiLanguage, onUiLanguageChange, setUiLanguage, t, type MessageKey } from './index';
 import { ja } from './ja';
 import { en } from './en';
 
@@ -60,7 +60,23 @@ test('言語値の判定と、ja と en のキー集合の一致', () => {
   for (const value of ['fr', '', null, undefined, 1]) expect(isUiLanguage(value)).toBe(false);
   expect(Object.keys(en).sort()).toEqual(Object.keys(ja).sort());
   for (const key of Object.keys(ja)) {
-    expect(key.startsWith('guide.')).toBe(true);
     expect(en[key as MessageKey].length).toBeGreaterThan(0);
   }
+});
+
+
+test('localizeDom はテキストと対象属性を現在言語で更新する', () => {
+  const root = document.createElement('div');
+  root.innerHTML = `<span data-i18n="home.title"></span>
+    <input data-i18n-placeholder="guide.next" data-i18n-title="guide.done"
+      data-i18n-aria-label="settings.language"><b>保持</b>`;
+  localizeDom(root);
+  expect(root.querySelector('span')?.textContent).toBe('ホーム');
+  setUiLanguage('en');
+  localizeDom(root);
+  expect(root.querySelector('span')?.textContent).toBe('Home');
+  expect(root.querySelector('input')?.getAttribute('placeholder')).toBe('Next');
+  expect(root.querySelector('input')?.title).toBe('Done');
+  expect(root.querySelector('input')?.getAttribute('aria-label')).toBe('Display language');
+  expect(root.querySelector('b')?.textContent).toBe('保持');
 });

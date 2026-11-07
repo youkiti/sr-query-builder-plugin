@@ -1,3 +1,4 @@
+import { t } from '@/lib/i18n';
 import { ROUTE_LABELS, type RouteName } from '../router';
 import type { RenderView } from './types';
 
@@ -13,7 +14,7 @@ export function buildNotImplementedView(route: RouteName): RenderView {
     container.appendChild(heading);
     const note = container.ownerDocument.createElement('p');
     note.className = 'view__placeholder';
-    note.textContent = `「${ROUTE_LABELS[route]}」画面は未実装です。`;
+    note.textContent = t('shell.notImplemented', { route: ROUTE_LABELS[route] });
     container.appendChild(note);
   };
 }
