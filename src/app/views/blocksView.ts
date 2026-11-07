@@ -1,5 +1,6 @@
+import { getUiLanguage, t } from '@/lib/i18n';
+import { ROUTE_LABELS } from '../router';
 import {
-  formatCombinationError,
   normalizeCombinationExpression,
   validateCombinationExpression,
 } from '@/lib/combination-expression';
@@ -9,7 +10,6 @@ import {
   explainDefaultFilterSelection,
   buildFiltersFromSelection,
 } from '@/features/formula/skills';
-import { ROUTE_LABELS } from '../router';
 import type { AppStore, BlockDraft, BlocksDraft, ProtocolDraft } from '../store';
 import {
   MAX_BLOCKS,
@@ -65,7 +65,7 @@ export function createBlocksView(
     if (!ctx.state.project) {
       const warn = container.ownerDocument.createElement('p');
       warn.className = 'view__placeholder';
-      warn.textContent = '先にプロジェクトを選択してください。';
+      warn.textContent = t('blocks.noProject');
       container.appendChild(warn);
       return;
     }
@@ -105,7 +105,7 @@ function buildLede(doc: Document): HTMLElement {
   const p = doc.createElement('p');
   p.className = 'blocks__lede';
   p.textContent =
-    'プロトコルから抽出された検索ブロック（PICO などの概念グループ）を確認してください。内容を承認するとシード論文の登録へ進み、その後 AI が PubMed 検索式のドラフトを生成します。';
+    t('blocks.lead');
   return p;
 }
 
@@ -121,18 +121,18 @@ function buildUnapprovedDraftNotice(doc: Document, savedAt: string): HTMLElement
   const savedLabel = Number.isNaN(savedDate.getTime())
     ? savedAt
     : savedDate.toLocaleString('ja-JP');
-  notice.textContent = `未承認の下書きがあります（保存: ${savedLabel}）。「承認してシード論文へ」を押すまで Sheets には反映されません。`;
+  notice.textContent = t('blocks.unsaved', { savedAt: savedLabel });
   return notice;
 }
 
 function buildStepper(doc: Document): HTMLElement {
   const ol = doc.createElement('ol');
   ol.className = 'blocks__stepper';
-  ol.setAttribute('aria-label', '画面内の作業ステップ');
+  ol.setAttribute('aria-label', t('blocks.steps'));
   const steps: Array<{ num: string; title: string; desc: string }> = [
-    { num: '1', title: 'ブロックを確認・編集', desc: '名称と説明を見直す' },
-    { num: '2', title: '結合式を確認', desc: 'AND / OR の組み合わせ' },
-    { num: '3', title: '承認して次へ', desc: 'シード論文の登録へ進む' },
+    { num: '1', title: t('blocks.stepReview'), desc: t('blocks.stepReviewDescription') },
+    { num: '2', title: t('blocks.stepCombination'), desc: t('blocks.stepCombinationDescription') },
+    { num: '3', title: t('blocks.stepApprove'), desc: t('blocks.stepApproveDescription') },
   ];
   steps.forEach((s) => {
     const li = doc.createElement('li');
@@ -163,13 +163,13 @@ function buildProtocolReference(doc: Document, protocol: ProtocolDraft | null): 
 
   const title = doc.createElement('h3');
   title.className = 'blocks__protocol-ref-title';
-  title.textContent = 'プロトコル';
+  title.textContent = t('blocks.protocol');
   section.appendChild(title);
 
   if (!protocol) {
     const empty = doc.createElement('p');
     empty.className = 'blocks__protocol-ref-empty';
-    empty.textContent = 'プロトコルが入力されていません。';
+    empty.textContent = t('blocks.noProtocol');
     section.appendChild(empty);
     return section;
   }
@@ -179,20 +179,20 @@ function buildProtocolReference(doc: Document, protocol: ProtocolDraft | null): 
   // overflow-y: auto のスクロール領域はキーボードで到達できる必要がある（axe: scrollable-region-focusable）
   body.tabIndex = 0;
   body.setAttribute('role', 'region');
-  body.setAttribute('aria-label', 'プロトコル参照');
+  body.setAttribute('aria-label', t('blocks.protocolReference'));
 
   appendRefField(doc, body, 'Framework', protocol.frameworkType.toUpperCase());
   appendRefField(doc, body, 'RQ', protocol.researchQuestion);
   appendRefField(doc, body, 'Study design', protocol.studyDesign);
-  appendRefField(doc, body, '組入基準', protocol.inclusionCriteria);
-  appendRefField(doc, body, '除外基準', protocol.exclusionCriteria);
+  appendRefField(doc, body, t('blocks.inclusion'), protocol.inclusionCriteria);
+  appendRefField(doc, body, t('blocks.exclusion'), protocol.exclusionCriteria);
 
   const rawText = protocol.rawTextInline ?? protocol.rawTextPreview;
   if (rawText) {
     const sourceLabel =
       protocol.sourceType === 'manual'
-        ? '元テキスト'
-        : `元テキスト（${protocol.sourceFilename ?? protocol.sourceType}・先頭 500 文字）`;
+        ? t('blocks.source')
+        : t('blocks.sourcePreview', { filename: protocol.sourceFilename ?? protocol.sourceType });
     appendRefField(doc, body, sourceLabel, rawText);
   }
 
@@ -237,12 +237,12 @@ function buildBlocksSection(doc: Document, draft: BlocksDraft, store: AppStore):
   const h3 = doc.createElement('h3');
   h3.id = 'blocks-section-heading';
   h3.className = 'blocks__section-title';
-  h3.textContent = '① ブロック一覧';
+  h3.textContent = t('blocks.list');
   header.appendChild(h3);
 
   const summary = doc.createElement('span');
   summary.className = 'blocks__summary';
-  summary.textContent = `${draft.blocks.length} / ${MAX_BLOCKS} ブロック`;
+  summary.textContent = t('blocks.count', { count: draft.blocks.length, max: MAX_BLOCKS });
   header.appendChild(summary);
 
   section.appendChild(header);
@@ -250,7 +250,7 @@ function buildBlocksSection(doc: Document, draft: BlocksDraft, store: AppStore):
   const hint = doc.createElement('p');
   hint.className = 'blocks__section-hint';
   hint.textContent =
-    '各ブロックの「ブロック名」と「説明」を確認・修正してください。説明が具体的なほど AI が良い検索語を提案できます。1 ブロック = AND で掛け合わせる 1 概念です。「小児の肺炎」のように AND 条件を含む場合は「小児」「肺炎」の 2 ブロックに分けてください（ブロック内は OR で束ねられます）。';
+    t('blocks.listHint');
   section.appendChild(hint);
 
   section.appendChild(buildBlockList(doc, draft, store));
@@ -289,7 +289,7 @@ function buildBlockItem(
 
   const badge = doc.createElement('span');
   badge.className = `blocks__badge blocks__badge--${block.aiGenerated ? 'ai' : 'user'}`;
-  badge.textContent = block.aiGenerated ? '🤖 AI 生成' : '✏️ ユーザー編集';
+  badge.textContent = block.aiGenerated ? t('blocks.ai') : t('blocks.user');
   header.appendChild(badge);
 
   const controls = doc.createElement('div');
@@ -308,7 +308,7 @@ function buildBlockItem(
   controls.appendChild(
     buildIconButton(
       doc,
-      '削除',
+      t('blocks.delete'),
       () => mutateDraft(store, (d) => removeBlock(d, index)),
       draft.blocks.length <= MIN_BLOCKS
     )
@@ -323,13 +323,13 @@ function buildBlockItem(
   body.appendChild(
     buildLabeledInput(doc, {
       className: 'blocks__field blocks__field--label',
-      title: 'ブロック名',
-      hint: '例: Population / Intervention / Outcome',
+      title: t('blocks.name'),
+      hint: t('blocks.nameHint'),
       value: block.blockLabel,
-      placeholder: '例: Population',
+      placeholder: t('blocks.namePlaceholder'),
       kind: 'input',
       inputClass: 'blocks__label-input',
-      ariaLabel: `ブロック ${index + 1} のラベル`,
+      ariaLabel: t('blocks.nameAria', { number: index + 1 }),
       onInput: (v) => mutateDraft(store, (d) => updateBlock(d, index, { blockLabel: v })),
     })
   );
@@ -337,13 +337,13 @@ function buildBlockItem(
   body.appendChild(
     buildLabeledInput(doc, {
       className: 'blocks__field blocks__field--note',
-      title: 'メモ',
-      hint: '任意。検索式には使われません',
+      title: t('blocks.note'),
+      hint: t('blocks.noteHint'),
       value: block.note,
-      placeholder: '例: 高齢の定義は 65 歳で固定',
+      placeholder: t('blocks.notePlaceholder'),
       kind: 'textarea',
       inputClass: 'blocks__note',
-      ariaLabel: `ブロック ${index + 1} のノート`,
+      ariaLabel: t('blocks.noteAria', { number: index + 1 }),
       onInput: (v) => mutateDraft(store, (d) => updateBlock(d, index, { note: v })),
     })
   );
@@ -351,13 +351,13 @@ function buildBlockItem(
   body.appendChild(
     buildLabeledInput(doc, {
       className: 'blocks__field blocks__field--desc',
-      title: '説明',
-      hint: 'このブロックで拾いたい概念を 1〜3 文で',
+      title: t('blocks.description'),
+      hint: t('blocks.descriptionHint'),
       value: block.description,
-      placeholder: '例: 65 歳以上の慢性心不全患者。NYHA II〜IV。',
+      placeholder: t('blocks.descriptionPlaceholder'),
       kind: 'textarea',
       inputClass: 'blocks__desc',
-      ariaLabel: `ブロック ${index + 1} の説明`,
+      ariaLabel: t('blocks.descriptionAria', { number: index + 1 }),
       onInput: (v) => mutateDraft(store, (d) => updateBlock(d, index, { description: v })),
     })
   );
@@ -421,7 +421,7 @@ function buildAddRow(doc: Document, draft: BlocksDraft, store: AppStore): HTMLEl
   const addBtn = doc.createElement('button');
   addBtn.type = 'button';
   addBtn.className = 'blocks__btn-secondary';
-  addBtn.textContent = '＋ ブロックを追加';
+  addBtn.textContent = t('blocks.add');
   addBtn.disabled = draft.blocks.length >= MAX_BLOCKS;
   addBtn.addEventListener('click', () => mutateDraft(store, addBlock));
   wrap.appendChild(addBtn);
@@ -429,7 +429,7 @@ function buildAddRow(doc: Document, draft: BlocksDraft, store: AppStore): HTMLEl
   if (draft.blocks.length >= MAX_BLOCKS) {
     const note = doc.createElement('span');
     note.className = 'blocks__add-row-note';
-    note.textContent = `ブロックは最大 ${MAX_BLOCKS} 個までです`;
+    note.textContent = t('blocks.limit', { max: MAX_BLOCKS });
     wrap.appendChild(note);
   }
   return wrap;
@@ -443,13 +443,13 @@ function buildCombinationEditor(
   const fieldset = doc.createElement('fieldset');
   fieldset.className = 'blocks__combination';
   const legend = doc.createElement('legend');
-  legend.textContent = '② 結合式 (combination_expression)';
+  legend.textContent = t('blocks.combination');
   fieldset.appendChild(legend);
 
   const hint = doc.createElement('p');
   hint.className = 'blocks__section-hint';
   hint.textContent =
-    'ブロック同士をどう組み合わせて検索するかを決めます。通常はすべて AND で問題ありません。';
+    t('blocks.combinationHint');
   fieldset.appendChild(hint);
 
   fieldset.appendChild(buildFilterSelector(doc, draft, store));
@@ -465,9 +465,9 @@ function buildCombinationEditor(
   preview.className = 'blocks__combination-preview';
   const previewLabel = doc.createElement('span');
   previewLabel.className = 'blocks__combination-preview-label';
-  previewLabel.textContent = '最終プレビュー:';
+  previewLabel.textContent = t('blocks.preview');
   const previewCode = doc.createElement('code');
-  previewCode.textContent = finalExpr || '(空)';
+  previewCode.textContent = finalExpr || t('blocks.empty');
   preview.appendChild(previewLabel);
   preview.appendChild(previewCode);
   fieldset.appendChild(preview);
@@ -476,11 +476,11 @@ function buildCombinationEditor(
   inputWrap.className = 'blocks__combination-edit';
   const inputTitle = doc.createElement('span');
   inputTitle.className = 'blocks__field-title';
-  inputTitle.textContent = '結合式を編集';
+  inputTitle.textContent = t('blocks.editCombination');
   inputWrap.appendChild(inputTitle);
   const inputHint = doc.createElement('span');
   inputHint.className = 'blocks__field-hint';
-  inputHint.textContent = '例: #1 AND #2 ・ (#1 OR #2) AND #3 ・ 使える記号: AND / OR / NOT / ( )';
+  inputHint.textContent = t('blocks.expressionHint');
   inputWrap.appendChild(inputHint);
 
   const input = doc.createElement('input');
@@ -503,15 +503,15 @@ function buildCombinationEditor(
   status.setAttribute('aria-live', 'polite');
   status.textContent =
     validation.errors.length === 0
-      ? '✓ 構文 OK'
-      : `⚠ ${validation.errors.length} 件のエラーがあります`;
+      ? t('blocks.syntaxOk')
+      : t('blocks.errors', { count: validation.errors.length });
   fieldset.appendChild(status);
 
   const errorList = doc.createElement('ul');
   errorList.className = 'blocks__combination-errors';
   for (const err of validation.errors) {
     const li = doc.createElement('li');
-    li.textContent = formatCombinationError(err);
+    li.textContent = t('blocks.errorPosition', { position: err.position + 1, message: err.message });
     errorList.appendChild(li);
   }
   fieldset.appendChild(errorList);
@@ -521,7 +521,7 @@ function buildCombinationEditor(
   const resetBtn = doc.createElement('button');
   resetBtn.type = 'button';
   resetBtn.className = 'blocks__btn-secondary';
-  resetBtn.textContent = '全 AND に戻す';
+  resetBtn.textContent = t('blocks.reset');
   resetBtn.addEventListener('click', () => mutateDraft(store, resetCombinationToAllAnd));
   actions.appendChild(resetBtn);
   fieldset.appendChild(actions);
@@ -547,13 +547,13 @@ function buildFilterSelector(doc: Document, draft: BlocksDraft, store: AppStore)
 
   const title = doc.createElement('span');
   title.className = 'blocks__field-title';
-  title.textContent = '検索フィルター';
+  title.textContent = t('blocks.filters');
   header.appendChild(title);
 
   const hint = doc.createElement('span');
   hint.className = 'blocks__field-hint';
   hint.textContent =
-    '検索式生成後に AND で結合されるフィルターを選択してください。';
+    t('blocks.filtersHint');
   header.appendChild(hint);
 
   section.appendChild(header);
@@ -562,19 +562,21 @@ function buildFilterSelector(doc: Document, draft: BlocksDraft, store: AppStore)
   if (draft.filterSelectionSource === 'ai') {
     const notice = doc.createElement('p');
     notice.className = 'blocks__field-hint';
-    notice.textContent = 'フィルターの初期選択は AI の提案です。必要に応じて変更してください。';
+    notice.textContent = t('blocks.aiFilters');
     section.appendChild(notice);
   }
   if (reason) {
     const notice = doc.createElement('p');
     notice.className = 'blocks__field-hint';
-    notice.textContent = reason;
+    notice.textContent = getUiLanguage() === 'en'
+      ? t('blocks.rctSkipped', { terms: (reason.match(/（(.*?)）/)?.[1] ?? '').split('、').join(', ') })
+      : reason;
     section.appendChild(notice);
   }
 
   const list = doc.createElement('ul');
   list.className = 'blocks__filter-list';
-  list.setAttribute('aria-label', '利用可能な検索フィルター');
+  list.setAttribute('aria-label', t('blocks.availableFilters'));
 
   for (const def of PREDEFINED_FILTER_DEFS) {
     const li = doc.createElement('li');
@@ -605,7 +607,8 @@ function buildFilterSelector(doc: Document, draft: BlocksDraft, store: AppStore)
 
     const nameEl = doc.createElement('span');
     nameEl.className = 'blocks__filter-item-name';
-    nameEl.textContent = def.label;
+    nameEl.textContent = def.id === 'RCTfilter' ? t('blocks.rctName') :
+      def.id === 'SRfilter' ? t('blocks.srName') : def.label;
     labelEl.appendChild(nameEl);
 
     li.appendChild(labelEl);
@@ -613,7 +616,8 @@ function buildFilterSelector(doc: Document, draft: BlocksDraft, store: AppStore)
     const descEl = doc.createElement('p');
     descEl.className = 'blocks__filter-item-desc';
     descEl.id = `filter-desc-${def.id}`;
-    descEl.textContent = def.description;
+    descEl.textContent = def.id === 'RCTfilter' ? t('blocks.rctDescription') :
+      def.id === 'SRfilter' ? t('blocks.srDescription') : def.description;
     li.appendChild(descEl);
 
     list.appendChild(li);
@@ -637,9 +641,10 @@ function buildActionRow(
 
   const summary = doc.createElement('div');
   summary.className = 'blocks__actions-summary';
-  summary.textContent = `ブロック数: ${draft.blocks.length} / ${MAX_BLOCKS} ・ 結合式: ${
-    hasErrors ? '⚠ エラー有り' : '✓ OK'
-  }`;
+  summary.textContent = t('blocks.actionSummary', {
+    count: draft.blocks.length, max: MAX_BLOCKS,
+    status: hasErrors ? t('blocks.errorStatus') : '✓ OK',
+  });
   wrap.appendChild(summary);
 
   const buttons = doc.createElement('div');
@@ -648,7 +653,7 @@ function buildActionRow(
   const draftBtn = doc.createElement('button');
   draftBtn.type = 'button';
   draftBtn.className = 'blocks__btn-secondary';
-  draftBtn.textContent = '下書きとして保存';
+  draftBtn.textContent = t('blocks.save');
   draftBtn.addEventListener('click', () => {
     runAction(
       callbacks.onSaveDraft,
@@ -670,10 +675,10 @@ function buildActionRow(
   approveBtn.type = 'button';
   approveBtn.className = 'blocks__btn-primary';
   approveBtn.dataset.tour = 'blocks-approve';
-  approveBtn.textContent = '承認してシード論文へ →';
+  approveBtn.textContent = t('blocks.approve');
   approveBtn.disabled = hasErrors;
   if (hasErrors) {
-    approveBtn.title = '結合式のエラーを解消してください';
+    approveBtn.title = t('blocks.fixErrors');
   }
   approveBtn.addEventListener('click', () => {
     runAction(
@@ -697,7 +702,7 @@ function buildActionRow(
   if (hasErrors) {
     const reason = doc.createElement('p');
     reason.className = 'blocks__approve-reason';
-    reason.textContent = '⚠ 結合式のエラーを解消すると承認できます';
+    reason.textContent = t('blocks.approveReason');
     wrap.appendChild(reason);
   }
 

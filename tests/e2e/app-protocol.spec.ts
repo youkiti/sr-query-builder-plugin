@@ -11,6 +11,16 @@ import { fullStateScenario, FULL_PROTOCOL_DRAFT } from './fixtures/scenarios/ful
 const APP_URL = '/app/app.html#/protocol';
 
 test.describe('app-protocol (#/protocol)', () => {
+  test('saved English language: protocol form and axe', async ({ page }) => {
+    await injectAppStub(page, scenarioWithProject({ extraStorage: { uiLanguage: 'en' } }));
+    await page.goto(APP_URL);
+    await expect(page.locator('#app-content h2')).toHaveText('Protocol input');
+    await expect(page.locator('.protocol__lead')).toContainText('Start by entering your review protocol.');
+    await expect(page.locator('.protocol__submit')).toHaveText('Analyze the protocol text and go to block extraction');
+    const result = await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze();
+    expect(result.violations, JSON.stringify(result.violations, null, 2)).toEqual([]);
+  });
+
   test('プロジェクト未選択時: 警告文言が出て form は描画されない', async ({ page }) => {
     await injectAppStub(page, { authed: true });
     await page.goto(APP_URL);
