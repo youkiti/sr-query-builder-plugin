@@ -1,6 +1,20 @@
 import { buildFormulaV1, buildValidationSummary } from '@/demo/scenario';
 import { SEED_PMIDS } from '@/demo/corpus';
-import { renderValidationResults } from './validationResults';
+import { formatValidationProgress, renderValidationResults, summaryStatusText } from './validationResults';
+import { setUiLanguage } from '@/lib/i18n';
+
+afterEach(() => setUiLanguage('ja'));
+
+test('English validation results and progress use the current language', () => {
+  setUiLanguage('en');
+  const summary = buildValidationSummary(buildFormulaV1().markdown, []);
+  const container = document.createElement('div');
+  renderValidationResults(document, container, summary, {}, null);
+  expect(container.querySelector('h3')!.textContent).toBe('Hits by line');
+  expect(container.textContent).toContain('Final formula and seed capture');
+  expect(summaryStatusText(summary)).toBe('Validation complete (0/0 eligible seeds)');
+  expect(formatValidationProgress({ step: 'line_hits', blockIndex: 1, blockCount: 2 })).toBe('Counting hits by line (block 1/2)');
+});
 
 describe('捕捉率の表示', () => {
   test.each([

@@ -1,3 +1,4 @@
+import { getUiLanguage, t, type UiLanguage } from '@/lib/i18n';
 import type { OptimizationApiEvent, OptimizationMeasurement, OptimizationMeshNode, OptimizationTrial } from '@/features/formula/skills/optimizeQuery';
 import { extractBlockTerms } from '@/features/validation/blockTerms';
 import { buildPubmedSearchUrl } from '@/lib/ncbi/pubmedUrl';
@@ -5,10 +6,10 @@ import type { OptimizationResumeAvailability } from '../services/queryOptimizati
 import { tokenizeExpression } from '@/lib/search-formula-md/expression';
 import type { QueryOptimizationRunState, QueryOptimizationSetupState } from '../store';
 
-const hits = (value: number | null | undefined): string => value == null ? '未測定' : `${value.toLocaleString()} 件`;
+const hits = (value: number | null | undefined): string => value == null ? t('draft.history.notMeasured') : t('draft.history.hits', { count: value.toLocaleString() });
 
 export function optimizationApiLabel(event: OptimizationApiEvent): string {
-  return `${event.source}: ${{ rate_limit: 'レート調整中', retry: '再試行中', failure: '取得失敗' }[event.status]}`;
+  return `${event.source}: ${{ rate_limit: t('draft.history.rateLimiting'), retry: t('draft.history.retrying'), failure: t('draft.history.retrievalFailed') }[event.status]}`;
 }
 
 function paragraph(parent: HTMLElement, value: string): void {
@@ -18,15 +19,15 @@ function paragraph(parent: HTMLElement, value: string): void {
 }
 
 function seedCount(measurement: OptimizationMeasurement | null, total: number | null): string {
-  return measurement?.capturedPmids == null ? '未測定' : `${measurement.capturedPmids.length}/${total ?? '不明'}件`;
+  return measurement?.capturedPmids == null ? t('draft.history.notMeasured') : t('draft.history.seeds', { capturedCount: measurement.capturedPmids.length, seedCount: total ?? t('draft.history.unknown') });
 }
 
 function changedTerms(trial: OptimizationTrial): { label: string; before?: string; after?: string }[] {
   const changes = trial.kind === 'proposal' ? trial.changes : undefined;
   return changes ? [
-    ...changes.removedTerms.map((before) => ({ label: '削除', before })),
-    ...changes.addedTerms.map((after) => ({ label: '追加', after })),
-    ...changes.replacedTerms.map((term) => ({ label: '修正', ...term })),
+    ...changes.removedTerms.map((before) => ({ label: t('draft.history.remove'), before })),
+    ...changes.addedTerms.map((after) => ({ label: t('draft.history.add'), after })),
+    ...changes.replacedTerms.map((term) => ({ label: t('draft.history.revise'), ...term })),
   ] : [];
 }
 
@@ -83,10 +84,10 @@ function renderMeshDetails(mesh: HTMLElement, trial: OptimizationTrial, nodes: O
   heading.textContent = 'MeSH';
   mesh.replaceChildren(heading);
   const meshChanges = changedTerms(trial).filter((change) => meshTermsForChange(trial, change).length > 0);
-  if (!meshChanges.length) paragraph(mesh, trial.kind === 'information' ? '周辺ツリーの情報要求。式は変更していません。' : 'MeSH の変更記録なし');
+  if (!meshChanges.length) paragraph(mesh, trial.kind === 'information' ? t('draft.history.requestedNearbyMeshTreeContext') : t('draft.history.noMeshChangesRecorded'));
   for (const change of meshChanges) {
-    paragraph(mesh, `${change.label}: ${change.before ?? 'なし'} → ${change.after ?? 'なし'}`);
-    paragraph(mesh, `単独件数（変更前 → 変更後）: ${termHits(trial, change.before, 'before')} → ${termHits(trial, change.after, 'after')}`);
+    paragraph(mesh, `${change.label}: ${change.before ?? t('draft.history.none')} → ${change.after ?? t('draft.history.none')}`);
+    paragraph(mesh, t('draft.history.standaloneHitsBeforeAfter', { before: termHits(trial, change.before, 'before'), after: termHits(trial, change.after, 'after') }));
   }
   if (meshChanges.length || trial.kind === 'information') {
     const edges = new Set<string>();
@@ -95,12 +96,12 @@ function renderMeshDetails(mesh: HTMLElement, trial: OptimizationTrial, nodes: O
         edges.add(`${parent.label ?? parent.descriptor} → ${child.label ?? child.descriptor}`);
       }
     }
-    paragraph(mesh, edges.size ? `取得済みの上位語 → 下位語: ${[...edges].join(' / ')}` : '親子関係は未取得です。置換方向は未確認です。');
+    paragraph(mesh, edges.size ? t('draft.history.retrievedBroaderNarrowerTerms', { terms: [...edges].join(' / ') }) : t('draft.history.parentChildRelationshipsHaveNot'));
     for (const node of nodes) {
-      paragraph(mesh, `${node.label ?? node.descriptor}: ${node.treeNumbers.join(', ') || 'ツリー番号未取得'} / explode: ${node.explode ? 'あり' : 'なし'} / ${node.note}`);
+      paragraph(mesh, `${node.label ?? node.descriptor}: ${node.treeNumbers.join(', ') || t('draft.history.treeNumbersNotRetrieved')} / explode: ${node.explode ? t('draft.history.yes') : t('draft.history.none')} / ${node.note}`);
     }
-    paragraph(mesh, `根拠（AI の説明）: ${trial.rationale || '記録なし'}`);
-    paragraph(mesh, `最終式の前後件数: ${hits(trial.before?.totalHits)} → ${hits(trial.after?.totalHits)}`);
+    paragraph(mesh, t('draft.history.rationaleAiExplanation', { rationale: trial.rationale || t('draft.history.notRecorded') }));
+    paragraph(mesh, t('draft.history.finalFormulaHitsBeforeAnd', { before: hits(trial.before?.totalHits), after: hits(trial.after?.totalHits) }));
   }
 }
 
@@ -117,26 +118,26 @@ function renderDetails(details: HTMLElement, trial: OptimizationTrial, nodes: Op
   };
   renderMeshDetails(group('MeSH'), trial, nodes);
 
-  const freewords = group('フリーワード');
-  if (!freewordChanges.length) paragraph(freewords, 'フリーワードの変更記録なし');
+  const freewords = group(t('draft.history.freeTextTerms'));
+  if (!freewordChanges.length) paragraph(freewords, t('draft.history.noFreeTextChangesRecorded'));
   for (const change of freewordChanges) {
-    paragraph(freewords, `${change.label}: ${change.before ?? 'なし'} → ${change.after ?? 'なし'}`);
-    paragraph(freewords, `単独件数（変更前 → 変更後）: ${termHits(trial, change.before, 'before')} → ${termHits(trial, change.after, 'after')}`);
-    paragraph(freewords, `最終式での固有寄与（変更前 → 変更後）: ${contribution(trial, change.before, 'before')} → ${contribution(trial, change.after, 'after')}`);
+    paragraph(freewords, `${change.label}: ${change.before ?? t('draft.history.none')} → ${change.after ?? t('draft.history.none')}`);
+    paragraph(freewords, t('draft.history.standaloneHitsBeforeAfter', { before: termHits(trial, change.before, 'before'), after: termHits(trial, change.after, 'after') }));
+    paragraph(freewords, t('draft.history.uniqueContributionToTheFinal', { before: contribution(trial, change.before, 'before'), after: contribution(trial, change.after, 'after') }));
   }
-  if (freewordChanges.length) paragraph(freewords, `基準との関係（AI の説明）: ${trial.rationale || '記録なし'}`);
+  if (freewordChanges.length) paragraph(freewords, t('draft.history.relationToCriteriaAiExplanation', { rationale: trial.rationale || t('draft.history.notRecorded') }));
 
-  const seeds = group('シード');
+  const seeds = group(t('draft.history.seeds2'));
   const before = trial.before?.capturedPmids;
   const after = trial.after?.capturedPmids;
   if (after == null || (trial.before && before == null)) {
-    paragraph(seeds, '未測定のため、回収・喪失は未確認です。');
+    paragraph(seeds, t('draft.history.recoveredAndLostSeedsAre'));
   } else {
     const recovered = after.filter((pmid) => !before?.includes(pmid));
     const lost = (before ?? []).filter((pmid) => !after.includes(pmid));
     for (const [label, pmids] of [
-      [trial.accepted ? '回収' : '却下候補での回収（最良候補には未反映）', recovered],
-      [trial.accepted ? '喪失' : '失ったため戻したシード', lost],
+      [trial.accepted ? t('draft.history.recovered') : t('draft.history.recoveredByRejectedCandidateNot'), recovered],
+      [trial.accepted ? t('draft.history.lost') : t('draft.history.seedsRestoredAfterALoss'), lost],
     ] as const) {
       if (!pmids.length) continue;
       const p = doc.createElement('p');
@@ -151,18 +152,18 @@ function renderDetails(details: HTMLElement, trial: OptimizationTrial, nodes: Op
       }
       seeds.appendChild(p);
     }
-    if (!recovered.length && !lost.length) paragraph(seeds, '捕捉シードの変化なし');
+    if (!recovered.length && !lost.length) paragraph(seeds, t('draft.history.noChangeInCapturedSeeds'));
   }
-  const captureGroup = group('シード × ブロック捕捉表');
+  const captureGroup = group(t('draft.history.seedBlockCaptureTable'));
   const capture = trial.after?.seedCapture;
-  if (!capture) paragraph(captureGroup, '捕捉表は未計測（未捕捉シードがある局面でだけ測ります）');
+  if (!capture) paragraph(captureGroup, t('draft.history.captureTableNotMeasuredMeasured'));
   else {
     const wrapper = doc.createElement('div');
     wrapper.className = 'optimization__capture-table';
     const table = doc.createElement('table');
-    table.setAttribute('aria-label', 'シード × ブロック捕捉表');
+    table.setAttribute('aria-label', t('draft.history.seedBlockCaptureTable'));
     const head = table.createTHead().insertRow();
-    for (const label of ['シード PMID', ...capture.rows.map((row) => `#${row.blockId}`)]) {
+    for (const label of [t('draft.history.seedPmid'), ...capture.rows.map((row) => `#${row.blockId}`)]) {
       const th = doc.createElement('th');
       th.scope = 'col';
       th.textContent = label;
@@ -176,44 +177,44 @@ function renderDetails(details: HTMLElement, trial: OptimizationTrial, nodes: Op
       th.textContent = pmid;
       row.appendChild(th);
       for (const block of capture.rows) {
-        row.insertCell().textContent = block.capturedPmids === null ? '未測定' : block.capturedPmids.includes(pmid) ? '○' : '×';
+        row.insertCell().textContent = block.capturedPmids === null ? t('draft.history.notMeasured') : block.capturedPmids.includes(pmid) ? '○' : '×';
       }
     }
     wrapper.appendChild(table);
     captureGroup.appendChild(wrapper);
   }
-  const deletion = group('削除影響');
+  const deletion = group(t('draft.history.deletionImpactCheck'));
   const impact = trial.impact;
-  if (!impact) paragraph(deletion, '採用判定の前に却下したため、差集合は実測していません');
+  if (!impact) paragraph(deletion, t('draft.history.rejectedBeforeAdoptionReviewSet'));
   else {
-    paragraph(deletion, `失う集合: ${impact.lostHits ?? '未測定'} 件 / 増える集合: ${impact.gainedHits ?? '未測定'} 件`);
+    paragraph(deletion, t('draft.history.lostSetHitsGainedSet', { lostHits: impact.lostHits ?? t('draft.history.notMeasured'), gainedHits: impact.gainedHits ?? t('draft.history.notMeasured') }));
     paragraph(deletion, impact.sample
-      ? `抽出方法: ${impact.sample.method === 'all' ? 'all（全件から無作為抽出）' : `retrieved_subset（取得できた ${impact.sample.retrievedCount} 件から無作為抽出。集合全体からの無作為抽出ではありません）`} / 種: ${impact.sample.seed}`
-      : '抽出方法: 旧データ（先頭の数件） / 種: 記録なし');
-    paragraph(deletion, `確認した書誌: ${impact.inspected.length} 件 / 失う集合全体 ${impact.lostHits ?? '未測定'} 件（${impact.sample ? '抽出した書誌であり' : '先頭の数件であり'}、集合全体の安全性を示すものではありません）`);
+      ? t('draft.history.samplingMethodSeed', { method: impact.sample.method === 'all' ? t('draft.history.allRandomSampleFromThe') : t('draft.history.retrievedSubsetRandomSampleFrom', { count: impact.sample.retrievedCount }), seed: impact.sample.seed })
+      : t('draft.history.samplingMethodLegacyDataFirst'));
+    paragraph(deletion, t('draft.history.papersInspectedFullLostSet', { inspectedCount: impact.inspected.length, lostHits: impact.lostHits ?? t('draft.history.notMeasured'), sampleDescription: impact.sample ? t('draft.history.sampledPapers') : t('draft.history.theFirstFewPapers') }));
     for (const article of impact.inspected) {
       const p = doc.createElement('p');
       const link = doc.createElement('a');
-      link.textContent = `PMID ${article.pmid}（${article.year ?? '年不明'}）${article.title ?? 'タイトル未取得'}`;
+      link.textContent = t('draft.history.article', { pmid: article.pmid, year: article.year ?? t('draft.history.unknownYear'), title: article.title ?? t('draft.history.titleNotRetrieved') });
       link.href = buildPubmedSearchUrl(`${article.pmid}[uid]`);
       link.target = '_blank';
       link.rel = 'noopener noreferrer';
       p.appendChild(link);
       const annotation = impact.annotation?.items.find((item) => item.pmid === article.pmid);
       if (annotation) {
-        const label = { likely_eligible: '適格らしい', unclear: '判断不能', likely_ineligible: '非適格らしい' }[annotation.judgement];
-        p.appendChild(doc.createTextNode(` — AI: ${label}（${annotation.reason}）`));
+        const label = { likely_eligible: t('draft.history.likelyEligible'), unclear: t('draft.history.unclear'), likely_ineligible: t('draft.history.likelyIneligible') }[annotation.judgement];
+        p.appendChild(doc.createTextNode(t('draft.history.aiAnnotation', { label, reason: annotation.reason })));
       }
       deletion.appendChild(p);
     }
     if (impact.annotation?.status === 'failure') {
-      paragraph(deletion, `AI の参考注釈を取得できませんでした（${impact.annotation.error}）。人の判定には影響しません。`);
+      paragraph(deletion, t('draft.history.couldNotRetrieveAiReference', { error: String(impact.annotation.error) }));
     }
-    if (impact.error) paragraph(deletion, `実測・取得の失敗: ${impact.error}`);
+    if (impact.error) paragraph(deletion, t('draft.history.measurementOrRetrievalFailed', { error: impact.error }));
   }
-  const api = group('API 待機');
-  if (!trial.apiEvents.length) paragraph(api, '通知された待機・取得失敗の記録なし');
-  for (const event of trial.apiEvents) paragraph(api, `${optimizationApiLabel(event)}（この試行中の記録）`);
+  const api = group(t('draft.history.apiWait'));
+  if (!trial.apiEvents.length) paragraph(api, t('draft.history.noWaitOrRetrievalFailure'));
+  for (const event of trial.apiEvents) paragraph(api, t('draft.history.recordedDuringThisTrial', { event: optimizationApiLabel(event) }));
 }
 
 /** データは毎回 state から読む。スクロール位置と開閉状態だけを DOM に保持する。 */
@@ -229,9 +230,10 @@ export function createOptimizationHistoryRenderer(): (
   let follow = true;
   let scrollTop = 0;
   let renderedContext: OptimizationMeshNode[] | null = null;
-  const rows = new Map<string, { element: HTMLLIElement; trial: OptimizationTrial }>();
+  const rows = new Map<string, { element: HTMLLIElement; trial: OptimizationTrial; language: UiLanguage }>();
   return (container, run, setup, resume) => {
     const doc = container.ownerDocument;
+    const language = getUiLanguage();
     container.querySelector('.optimization__restored')?.remove();
     if (run) {
       const nextKey = `${run.projectId}:${run.runId}`;
@@ -245,13 +247,13 @@ export function createOptimizationHistoryRenderer(): (
         section.dataset.optimizationRun = nextKey;
         section.dataset.tour = 'draft-optimize-history';
         const heading = doc.createElement('h3');
-        heading.textContent = '試行履歴';
+        heading.textContent = t('draft.history.trialHistory');
         section.appendChild(heading);
         viewport = doc.createElement('div');
         viewport.className = 'optimization__history-scroll';
         viewport.tabIndex = 0;
         viewport.setAttribute('role', 'region');
-        viewport.setAttribute('aria-label', '自動調整の試行履歴');
+        viewport.setAttribute('aria-label', t('draft.history.autoTuningTrialHistory'));
         viewport.addEventListener('scroll', () => {
           if (!viewport?.isConnected) return;
           scrollTop = viewport.scrollTop;
@@ -261,15 +263,17 @@ export function createOptimizationHistoryRenderer(): (
         viewport.appendChild(list);
         section.appendChild(viewport);
       }
+      section.querySelector('h3')!.textContent = t('draft.history.trialHistory');
+      viewport.setAttribute('aria-label', t('draft.history.autoTuningTrialHistory'));
       let evaluated = 0;
       let added = false;
       const contextChanged = renderedContext !== run.meshContext;
       for (const trial of run.trials) {
-        const label = trial.kind === 'initial' ? '初期式' : trial.kind === 'final' ? '最終再検証'
-          : trial.kind === 'information' ? '情報要求' : trial.kind === 'finish' ? '終了判断' : `試行${++evaluated}`;
+        const label = trial.kind === 'initial' ? t('draft.history.initialFormula') : trial.kind === 'final' ? t('draft.history.finalRevalidation')
+          : trial.kind === 'information' ? t('draft.history.contextRequest') : trial.kind === 'finish' ? t('draft.history.finishDecision') : t('draft.history.trial', { number: ++evaluated });
         const nodes = relatedMeshNodes(trial, run.meshContext);
         const existing = rows.get(trial.candidateId);
-        if (existing && (existing.trial === trial || JSON.stringify(existing.trial) === JSON.stringify(trial))) {
+        if (existing && existing.language === language && (existing.trial === trial || JSON.stringify(existing.trial) === JSON.stringify(trial))) {
           if (contextChanged) {
             renderMeshDetails(existing.element.querySelector<HTMLElement>('details > section')!, trial, nodes);
           }
@@ -277,33 +281,33 @@ export function createOptimizationHistoryRenderer(): (
           continue;
         }
         const row = doc.createElement('li');
-        const outcome = trial.kind === 'information' ? '評価保留'
-          : trial.kind === 'finish' ? (trial.finishRejectedReason ? '終了判断（受け付けず）' : '終了判断')
-          : trial.held ? '保留' : trial.accepted ? '採用' : '却下';
-        paragraph(row, `${label} — 前後件数: ${hits(trial.before?.totalHits)} → ${hits(trial.after?.totalHits)} / シード: ${seedCount(trial.before, run.seedCount)} → ${seedCount(trial.after, run.seedCount)} / ${outcome}: ${trial.reason}`);
+        const outcome = trial.kind === 'information' ? t('draft.history.evaluationDeferred')
+          : trial.kind === 'finish' ? (trial.finishRejectedReason ? t('draft.history.finishDecisionNotAccepted') : t('draft.history.finishDecision'))
+          : trial.held ? t('draft.history.held') : trial.accepted ? t('draft.history.adopted') : t('draft.history.rejected');
+        paragraph(row, t('draft.history.hitsBeforeAndAfterSeeds', { label: label, beforeHits: hits(trial.before?.totalHits), afterHits: hits(trial.after?.totalHits), beforeSeeds: seedCount(trial.before, run.seedCount), afterSeeds: seedCount(trial.after, run.seedCount), outcome: outcome, reason: trial.reason }));
         if (trial.kind === 'information' && trial.informationResult) {
-          paragraph(row, `情報要求 ${trial.candidateId}: 文脈へ反映 ${trial.informationResult.obtained} / 要求 ${trial.informationResult.requested} 件`);
+          paragraph(row, t('draft.history.contextRequestAddedToContext', { candidateId: trial.candidateId, obtained: trial.informationResult.obtained, requested: trial.informationResult.requested }));
         }
         if (trial.kind === 'information' && trial.trialDetailIds?.length) {
-          paragraph(row, `要求した試行の詳細: ${trial.trialDetailIds.join(', ')}`);
+          paragraph(row, t('draft.history.requestedTrialDetails', { candidateIds: trial.trialDetailIds.join(', ') }));
         }
         if (trial.kind === 'finish' && trial.finishKind) {
-          paragraph(row, `終了区分: ${trial.finishKind === 'no_change_needed' ? '変更不要' : '人の判断が必要'}（この判断だけでは目安件数・既知シードの捕捉の達成は確定しません）`);
+          paragraph(row, t('draft.history.finishCategoryThisDecisionAlone', { category: trial.finishKind === 'no_change_needed' ? t('draft.history.noChangesNeeded') : t('draft.history.humanJudgmentNeeded') }));
         }
         if (trial.informedBy) {
-          paragraph(row, `情報要求 ${trial.informedBy.candidateId} で得た文脈 ${trial.informedBy.obtained}/${trial.informedBy.requested} 件を読んだうえでの判断`);
+          paragraph(row, t('draft.history.decisionAfterReadingContextFrom', { candidateId: trial.informedBy.candidateId, obtained: trial.informedBy.obtained, requested: trial.informedBy.requested }));
         }
-        if (trial.rationale) paragraph(row, `変更理由（AI の説明）: ${trial.rationale}`);
+        if (trial.rationale) paragraph(row, t('draft.history.reasonForChangeAiExplanation', { rationale: trial.rationale }));
         const details = doc.createElement('details');
         details.open = existing?.element.querySelector('details')?.open ?? false;
         const summary = doc.createElement('summary');
-        summary.textContent = `${label}の変更詳細`;
+        summary.textContent = t('draft.history.changeDetailsFor', { label: label });
         details.appendChild(summary);
         renderDetails(details, trial, nodes);
         row.appendChild(details);
         if (existing) existing.element.replaceWith(row);
         else { list.appendChild(row); added = true; }
-        rows.set(trial.candidateId, { element: row, trial });
+        rows.set(trial.candidateId, { element: row, trial, language });
       }
       renderedContext = run.meshContext;
       if (section.parentElement !== container) container.insertBefore(section, container.children.item(2));
@@ -316,21 +320,21 @@ export function createOptimizationHistoryRenderer(): (
       const restored = doc.createElement('section');
       restored.className = 'optimization__restored';
       const title = doc.createElement('h3');
-      title.textContent = checkpoint.status === 'interrupted' ? '中断された自動調整の履歴' : '完了済みの自動調整の履歴';
+      title.textContent = checkpoint.status === 'interrupted' ? t('draft.history.interruptedAutoTuningHistory') : t('draft.history.completedAutoTuningHistory');
       restored.appendChild(title);
-      paragraph(restored, checkpoint.status === 'interrupted' ? '処理は中断しています。バックグラウンドでは継続していません。' : 'この実行は終了しています。');
-      paragraph(restored, `保存日時: ${checkpoint.savedAt}。ログのみを復元しました。以下は保存時の記録で、再検証は済んでいません。`);
+      paragraph(restored, checkpoint.status === 'interrupted' ? t('draft.history.theRunWasInterruptedIt') : t('draft.history.thisRunHasEnded'));
+      paragraph(restored, t('draft.history.savedOnlyTheLogWas', { savedAt: checkpoint.savedAt }));
       if (!run && checkpoint.status === 'interrupted' && resume) {
         const message = doc.createElement('p');
         message.setAttribute('aria-live', 'polite');
         if (resume.availability.available) {
           const remaining = resume.availability.remaining;
-          message.textContent = `保存した最良候補を初期式にして新しい実行を開始し、件数・シード捕捉をすべて測り直します。残り予算: 通信 ${remaining.apiCalls} 回 / 時間 ${Math.floor(remaining.elapsedMs / 1000)} 秒 / 評価試行 ${remaining.evaluatedTrials} 回。`;
+          message.textContent = t('draft.history.startANewRunFrom', { apiCalls: remaining.apiCalls, seconds: Math.floor(remaining.elapsedMs / 1000), trials: remaining.evaluatedTrials });
           restored.appendChild(message);
           const button = doc.createElement('button');
           button.type = 'button';
           button.className = 'optimization__resume';
-          button.textContent = '最良候補から再開して測り直す';
+          button.textContent = t('draft.history.resumeFromBestCandidateAnd');
           button.disabled = resume.disabled || !resume.start;
           button.addEventListener('click', () => {
             if (button.disabled) return;
@@ -346,7 +350,7 @@ export function createOptimizationHistoryRenderer(): (
       const summaries = doc.createElement('ul');
       for (const trial of checkpoint.trials) {
         const item = doc.createElement('li');
-        item.textContent = `${trial.candidateId}: ${hits(trial.totalHits)} / シード捕捉 ${trial.capturedSeedCount == null ? '未測定' : `${trial.capturedSeedCount}件（総数の記録なし）`} / ${trial.held ? '保留' : trial.accepted ? '採用' : '却下'}: ${trial.reason}${trial.lostHits !== undefined ? ` / 失う ${trial.lostHits ?? '未測定'} 件` : ''}`;
+        item.textContent = t('draft.history.seedCapture', { candidateId: trial.candidateId, hits: hits(trial.totalHits), capturedSeeds: trial.capturedSeedCount == null ? t('draft.history.notMeasured') : t('draft.history.seedsTotalNotRecorded', { count: trial.capturedSeedCount }), outcome: trial.held ? t('draft.history.held') : trial.accepted ? t('draft.history.adopted') : t('draft.history.rejected'), reason: trial.reason, lostHits: trial.lostHits !== undefined ? t('draft.history.hitsLost', { count: trial.lostHits ?? t('draft.history.notMeasured') }) : '' });
         summaries.appendChild(item);
       }
       restored.appendChild(summaries);
