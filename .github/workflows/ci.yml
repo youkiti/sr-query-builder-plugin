@@ -21,7 +21,8 @@ permissions:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    # e2e と同じ OS にそろえる（e2e の固定の理由はそちらのコメント）
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       # submodule（tiab-review-plugin / search-formula-developper）は参照実装で、
@@ -57,7 +58,9 @@ jobs:
         run: npm run dev
 
   e2e:
-    runs-on: ubuntu-latest
+    # ubuntu-latest は 2026-11 に ubuntu-26.04 へ移り、Playwright の chromium 導入が
+    # 「Playwright does not support chromium on ubuntu26.04-x64」で失敗する。対応版が出るまで固定する。
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: リポジトリを取得する
