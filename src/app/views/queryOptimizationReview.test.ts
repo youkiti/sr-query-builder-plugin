@@ -2,9 +2,38 @@ import { buildAdoptConfirmContent, renderOptimizationReview } from './queryOptim
 import { createDraftView } from './draftView';
 import { INITIAL_STATE, type QueryOptimizationRunState } from '../store';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
-import { setUiLanguage } from '@/lib/i18n';
+import { setUiLanguage, translate } from '@/lib/i18n';
 
 afterEach(() => setUiLanguage('ja'));
+
+test('英語でも達成時の捕捉の限界は見出し直後に一度だけ表示する', () => {
+  setUiLanguage('en');
+  const container = document.createElement('div');
+  const current = run('achieved');
+  current.result!.unmetReasons = [];
+  renderOptimizationReview(container, current, actions);
+  expect(container.textContent!.match(/does not guarantee coverage of unknown eligible studies/g)).toHaveLength(1);
+});
+
+test.each(['structured', 'legacy', 'mismatched'] as const)('英語表示の理由一覧と外側の確認は構造化した理由を優先し、旧形式も表示する: %s', (kind) => {
+  setUiLanguage('en');
+  const current = run('stopped');
+  current.result!.unmetReasons = [translate('ja', 'draft.unmet.seedsNotSpecified')];
+  current.outsideCheck = { status: 'skipped', reason: translate('ja', 'draft.outsideReason.userStop'),
+    originalHits: null, marginHits: null, evaluatedCount: 0, candidates: [], decisions: {} };
+  if (kind !== 'legacy') {
+    current.result!.unmetReasonMessages = kind === 'mismatched' ? [] : [{ key: 'draft.unmet.seedsNotSpecified' }];
+    current.outsideCheck.reasonMessage = { key: 'draft.outsideReason.userStop' };
+  }
+  const container = document.createElement('div');
+  renderOptimizationReview(container, current, actions);
+  const expectedReason = kind === 'structured' ? 'No seeds were specified' : 'シードが未指定です';
+  expect(container.textContent).toContain(expectedReason);
+  expect(buildAdoptConfirmContent(document, current).textContent).toContain(expectedReason);
+  const outsideReason = kind === 'legacy' ? 'ユーザーの停止要求で外側の確認を中止しました' : "Outside check was canceled at the user's request";
+  expect(container.textContent).toContain(outsideReason);
+  if (kind === 'structured') expect(container.textContent).not.toMatch(/[\u3040-\u30ff\u4e00-\u9fff]/);
+});
 
 test('English final review and adoption confirmation use the current language', () => {
   setUiLanguage('en');

@@ -9,6 +9,49 @@ import { esearch, sharedEutilsRateLimiters } from '@/lib/ncbi';
 import { validateCombinationExpression } from '@/lib/combination-expression';
 import { samplePmids, diffOptimizationFormula, runQueryOptimization, validateOptimizationCandidate, QueryOptimizationStopError, type QueryOptimizationInput, type QueryOptimizationDeps } from './queryOptimizationService';
 import { evaluateHeldCandidateAdoptionGate } from './queryOptimizationReviewSections';
+import { formatLocalized, setUiLanguage, translate } from '@/lib/i18n';
+
+test.each(['conditions_met', 'iteration_limit', 'user_stop', 'invalid_input', 'api_error', 'completion_failure', 'exception'] as const)('終了時の日本語と構造化した理由の件数・順序は一致する: %s', async (kind) => {
+  const f = setup();
+  if (kind === 'conditions_met') f.input.maxHits = 1000;
+  if (kind === 'iteration_limit' || kind === 'completion_failure') f.input.maxIterations = 1;
+  if (kind === 'user_stop') f.deps.shouldStop = () => true;
+  if (kind === 'invalid_input') f.input.maxHits = 0;
+  if (kind === 'api_error') f.fetch.mockRejectedValue(new Error('Network unavailable'));
+  if (kind === 'completion_failure') f.write.mockImplementation(async (project) => {
+    if (project.queryOptimizationCheckpoint?.completion) throw new Error('Storage unavailable');
+  });
+  if (kind === 'exception') f.forPurpose.mockImplementation(() => { throw new Error('Provider unavailable'); });
+  setUiLanguage('en');
+  try {
+    const result = await runQueryOptimization(f.input, f.deps);
+    expect(result.unmetReasonMessages).toHaveLength(result.unmetReasons.length);
+    expect(result.unmetReasonMessages!.map((message) => formatLocalized('ja', message))).toEqual(result.unmetReasons);
+    if (kind !== 'completion_failure' && kind !== 'exception') expect(result.stopReason).toBe(kind);
+    if (kind === 'completion_failure') expect(result.unmetReasons).toContain('終了記録の保存に失敗しました: Storage unavailable');
+    if (kind === 'exception') expect(result.unmetReasonMessages).toContain('Provider unavailable');
+    if (kind === 'user_stop') {
+      expect(result.unmetReasons).toContain(new QueryOptimizationStopError('user_stop').message);
+      expect(result.unmetReasonMessages!.map((message) => formatLocalized('en', message))).toContain("Stopped at the user's request.");
+    }
+    for (const [project] of f.write.mock.calls) {
+      const completion = project.queryOptimizationCheckpoint?.completion;
+      if (completion) expect(completion).not.toHaveProperty('unmetReasonMessages');
+    }
+  } finally {
+    setUiLanguage('ja');
+  }
+});
+
+test.each(['no_change_needed', 'needs_human_judgment', 'rejected'] as const)('最後の AI 判断は理由本文を保って翻訳する: %s', async (kind) => {
+  const f = setup();
+  if (kind === 'no_change_needed') f.input.seedPmids = ['99'];
+  f.chat.mockResolvedValue({ text: JSON.stringify({ action: 'finish', finish_kind: kind === 'needs_human_judgment' ? kind : 'no_change_needed', rationale: 'Review required' }) });
+  const result = await runQueryOptimization(f.input, f.deps);
+  expect(result.unmetReasonMessages!.map((message) => formatLocalized('ja', message))).toEqual(result.unmetReasons);
+  expect(result.unmetReasonMessages!.map((message) => formatLocalized('en', message)))
+    .toContain(translate('en', kind === 'rejected' ? 'draft.unmet.rejectedAiFinish' : kind === 'no_change_needed' ? 'draft.unmet.aiNoChange' : 'draft.unmet.aiHumanJudgment', { rationale: 'Review required' }));
+});
 
 interface Outcome { pmids: string[]; blockPmids?: Record<string, string[]>;
   articles?: Record<string, { abstract?: string; mesh?: string[] }> }

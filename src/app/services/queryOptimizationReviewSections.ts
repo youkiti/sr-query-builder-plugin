@@ -1,3 +1,4 @@
+import { formatLocalized, translate, type UiLanguage } from '@/lib/i18n';
 import type { OptimizationTrial } from '@/features/formula/skills/optimizeQuery';
 import type { OptimizationOutsideCheckState, QueryOptimizationRunState } from '../store';
 
@@ -19,11 +20,11 @@ export function countLostSampleAnnotations(annotation: LostSampleAnnotation): {
   return counts;
 }
 
-export function formatLostSampleAnnotation(annotation: LostSampleAnnotation): string {
-  if (annotation.status === 'failure') return `AI の参考注釈を取得できませんでした（${annotation.error}）。人の判定には影響しません。`;
+export function formatLostSampleAnnotation(annotation: LostSampleAnnotation, language: UiLanguage = 'ja'): string {
+  if (annotation.status === 'failure') return translate(language, 'draft.annotation.failure', { error: String(annotation.error) });
   const counts = countLostSampleAnnotations(annotation);
-  return `AI の参考注釈（採否には使いません）: 標本 ${new Set(annotation.requestedPmids).size} 件中 適格らしい ${counts.likelyEligible} 件・判断不能 ${counts.unclear} 件・非適格らしい ${counts.likelyIneligible} 件`
-    + (counts.unannotated ? `・未注釈 ${counts.unannotated} 件` : '');
+  return translate(language, 'draft.annotation.summary', { count: new Set(annotation.requestedPmids).size, eligible: counts.likelyEligible, unclear: counts.unclear, ineligible: counts.likelyIneligible })
+    + (counts.unannotated ? translate(language, 'draft.annotation.unannotated', { count: counts.unannotated }) : '');
 }
 export interface OptimizationReviewSection {
   key: 'known_capture' | 'hit_target' | 'outside_check' | 'deletion_impact';
@@ -42,32 +43,32 @@ function decisionState(check: OptimizationOutsideCheckState | undefined, source:
 }
 
 /** 表示と保存で同じ判定を使う。取得した書誌と集合全体の件数を区別する。 */
-export function buildOptimizationReviewSections(run: QueryOptimizationRunState): {
+export function buildOptimizationReviewSections(run: QueryOptimizationRunState, language: UiLanguage = 'ja'): {
   sections: [OptimizationReviewSection, OptimizationReviewSection, OptimizationReviewSection, OptimizationReviewSection];
   unconfirmed: string[];
 } {
-  const known: OptimizationReviewSection = { key: 'known_capture', label: '既知文献の捕捉', state: 'unconfirmed', lines: [] };
-  const hits: OptimizationReviewSection = { key: 'hit_target', label: '目安件数', state: 'unconfirmed', lines: [] };
-  const outside: OptimizationReviewSection = { key: 'outside_check', label: '外側の確認', state: 'unconfirmed', lines: [] };
-  const deletion: OptimizationReviewSection = { key: 'deletion_impact', label: '削除影響の確認', state: 'unconfirmed', lines: [] };
+  const known: OptimizationReviewSection = { key: 'known_capture', label: translate(language, 'draft.reviewSection.knownCapture'), state: 'unconfirmed', lines: [] };
+  const hits: OptimizationReviewSection = { key: 'hit_target', label: translate(language, 'draft.reviewSection.hitTarget'), state: 'unconfirmed', lines: [] };
+  const outside: OptimizationReviewSection = { key: 'outside_check', label: translate(language, 'draft.reviewSection.outsideCheck'), state: 'unconfirmed', lines: [] };
+  const deletion: OptimizationReviewSection = { key: 'deletion_impact', label: translate(language, 'draft.reviewSection.deletionImpact'), state: 'unconfirmed', lines: [] };
   const sections: [OptimizationReviewSection, OptimizationReviewSection, OptimizationReviewSection, OptimizationReviewSection] = [known, hits, outside, deletion];
   const best = run.result?.best;
   const measured = best?.evaluation.finalQuery;
   const seeds = best?.evaluation.seedPmids.length ?? run.seedCount;
   const captured = measured?.capturedPmids;
-  known.lines.push(captured && seeds !== null ? `既知シード ${captured.length}/${seeds} 件捕捉`
-    : `既知シード捕捉は未測定（対象 ${seeds ?? '不明'} 件）`);
-  known.lines.push('既知シードの捕捉は、未知の適格研究の網羅性を保証するものではありません。');
-  if (seeds === 0) known.lines.push('検証対象シードがないため、捕捉の確認はできていません。');
+  known.lines.push(captured && seeds !== null ? translate(language, 'draft.reviewSection.captured', { captured: captured.length, seeds: seeds })
+    : translate(language, 'draft.reviewSection.captureUnmeasured', { seeds: seeds ?? translate(language, 'draft.reviewSection.unknown') }));
+  known.lines.push(translate(language, 'draft.reviewSection.captureCaution'));
+  if (seeds === 0) known.lines.push(translate(language, 'draft.reviewSection.noSeeds'));
   for (const trial of run.trials) {
     if (trial.kind === 'proposal' && trial.accepted && trial.before?.missedPmids?.length
       && trial.before.capturedPmids != null && trial.after?.capturedPmids != null
       && trial.before.capturedPmids.length === trial.after.capturedPmids.length) {
-      known.lines.push(`中間手 ${trial.candidateId}: ${trial.reason}`);
+      known.lines.push(translate(language, 'draft.reviewSection.intermediate', { candidateId: trial.candidateId, reason: trial.reason }));
     }
   }
   const total = measured?.totalHits;
-  hits.lines.push(`目安件数 ${run.maxHits.toLocaleString()} 件に対して実測 ${total == null ? '未測定' : `${total.toLocaleString()} 件`}（${total == null ? '未測定' : total <= run.maxHits ? '目安以下' : '目安超過'}）`);
+  hits.lines.push(translate(language, 'draft.reviewSection.hits', { target: run.maxHits.toLocaleString(), measured: total == null ? translate(language, 'draft.reviewSection.notMeasured') : translate(language, 'draft.reviewSection.hitCount', { count: total.toLocaleString() }), state: total == null ? translate(language, 'draft.reviewSection.notMeasured') : total <= run.maxHits ? translate(language, 'draft.reviewSection.withinTarget') : translate(language, 'draft.reviewSection.overTarget') }));
   if (run.result) {
     if (seeds && captured) known.state = captured.length < seeds || measured?.missedPmids?.length ? 'unmet' : 'confirmed';
     if (total != null) hits.state = total <= run.maxHits ? 'confirmed' : 'unmet';
@@ -75,22 +76,22 @@ export function buildOptimizationReviewSections(run: QueryOptimizationRunState):
     const candidates = check?.candidates.filter((candidate) => candidate.source === 'outside') ?? [];
     if (check?.status === 'ready') {
       outside.state = candidates.length && check.marginHits == null ? 'unconfirmed' : decisionState(check, 'outside');
-      if (candidates.length && check.marginHits == null) outside.lines.push('外側の件数は未測定です。');
+      if (candidates.length && check.marginHits == null) outside.lines.push(translate(language, 'draft.reviewSection.outsideUnmeasured'));
       outside.maybeCount = candidates.filter((candidate) => check.decisions[candidate.pmid]?.status === 'saved'
         && check.decisions[candidate.pmid]?.decision === 'maybe').length;
-      if (!candidates.length) outside.lines.push(`拡張式の外側 ${check.marginHits ?? '未測定'} 件から判定候補は選ばれませんでした。網羅性の保証ではありません`);
+      if (!candidates.length) outside.lines.push(translate(language, 'draft.reviewSection.noOutsideCandidates', { count: check.marginHits ?? translate(language, 'draft.reviewSection.notMeasured') }));
       else {
         const included = candidates.filter((candidate) => check.decisions[candidate.pmid]?.status === 'saved'
           && check.decisions[candidate.pmid]?.decision === 'include').length;
-        outside.lines.push(`外側の判定候補 ${candidates.length} 件、保存済み ${candidates.filter((candidate) => check.decisions[candidate.pmid]?.status === 'saved').length} 件`);
-        if (outside.maybeCount) outside.lines.push(`maybe で保存した候補 ${outside.maybeCount} 件は未確認として残ります`);
-        if (included) outside.lines.push(`式の外側に include した文献が ${included} 件あります。保護して再調整してください`);
+        outside.lines.push(translate(language, 'draft.reviewSection.outsideCandidates', { count: candidates.length, saved: candidates.filter((candidate) => check.decisions[candidate.pmid]?.status === 'saved').length }));
+        if (outside.maybeCount) outside.lines.push(translate(language, 'draft.reviewSection.maybeRemaining', { count: outside.maybeCount }));
+        if (included) outside.lines.push(translate(language, 'draft.reviewSection.outsideIncluded', { count: included }));
       }
-    } else outside.lines.push(check?.reason ?? (check?.status === 'running' ? '外側の確認を実行中です' : '外側の確認は未実行です'));
+    } else outside.lines.push((check?.reasonMessage != null ? formatLocalized(language, check.reasonMessage) : check?.reason) ?? (check?.status === 'running' ? translate(language, 'draft.reviewSection.outsideRunning') : translate(language, 'draft.reviewSection.outsideNotRun')));
     const held = run.trials.filter((trial) => trial.held);
     if (!held.length) {
       deletion.state = 'confirmed';
-      deletion.lines.push('保留した候補はありません（採用した変更の失う集合はすべて 0 件）');
+      deletion.lines.push(translate(language, 'draft.reviewSection.noHeldCandidates'));
     } else {
       const lost = check?.candidates.filter((candidate) => candidate.source === 'lost') ?? [];
       deletion.state = lost.length ? decisionState(check, 'lost') : 'unconfirmed';
@@ -100,33 +101,33 @@ export function buildOptimizationReviewSections(run: QueryOptimizationRunState):
         && trial.impact.inspected.length >= trial.impact.lostHits)) deletion.state = 'decided';
       if (lost.length) deletion.maybeCount = lost.filter((candidate) => check?.decisions[candidate.pmid]?.status === 'saved'
         && check?.decisions[candidate.pmid]?.decision === 'maybe').length;
-      deletion.lines.push(`保留した候補 ${held.length} 件の削除影響の確認`);
+      deletion.lines.push(translate(language, 'draft.reviewSection.heldCandidates', { count: held.length }));
       for (const trial of held) {
         const count = trial.impact?.inspected.length ?? 0;
         const lostHits = trial.impact?.lostHits;
         const sample = trial.impact?.sample;
-        const prefix = `保留候補 ${trial.candidateId}: 失う集合 ${lostHits ?? '未測定'} 件`;
+        const prefix = translate(language, 'draft.reviewSection.heldLost', { candidateId: trial.candidateId, count: lostHits ?? translate(language, 'draft.reviewSection.notMeasured') });
         deletion.lines.push(sample?.method === 'all'
-          ? `${prefix}から無作為抽出した ${count} 件の書誌を確認`
+          ? translate(language, 'draft.reviewSection.randomSample', { prefix: prefix, count: count })
           : sample?.method === 'retrieved_subset'
-            ? `${prefix}のうち取得できた ${sample.retrievedCount} 件から無作為抽出した ${count} 件の書誌を確認（集合全体からの無作為抽出ではありません）`
-            : `${prefix}のうち書誌を確認できたのは先頭 ${count} 件`);
-        if (trial.impact?.annotation) deletion.lines.push(formatLostSampleAnnotation(trial.impact.annotation));
-        if (lostHits != null && lostHits > count) deletion.lines.push(`残り ${lostHits - count} 件は未確認`);
+            ? translate(language, 'draft.reviewSection.retrievedSample', { prefix: prefix, retrieved: sample.retrievedCount, count: count })
+            : translate(language, 'draft.reviewSection.firstPapers', { prefix: prefix, count: count }));
+        if (trial.impact?.annotation) deletion.lines.push(formatLostSampleAnnotation(trial.impact.annotation, language));
+        if (lostHits != null && lostHits > count) deletion.lines.push(translate(language, 'draft.reviewSection.remaining', { count: lostHits - count }));
         // 標本を全件 exclude と判定しても否定できない適格文献の上限（片側 95%）。deletion.state の判定には使わない。
-        const upperBound = formatUnconfirmedEligibleUpperBound(trial);
+        const upperBound = formatUnconfirmedEligibleUpperBound(trial, language);
         if (upperBound) deletion.lines.push(upperBound);
         if (trial.impact?.error) deletion.lines.push(trial.impact.error);
       }
-      if (deletion.maybeCount) deletion.lines.push(`maybe で保存した候補 ${deletion.maybeCount} 件は未確認として残ります`);
-      if (deletion.state === 'unmet') deletion.lines.push('失う文献に include した文献があります。保護して再調整してください');
+      if (deletion.maybeCount) deletion.lines.push(translate(language, 'draft.reviewSection.maybeRemaining', { count: deletion.maybeCount }));
+      if (deletion.state === 'unmet') deletion.lines.push(translate(language, 'draft.reviewSection.lostIncluded'));
     }
   } else {
-    outside.lines.push('実行結果がないため外側の確認は未確認です');
-    deletion.lines.push('実行結果がないため削除影響の確認は未確認です');
+    outside.lines.push(translate(language, 'draft.reviewSection.outsideNoResult'));
+    deletion.lines.push(translate(language, 'draft.reviewSection.deletionNoResult'));
   }
   return { sections, unconfirmed: sections.filter((section) => section.state !== 'confirmed')
-    .map((section) => `${section.label}: ${section.lines.filter((line) => !line.startsWith('既知シードの捕捉は、')).join(' / ')}`) };
+    .map((section) => `${section.label}: ${section.lines.filter((line) => line !== translate(language, 'draft.reviewSection.captureCaution')).join(' / ')}`) };
 }
 
 /**
@@ -185,16 +186,16 @@ export function unconfirmedEligibleUpperBound(lostHits: number, sampleSize: numb
 }
 
 /** 保留候補カード・最終レビュー・採用監査で共通して使う、否定できない適格文献上限の表示文。 */
-export function formatUnconfirmedEligibleUpperBound(trial: OptimizationTrial): string | null {
+export function formatUnconfirmedEligibleUpperBound(trial: OptimizationTrial, language: UiLanguage = 'ja'): string | null {
   const impact = trial.impact;
   if (!impact || impact.lostHits == null) return null;
   const sampleSize = impact.sample?.pmids.length ?? impact.inspected.length;
   const upperBound = unconfirmedEligibleUpperBound(impact.lostHits, sampleSize);
   if (upperBound === null || upperBound === 0) return null;
   const remaining = impact.lostHits - sampleSize;
-  let text = `標本 ${sampleSize} 件をすべて exclude と判定しても、残り ${remaining} 件に適格文献が最大 ${upperBound} 件（片側 95% 上限）含まれる可能性を否定できません。`;
+  let text = translate(language, 'draft.reviewSection.eligibleUpperBound', { sampleSize: sampleSize, remaining: remaining, upperBound: upperBound });
   if (impact.sample?.method === 'retrieved_subset') {
-    text += `（取得できた ${impact.sample.retrievedCount} 件からの抽出のため、集合全体に対する上限ではありません）`;
+    text += translate(language, 'draft.reviewSection.subsetUpperBound', { retrieved: impact.sample.retrievedCount });
   }
   return text;
 }
@@ -205,10 +206,11 @@ export function evaluateHeldCandidateAdoptionGate(
   options: {
     bestCapturedPmids: readonly string[] | null | undefined;
     threshold?: number;
+    language?: UiLanguage;
     unjudgedSeedPmids?: readonly string[];
   }
 ): HeldCandidateAdoptionGate {
-  const { bestCapturedPmids, threshold = HELD_CANDIDATE_ADOPTION_LOST_HITS_THRESHOLD, unjudgedSeedPmids = [] } = options;
+  const { language = 'ja', bestCapturedPmids, threshold = HELD_CANDIDATE_ADOPTION_LOST_HITS_THRESHOLD, unjudgedSeedPmids = [] } = options;
   const impact = trial.impact;
   const sampledCount = impact?.inspected.length ?? 0;
   const judgedCount = impact?.inspected.filter((paper) => decisions?.[paper.pmid]?.status === 'saved'
@@ -216,43 +218,43 @@ export function evaluateHeldCandidateAdoptionGate(
   if (!trial.held || !impact || impact.lostHits === null
     || impact.failedMeasurements?.includes('lost_search') || (impact.error && !impact.failedMeasurements)) {
     return { allowed: false, judgedCount, sampledCount, exceedsMaxLostHits: false,
-      reason: '失う集合を実測できていないため採用できません。' };
+      reason: translate(language, 'draft.adoptionGate.lostUnmeasured') };
   }
   if (impact.lostHits > HELD_CANDIDATE_ADOPTION_MAX_LOST_HITS) {
     return { allowed: false, judgedCount, sampledCount, exceedsMaxLostHits: true,
-      reason: `失う集合 ${impact.lostHits.toLocaleString('ja-JP')} 件が上限 ${HELD_CANDIDATE_ADOPTION_MAX_LOST_HITS.toLocaleString('ja-JP')} 件を超えるため、`
-        + 'この候補は採用できません。標本の判定では集合全体に適格文献が無いことを確かめられません。再調整するか除外してください。' };
+      reason: translate(language, 'draft.adoptionGate.overLimit', { count: impact.lostHits.toLocaleString(language === 'en' ? 'en-US' : 'ja-JP'), limit: HELD_CANDIDATE_ADOPTION_MAX_LOST_HITS.toLocaleString(language === 'en' ? 'en-US' : 'ja-JP') })
+        + translate(language, 'draft.adoptionGate.overLimitAdvice') };
   }
   if (impact.failedMeasurements?.includes('lost_fetch')) return { allowed: false, judgedCount, sampledCount, exceedsMaxLostHits: false,
-    reason: '失う集合の書誌を取得できていないため採用できません。' };
+    reason: translate(language, 'draft.adoptionGate.bibliographyUnavailable') };
   const lostKnownSeeds = impact.inspected.filter((paper) => unjudgedSeedPmids.includes(paper.pmid))
     .map((paper) => paper.pmid);
   if (lostKnownSeeds.length) return { allowed: false, judgedCount, sampledCount, exceedsMaxLostHits: false,
-    reason: `失う文献に未判定の既知シードがあるため採用できません（PMID: ${lostKnownSeeds.join(', ')}）。` };
+    reason: translate(language, 'draft.adoptionGate.unjudgedSeeds', { pmids: lostKnownSeeds.join(', ') }) };
   const includedPmids = impact.inspected.filter((paper) => decisions?.[paper.pmid]?.decision === 'include')
     .map((paper) => paper.pmid);
   if (includedPmids.length) {
     return { allowed: false, judgedCount, sampledCount, exceedsMaxLostHits: false,
-      reason: `失う文献に include と判定した文献があるため採用できません（PMID: ${includedPmids.join(', ')}）。` };
+      reason: translate(language, 'draft.adoptionGate.includedPapers', { pmids: includedPmids.join(', ') }) };
   }
   const heldCapturedPmids = trial.after?.capturedPmids;
   if (bestCapturedPmids == null || heldCapturedPmids == null) return { allowed: false, judgedCount, sampledCount, exceedsMaxLostHits: false,
-    reason: '最良候補と保留候補の既知シード捕捉を比較できません（未測定）。採用できません。' };
+    reason: translate(language, 'draft.adoptionGate.captureUnmeasured') };
   const missingSeeds = bestCapturedPmids.filter((pmid) => !heldCapturedPmids.includes(pmid));
   if (missingSeeds.length) return { allowed: false, judgedCount, sampledCount, exceedsMaxLostHits: false,
-    reason: `最良候補が捕捉している既知シードを失うため採用できません（PMID: ${missingSeeds.join(', ')}）。` };
+    reason: translate(language, 'draft.adoptionGate.lostSeeds', { pmids: missingSeeds.join(', ') }) };
   if (impact.lostHits <= threshold) {
     if (sampledCount >= impact.lostHits && judgedCount >= sampledCount) return { allowed: true, judgedCount, sampledCount, exceedsMaxLostHits: false, reason: null };
     return { allowed: false, judgedCount, sampledCount, exceedsMaxLostHits: false,
-      reason: `失う集合 ${impact.lostHits} 件のうち exclude と判定して保存したのは ${judgedCount} 件です（あと ${impact.lostHits - judgedCount} 件の確認が必要です）。` };
+      reason: translate(language, 'draft.adoptionGate.remainingPapers', { count: impact.lostHits, judged: judgedCount, remaining: impact.lostHits - judgedCount }) };
   }
   const sampledPmids = impact.sample?.pmids ?? impact.inspected.map((paper) => paper.pmid);
   const missingBibliography = sampledPmids.filter((pmid) => !impact.inspected.some((paper) => paper.pmid === pmid));
   if (missingBibliography.length) return { allowed: false, judgedCount, sampledCount, exceedsMaxLostHits: false,
-    reason: `抽出した標本 ${sampledPmids.length} 件のうち ${missingBibliography.length} 件の書誌が未取得です。全件の書誌取得と exclude 判定の保存が必要です。` };
+    reason: translate(language, 'draft.adoptionGate.missingBibliography', { count: sampledPmids.length, missing: missingBibliography.length }) };
   const unjudgedCount = sampledPmids.filter((pmid) => decisions?.[pmid]?.status !== 'saved'
     || decisions[pmid]?.decision !== 'exclude').length;
   if (sampledPmids.length > 0 && unjudgedCount === 0) return { allowed: true, judgedCount, sampledCount, exceedsMaxLostHits: false, reason: null };
   return { allowed: false, judgedCount, sampledCount, exceedsMaxLostHits: false,
-    reason: `標本 ${sampledPmids.length} 件のうち ${sampledPmids.length - unjudgedCount} 件しか判定されていません（あと ${unjudgedCount} 件の判定が必要です。集合全体では残り ${impact.lostHits - judgedCount} 件が未確認のままです）。` };
+    reason: translate(language, 'draft.adoptionGate.unjudgedSample', { count: sampledPmids.length, judged: sampledPmids.length - unjudgedCount, remaining: unjudgedCount, unconfirmed: impact.lostHits - judgedCount }) };
 }

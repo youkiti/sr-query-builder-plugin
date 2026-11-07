@@ -3,6 +3,82 @@ import { buildOptimizationReviewSections, countLostSampleAnnotations, evaluateHe
   unconfirmedEligibleUpperBound } from './queryOptimizationReviewSections';
 import type { OptimizationOutsideCheckState, QueryOptimizationRunState } from '../store';
 import type { OptimizationTrial } from '@/features/formula/skills/optimizeQuery';
+import { translate } from '@/lib/i18n';
+
+const japaneseText = /[\u3040-\u30ff\u4e00-\u9fff]/;
+
+test.each(['all', 'retrieved_subset', undefined] as const)('英語の最終レビューは全区分・未確認事項・抽出方法 %s を翻訳する', (method) => {
+  const run = deletionFixture();
+  const check = run.outsideCheck!;
+  run.result!.best!.evaluation.finalQuery.missedPmids = ['9'];
+  check.candidates.push({ ...candidate('outside'), pmid: '4' }, { ...candidate('outside'), pmid: '5' });
+  check.decisions['2'] = { decision: 'maybe', status: 'saved', error: null };
+  check.decisions['3'] = { decision: 'include', status: 'saved', error: null };
+  check.decisions['4'] = { decision: 'maybe', status: 'saved', error: null };
+  check.decisions['5'] = { decision: 'include', status: 'saved', error: null };
+  const trial = run.trials[0]!;
+  trial.impact!.lostHits = 150;
+  trial.impact!.error = 'Bibliography unavailable';
+  trial.impact!.sample = method ? { method, seed: 1, populationCount: 150, retrievedCount: 100, pmids: ['2', '3'], sampledAt: '' } : undefined;
+  trial.impact!.annotation = { status: 'success', annotatedAt: '', requestedPmids: ['2', '3'], items: [], error: null };
+  run.trials.push({ ...trial, held: false, accepted: true, reason: 'Block capture improved',
+    before: { ...trial.after!, missedPmids: ['9'] }, after: trial.after });
+  const review = buildOptimizationReviewSections(run, 'en');
+  expect(review.sections.map((item) => item.label)).toEqual(['Known seed capture', 'Target hit count', 'Outside check', 'Deletion impact check']);
+  for (const text of [...review.sections.flatMap((item) => [item.label, ...item.lines]), ...review.unconfirmed]) expect(text).not.toMatch(japaneseText);
+  expect(review.sections[0].lines).toContain('Intermediate step candidate-1: Block capture improved');
+  expect(review.unconfirmed.join(' ')).not.toContain(translate('en', 'draft.reviewSection.captureCaution'));
+  expect(buildOptimizationReviewSections(run)).toEqual(buildOptimizationReviewSections(run, 'ja'));
+});
+
+test.each(['noResult', 'noSeeds', 'unmeasured', 'running', 'skipped', 'annotationFailure'] as const)('英語の未測定・未実行の説明も翻訳する: %s', (kind) => {
+  const run = deletionFixture();
+  if (kind === 'noResult') run.result = null;
+  if (kind === 'noSeeds') run.result!.best!.evaluation.seedPmids = [];
+  if (kind === 'unmeasured') {
+    run.result!.best!.evaluation.finalQuery.totalHits = null;
+    run.result!.best!.evaluation.finalQuery.capturedPmids = null;
+    run.trials[0]!.impact!.lostHits = null;
+    run.outsideCheck!.marginHits = null;
+    run.outsideCheck!.candidates.push(candidate('outside'));
+  }
+  if (kind === 'running') run.outsideCheck!.status = 'running';
+  if (kind === 'skipped') {
+    run.outsideCheck!.status = 'skipped';
+    run.outsideCheck!.reason = translate('ja', 'draft.outsideReason.userStop');
+    run.outsideCheck!.reasonMessage = { key: 'draft.outsideReason.userStop' };
+  }
+  if (kind === 'annotationFailure') run.trials[0]!.impact!.annotation = { status: 'failure', annotatedAt: '', requestedPmids: [], items: [], error: 'Unavailable' };
+  const review = buildOptimizationReviewSections(run, 'en');
+  expect(JSON.stringify(review)).not.toMatch(japaneseText);
+  expect(buildOptimizationReviewSections(run)).toEqual(buildOptimizationReviewSections(run, 'ja'));
+});
+
+test.each(['unmeasured', 'overLimit', 'fetch', 'unjudgedSeed', 'include', 'capture', 'lostSeed', 'remaining', 'bibliography', 'sample'] as const)('採用不可理由の各分岐を英語で表示する: %s', (kind) => {
+  const run = deletionFixture();
+  const trial = run.trials[0]!;
+  const impact = trial.impact!;
+  const options = { bestCapturedPmids: ['1'] as string[] | null, unjudgedSeedPmids: [] as string[], language: 'en' as const };
+  if (kind === 'unmeasured') impact.lostHits = null;
+  if (kind === 'overLimit') impact.lostHits = 1001;
+  if (kind === 'fetch') impact.failedMeasurements = ['lost_fetch'];
+  if (kind === 'unjudgedSeed') options.unjudgedSeedPmids = ['2'];
+  if (kind === 'include') run.outsideCheck!.decisions['2']!.decision = 'include';
+  if (kind === 'capture') options.bestCapturedPmids = null;
+  if (kind === 'lostSeed') options.bestCapturedPmids = ['9'];
+  if (kind === 'remaining') delete run.outsideCheck!.decisions['2'];
+  if (kind === 'bibliography' || kind === 'sample') {
+    impact.lostHits = 150;
+    impact.sample = { method: 'all', seed: 1, populationCount: 150, retrievedCount: 150, pmids: ['2', '3', '4'], sampledAt: '' };
+    if (kind === 'sample') impact.sample.pmids = ['2', '3'];
+    delete run.outsideCheck!.decisions['2'];
+  }
+  const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck!.decisions, options);
+  expect(gate.allowed).toBe(false);
+  expect(gate.reason).toBeTruthy();
+  expect(gate.reason).not.toMatch(japaneseText);
+  expect(evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck!.decisions, { ...options, language: 'ja' }).reason).toMatch(japaneseText);
+});
 
 function fixture(): QueryOptimizationRunState {
   const formula = { blocks: [{ id: '1', expression: 'a[tiab]', isCombination: false }], combinationExpression: null };

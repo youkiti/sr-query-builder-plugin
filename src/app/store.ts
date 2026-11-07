@@ -1,3 +1,4 @@
+import type { LocalizedText } from '@/lib/i18n';
 import type { QueryOptimizationProgress, QueryOptimizationResult } from './services/queryOptimizationService';
 import type { OptimizationMeshNode, OptimizationTrial } from '@/features/formula/skills/optimizeQuery';
 import type { CompletedQueryOptimization, InterruptedQueryOptimization } from './services/queryOptimizationCheckpointService';
@@ -158,6 +159,7 @@ export interface OptimizationOutsideCheckState {
   unjudgedSeedPmids?: string[];
   status: 'running' | 'ready' | 'error' | 'skipped';
   reason: string | null;
+  reasonMessage?: LocalizedText | null;
   originalHits: number | null;
   marginHits: number | null;
   evaluatedCount: number;

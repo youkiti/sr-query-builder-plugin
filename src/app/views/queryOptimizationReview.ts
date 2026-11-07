@@ -1,4 +1,4 @@
-import { t } from '@/lib/i18n';
+import { formatLocalized, getUiLanguage, t } from '@/lib/i18n';
 import { showConfirmationModal } from '../ui/confirmationModal';
 import { renderGenerationNotice } from './generationNotice';
 import { blockDiagnosisLines } from '@/features/validation/blockDiagnosis';
@@ -8,6 +8,12 @@ import { buildPubmedSearchUrl } from '@/lib/ncbi/pubmedUrl';
 import type { QueryOptimizationRunState } from '../store';
 import { buildOptimizationReviewSections, evaluateHeldCandidateAdoptionGate, formatLostSampleAnnotation,
   formatUnconfirmedEligibleUpperBound, type ReviewSectionState } from '../services/queryOptimizationReviewSections';
+
+function localizedUnmetReasons(run: QueryOptimizationRunState): string[] {
+  const reasons = run.result?.unmetReasons ?? [];
+  const messages = run.result?.unmetReasonMessages;
+  return messages && messages.length === reasons.length ? messages.map((message) => formatLocalized(getUiLanguage(), message)) : reasons;
+}
 
 export interface OptimizationReviewActions {
   adopt: (() => Promise<void>) | undefined;
@@ -38,6 +44,7 @@ function renderHeldCandidateCard(
   card.dataset.tour = 'draft-held-candidates';
   card.setAttribute('aria-label', t('draft.review.actionsForHeldCandidate', { candidateId: trial.candidateId }));
   const gate = evaluateHeldCandidateAdoptionGate(trial, run.outsideCheck?.decisions, {
+    language: getUiLanguage(),
     bestCapturedPmids: run.result?.best?.measurement.capturedPmids,
     unjudgedSeedPmids: run.outsideCheck?.unjudgedSeedPmids,
   });
@@ -50,10 +57,10 @@ function renderHeldCandidateCard(
   if (impact?.annotation) {
     const annotation = doc.createElement('p');
     annotation.className = 'optimization__held-annotation';
-    annotation.textContent = formatLostSampleAnnotation(impact.annotation);
+    annotation.textContent = formatLostSampleAnnotation(impact.annotation, getUiLanguage());
     card.appendChild(annotation);
   }
-  const upperBoundText = formatUnconfirmedEligibleUpperBound(trial);
+  const upperBoundText = formatUnconfirmedEligibleUpperBound(trial, getUiLanguage());
   if (upperBoundText) {
     const upperBound = doc.createElement('p');
     upperBound.className = 'optimization__held-upper-bound';
@@ -158,7 +165,7 @@ export function buildAdoptConfirmContent(doc: Document, run: QueryOptimizationRu
     list.appendChild(item);
   }
   content.appendChild(list);
-  const reasons = run.result?.unmetReasons ?? [];
+  const reasons = localizedUnmetReasons(run);
   if (reasons.length) paragraph(t('draft.review.recordedReasons', { reasons: reasons.join('／') }));
   paragraph(t('draft.review.goingOverTheTargetHit')
     + t('draft.review.meetingEitherConditionDoesNot'));
@@ -213,7 +220,7 @@ export function renderOptimizationReview(
     section.appendChild(formula);
   } else paragraph(t('draft.review.noMeasuredCandidates'));
   const seeds = best?.evaluation.seedPmids.length ?? run.seedCount;
-  const review = buildOptimizationReviewSections(run);
+  const review = buildOptimizationReviewSections(run, getUiLanguage());
   subheading(t('draft.review.checkStatus'));
   const stateLabels: Record<ReviewSectionState, string> = { no_human_decision: t('draft.review.noHumanDecision'), confirmed: t('draft.review.confirmed'), unmet: t('draft.review.unmet'), needs_decision: t('draft.review.awaitingDecision'), decided: t('draft.review.judgedItemsRemain'), unconfirmed: t('draft.review.unconfirmed') };
   for (const item of review.sections) {
@@ -225,7 +232,7 @@ export function renderOptimizationReview(
     group.appendChild(title);
     for (const line of item.lines) {
       // 達成時の捕捉の限界は見出し直後に示し、区分内では重複させない。
-      if (result?.status === 'achieved' && item.key === 'known_capture' && line.startsWith('既知シードの捕捉は、')) continue;
+      if (result?.status === 'achieved' && item.key === 'known_capture' && line === t('draft.reviewSection.captureCaution')) continue;
       const p = doc.createElement('p');
       p.textContent = line;
       group.appendChild(p);
@@ -253,7 +260,7 @@ export function renderOptimizationReview(
   subheading(t('draft.review.outsideCheckAndReviewOf'));
   const check = run.outsideCheck;
   if (!check) paragraph(t('draft.review.outsideCheckHasNotRun'));
-  else if (check.status !== 'ready') paragraph(check.reason ?? t('draft.review.outsideCheckIsRunning'));
+  else if (check.status !== 'ready') paragraph((check.reasonMessage != null ? formatLocalized(getUiLanguage(), check.reasonMessage) : check.reason) ?? t('draft.review.outsideCheckIsRunning'));
   if (check && !check.candidates.length) paragraph(t('draft.review.noPapersToJudge'));
   for (const candidate of check?.candidates ?? []) {
     const card = doc.createElement('article');
@@ -364,7 +371,7 @@ export function renderOptimizationReview(
     section.appendChild(buttons);
   }
   subheading(t('draft.review.remainingConcerns'));
-  const reasons = result?.unmetReasons ?? (run.error ? [run.error] : []);
+  const reasons = run.result ? localizedUnmetReasons(run) : (run.error ? [run.error] : []);
   if (!reasons.length) paragraph(t('draft.review.noUnmetConditionsRecordedCheck'));
   else {
     const list = doc.createElement('ul');
