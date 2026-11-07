@@ -1,3 +1,4 @@
+import * as optimizationLog from '@/features/optimization/optimizationLogRepository';
 import { runOptimizeQuery, runDecideOutsideCandidate, runReadjustOptimization,
   runReadjustFromHeldOptimizationCandidate, rejectHeldOptimizationCandidate,
   undoHeldOptimizationCandidateRejection, startApp } from './bootstrap';
@@ -41,6 +42,7 @@ const seed = (pmid: string | null, extra: Partial<SeedPaper> = {}): SeedPaper =>
   decidedAt: null, decidedBy: null, note: null, ...extra,
 });
 function setup() {
+  const log = jest.spyOn(optimizationLog, 'appendOptimizationLog').mockResolvedValue();
   const store = createStore({ ...INITIAL_STATE,
     project: { projectId: 'p', spreadsheetId: 's', driveFolderId: 'd', title: '研究' },
     blocksDraft: { blocks: [{ blockLabel: '疾患', description: '説明', aiGenerated: false, note: '' }], combinationExpression: '#1' },
@@ -64,7 +66,7 @@ function setup() {
   const run = jest.spyOn(optimization, 'runQueryOptimization').mockResolvedValue(result);
   const invoke = (maxHits = 123) => runOptimizeQuery(store, runtime,
     { google: runtime.google, store: runtime.store }, { maxHits, maxIterations: 2 });
-  return { store, runtime, run, list, buildFactory, invoke, data };
+  return { store, runtime, run, list, buildFactory, invoke, data, log };
 }
 async function flush() { for (let i = 0; i < 30; i += 1) await Promise.resolve(); }
 async function switchProject(fixture: ReturnType<typeof setup>, projectId = 'other') {
@@ -953,4 +955,133 @@ test.each([false, true])('除外・取消の保存待ちでは別候補も無効
   }
   expect(warn).toHaveBeenCalledTimes(fails ? 2 : 0);
   unsubscribe();
+});
+
+
+test.each(['achieved', 'needs_review', 'stopped', 'error'] as const)('開始と終了状態 %s を同じ run に記録する', async (status) => {
+  const f = setup();
+  f.run.mockResolvedValue({ ...result, status });
+  await f.invoke();
+  await flush();
+  await flush();
+  expect(f.log).toHaveBeenCalledTimes(2);
+  const runId = f.store.getState().queryOptimizationRun!.runId;
+  expect(f.log.mock.calls[0]).toEqual(['s', expect.objectContaining({ event: 'run_started', run_id: runId,
+    max_hits: 123, max_iterations: 2, seed_count: 1, model: 'fake', recorded_by: null }), f.runtime.google]);
+  expect(f.log.mock.calls[1]![1]).toMatchObject({ event: 'run_finished', run_id: runId, status });
+});
+
+test('再開の開始記録には残反復数と再開元を使う', async () => {
+  const f = setup();
+  await prepareResume(f).resume();
+  await flush();
+  expect(f.log.mock.calls[0]![1]).toMatchObject({ max_iterations: 3, resumed_from_run_id: 'old' });
+});
+
+test.each([false, true])('例外による終了も開始後だけ記録する（停止=%s）', async (stopped) => {
+  const f = setup();
+  f.run.mockRejectedValue(stopped ? new optimization.QueryOptimizationStopError('user_stop')
+    : new Error('連絡 person@example.com key ABCDEFGHIJKLMNOPQRSTUVWXYZ ' + '長'.repeat(250)));
+  await f.invoke();
+  await flush();
+  await flush();
+  expect(f.log.mock.calls[1]![1]).toMatchObject({ event: 'run_finished', status: stopped ? 'stopped' : 'error' });
+  if (!stopped) {
+    const event = f.log.mock.calls[1]![1];
+    expect(event.event === 'run_finished' && event.note).toContain('[REDACTED]');
+    expect(JSON.stringify(event)).not.toContain('person@example.com');
+    expect(JSON.stringify(event)).not.toContain('ABCDEFGHIJKLMNOPQRSTUVWXYZ');
+    expect(event.event === 'run_finished' && event.note?.length).toBe(200);
+  }
+});
+
+test('開始前の設定エラーは終了記録を残さない', async () => {
+  const f = setup();
+  f.buildFactory.mockRejectedValue(new Error('設定エラー'));
+  await f.invoke();
+  await flush();
+  await flush();
+  expect(f.log).not.toHaveBeenCalled();
+});
+
+test('記録の書き込み待ちと失敗は自動調整の結果を妨げない', async () => {
+  const f = setup();
+  const pending = deferred<void>();
+  f.log.mockReturnValue(pending.promise);
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  await f.invoke();
+  await flush();
+  expect(f.store.getState().queryOptimizationRun?.result).toEqual(result);
+  pending.reject(new Error('秘密の応答本文'));
+  await flush();
+  expect(warn).toHaveBeenCalledWith('自動調整の証跡を保存できませんでした');
+  expect(JSON.stringify(warn.mock.calls)).not.toContain('秘密の応答本文');
+});
+
+test.each([false, true])('除外・取消は保存成功後だけ記録する（取消=%s）', async (undo) => {
+  const f = setupOutside();
+  await f.invoke();
+  await flush();
+  addHeldTrial(f);
+  seedCompletedCheckpoint(f, f.store.getState().queryOptimizationRun!.runId);
+  if (undo) {
+    rejectHeldOptimizationCandidate(f.store, f.runtime, 'candidate-1');
+    await flush();
+  }
+  f.log.mockClear();
+  const pending = deferred<void>();
+  jest.spyOn(checkpointService, 'updateQueryOptimizationHeldRejections').mockReturnValueOnce(pending.promise);
+  const action = undo ? undoHeldOptimizationCandidateRejection : rejectHeldOptimizationCandidate;
+  action(f.store, f.runtime, 'candidate-1');
+  await flush();
+  expect(f.log).not.toHaveBeenCalled();
+  pending.resolve();
+  await flush();
+  expect(f.log).toHaveBeenCalledTimes(1);
+  expect(f.log.mock.calls[0]![1]).toMatchObject({ event: undo ? 'candidate_exclusion_undone' : 'candidate_excluded',
+    candidate_id: 'candidate-1' });
+});
+
+test.each([false, true])('保存失敗なら証跡を追記せず、記録失敗でも除外状態を保つ（取消=%s）', async (undo) => {
+  const f = setupOutside();
+  await f.invoke();
+  await flush();
+  addHeldTrial(f);
+  seedCompletedCheckpoint(f, f.store.getState().queryOptimizationRun!.runId);
+  if (undo) {
+    rejectHeldOptimizationCandidate(f.store, f.runtime, 'candidate-1');
+    await flush();
+  }
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  f.log.mockClear();
+  jest.spyOn(checkpointService, 'updateQueryOptimizationHeldRejections').mockRejectedValueOnce(new Error('保存失敗'));
+  const action = undo ? undoHeldOptimizationCandidateRejection : rejectHeldOptimizationCandidate;
+  action(f.store, f.runtime, 'candidate-1');
+  await flush();
+  expect(f.log).not.toHaveBeenCalled();
+  expect(!!f.store.getState().queryOptimizationRun!.heldRejections?.['candidate-1']).toBe(undo);
+  f.log.mockRejectedValue(new Error('秘密の応答本文'));
+  action(f.store, f.runtime, 'candidate-1');
+  await flush();
+  expect(!!f.store.getState().queryOptimizationRun!.heldRejections?.['candidate-1']).toBe(!undo);
+  expect(warn).toHaveBeenCalledWith('自動調整の証跡を保存できませんでした');
+});
+
+
+test('最良候補の実測値と操作した人を記録し、候補の fingerprint を引き継ぐ', async () => {
+  const f = setupOutside();
+  f.runtime.profile.getProfileUserInfo = async () => ({ email: 'user@example.com', id: 'user' });
+  await f.invoke();
+  await flush();
+  expect(f.log.mock.calls[1]![1]).toMatchObject({ final_hits: 10, captured_seed_count: 1, recorded_by: 'user@example.com' });
+  addHeldTrial(f);
+  f.store.setState((s) => ({ ...s, queryOptimizationRun: { ...s.queryOptimizationRun!,
+    trials: s.queryOptimizationRun!.trials.map((trial) => ({ ...trial, after: f.completed.best!.measurement })) } }));
+  seedCompletedCheckpoint(f, f.store.getState().queryOptimizationRun!.runId);
+  rejectHeldOptimizationCandidate(f.store, f.runtime, 'candidate-1');
+  await flush();
+  expect(f.log.mock.calls[2]![1]).toMatchObject({ candidate_fingerprint: 'fp', recorded_by: 'user@example.com' });
+  undoHeldOptimizationCandidateRejection(f.store, f.runtime, 'candidate-1');
+  await flush();
+  expect(f.log.mock.calls[3]![1]).toMatchObject({ event: 'candidate_exclusion_undone', candidate_fingerprint: 'fp' });
 });

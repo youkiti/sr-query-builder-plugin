@@ -45,3 +45,4 @@ export {
 } from './drive';
 
 export { ensureSheetHeaders } from './ensureSheetHeaders';
+export { ensureSheetTab } from './ensureSheetTab';

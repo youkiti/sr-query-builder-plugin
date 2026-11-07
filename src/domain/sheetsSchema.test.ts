@@ -1,8 +1,8 @@
 import { SHEET_HEADERS, SHEET_TABS } from './sheetsSchema';
 
 describe('SHEET_TABS / SHEET_HEADERS', () => {
-  test('9 タブが定義されている', () => {
-    expect(SHEET_TABS).toHaveLength(9);
+  test('10 タブが定義されている', () => {
+    expect(SHEET_TABS).toHaveLength(10);
   });
 
   test('各タブのヘッダー配列は重複なし・空文字なし', () => {

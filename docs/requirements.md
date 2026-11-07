@@ -90,7 +90,22 @@ https://www.googleapis.com/auth/drive.file          # Sheets 読み書き + LLM 
 
 ### 3.1 Google Sheets スキーマ
 
-1 プロジェクト = 1 スプレッドシート = 1 Drive フォルダ。タブは以下 9 つ。プロジェクト識別子（`project_id`）と Drive フォルダ ID は **`Meta` タブに 1 行だけ保持**し、他タブの行には持たせない（1 スプレッドシート内は同一プロジェクトなので冗長）。統合アプリはスプレッドシートの `Meta` タブを読めばプロジェクト ID と Drive 連携情報を取得できる。
+1 プロジェクト = 1 スプレッドシート = 1 Drive フォルダ。
+タブは以下 10 個。
+
+- Meta
+- Protocol
+- ProtocolBlocks
+- SeedPapers
+- FormulaVersions
+- ValidationLog
+- Conversions
+- LLMApiLog
+- Config
+- OptimizationLog
+
+プロジェクト識別子（`project_id`）と Drive フォルダ ID は **`Meta` タブに 1 行だけ保持**し、他タブの行には持たせない（1 スプレッドシート内は同一プロジェクトなので冗長）。
+統合アプリはスプレッドシートの `Meta` タブを読めばプロジェクト ID と Drive 連携情報を取得できる。
 
 **設計方針**: レビューの枠組みは PICO だけではない（PECO・PCC・SPIDER 等）。本拡張では固定の P/I/C/O カラムを持たず、「**1〜5 個の検索式ブロック**」を汎用的にモデル化する。各ブロックが `search_formula.md` の `#1`〜`#5` と 1:1 対応し、最終行の `combination_expression`（例: `#1 AND #2 AND #3`）でブロックを結合する。
 
@@ -265,6 +280,38 @@ Drive の prompt.json は `log_id`, `timestamp`, `provider`, `model_requested`, 
 | value | string | ✓ | |
 
 > API キー本体は Sheet には保存せず、`chrome.storage.local` のみに保存する。
+
+#### `OptimizationLog`
+
+自動調整の基準・結果と、人による保留候補の除外・取り消しを、1 出来事 1 行で追記する。
+行どうしは `run_id` で結び、過去の行は上書きしない。
+関係しない列は空欄にする。
+
+| 列 | 型 | 説明 |
+|---|---|---|
+| event | string | run_started / run_finished / candidate_excluded / candidate_exclusion_undone |
+| run_id | string | 実行 ID |
+| recorded_at | string(datetime) | 記録日時 |
+| recorded_by | string(email) | 操作した人。取得できなければ空 |
+| app_version | string | 開始時の拡張バージョン |
+| max_hits | string(number) | 開始時の目安件数 |
+| max_iterations | string(number) | 実際の反復上限。再開時は残予算 |
+| seed_count | string(number) | 開始時のシード数 |
+| model | string | 開始時に決まったモデル |
+| resumed_from_run_id | string | 再開元の run ID。再開時のみ |
+| status | string | 終了状態。achieved / needs_review / stopped / error |
+| stop_reason | string | 終了時の停止理由（あれば） |
+| final_hits | string(number) | 最良候補の件数（あれば） |
+| captured_seed_count | string(number) | 最良候補の捕捉シード数（あれば） |
+| candidate_id | string | 除外・取り消しの対象候補 ID |
+| candidate_fingerprint | string | 対象試行の fingerprint |
+| note | string | エラー文。メールと 20 文字以上の英数字を伏せ、200 文字まで |
+
+`SkippedSeeds` を増やさない判断の例外として、独立したタブを設ける。
+自動調整の証跡は人の監督と再現の記録で、既存のどのタブとも行の意味が違い、混ぜると読む側が行の種類で振り分ける必要が生じるためである。
+タブの追加も末尾への列追加と同様に後方互換とし、`Meta.schema_version` は変更しない。
+既存プロジェクトでは初回の記録時にタブを作り、見出しを書く。
+記録失敗は警告にとどめ、自動調整と除外・取り消しの操作を待たせない。
 
 ### 3.2 chrome.storage スキーマ
 

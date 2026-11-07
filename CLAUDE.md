@@ -227,6 +227,7 @@ MIT ライセンスの OSS Chrome 拡張 **sr-query-builder-plugin**。ユーザ
 | `Conversions` | version_id / target_db / converted_formula / exported_at |
 | `LLMApiLog` | timestamp / provider / model / purpose / prompt_ref / response_ref / tokens_in / tokens_out / latency_ms / error。フル payload は Drive の `{drive_folder_id}/logs/llm/{log_id}.json`、Sheet には URL と要約のみ |
 | `Config` | LLM プロバイダ設定・API キーの参照（キー本体は `chrome.storage` 側） |
+| `OptimizationLog` | 自動調整の基準・結果と、保留候補の除外の証跡。追記のみ |
 
 ### シード論文の対話的拡張フロー
 
