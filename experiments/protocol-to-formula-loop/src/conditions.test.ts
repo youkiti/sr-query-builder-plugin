@@ -4,6 +4,27 @@ import { join } from 'node:path';
 import { procedureBody } from './leakCheck';
 import { loadConditions, validateConditions } from './conditions';
 
+test.each([['v1appgl', 'gemini-3.5-flash-lite']])(
+  'アプリの Gemini 版を読み込む: %s', (version, model) => {
+    expect(loadConditions(version)).toMatchObject({ version, model, runner: 'app-gemini', tools: ['submit'],
+      maxMeasurements: 20, maxSubmissions: 4 });
+    expect(loadConditions(version).thinkingLevel).toBeUndefined();
+  });
+
+test.each([['submit'], ['check', 'count', 'mesh', 'submit']].map((tools) => [tools]))(
+  'アプリの Gemini 版で採点用の提出を含む道具を受け付ける: %j', (tools) => {
+    const value = { ...loadConditions('v1appgl'), tools };
+    expect(validateConditions(value, 'v1appgl')).toEqual(value);
+  });
+
+test.each([{ table: false }, { table: true }, { seeds: { label: 'seed', max: 1 } }, { combine: { from: 'v1', k: 3 } },
+  { hitsLimit: 10 }, { tools: ['submit', 'titles'] }, { tools: ['submit', 'outside'] }, { tools: ['submit', 'seeds'] },
+  { tools: [] }, { tools: ['check'] }, { provider: 'gemini' }, { thinkingLevel: 'low' }, { thinkingLevel: 'medium' },
+  { thinkingLevel: 'high' }, { model: 'gemini-latest' }, { model: 'google/gemini-2.0-flash' }])(
+  'アプリの Gemini 版で併用できない条件を拒否する: %j', (change) => {
+    expect(() => validateConditions({ ...loadConditions('v1appgl'), ...change }, 'v1appgl')).toThrow();
+  });
+
 test.each(['alibaba', 'z-ai', 'a.b-2', 'deepinfra/bf16'])('OpenRouter の提供元と固定モデルを受け付ける: %s', (provider) => {
   const conditions = { ...loadConditions('v0'), runner: 'openrouter-api', model: 'qwen/qwen3.8-flash', provider };
   expect(validateConditions(conditions, 'v0')).toEqual(conditions);

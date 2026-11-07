@@ -1,5 +1,5 @@
 /** @jest-environment node */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { config } from 'dotenv';
@@ -11,7 +11,10 @@ import { procedureBody, findLeaks } from './leakCheck';
 import { splitReviews } from './split';
 import type { RunRuntime } from './startRuns';
 import { fixture, record, review, writeJson, writeLines } from './testFixtures';
-import { EXTRACT_PROTOCOL_AGENT_SYSTEM_PROMPT } from '../../../src/features/formula/skills/extractProtocol';
+import { EXTRACT_PROTOCOL_AGENT_SYSTEM_PROMPT, EXTRACT_PROTOCOL_SYSTEM_PROMPT } from '../../../src/features/formula/skills/extractProtocol';
+import { BLOCK_DESIGNER_SYSTEM_PROMPT } from '../../../src/features/formula/skills/blockDesigner';
+import { MESH_SUGGESTER_SYSTEM_PROMPT } from '../../../src/features/formula/skills/meshSuggester';
+import { FREEWORD_DESIGNER_SYSTEM_PROMPT } from '../../../src/features/formula/skills/freewordDesigner';
 import { AGENT_DRAFT_PROCEDURE, AGENT_DRAFT_SETTINGS } from '../../../src/features/formula/agentDraft/procedure';
 import { renderPromptTemplate } from '../../../src/features/formula/skills/renderPromptTemplate';
 import { COCHRANE_HSSS_2024_PUBMED } from '../../../src/features/formula/skills/filterDesigner';
@@ -27,7 +30,7 @@ const extraction = () => text(JSON.stringify({ framework_type: 'pico', research_
     { block_label: 'B', description: '概念 B' }], combination_expression: '#1 AND #2', suggested_filter_ids: ['RCTfilter'] }));
 const formula = '## PubMed\n```\n#1 synthetic[tiab]\n#2 example[tiab]\n```\n';
 const done = () => text('終了');
-function setup(responses: (unknown | Response | Error)[] = [extraction(), done()], runs = 1, concurrency = 1) {
+function setup(responses: (unknown | Response | Error)[] = [extraction(), done()], runs = 1, concurrency = 1, version = 'v1app') {
   const root = mkdtempSync(join(tmpdir(), 'p2f-app-'));
   const casesDir = join(root, 'cases'), harnessDir = join(root, 'harness');
   const rows = Array.from({ length: 10 }, (_, i) => review(i + 1));
@@ -37,8 +40,8 @@ function setup(responses: (unknown | Response | Error)[] = [extraction(), done()
   writeJson(join(casesDir, 'subsets.json'), { fixed: [selected.pmcid] });
   mkdirSync(join(casesDir, selected.pmcid));
   writeFileSync(join(casesDir, selected.pmcid, 'protocol.md'), '合成プロトコル');
-  const conditionFile = join(harnessDir, 'v1app', 'conditions.json');
-  writeJson(conditionFile, loadConditions('v1app'));
+  const conditionFile = join(harnessDir, version, 'conditions.json');
+  writeJson(conditionFile, loadConditions(version));
   const bodies: Record<string, unknown>[] = [], searches: Record<string, string>[] = [];
   const fetchImpl = jest.fn<Promise<Response>, Parameters<typeof fetch>>(async (input, init) => {
     if (String(input).includes('eutils')) {
@@ -46,7 +49,14 @@ function setup(responses: (unknown | Response | Error)[] = [extraction(), done()
       searches.push(Object.fromEntries(init?.method === 'POST' ? new URLSearchParams(String(init.body)) : url.searchParams));
       return json({ esearchresult: { count: searches[searches.length - 1]!.db === 'mesh' ? '0' : '12', idlist: [] } });
     }
-    expect(String(input)).toBe('https://api.anthropic.com/v1/messages');
+    if (version === 'v1app') {
+      expect(String(input)).toBe('https://api.anthropic.com/v1/messages');
+    } else {
+      const url = new URL(String(input));
+      expect(url.hostname).toBe('generativelanguage.googleapis.com');
+      expect(url.pathname).toBe(`/v1beta/models/${loadConditions(version).model}:generateContent`);
+      expect(url.searchParams.get('key')).toBe('FAKE_GEMINI_SECRET');
+    }
     expect(init?.signal).toBeInstanceOf(AbortSignal);
     bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
     if (!responses.length) throw new Error('合成応答が不足しています');
@@ -56,16 +66,102 @@ function setup(responses: (unknown | Response | Error)[] = [extraction(), done()
   });
   let elapsed = 0;
   const runtime: RunRuntime = { casesDir, harnessDir,
-    env: { COCHRANE_BENCH_DIR: root, ANTHROPIC_API_KEY: 'FAKE_ANTHROPIC_SECRET', NCBI_API_KEY: 'FAKE_NCBI_SECRET' },
+    env: { COCHRANE_BENCH_DIR: root, ANTHROPIC_API_KEY: 'FAKE_ANTHROPIC_SECRET', NCBI_API_KEY: 'FAKE_NCBI_SECRET',
+      ...(version !== 'v1app' ? { GEMINI_API_KEY: 'FAKE_GEMINI_SECRET' } : {}) },
     now: () => new Date(Date.parse('2026-01-01T00:00:00Z') + elapsed), stdout: jest.fn(), stderr: jest.fn(),
     sleep: jest.fn(async (ms) => { elapsed += ms; }), fetchImpl };
-  const args = ['--runs', join(root, 'runs'), '--version', 'v1app', '--subset', 'fixed', '--runs-per-review', String(runs), '--concurrency', String(concurrency)];
-  const dir = runPath(join(root, 'runs'), 'v1app', selected.pmcid, 1);
+  const args = ['--runs', join(root, 'runs'), '--version', version, '--subset', 'fixed', '--runs-per-review', String(runs), '--concurrency', String(concurrency)];
+  const dir = runPath(join(root, 'runs'), version, selected.pmcid, 1);
   const read = (name: string) => readFileSync(join(dir, name), 'utf8');
   const agent = () => JSON.parse(read('agent.json')) as Record<string, unknown>;
   return { args, runtime, dir, read, agent, responses, fetchImpl, bodies, searches, selected, conditionFile };
 }
 afterEach(() => jest.restoreAllMocks());
+
+const geminiText = (value: string) => ({
+  candidates: [{ content: { parts: [{ text: value }] } }],
+  usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 2 },
+  modelVersion: 'gemini-fixed-response', model: '優先しないモデル',
+});
+const geminiExtraction = () => geminiText(JSON.stringify({ framework_type: 'pico', research_question: '合成疑問 FAKE_GEMINI_SECRET',
+  study_design: 'RCT', inclusion_criteria: '合成組入', exclusion_criteria: '合成除外',
+  blocks: [{ block_label: 'A', description: '概念 A' }, { block_label: 'B', description: '概念 B' }],
+  combination_expression: '#1 AND #2' }));
+const geminiGeneration = () => ['synthetic', 'example'].flatMap((term) => [
+  geminiText(JSON.stringify({ concept_summary: term, mesh_requirements: [], freeword_requirements: [term], rationale: 'FAKE_GEMINI_SECRET' })),
+  geminiText(JSON.stringify({ suggestions: [] })),
+  geminiText(JSON.stringify({ freewords: [{ query: `${term}[tiab]`, rationale: '合成語' }] })),
+]);
+
+test('Gemini の抽出・1 問 1 答の生成をアプリの既定で実行し、提出 1 回として採点できる', async () => {
+  const s = setup([geminiExtraction(), ...geminiGeneration()], 1, 1, 'v1appgl');
+  delete s.runtime.env.ANTHROPIC_API_KEY;
+  expect(await main(s.args, s.runtime)).toBe(0);
+  expect(s.agent()).toMatchObject({ status: 'completed', model: 'gemini-3.5-flash-lite', effort: null,
+    respondedModels: ['gemini-fixed-response'], extractionCalls: 1, generationCalls: 6, promptTokens: 70, outputTokens: 14 });
+  expect(readSubmissionState(s.dir)).toMatchObject({ submitAttempts: 1, submission: { number: 1,
+    query: `(synthetic[tiab]) AND (example[tiab]) AND (${COCHRANE_HSSS_2024_PUBMED})` } });
+  expect(s.read('submissions/1.md')).toContain('#RCTfilter');
+  expect(existsSync(join(s.dir, 'submissions/0.md'))).toBe(false);
+  expect(readBudget(s.dir)).toEqual({ measurements: 0, submissions: 1 });
+  expect(s.read('tool-log.jsonl').trim().split('\n').map((line) => JSON.parse(line).command)).toEqual(['submit']);
+  expect(s.bodies.map((body) => body.systemInstruction)).toEqual([
+    EXTRACT_PROTOCOL_SYSTEM_PROMPT,
+    ...Array.from({ length: 2 }, () => [BLOCK_DESIGNER_SYSTEM_PROMPT, MESH_SUGGESTER_SYSTEM_PROMPT, FREEWORD_DESIGNER_SYSTEM_PROMPT]).flat(),
+  ].map((prompt) => ({ parts: [{ text: prompt }] })));
+  expect(s.bodies.map((body) => (body.generationConfig as Record<string, unknown>).temperature)).toEqual([0.2, 0.3, 0.3, 0.4, 0.3, 0.3, 0.4]);
+  for (const body of s.bodies) {
+    expect(body).not.toHaveProperty('tools');
+    expect(body.generationConfig).not.toHaveProperty('thinkingConfig');
+  }
+  for (const [url] of s.fetchImpl.mock.calls) {
+    expect(String(url)).not.toContain('anthropic.com');
+  }
+  const checkFiles = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        checkFiles(path);
+      } else {
+        expect(readFileSync(path, 'utf8')).not.toContain('FAKE_GEMINI_SECRET');
+      }
+    }
+  };
+  checkFiles(s.dir);
+  expect(JSON.stringify((s.runtime.stdout as jest.Mock).mock.calls)).not.toContain('FAKE_GEMINI_SECRET');
+});
+
+test('Gemini キーが無いと実行フォルダの作成・通信前に拒否する', async () => {
+  const s = setup([], 1, 1, 'v1appgl');
+  delete s.runtime.env.GEMINI_API_KEY;
+  await expect(main(s.args, s.runtime)).rejects.toThrow('GEMINI_API_KEY が必要です');
+  expect(s.fetchImpl).not.toHaveBeenCalled();
+  expect(existsSync(s.dir)).toBe(false);
+});
+
+test('Gemini の抽出は不正応答を 3 回まで試し、生成の不正応答は error として作り直す', async () => {
+  const failed = setup([geminiText('{}'), geminiText('{'), geminiText('{}')], 1, 1, 'v1appgl');
+  expect(await main(failed.args, failed.runtime)).toBe(0);
+  expect(failed.agent()).toMatchObject({ status: 'extraction_failed', extractionCalls: 3, generationCalls: 0 });
+  const s = setup([geminiText('{}'), geminiExtraction(), geminiText('{')], 1, 1, 'v1appgl');
+  expect(await main(s.args, s.runtime)).toBe(1);
+  expect(s.agent()).toMatchObject({ status: 'error', extractionCalls: 2, generationCalls: 1 });
+  expect(readSubmissionState(s.dir)).toMatchObject({ submitAttempts: 0, submission: null });
+  s.responses.push(geminiExtraction(), ...geminiGeneration());
+  expect(await main(s.args, s.runtime)).toBe(0);
+  expect(s.agent().status).toBe('completed');
+  expect(existsSync(`${s.dir}.failed-20260101T000000Z`)).toBe(true);
+});
+
+test('Gemini の通信再試行にも同じ期限と待機を使い、失敗時のキーを伏せる', async () => {
+  const s = setup([json({}, 503), geminiExtraction(), new Error('FAKE_GEMINI_SECRET')], 1, 1, 'v1appgl');
+  expect(await main(s.args, s.runtime)).toBe(1);
+  expect(s.agent()).toMatchObject({ status: 'error', extractionCalls: 1, generationCalls: 1 });
+  expect((s.runtime.sleep as jest.Mock).mock.calls).toEqual([[1000]]);
+  expect(new Set(s.fetchImpl.mock.calls.map(([, init]) => init?.signal)).size).toBe(3);
+  expect(s.read('agent.json')).not.toContain('FAKE_GEMINI_SECRET');
+  expect(JSON.stringify((s.runtime.stdout as jest.Mock).mock.calls)).not.toContain('FAKE_GEMINI_SECRET');
+});
 
 test('アプリで抽出・生成し、承認したフィルタと結合式を展開して採点用に保存する', async () => {
   const s = setup([extraction(), call('write_formula', { content: formula }), call('tool', { command: 'check' }),

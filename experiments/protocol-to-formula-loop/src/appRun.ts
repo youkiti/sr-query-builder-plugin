@@ -22,40 +22,48 @@ import { defaultRuntime } from './tool';
 
 type Status = 'completed' | 'no_submission' | 'extraction_failed' | 'error';
 interface Agent {
-  status: Status; model: string; respondedModels: string[]; effort: 'medium';
+  status: Status; model: string; respondedModels: string[]; effort: 'medium' | null;
   extractionCalls: number; generationCalls: number; promptTokens: number; outputTokens: number;
   startedAt: string; finishedAt: string; note?: string;
 }
 // 保存する式や抽出結果には API キーの除去だけを掛ける（URL などの伏せ字で検索式を書き換えない）。
-const redactKeys = (runtime: RunRuntime, text: string) => redact(text, [runtime.env.ANTHROPIC_API_KEY ?? '', runtime.env.NCBI_API_KEY ?? '']);
+const redactKeys = (runtime: RunRuntime, text: string) => redact(text,
+  [runtime.env.ANTHROPIC_API_KEY ?? '', runtime.env.GEMINI_API_KEY ?? '', runtime.env.NCBI_API_KEY ?? '']);
 const safeText = (runtime: RunRuntime, text: string) => redactKeys(runtime, text)
   .replace(/https?:\/\/[^\s"<>]+/gi, '[URL]')
   .replace(/(?:authorization|x-api-key|api-key|headers?)\s*[:=][^\r\n]*/gi, '[REDACTED]');
 
 async function runAgent(dir: string, runtime: RunRuntime): Promise<Agent> {
   const run = readRun(dir);
-  const agent: Agent = { status: 'error', model: run.conditions.model, respondedModels: [], effort: 'medium',
+  const providerId = run.conditions.runner === 'app-gemini' ? 'gemini' : 'anthropic';
+  const agent: Agent = { status: 'error', model: run.conditions.model, respondedModels: [], effort: providerId === 'anthropic' ? 'medium' : null,
     extractionCalls: 0, generationCalls: 0, promptTokens: 0, outputTokens: 0, startedAt: runtime.now().toISOString(), finishedAt: '' };
   const save = (name: string, value: unknown) => writeFileSync(join(dir, name), JSON.stringify(value,
     (key, item: unknown) => typeof item === 'string' ? (key === 'note' ? safeText : redactKeys)(runtime, item) : item, 2) + '\n');
   let extracting = true;
   let measurementFailed = false;
   try {
-    const retried = withRetry(createProvider({ provider: 'anthropic', apiKey: runtime.env.ANTHROPIC_API_KEY!,
-      model: run.conditions.model, effort: 'medium', fetch: runtime.fetchImpl }), {
+    const original = providerId === 'gemini'
+      ? createProvider({ provider: 'gemini', apiKey: runtime.env.GEMINI_API_KEY!, model: run.conditions.model, fetch: runtime.fetchImpl })
+      : createProvider({ provider: 'anthropic', apiKey: runtime.env.ANTHROPIC_API_KEY!,
+        model: run.conditions.model, effort: 'medium', fetch: runtime.fetchImpl });
+    const retried = withRetry(original, {
       createSignal: () => AbortSignal.timeout(300_000), sleep: runtime.sleep, maxAttempts: 6,
     });
     const counted = async <T extends ChatResponse>(call: () => Promise<T>): Promise<T> => {
       if (extracting) agent.extractionCalls++; else agent.generationCalls++;
       const reply = await call();
       agent.promptTokens += reply.tokensIn ?? 0; agent.outputTokens += reply.tokensOut ?? 0;
-      const model = reply.raw && typeof reply.raw === 'object' && 'model' in reply.raw ? reply.raw.model : undefined;
+      const model = reply.modelReported
+        ?? (reply.raw && typeof reply.raw === 'object' && 'model' in reply.raw ? reply.raw.model : undefined);
       if (typeof model === 'string' && !agent.respondedModels.includes(model)) agent.respondedModels.push(model);
       return reply;
     };
-    const provider: LLMProvider = { providerId: 'anthropic', model: run.conditions.model,
+    const provider: LLMProvider = { providerId, model: run.conditions.model,
       chat: (messages, options) => counted(() => retried.chat(messages, options)),
-      chatWithTools: (system, messages, tools, options) => counted(() => retried.chatWithTools!(system, messages, tools, options)),
+      ...(original.chatWithTools ? {
+        chatWithTools: (system, messages, tools, options) => counted(() => retried.chatWithTools!(system, messages, tools, options)),
+      } : {}),
     };
     const parsed = parseManualProtocol(readFileSync(join(dir, 'protocol.md'), 'utf8'));
     const extract = async () => {
@@ -80,7 +88,7 @@ async function runAgent(dir: string, runtime: RunRuntime): Promise<Agent> {
         ...(draft.suggestedFilterIds !== undefined ? { selectedFilterIds: draft.suggestedFilterIds, filterSelectionSource: 'ai' as const } : {}) },
       seedContext: buildSeedContext([]),
     }, {
-      llmFactory: { providerId: 'anthropic', model: run.conditions.model, forPurpose: () => provider },
+      llmFactory: { providerId, model: run.conditions.model, forPurpose: () => provider },
       countBlockHits: async (query) => (await esearch(query, deps, { retmax: 0 })).count,
       resolveMeshDescriptors: (terms) => resolveMeshDescriptors(terms, deps),
       fetchMeshTreeNumbers: (terms) => fetchMeshTreeNumbers(terms, deps),
@@ -97,6 +105,14 @@ async function runAgent(dir: string, runtime: RunRuntime): Promise<Agent> {
         if (step.lastExitCode === 3) measurementFailed = true;
       },
     });
+    if (providerId === 'gemini') {
+      // 1 問 1 答の生成結果を、採点用の提出 1 回として記録する。
+      submissions = 1;
+      recordToolCall(dir, { measurements: 0, submissions }, {
+        at: runtime.now().toISOString(), command: 'submit', args: 'アプリの生成結果 1 件', result: '成功',
+        remaining: { measurements: run.conditions.maxMeasurements, submissions: run.conditions.maxSubmissions - submissions },
+      });
+    }
     mkdirSync(join(dir, 'submissions'), { recursive: true });
     writeFileSync(join(dir, 'submissions', `${submissions}.md`), redactKeys(runtime, result.markdown));
     save('submission.json', { number: submissions, submittedAt: runtime.now().toISOString(),
@@ -116,8 +132,13 @@ async function runAgent(dir: string, runtime: RunRuntime): Promise<Agent> {
 async function execute(args: string[], runtime: RunRuntime): Promise<number> {
   const options = parseOptions(args);
   const conditions = loadConditions(options.version, runtime.harnessDir);
-  if (conditions.runner !== 'app-anthropic') throw new Error('実行役が app-anthropic の版を指定してください');
-  if (!runtime.env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY が必要です');
+  if (conditions.runner !== 'app-anthropic' && conditions.runner !== 'app-gemini') {
+    throw new Error('実行役が app-anthropic か app-gemini の版を指定してください');
+  }
+  const key = conditions.runner === 'app-gemini' ? 'GEMINI_API_KEY' : 'ANTHROPIC_API_KEY';
+  if (!runtime.env[key]) {
+    throw new Error(`${key} が必要です`);
+  }
   const reviews = targetReviews(options, runtime);
   const jobs = reviews.flatMap((review) => Array.from({ length: options.runsPerReview }, (_, i) => ({ review, runIndex: i + 1 })));
   const counts = { completed: 0, no_submission: 0, extraction_failed: 0, error: 0 };
