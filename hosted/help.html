@@ -104,11 +104,11 @@
           <p>
             <span class="ja" lang="ja"
               >Gemini キーだけを保存したときの既定は gemini-3.5-flash-lite です。無料プランを検出すると
-              gemini-2.0-flash へ自動で切り替わります。Google
+              gemini-3.5-flash-lite へ自動で切り替わります。Google
               の説明では、無料枠で送った内容と応答は改善に使われ、人が読むことがあります。有料枠では改善に使わず、EEA・スイス・英国では無料でも有料枠の扱いです。</span
             ><span class="en" lang="en"
               >With only a Gemini key, the default is gemini-3.5-flash-lite. Detecting a free plan
-              automatically switches to gemini-2.0-flash. According to Google, free-tier content and
+              automatically switches to gemini-3.5-flash-lite. According to Google, free-tier content and
               responses may be used for improvement and read by humans. Paid content is not used for
               improvement; paid treatment also applies to free services in the EEA, Switzerland and
               UK.</span
@@ -449,6 +449,22 @@
               provider is selected. The default model is Claude Opus 5.5 from Anthropic, which requires an Anthropic API key.
               Selecting a Gemini model in “Model” on the settings screen requires a Gemini API key; selecting an OpenRouter model requires an OpenRouter API key.
               If you save only a Gemini API key without selecting a model, Gemini 3.5 Flash Lite is used. An NCBI API key is optional and eases the rate limit on NCBI E-utilities.</span
+            >
+          </p>
+          <p>
+            <span class="ja" lang="ja"
+              >Gemini のモデル ID は Google の分類で Stable のものを使っています。Google は Stable を「通常は変わらない」と説明していますが、不変の保証ではなく、廃止したモデルへの要求を後継へ転送することがあります（例: Gemini 3.5 Flash への要求は Gemini 3.6 Flash へ転送）。以前の設定で Gemini 2.0 Flash（停止済み）を選んでいた場合は Gemini 3.5 Flash Lite、Gemini 3.5 Flash を選んでいた場合は Gemini 3.6 Flash で動きます。</span
+            >
+            <span class="en" lang="en"
+              >The Gemini model IDs used here are classified as Stable by Google. Google describes Stable models as usually unchanged, but this is not a guarantee of immutability: requests to a retired model may be redirected to its successor (for example, Gemini 3.5 Flash requests are redirected to Gemini 3.6 Flash). Older settings that selected the discontinued Gemini 2.0 Flash use Gemini 3.5 Flash Lite; settings that selected Gemini 3.5 Flash use Gemini 3.6 Flash.</span
+            >
+          </p>
+          <p>
+            <span class="ja" lang="ja"
+              >OpenRouter のモデルは複数の提供元が配信しており、提供元は固定していません。要求ごとにどの提供元が答えるかが変わりうるため、答えた提供元を LLM API のログに記録します。</span
+            >
+            <span class="en" lang="en"
+              >OpenRouter models are served by multiple providers, and no provider is pinned. The provider answering may vary between requests; the provider that answered is recorded in the LLM API log.</span
             >
           </p>
           <div class="note">

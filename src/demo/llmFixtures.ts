@@ -425,7 +425,7 @@ export function handleGeminiGenerateContent(init: RequestInit): Response {
   // ここで弾かないと detectSkill('') が throw し、probeOnce の catch に握り潰されて
   // 'unknown' が返り、第 2 章の tier バッジが「確認中...」→ 空欄で終わってしまう。
   // 200 OK は 'paid'（= 有料プラン）と解釈される。'free' を返すとモデル選択が
-  // gemini-2.0-flash へ強制的に切り替わって永続化され、他章の gemini-3.5-flash と
+  // gemini-3.5-flash-lite へ強制的に切り替わって永続化され、他章の gemini-3.6-flash と
   // 食い違うため、必ず 200 側に倒すこと（src/options/bootstrap.ts の tier 判定）。
   if (isTierProbe(body)) {
     return jsonResponse({
