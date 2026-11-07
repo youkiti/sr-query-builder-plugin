@@ -10,6 +10,14 @@ import { fullStateScenario, FULL_APP_STATE } from './fixtures/scenarios/fullStat
 
 const APP_URL = '/app/app.html#/draft';
 
+test('English draft shows the auto-tuning heading and start action', async ({ page }) => {
+  await injectAppStub(page, fullStateScenario({ extraStorage: { uiLanguage: 'en' } }));
+  await page.goto(APP_URL);
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+  await expect(page.locator('.optimization__setup h3')).toHaveText('Auto-tuning the search formula');
+  await expect(page.locator('.optimization__start')).toHaveText('Create and auto-tune the formula');
+});
+
 test.describe('app-draft (#/draft)', () => {
   test('既存 formula 無し: .draft__generate は出ず、主操作は自動調整ボタンのみ', async ({ page }) => {
     await injectAppStub(

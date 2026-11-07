@@ -1,3 +1,4 @@
+import { t } from '@/lib/i18n';
 import type { GenerationNotices } from '../store';
 
 export function renderGenerationNotice(doc: Document, notices: GenerationNotices): HTMLElement | null {
@@ -7,11 +8,11 @@ export function renderGenerationNotice(doc: Document, notices: GenerationNotices
   notice.className = 'draft__mesh-notice';
   notice.setAttribute('role', 'status');
   const groups = [
-    { message: 'MeSH の同義語を正式な見出しに置き換えました',
-      items: notices.replacedMeshHeadings.map((item) => `#${item.blockId} ${item.blockLabel}: ${item.from} → ${item.to.join('、')}`) },
-    { message: '⚠ MeSH 辞書に無い見出しを式から外しました（AI が提案した見出しが MeSH に存在しないため）',
+    { message: t('draft.notice.replacedMeshSynonymsWithOfficial'),
+      items: notices.replacedMeshHeadings.map((item) => `#${item.blockId} ${item.blockLabel}: ${item.from} → ${item.to.join(t('draft.notice.listSeparator'))}`) },
+    { message: t('draft.notice.removedHeadingsThatAreNot'),
       items: notices.removedMeshHeadings.map((item) => `#${item.blockId} ${item.blockLabel}: ${item.descriptor}`) },
-    { message: '検索語の中の AND / OR を括弧で囲みました（PubMed は括弧の無い AND / OR を左から順に評価し、意図しない絞り込みになるため）',
+    { message: t('draft.notice.addedParenthesesAroundAndOr'),
       items: (notices.parenthesizedTerms ?? []).map((item) => `#${item.blockId} ${item.blockLabel}: (${item.term})`) },
   ];
   for (const group of groups) {

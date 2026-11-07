@@ -7,6 +7,71 @@ import {
 } from '../store';
 import { createDraftView, currentStepIndex, formatDraftProgress, readStoredProposal } from './draftView';
 import type { DraftProgress, ValidationSummary } from '@/app/services';
+import { setUiLanguage } from '@/lib/i18n';
+import { renderGenerationNotice } from './generationNotice';
+
+afterEach(() => setUiLanguage('ja'));
+
+test('English draft labels and progress use the current language', () => {
+  setUiLanguage('en');
+  const container = buildContainer();
+  createDraftView()(container, { state: stateReady(), navigate: jest.fn() });
+  expect(container.querySelector('h2')?.textContent).toBe('Search formula (draft and validate)');
+  expect(container.querySelector('.optimization__setup h3')?.textContent).toBe('Auto-tuning the search formula');
+  expect(container.querySelector('.optimization__start')?.textContent).toBe('Create and auto-tune the formula');
+  expect(formatDraftProgress({ step: 'block-designer', blockIndex: 0, blockCount: 2 })).toBe('Designing block structure (block 1/2)');
+});
+
+test('English generation notices keep service-provided content', () => {
+  setUiLanguage('en');
+  const notice = renderGenerationNotice(document, {
+    replacedMeshHeadings: [], parenthesizedTerms: [], filterNotice: 'service notice',
+    removedMeshHeadings: [{ blockIndex: 0, blockId: '1', blockLabel: 'P', descriptor: 'Missing' }],
+  })!;
+  expect(notice.textContent).toContain('Removed headings that are not in MeSH');
+  expect(notice.textContent).toContain('#1 P: Missing');
+  expect(notice.textContent).toContain('service notice');
+});
+
+test('language rerender retains filter checks, advanced settings, inputs and discard confirmation', () => {
+  const state = stateReady({
+    currentFormulaMarkdown: '## PubMed/MEDLINE\n```\n#1 x\n```',
+    currentFormulaVersionId: 'v1', currentFormulaCreatedBy: 'user_edit',
+    queryOptimizationSetup: { projectId: 'p', status: 'ready', maxHits: '2000', maxIterations: '3', seedCount: 1, error: null },
+    excessFilterProposal: { formulaVersionId: 'v1', totalHits: 12000, error: null,
+      candidates: [{ label: 'Filter', expression: 'english[la]', rationale: 'Reason' }] },
+  });
+  const view = createDraftView({ onOptimizationSettingsInput: (values) => {
+    state.queryOptimizationSetup = { ...state.queryOptimizationSetup!, ...values };
+  } });
+  const container = buildContainer();
+  const render = () => view(container, { state, navigate: jest.fn() });
+  render();
+  container.querySelector<HTMLInputElement>('.draft__excess-check')!.click();
+  container.querySelector<HTMLDetailsElement>('.optimization__setup details')!.open = true;
+  const inputs = container.querySelectorAll<HTMLInputElement>('.optimization__setup input');
+  inputs[0]!.value = '3456';
+  inputs[1]!.value = '7';
+  inputs[0]!.dispatchEvent(new Event('input'));
+  container.querySelector<HTMLButtonElement>('.draft__generate')!.click();
+  setUiLanguage('en');
+  render();
+  expect(container.querySelector<HTMLInputElement>('.draft__excess-check')!.checked).toBe(true);
+  expect(container.querySelector<HTMLButtonElement>('.draft__excess-apply')!.disabled).toBe(false);
+  expect(container.querySelector<HTMLDetailsElement>('.optimization__setup details')!.open).toBe(true);
+  expect(Array.from(container.querySelectorAll<HTMLInputElement>('.optimization__setup input'), (input) => input.value)).toEqual(['3456', '7']);
+  expect(container.querySelector<HTMLDivElement>('.draft__discard-confirm')!.hidden).toBe(false);
+  expect(container.querySelector('.draft__discard-message')!.textContent).toContain('includes changes to the AI draft');
+  container.querySelector<HTMLButtonElement>('.draft__discard-cancel')!.click();
+  setUiLanguage('ja');
+  render();
+  expect(container.querySelector<HTMLDivElement>('.draft__discard-confirm')!.hidden).toBe(true);
+  state.currentFormulaVersionId = 'v2';
+  state.excessFilterProposal = { ...state.excessFilterProposal!, formulaVersionId: 'v2' };
+  render();
+  expect(container.querySelector<HTMLInputElement>('.draft__excess-check')!.checked).toBe(false);
+  expect(container.querySelector<HTMLButtonElement>('.draft__excess-apply')!.disabled).toBe(true);
+});
 
 function validationSummary(): ValidationSummary {
   return {
