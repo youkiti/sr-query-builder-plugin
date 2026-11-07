@@ -1,4 +1,5 @@
 import type { ExportResult, ValidationSummary } from '@/app/services';
+import { setUiLanguage } from '@/lib/i18n';
 import { INITIAL_STATE, type AppState } from '../store';
 import { buildValidationWarning, createExportView } from './exportView';
 
@@ -72,6 +73,87 @@ function summaryWith(
 }
 
 describe('createExportView', () => {
+  test('英語で見出し・変換・文案コピーボタンを表示し、文案本文は両言語とも保つ', () => {
+    const container = buildContainer();
+    const view = createExportView();
+    const ctx = { state: stateWithDraft(), navigate: jest.fn() };
+    view(container, ctx);
+    const drafts = Array.from(container.querySelectorAll('.export__methods-text')).map((node) => node.textContent);
+    try {
+      setUiLanguage('en');
+      view(container, ctx);
+      expect(container.querySelector('h2')?.textContent).toBe('Export');
+      expect(container.querySelector('h3')?.textContent).toBe('Draft text for the Methods section');
+      expect(container.querySelector('.export__actions button')?.textContent).toBe('Convert to 4 databases and save');
+      expect(Array.from(container.querySelectorAll('.export__methods-copy')).map((node) => node.textContent)).toEqual([
+        'Copy English version', 'Copy Japanese version',
+      ]);
+      expect(Array.from(container.querySelectorAll('.export__methods-text')).map((node) => node.textContent)).toEqual(drafts);
+      expect(container.querySelector('.export__validation-warning')?.textContent).toContain('has not been validated yet');
+    } finally {
+      setUiLanguage('ja');
+    }
+  });
+
+  test('言語変更で変換結果・ダウンロード内容・開閉状態を保ち、別の版では結果を消す', async () => {
+    const onExport = jest.fn(async () => sampleResult());
+    const view = createExportView({ onExport });
+    const container = buildContainer();
+    const ctx = { state: stateWithDraft(), navigate: jest.fn() };
+    view(container, ctx);
+    container.querySelector<HTMLButtonElement>('.export__actions button')!.click();
+    await flushAsync();
+    const details = container.querySelectorAll<HTMLDetailsElement>('details');
+    details[0]!.open = true;
+    details[1]!.open = false;
+    const download = container.querySelector<HTMLAnchorElement>('.export__download')!;
+    const original = { href: download.href, filename: download.download };
+    try {
+      setUiLanguage('en');
+      view(container, ctx);
+      expect(Array.from(container.querySelectorAll<HTMLDetailsElement>('details')).map((node) => node.open)).toEqual([true, false]);
+      expect(container.querySelector('.export__status')?.textContent).toBe('Conversion complete.');
+      expect(container.querySelector('.export__download')?.textContent).toBe('Download search-formula.central.md');
+      const translatedDownload = container.querySelector<HTMLAnchorElement>('.export__download')!;
+      expect({ href: translatedDownload.href, filename: translatedDownload.download }).toEqual(original);
+      expect(container.querySelector('.export__warnings')?.textContent).toBe('Condition/Intervention 振り分け未対応');
+      setUiLanguage('ja');
+      view(container, ctx);
+      expect(Array.from(container.querySelectorAll<HTMLDetailsElement>('details')).map((node) => node.open)).toEqual([true, false]);
+      expect(onExport).toHaveBeenCalledTimes(1);
+      view(container, { ...ctx, state: stateWithDraft({ currentFormulaVersionId: 'v-2' }) });
+      expect(container.querySelector('details')).toBeNull();
+    } finally {
+      setUiLanguage('ja');
+    }
+  });
+
+  test('変換中に言語を変更しても重複実行せず、新しい画面に結果を表示する', async () => {
+    let finish!: (result: ExportResult) => void;
+    const onExport = jest.fn(() => new Promise<ExportResult>((resolve) => {
+      finish = resolve;
+    }));
+    const view = createExportView({ onExport });
+    const container = buildContainer();
+    const ctx = { state: stateWithDraft(), navigate: jest.fn() };
+    view(container, ctx);
+    container.querySelector<HTMLButtonElement>('.export__actions button')!.click();
+    try {
+      setUiLanguage('en');
+      view(container, ctx);
+      expect(container.querySelector('.export__status')?.textContent).toBe('Converting…');
+      expect(container.querySelector<HTMLButtonElement>('.export__actions button')?.disabled).toBe(true);
+      finish(sampleResult());
+      await flushAsync();
+      expect(container.querySelectorAll('details')).toHaveLength(2);
+      expect(container.querySelector('.export__status')?.textContent).toBe('Conversion complete.');
+      expect(container.querySelector<HTMLButtonElement>('.export__actions button')?.disabled).toBe(false);
+      expect(onExport).toHaveBeenCalledTimes(1);
+    } finally {
+      setUiLanguage('ja');
+    }
+  });
+
   test('プロジェクト未選択時は警告のみ', () => {
     const view = createExportView();
     const container = buildContainer();

@@ -1,6 +1,56 @@
-// exportView.ts、methodsText.ts の文言を置く。
-import type { TranslatedMessages } from './types';
+// exportView.ts の文言を置く（methodsText.ts の文案は論文に貼る文なので日英とも固定）。
+export const exportJa = {
+  "export.noProject": "先にプロジェクトを選択してください。",
+  "export.noFormula": "先に /draft で検索式を生成してください。",
+  "export.unreviewed": "⚠ この版は AI が作ったままで、人が確かめていません。",
+  "export.editLink": "編集画面",
+  "export.reviewPrompt": " で確かめてから使ってください。",
+  "export.convert": "4 DB へ変換して保存",
+  "export.converting": "変換中…",
+  "export.converted": "変換が完了しました。",
+  "export.unvalidated": "⚠ この検索式はまだ検証されていません。#/draft の「検証のみ再実行」でシード捕捉率を確認してからのエクスポートを推奨します。",
+  "export.validationFailed": "⚠ 検証でシード捕捉率を確認できていません（final_query の実行に失敗）。#/draft で再検証してからのエクスポートを推奨します。",
+  "export.noSeeds": "⚠ 既知の文献（シード論文）での検証をしていません",
+  "export.lowCapture": "⚠ シード捕捉率が {percent}%（{captured}/{seedTotal} 件）です。未捕捉シードの原因を #/draft で確認してからのエクスポートを推奨します。",
+  "export.conversionNote": "この変換は規則に基づくもので、AI は使っていません。各行を、変換先のデータベースで確かめてください。",
+  "export.download": "{filename} をダウンロード",
+  "export.methodsTitle": "論文 Methods 用の文案",
+  "export.methodsNoModel": "検索式の下書きに生成 AI を使ったことを論文の方法（Methods）に記載するための定型文です。この検索式にはモデル情報が記録されていないため、{ } の部分は使用したモデル名に置き換えてください。",
+  "export.methodsNote": "検索式の下書きに生成 AI を使ったことを論文の方法（Methods）に記載するための定型文です。必要に応じて調整して使ってください。",
+  "export.methodsFillIn": "［ ］内に、著者が AI の下書きをどう確かめ、直したかを必ず記入してください。",
+  "export.englishVersion": "英語版",
+  "export.japaneseVersion": "日本語版",
+  "export.copyVersion": "{label}をコピー",
+  "export.copiedVersion": "{label}の文案をコピーしました。",
+  "export.copyFailed": "コピーに失敗しました。テキストを選択して手動でコピーしてください。",
+  "export.clipboardUnavailable": "クリップボード API が利用できません",
+  "export.pubmedLink": "PubMed で直接開く: ",
+} as const;
 
-export const exportJa = {} as const;
-
-export const exportEn: TranslatedMessages<typeof exportJa> = {};
+export const exportEn: Record<keyof typeof exportJa, string> = {
+  "export.noProject": "Select a project first.",
+  "export.noFormula": "Generate a search formula in /draft first.",
+  "export.unreviewed": "⚠ This version was created by AI and has not been checked by a person. Check it in ",
+  "export.editLink": "Edit formula",
+  "export.reviewPrompt": " before use.",
+  "export.convert": "Convert to 4 databases and save",
+  "export.converting": "Converting…",
+  "export.converted": "Conversion complete.",
+  "export.unvalidated": "⚠ This search formula has not been validated yet. Use “Re-run validation only” in #/draft to check the seed-paper capture rate before exporting.",
+  "export.validationFailed": "⚠ The seed-paper capture rate could not be checked (final_query failed). Re-run validation in #/draft before exporting.",
+  "export.noSeeds": "⚠ This formula has not been validated against known papers (seed papers)",
+  "export.lowCapture": "⚠ The seed-paper capture rate is {percent}% ({captured}/{seedTotal} papers). Check why seeds were missed in #/draft before exporting.",
+  "export.conversionNote": "This conversion uses rules, without AI. Check each line in the target database.",
+  "export.download": "Download {filename}",
+  "export.methodsTitle": "Draft text for the Methods section",
+  "export.methodsNoModel": "Use this template to disclose generative AI use in drafting the search formula in your Methods section. No model information was recorded for this formula; replace { } with the model name you used.",
+  "export.methodsNote": "Use this template to disclose generative AI use in drafting the search formula in your Methods section. Adapt it as needed.",
+  "export.methodsFillIn": "In the brackets, describe how the authors checked and revised the AI-generated drafts.",
+  "export.englishVersion": "English version",
+  "export.japaneseVersion": "Japanese version",
+  "export.copyVersion": "Copy {label}",
+  "export.copiedVersion": "Copied the {label} draft.",
+  "export.copyFailed": "Copy failed. Select the text and copy it manually.",
+  "export.clipboardUnavailable": "Clipboard API is unavailable",
+  "export.pubmedLink": "Open directly in PubMed: ",
+};
