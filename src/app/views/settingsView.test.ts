@@ -86,6 +86,24 @@ describe('createSettingsView - Gemini プラン判定', () => {
     ['settings-ncbi-key', 'apiKeys.ncbi'],
   ];
 
+  test('英語の見出しとボタンを表示し、言語変更後も未保存入力を保持する', async () => {
+    const view = createSettingsView(buildDeps({}));
+    const container = document.createElement('div');
+    view(container, buildCtx());
+    await flush();
+    const input = container.querySelector<HTMLInputElement>('#settings-gemini-key')!;
+    input.value = 'unsaved-key';
+    input.dispatchEvent(new Event('input'));
+    i18n.setUiLanguage('en');
+    view(container, buildCtx());
+    await flush();
+    expect(container.querySelector('h2')!.textContent).toBe('Settings');
+    expect(container.querySelector('.settings__section h3')!.textContent).toBe('Display language');
+    expect(container.querySelector('#settings-save')!.textContent).toBe('Save');
+    expect(container.querySelector('.settings__back-btn')!.textContent).toBe('← Back to Home');
+    expect(container.querySelector<HTMLInputElement>('#settings-gemini-key')!.value).toBe('unsaved-key');
+  });
+
   test.each([...keyFields, ['settings-custom-model-id', ''], ['settings-custom-model-label', '']])(
     '非同期の保存値読み込み後も再描画前の未保存入力を保持する: %s', async (id, key) => {
       const store = { [key!]: 'saved', 'gemini.detectedTier': 'paid' };

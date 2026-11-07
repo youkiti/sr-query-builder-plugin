@@ -1,6 +1,7 @@
+import { t } from '@/lib/i18n';
 import { buildUiLanguageSection } from './uiLanguageSection';
 import { ROUTE_LABELS } from '../router';
-import { addLlmPermissionButtons, requestLlmHosts, HOST_PERMISSION_DENIED, type LlmHostPermissions } from '@/lib/llm/hostPermissions';
+import { addLlmPermissionButtons, requestLlmHosts, type LlmHostPermissions } from '@/lib/llm/hostPermissions';
 import { AiConsentDeclinedError } from '../services/aiConsentService';
 import { updateGeminiDataNotice } from '@/lib/llm/aiDisclosure';
 import {
@@ -111,7 +112,7 @@ function populateModelSelect(
   if (selectedModelId && !Array.from(selectEl.options).some((option) => option.value === selectedModelId)) {
     const option = selectEl.ownerDocument.createElement('option');
     option.value = selectedModelId;
-    option.textContent = `${selectedModelId}（一覧にないモデル）`;
+    option.textContent = t('settings.unlistedModel', { id: selectedModelId });
     option.selected = true;
     selectEl.appendChild(option);
   }
@@ -139,15 +140,15 @@ function updateTierBadge(
   switch (state) {
     case 'checking':
       badge.classList.add('settings__tier-badge--checking');
-      badge.textContent = '確認中...';
+      badge.textContent = t('settings.checking');
       break;
     case 'paid':
       badge.classList.add('settings__tier-badge--paid');
-      badge.textContent = '有料プラン';
+      badge.textContent = t('settings.paid');
       break;
     case 'free':
       badge.classList.add('settings__tier-badge--free');
-      badge.textContent = '無料プラン';
+      badge.textContent = t('settings.free');
       break;
     default:
       badge.textContent = '';
@@ -167,7 +168,7 @@ function renderCustomModelsList(
     span.textContent = m.label ? `${m.label} (${m.id})` : m.id;
     const btn = listEl.ownerDocument.createElement('button');
     btn.type = 'button';
-    btn.textContent = '削除';
+    btn.textContent = t('settings.remove');
     btn.addEventListener('click', () => onRemove(m.id));
     item.appendChild(span);
     item.appendChild(btn);
@@ -190,7 +191,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
     const backBtn = doc.createElement('button');
     backBtn.type = 'button';
     backBtn.className = 'settings__back-btn';
-    backBtn.textContent = '← ホームへ戻る';
+    backBtn.textContent = t('settings.back');
     backBtn.addEventListener('click', () => ctx.navigate('home'));
     header.appendChild(h2);
     header.appendChild(backBtn);
@@ -206,7 +207,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
     // ステータス行
     const status = doc.createElement('p');
     status.className = 'settings__status';
-    status.textContent = '読み込み中…';
+    status.textContent = t('settings.loading');
     container.appendChild(status);
 
     container.appendChild(buildUiLanguageSection(doc));
@@ -215,7 +216,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
     const llmSection = doc.createElement('section');
     llmSection.className = 'settings__section';
     const llmHeading = doc.createElement('h3');
-    llmHeading.textContent = 'LLM プロバイダ';
+    llmHeading.textContent = t('settings.providers');
     llmSection.appendChild(llmHeading);
 
     // Gemini カード
@@ -231,7 +232,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
     geminiLink.target = '_blank';
     geminiLink.rel = 'noreferrer';
     geminiLink.className = 'settings__provider-link';
-    geminiLink.textContent = 'APIキーを取得 ↗';
+    geminiLink.textContent = t('settings.getKey');
     const tierBadge = doc.createElement('span');
     tierBadge.id = 'settings-gemini-tier-badge';
     tierBadge.className = 'settings__tier-badge';
@@ -243,7 +244,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
     const geminiLabel = doc.createElement('label');
     geminiLabel.className = 'settings__field';
     const geminiLabelText = doc.createElement('span');
-    geminiLabelText.textContent = 'API キー';
+    geminiLabelText.textContent = t('settings.apiKey');
     const geminiInput = doc.createElement('input');
     geminiInput.type = 'password';
     geminiInput.id = 'settings-gemini-key';
@@ -254,8 +255,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
     const geminiMuted = doc.createElement('p');
     geminiMuted.className = 'settings__muted';
     geminiMuted.textContent =
-      'キーの保存時（未判定の場合はこの画面を開いたとき）にプランを自動確認します。' +
-      '無料プランを検出した場合はモデルを Gemini 3.5 Flash Lite に自動切り替えします。';
+      t('settings.geminiHint');
     geminiCard.appendChild(geminiMuted);
     llmSection.appendChild(geminiCard);
 
@@ -272,18 +272,18 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
     orLink.target = '_blank';
     orLink.rel = 'noreferrer';
     orLink.className = 'settings__provider-link';
-    orLink.textContent = 'APIキーを取得 ↗';
+    orLink.textContent = t('settings.getKey');
     orTitle.appendChild(orTitleText);
     orTitle.appendChild(orLink);
     orCard.appendChild(orTitle);
     const orMuted = doc.createElement('p');
     orMuted.className = 'settings__muted';
-    orMuted.textContent = 'Qwen / DeepSeek などの OSS モデルや多プロバイダを利用できます。';
+    orMuted.textContent = t('settings.openrouterHint');
     orCard.appendChild(orMuted);
     const orLabel = doc.createElement('label');
     orLabel.className = 'settings__field';
     const orLabelText = doc.createElement('span');
-    orLabelText.textContent = 'API キー';
+    orLabelText.textContent = t('settings.apiKey');
     const orInput = doc.createElement('input');
     orInput.type = 'password';
     orInput.id = 'settings-openrouter-key';
@@ -296,16 +296,16 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
     const customForm = doc.createElement('div');
     customForm.className = 'settings__custom-model-form';
     const customHeading = doc.createElement('h5');
-    customHeading.textContent = 'カスタムモデルを追加（上限 20 件）';
+    customHeading.textContent = t('settings.customHeading');
     const customMuted = doc.createElement('p');
     customMuted.className = 'settings__muted';
-    customMuted.textContent = 'OpenRouter の任意のモデルID（例: meta-llama/llama-3.3-70b）や Claude のモデルID（例: claude-opus-5-5）を追加できます。';
+    customMuted.textContent = t('settings.customHint');
     const customFieldRow = doc.createElement('div');
     customFieldRow.className = 'settings__field-row';
     const customIdLabel = doc.createElement('label');
     customIdLabel.className = 'settings__field';
     const customIdLabelText = doc.createElement('span');
-    customIdLabelText.textContent = 'モデルID';
+    customIdLabelText.textContent = t('settings.modelId');
     const customModelIdInput = doc.createElement('input');
     customModelIdInput.type = 'text';
     customModelIdInput.id = 'settings-custom-model-id';
@@ -316,7 +316,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
     const customLabelLabel = doc.createElement('label');
     customLabelLabel.className = 'settings__field';
     const customLabelLabelText = doc.createElement('span');
-    customLabelLabelText.textContent = '表示名（任意）';
+    customLabelLabelText.textContent = t('settings.modelLabel');
     const customModelLabelInput = doc.createElement('input');
     customModelLabelInput.type = 'text';
     customModelLabelInput.id = 'settings-custom-model-label';
@@ -329,7 +329,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
     const addCustomModelBtn = doc.createElement('button');
     addCustomModelBtn.type = 'button';
     addCustomModelBtn.className = 'settings__btn';
-    addCustomModelBtn.textContent = '追加';
+    addCustomModelBtn.textContent = t('settings.add');
     const customModelsList = doc.createElement('div');
     customModelsList.id = 'settings-custom-models-list';
     customModelsList.className = 'settings__custom-models-list';
@@ -354,18 +354,18 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
     anthropicLink.target = '_blank';
     anthropicLink.rel = 'noreferrer';
     anthropicLink.className = 'settings__provider-link';
-    anthropicLink.textContent = 'APIキーを取得 ↗';
+    anthropicLink.textContent = t('settings.getKey');
     anthropicTitle.appendChild(anthropicTitleText);
     anthropicTitle.appendChild(anthropicLink);
     anthropicCard.appendChild(anthropicTitle);
     const anthropicMuted = doc.createElement('p');
     anthropicMuted.className = 'settings__muted';
-    anthropicMuted.textContent = 'Claude モデルを利用できます。';
+    anthropicMuted.textContent = t('settings.anthropicHint');
     anthropicCard.appendChild(anthropicMuted);
     const anthropicLabel = doc.createElement('label');
     anthropicLabel.className = 'settings__field';
     const anthropicLabelText = doc.createElement('span');
-    anthropicLabelText.textContent = 'API キー';
+    anthropicLabelText.textContent = t('settings.apiKey');
     const anthropicInput = doc.createElement('input');
     anthropicInput.type = 'password';
     anthropicInput.id = 'settings-anthropic-key';
@@ -383,7 +383,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
     modelHead.className = 'settings__field-head';
     const modelLabelText = doc.createElement('label');
     modelLabelText.htmlFor = 'settings-llm-model';
-    modelLabelText.textContent = '使用モデル';
+    modelLabelText.textContent = t('settings.model');
     const modelSelect = doc.createElement('select');
     modelSelect.id = 'settings-llm-model';
     const modelHelp = doc.createElement('a');
@@ -391,7 +391,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
     modelHelp.href = MODEL_BENCHMARK_URL;
     modelHelp.target = '_blank';
     modelHelp.rel = 'noreferrer';
-    modelHelp.title = 'モデルごとの成績（ベンチマーク）を GitHub の README で開く';
+    modelHelp.title = t('settings.benchmark');
     modelHelp.setAttribute('aria-label', modelHelp.title);
     modelHelp.textContent = '?';
     modelHead.appendChild(modelLabelText);
@@ -409,12 +409,12 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
     const ncbiMuted = doc.createElement('p');
     ncbiMuted.className = 'settings__muted';
     ncbiMuted.innerHTML =
-      'APIキーを設定してください（任意）。登録すると PubMed API のレート上限が 3 req/s → 10 req/s に上がります。未設定でも動作しますが、検証フェーズで rate limit に当たる場合は' +
-      ' <a href="https://www.ncbi.nlm.nih.gov/account/settings/" target="_blank" rel="noreferrer">NCBI アカウント設定</a> で取得して設定してください。';
+      t('settings.ncbiIntro') +
+      ' <a href="https://www.ncbi.nlm.nih.gov/account/settings/" target="_blank" rel="noreferrer">' + t('settings.ncbiAccount') + '</a>' + t('settings.ncbiEnd');
     const ncbiLabel = doc.createElement('label');
     ncbiLabel.className = 'settings__field';
     const ncbiLabelText = doc.createElement('span');
-    ncbiLabelText.textContent = 'NCBI APIキー';
+    ncbiLabelText.textContent = t('settings.ncbiKey');
     const ncbiInput = doc.createElement('input');
     ncbiInput.type = 'password';
     ncbiInput.id = 'settings-ncbi-key';
@@ -433,7 +433,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
     saveBtn.type = 'button';
     saveBtn.id = 'settings-save';
     saveBtn.className = 'settings__btn settings__btn--primary';
-    saveBtn.textContent = '保存';
+    saveBtn.textContent = t('settings.save');
     actions.appendChild(saveBtn);
     container.appendChild(actions);
 
@@ -471,7 +471,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
 
       if (pending === '1') {
         banner.textContent =
-          'LLMプロバイダのAPIキーが未設定です。入力して保存すると作業画面に戻ります。';
+          t('settings.pending');
         banner.hidden = false;
       }
 
@@ -497,10 +497,10 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
       refreshProviderCards(doc, selectedModel);
 
       const parts: string[] = [];
-      parts.push(gemini ? 'Google AI Studio: 保存済み' : 'Google AI Studio: 未設定');
-      parts.push(openrouter ? 'OpenRouter: 保存済み' : 'OpenRouter: 未設定');
-      parts.push(anthropic ? 'Anthropic: 保存済み' : 'Anthropic: 未設定');
-      parts.push(ncbi ? 'NCBI: 保存済み' : 'NCBI: 未設定（3 req/s 枠）');
+      parts.push(gemini ? t('settings.geminiSaved') : t('settings.geminiUnset'));
+      parts.push(openrouter ? t('settings.orSaved') : t('settings.orUnset'));
+      parts.push(anthropic ? t('settings.anthropicSaved') : t('settings.anthropicUnset'));
+      parts.push(ncbi ? t('settings.ncbiSaved') : t('settings.ncbiUnset'));
       status.textContent = parts.join(' / ');
 
       // 保存済み tier をバッジへ復元。未判定でキーがあれば読み込み時に自動判定する
@@ -534,7 +534,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
         const currentModel = modelSelect.value ?? DEFAULT_MODEL;
         populateModelSelect(modelSelect, models, currentModel);
         renderCustomModelsList(customModelsList, models, handleRemoveCustomModel);
-        status.textContent = 'カスタムモデルを削除しました。';
+        status.textContent = t('settings.removed');
       })();
     }
 
@@ -544,7 +544,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
       void callbacks.writeKey(KEY_LLM_MODEL, selectedModel);
       refreshProviderCards(doc, selectedModel);
       void hostPermission.then((allowed) => {
-        if (!allowed) status.textContent = HOST_PERMISSION_DENIED;
+        if (!allowed) status.textContent = t('settings.permissionDenied');
       });
     });
 
@@ -553,17 +553,17 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
         const id = customModelIdInput.value.trim();
         const label = customModelLabelInput.value.trim();
         if (!id.includes('/') && !id.startsWith('claude-')) {
-          status.textContent = 'モデルID は "provider/model-name" 形式、または "claude-" で始まる ID を入力してください。';
+          status.textContent = t('settings.invalidId');
           return;
         }
         const raw = await callbacks.readKey(KEY_CUSTOM_MODELS);
         const models = parseCustomModels(raw);
         if (models.length >= MAX_CUSTOM_MODELS) {
-          status.textContent = 'カスタムモデルの上限（20件）に達しています。';
+          status.textContent = t('settings.limit');
           return;
         }
         if (models.some((m) => m.id === id)) {
-          status.textContent = 'そのモデルIDはすでに登録されています。';
+          status.textContent = t('settings.duplicate');
           return;
         }
         const newEntry: CustomModel = label ? { id, label } : { id };
@@ -575,7 +575,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
         unsavedInputs.delete(customModelLabelInput.id);
         populateModelSelect(modelSelect, models, modelSelect.value ?? DEFAULT_MODEL);
         renderCustomModelsList(customModelsList, models, handleRemoveCustomModel);
-        status.textContent = 'カスタムモデルを追加しました。';
+        status.textContent = t('settings.added');
       })();
     });
 
@@ -611,7 +611,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
         if (!hostAllowed) {
           const notice = doc.createElement('p');
           notice.setAttribute('role', 'alert');
-          notice.textContent = HOST_PERMISSION_DENIED;
+          notice.textContent = t('settings.permissionDenied');
           saveBtn?.parentElement?.appendChild(notice);
         }
 
@@ -624,7 +624,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
           await callbacks.removeKey(KEY_GEMINI_TIER);
           updateTierBadge(tierBadge, 'unknown');
         } else if (resolveProvider(selectedModel) === 'gemini') {
-          status.textContent = 'APIプランを確認中...';
+          status.textContent = t('settings.checkingPlan');
           updateTierBadge(tierBadge, 'checking');
 
           let tier: 'paid' | 'free' | 'unknown' | 'unavailable';
@@ -667,7 +667,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
 
         if (hostAllowed && pendingNow === '1' && keyForProvider.trim() !== '') {
           await callbacks.removeKey(KEY_PENDING);
-          status.textContent = '保存しました。ホーム画面に戻ります…';
+          status.textContent = t('settings.returning');
           banner.hidden = true;
           ctx.navigate('home');
           return;
@@ -675,15 +675,15 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
 
         if (modelSwitchedToFree) {
           status.textContent =
-            '保存しました。無料プランを検出。Gemini 3.5 Flash Lite に切り替えました。';
+            t('settings.switched');
         } else if (tierUnavailable) {
           status.textContent =
-            '保存しました。（Gemini が混雑中のためプランを判定できませんでした。時間をおいてこの画面を開くと自動で再判定されます）';
+            t('settings.unavailable');
         } else if (tierUndetermined) {
           status.textContent =
-            '保存しました。（Gemini プランを自動判定できませんでした。コンソールログを確認してください）';
+            t('settings.undetermined');
         } else {
-          status.textContent = '保存しました。';
+          status.textContent = t('settings.saved');
         }
       })();
     });

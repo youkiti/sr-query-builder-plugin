@@ -1,5 +1,6 @@
 import * as i18n from '@/lib/i18n';
 import * as languageStore from '@/lib/i18n/uiLanguageStore';
+import { readFileSync } from 'fs';
 
 beforeEach(() => { jest.spyOn(languageStore, 'loadUiLanguage').mockResolvedValue('ja'); });
 afterEach(() => { i18n.setUiLanguage('ja'); jest.restoreAllMocks(); });
@@ -46,6 +47,43 @@ describe('startOptions', () => {
       openAppTab: jest.fn(),
     };
   }
+
+  test('言語変更で静的文言・状態・モデル一覧を更新し、編集中の値を保持する', async () => {
+    const doc = new DOMParser().parseFromString(readFileSync(`${__dirname}/options.html`, 'utf8'), 'text/html');
+    doc.getElementById('options-build-date')!.remove();
+    const initialText = doc.documentElement.textContent!.replace(/\s+/g, ' ').trim();
+    i18n.localizeDom(doc);
+    expect(doc.documentElement.textContent!.replace(/\s+/g, ' ').trim()).toBe(initialText);
+    for (const element of Array.from(doc.querySelectorAll('[data-i18n]'))) {
+      expect(element.children).toHaveLength(0);
+    }
+    await startOptions(doc, readStoredValues({
+      'llm.customModels': JSON.stringify([{ id: 'vendor/model', label: 'Custom model' }]),
+      'gemini.detectedTier': 'paid',
+    }));
+    const keyInput = doc.querySelector<HTMLInputElement>('#gemini-api-key')!;
+    keyInput.value = 'unsaved-key';
+    const modelInput = doc.querySelector<HTMLInputElement>('#custom-model-label')!;
+    modelInput.value = 'unsaved-label';
+    const select = doc.querySelector<HTMLSelectElement>('#llm-model-select')!;
+    const selected = select.value;
+    i18n.setUiLanguage('en');
+    expect(doc.title).toBe('SR Query Builder Plugin - Settings');
+    expect(doc.querySelector('h1')!.textContent).toBe('Settings');
+    expect(doc.querySelector('#options-status')!.textContent).toContain('Gemini: Not set');
+    expect(doc.querySelector('#custom-models-list button')!.textContent).toBe('Remove');
+    expect(doc.querySelector('#gemini-tier-badge')!.textContent).toBe('Paid plan');
+    expect(doc.querySelector('#gemini-card p')!.textContent).not.toMatch(/[ぁ-龠]/);
+    expect(keyInput.value).toBe('unsaved-key');
+    expect(modelInput.value).toBe('unsaved-label');
+    expect(select.value).toBe(selected);
+    doc.querySelector<HTMLButtonElement>('#save-keys')!.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(doc.querySelector('#options-status')!.textContent).toBe('Saved.');
+    i18n.setUiLanguage('ja');
+    expect(doc.querySelector('#options-status')!.textContent).toBe('保存しました。');
+    expect(doc.querySelector('#custom-models-list button')!.textContent).toBe('削除');
+  });
 
   test('選択が空のとき、空 ID の一覧外モデルを追加しない', async () => {
     const doc = buildDocument();

@@ -3,19 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SR Query Builder Plugin</title>
+    <title data-i18n="popup.brand">SR Query Builder Plugin</title>
     <link rel="stylesheet" href="../styles/tokens.css" />
     <link rel="stylesheet" href="../styles/globals.css" />
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
     <main id="popup-root" class="popup">
-      <h1 class="popup__title">SR Query Builder Plugin</h1>
+      <h1 class="popup__title" data-i18n="popup.brand">SR Query Builder Plugin</h1>
       <span class="popup__build-date" id="popup-build-date"></span>
-      <p class="popup__status" id="popup-status">読み込み中…</p>
+      <p class="popup__status" id="popup-status" data-i18n="popup.loading">読み込み中…</p>
 
       <section class="popup__section" id="popup-auth" hidden>
-        <p class="popup__muted">
+        <p class="popup__muted" data-i18n="popup.authHint">
           プロジェクトは Google Sheets / Drive に保存されます。Google
           アカウントでログインしてください。
         </p>
@@ -23,6 +23,7 @@
           type="button"
           id="login-button"
           class="popup__button popup__button--primary"
+          data-i18n="popup.login"
         >
           Google でログイン
         </button>
@@ -31,50 +32,53 @@
 
       <div id="popup-projects" hidden>
         <section class="popup__section popup__account" id="popup-account">
-          <p class="popup__muted popup__account-row">
+          <p class="popup__muted popup__account-row"><span data-i18n="popup.signedIn">
             ログイン中:
-            <span id="popup-email" class="popup__account-email">—</span>
+            </span> <span id="popup-email" class="popup__account-email">—</span>
           </p>
           <button
             type="button"
             id="logout-button"
             class="popup__button popup__button--text"
+            data-i18n="popup.logout"
           >
             ログアウト
           </button>
         </section>
 
         <section class="popup__section" id="popup-recent-section" hidden>
-          <h2 class="popup__section-title">最近のプロジェクト</h2>
+          <h2 class="popup__section-title" data-i18n="popup.recent">最近のプロジェクト</h2>
           <ul class="popup__recent" id="popup-recent"></ul>
         </section>
 
         <section class="popup__section">
-          <h2 class="popup__section-title">新規プロジェクト</h2>
+          <h2 class="popup__section-title" data-i18n="popup.newProject">新規プロジェクト</h2>
           <form id="popup-create-form" class="popup__form">
             <input
               type="text"
               id="popup-create-title"
               class="popup__input"
               placeholder="プロジェクトタイトル"
+              data-i18n-placeholder="popup.titlePlaceholder"
               required
             />
-            <button type="submit" class="popup__button">作成</button>
+            <button type="submit" class="popup__button" data-i18n="popup.create">作成</button>
           </form>
           <p class="popup__form-error" id="popup-create-error"></p>
         </section>
 
         <section class="popup__section">
-          <h2 class="popup__section-title">スプレッドシート ID で開く</h2>
+          <h2 class="popup__section-title" data-i18n="popup.openById">スプレッドシート ID で開く</h2>
           <form id="popup-open-form" class="popup__form">
             <input
               type="text"
               id="popup-open-id"
               class="popup__input"
               placeholder="スプレッドシート ID"
+              data-i18n-placeholder="popup.idPlaceholder"
               required
             />
-            <button type="submit" class="popup__button">開く</button>
+            <button type="submit" class="popup__button" data-i18n="popup.open">開く</button>
           </form>
           <p class="popup__form-error" id="popup-open-error"></p>
           <!-- 他人が作った共有シートを開こうとしてアクセス拒否になったときの許可導線。
@@ -83,7 +87,7 @@
         </section>
       </div>
 
-      <button type="button" id="open-options" class="popup__button popup__button--text">
+      <button type="button" id="open-options" class="popup__button popup__button--text" data-i18n="popup.settings">
         設定を開く
       </button>
     </main>

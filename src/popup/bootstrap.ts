@@ -10,6 +10,8 @@
  *
  * すべての deps を引数注入するので OAuth 無しでテスト可能。
  */
+import { t, getUiLanguage, localizeDom, onUiLanguageChange, setUiLanguage } from '@/lib/i18n';
+import { loadUiLanguage, subscribeUiLanguage } from '@/lib/i18n/uiLanguageStore';
 
 import {
   createChromeRuntimeDeps,
@@ -121,6 +123,19 @@ export function createChromePopupDeps(): PopupDeps {
 }
 
 export async function startPopup(doc: Document, deps: PopupDeps): Promise<void> {
+  setUiLanguage(await loadUiLanguage());
+  const refreshLanguage = (): void => {
+    localizeDom(doc);
+    refreshText(doc);
+    doc.documentElement.lang = getUiLanguage();
+  };
+  refreshLanguage();
+  const unsubscribeLanguage = onUiLanguageChange(refreshLanguage);
+  const unsubscribeStorage = subscribeUiLanguage();
+  doc.defaultView?.addEventListener('pagehide', () => {
+    unsubscribeLanguage();
+    unsubscribeStorage();
+  }, { once: true });
   const buildDateEl = doc.getElementById('popup-build-date');
   if (buildDateEl) {
     buildDateEl.textContent = `build: ${__BUILD_DATE__}`;
@@ -143,7 +158,7 @@ async function refresh(doc: Document, deps: PopupDeps): Promise<void> {
   if (projectsSection) projectsSection.hidden = !authed;
 
   if (!authed) {
-    if (status) status.textContent = 'ログインが必要です。';
+    if (status) setText(status, () => t('popup.loginRequired'));
     return;
   }
 
@@ -151,10 +166,9 @@ async function refresh(doc: Document, deps: PopupDeps): Promise<void> {
   const recent = await getRecentProjects(deps.runtime.store);
   renderRecent(doc, recent, deps);
   if (status) {
-    status.textContent =
-      recent.length > 0
-        ? '最近のプロジェクトから選ぶか、新しく作成してください。'
-        : '新しいプロジェクトを作成するか、スプレッドシート ID から開いてください。';
+    setText(status, () => recent.length > 0
+        ? t('popup.chooseRecent')
+        : t('popup.chooseNew'));
   }
 }
 
@@ -163,9 +177,9 @@ async function renderAccount(doc: Document, deps: PopupDeps): Promise<void> {
   if (!emailSpan) return;
   try {
     const email = await getCurrentUserEmail(deps.runtime.profile);
-    emailSpan.textContent = email ?? '(不明)';
+    setText(emailSpan, () => email ?? t('popup.unknown'));
   } catch {
-    emailSpan.textContent = '(不明)';
+    setText(emailSpan, () => t('popup.unknown'));
   }
 }
 
@@ -189,7 +203,7 @@ function renderRecent(
     const li = doc.createElement('li');
     const btn = doc.createElement('button');
     btn.type = 'button';
-    btn.textContent = `${entry.title} — ${entry.projectId.slice(0, 8)}`;
+    setText(btn, () => `${entry.title} — ${entry.projectId.slice(0, 8)}`);
     btn.addEventListener('click', () => {
       void openRecent(doc, deps, entry);
     });
@@ -220,8 +234,7 @@ async function openAppOrRedirect(doc: Document, deps: PopupDeps): Promise<void> 
   await deps.runtime.store.write({ [STORAGE_KEY_PENDING_APP_TAB]: '1' });
   const status = doc.getElementById('popup-status');
   if (status) {
-    status.textContent =
-      `${providerName} APIキーが未設定です。設定画面で入力すると、保存後にトップ画面に戻ります。`;
+    setText(status, () => t('popup.missingKey', { providerName }));
   }
   deps.openOptions();
 }
@@ -231,7 +244,7 @@ function bindLoginButton(doc: Document, deps: PopupDeps): void {
   const error = doc.getElementById('login-error');
   if (!btn) return;
   btn.addEventListener('click', () => {
-    if (error) error.textContent = '';
+    if (error) setText(error, () => '');
     btn.disabled = true;
     void deps
       .signIn()
@@ -239,8 +252,7 @@ function bindLoginButton(doc: Document, deps: PopupDeps): void {
         btn.disabled = false;
         if (!ok) {
           if (error) {
-            error.textContent =
-              'ログインに失敗しました。ブラウザに Google アカウントが追加されているか確認してください。';
+            setText(error, () => t('popup.loginFailed'));
           }
           return;
         }
@@ -283,16 +295,16 @@ function bindCreateForm(doc: Document, deps: PopupDeps): void {
   const submitBtn = form.querySelector('button[type="submit"]') as HTMLButtonElement | null;
   form.addEventListener('submit', (event) => {
     event.preventDefault();
-    if (error) error.textContent = '';
+    if (error) setText(error, () => '');
     let dotTimer: ReturnType<typeof setInterval> | null = null;
     if (submitBtn) {
       submitBtn.disabled = true;
       let dots = 0;
       const dotLabels = ['.', '..', '...'];
-      submitBtn.textContent = `作成中${dotLabels[0]}`;
+      setText(submitBtn, () => t('popup.creating', { dots: dotLabels[0]! }));
       dotTimer = setInterval(() => {
         dots = (dots + 1) % dotLabels.length;
-        if (submitBtn) submitBtn.textContent = `作成中${dotLabels[dots]}`;
+        if (submitBtn) setText(submitBtn, () => t('popup.creating', { dots: dotLabels[dots]! }));
       }, 400);
     }
     void createNewProject(titleInput.value, deps.runtime)
@@ -302,10 +314,10 @@ function bindCreateForm(doc: Document, deps: PopupDeps): void {
       })
       .catch((err: unknown) => {
         if (dotTimer !== null) clearInterval(dotTimer);
-        if (error) error.textContent = formatError(err);
+        if (error) setText(error, () => formatError(err));
         if (submitBtn) {
           submitBtn.disabled = false;
-          submitBtn.textContent = '作成';
+          setText(submitBtn, () => t('popup.create'));
         }
       });
   });
@@ -318,7 +330,7 @@ function bindOpenForm(doc: Document, deps: PopupDeps): void {
   if (!form || !idInput) return;
   form.addEventListener('submit', (event) => {
     event.preventDefault();
-    if (error) error.textContent = '';
+    if (error) setText(error, () => '');
     void openById(doc, deps, idInput.value.trim(), idInput);
   });
 }
@@ -345,7 +357,7 @@ async function openById(
       showPickerGuidance(doc, deps, spreadsheetId, idInput, err);
       return;
     }
-    if (error) error.textContent = formatError(err);
+    if (error) setText(error, () => formatError(err));
   }
 }
 
@@ -377,8 +389,7 @@ function showPickerGuidance(
   if (!container) {
     // 導線を置く場所が無い DOM では、せめて理由を文字で伝える
     if (error) {
-      error.textContent =
-        'このスプレッドシートを開く許可がありません。Google での許可が必要な可能性があります。';
+      setText(error, () => t('popup.noPermission'));
     }
     return;
   }
@@ -386,19 +397,17 @@ function showPickerGuidance(
   container.hidden = false;
 
   const message = doc.createElement('p');
-  message.textContent =
-    'このスプレッドシートを開くには、Google での許可が必要です（初回のみ）。開いた画面で対象のシートを選んでください。';
+  setText(message, () => t('popup.grantHint'));
   container.appendChild(message);
 
   const hint = doc.createElement('p');
   hint.className = 'popup__guidance-hint';
-  hint.textContent =
-    '許可しても開けない場合は、シートが削除されている・ID が間違っている・自分のアカウントに共有されていない、のいずれかの可能性があります。';
+  setText(hint, () => t('popup.grantTrouble'));
   container.appendChild(hint);
 
   const detail = doc.createElement('p');
   detail.className = 'popup__guidance-detail';
-  detail.textContent = `エラー詳細: ${formatError(err)}`;
+  setText(detail, () => t('popup.errorDetail', { error: formatError(err) }));
   container.appendChild(detail);
 
   const status = doc.createElement('p');
@@ -412,17 +421,17 @@ function showPickerGuidance(
   const grantBtn = doc.createElement('button');
   grantBtn.type = 'button';
   grantBtn.className = 'popup__button popup__button--primary';
-  grantBtn.textContent = 'Google で許可する';
+  setText(grantBtn, () => t('popup.grant'));
   grantBtn.addEventListener('click', () => {
     grantBtn.disabled = true;
-    status.textContent = '許可画面を開いています…';
+    setText(status, () => t('popup.grantOpening'));
     void deps
       .requestPickerGrant(spreadsheetId)
       .then((result) => {
-        writeGrantOutcome(doc, status, grantBtn, describeGrantResult(result));
+        writeGrantOutcome(doc, status, grantBtn, () => describeGrantResult(result));
       })
       .catch((err: unknown) => {
-        writeGrantOutcome(doc, status, grantBtn, `許可に失敗しました: ${formatError(err)}`);
+        writeGrantOutcome(doc, status, grantBtn, () => t('popup.grantFailed', { error: formatError(err) }));
       });
   });
   actions.appendChild(grantBtn);
@@ -430,10 +439,10 @@ function showPickerGuidance(
   const retryBtn = doc.createElement('button');
   retryBtn.type = 'button';
   retryBtn.className = 'popup__button';
-  retryBtn.textContent = '再試行';
+  setText(retryBtn, () => t('popup.retry'));
   retryBtn.addEventListener('click', () => {
     retryBtn.disabled = true;
-    status.textContent = '';
+    setText(status, () => '');
     void openById(doc, deps, spreadsheetId, idInput).finally(() => {
       retryBtn.disabled = false;
     });
@@ -457,37 +466,59 @@ function writeGrantOutcome(
   doc: Document,
   status: HTMLElement,
   grantBtn: HTMLButtonElement,
-  message: string
+  message: () => string
 ): void {
   if (status.isConnected) {
     grantBtn.disabled = false;
-    status.textContent = message;
+    setText(status, message);
     return;
   }
   const container = doc.getElementById('popup-open-guidance');
   const currentStatus = container?.querySelector<HTMLElement>('[role="status"]') ?? null;
   if (currentStatus) {
-    currentStatus.textContent = message;
+    setText(currentStatus, message);
     return;
   }
   const error = doc.getElementById('popup-open-error');
-  if (error) error.textContent = message;
+  if (error) setText(error, message);
 }
 
 function describeGrantResult(result: PickerGrantResult): string {
   switch (result.status) {
     case 'granted':
-      return '許可しました。メインビューを開いています…';
+      return t('popup.granted');
     case 'cancelled':
-      return '許可がキャンセルされました。';
+      return t('popup.cancelled');
     case 'busy':
-      return '許可画面を開いています。表示された画面で操作してください。';
+      return t('popup.busy');
     default:
-      return `許可に失敗しました: ${result.message}`;
+      return t('popup.grantFailed', { error: result.message });
   }
 }
 
 function formatError(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
+}
+
+const localizedText = new WeakMap<Document, Map<HTMLElement, () => string>>();
+
+function setText(element: HTMLElement, render: () => string): void {
+  let entries = localizedText.get(element.ownerDocument);
+  if (!entries) {
+    entries = new Map();
+    localizedText.set(element.ownerDocument, entries);
+  }
+  entries.set(element, render);
+  element.textContent = render();
+}
+
+function refreshText(doc: Document): void {
+  for (const [element, render] of localizedText.get(doc) ?? []) {
+    if (doc.contains(element)) {
+      element.textContent = render();
+    } else {
+      localizedText.get(doc)?.delete(element);
+    }
+  }
 }

@@ -1,4 +1,6 @@
 import { SHEET_HEADERS } from '@/domain/sheetsSchema';
+import { readFileSync } from 'fs';
+import { localizeDom, setUiLanguage } from '@/lib/i18n';
 import { STORAGE_KEY_GEMINI } from '@/app/services';
 import {
   STORAGE_KEY_ANTHROPIC,
@@ -113,6 +115,77 @@ function makeDeps(
 async function flushAsync(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
+
+test('保存言語で起動し、他ページの変更で動的表示を更新して入力と選択を保持する', async () => {
+  const originalChrome = globalThis.chrome;
+  const listeners = new Set<(changes: Record<string, chrome.storage.StorageChange>, area: string) => void>();
+  const removeListener = jest.fn((listener) => listeners.delete(listener));
+  globalThis.chrome = {
+    storage: {
+      local: { get: jest.fn(async () => ({ uiLanguage: 'en' })) },
+      onChanged: {
+        addListener: (listener: (changes: Record<string, chrome.storage.StorageChange>, area: string) => void) => listeners.add(listener),
+        removeListener,
+      },
+    },
+  } as unknown as typeof chrome;
+  document.documentElement.innerHTML = readFileSync(`${__dirname}/popup.html`, 'utf8');
+  document.getElementById('popup-build-date')!.remove();
+  const { deps, fetchMock } = makeDeps({
+    recentProjects: [{ projectId: 'project-123', spreadsheetId: 'sheet', title: 'My project' }],
+  });
+  deps.runtime.profile.getProfileUserInfo = jest.fn().mockResolvedValue({ email: '', id: '' });
+  fetchMock.mockResolvedValue(accessDeniedResponse());
+  try {
+    setUiLanguage('ja');
+    const initialText = document.documentElement.textContent!.replace(/\s+/g, ' ').trim();
+    localizeDom(document);
+    expect(document.documentElement.textContent!.replace(/\s+/g, ' ').trim()).toBe(initialText);
+    for (const element of Array.from(document.querySelectorAll('[data-i18n]'))) {
+      expect(element.children).toHaveLength(0);
+    }
+    await startPopup(document, deps);
+    expect(chrome.storage.local.get).toHaveBeenCalledWith('uiLanguage');
+    expect(document.documentElement.lang).toBe('en');
+    expect(document.querySelector('[data-i18n="popup.openById"]')!.textContent).toBe('Open by spreadsheet ID');
+    expect(document.querySelector('#popup-email')!.textContent).toBe('(Unknown)');
+    expect(document.querySelector('#popup-status')!.textContent).toBe('Choose a recent project or create a new one.');
+    const titleInput = document.querySelector<HTMLInputElement>('#popup-create-title')!;
+    const idInput = document.querySelector<HTMLInputElement>('#popup-open-id')!;
+    titleInput.value = 'Draft title';
+    idInput.value = 'shared-sheet';
+    idInput.setSelectionRange(1, 4);
+    document.querySelector<HTMLFormElement>('#popup-open-form')!.dispatchEvent(new Event('submit', { cancelable: true }));
+    await flushAsync();
+    expect(guidance(document).textContent).toContain('Grant access through Google');
+    for (const listener of listeners) listener({ uiLanguage: { newValue: 'ja' } }, 'local');
+    expect(document.documentElement.lang).toBe('ja');
+    expect(document.querySelector('#popup-email')!.textContent).toBe('(不明)');
+    expect(guidance(document).textContent).toContain('Google で許可する');
+    expect(titleInput.value).toBe('Draft title');
+    expect(idInput.value).toBe('shared-sheet');
+    expect([idInput.selectionStart, idInput.selectionEnd]).toEqual([1, 4]);
+    expect(document.querySelector('#popup-recent button')!.textContent).toBe('My project — project-');
+    deps.requestPickerGrant.mockResolvedValue({ status: 'cancelled' });
+    guidanceButton(document, 'Google で許可する')!.click();
+    await flushAsync();
+    expect(guidance(document).textContent).toContain('許可がキャンセルされました。');
+    for (const listener of listeners) listener({ uiLanguage: { newValue: 'en' } }, 'local');
+    expect(guidance(document).textContent).toContain('Access request cancelled.');
+    expect(guidance(document).textContent).toContain('Error details:');
+    expect(document.title).toBe('SR Query Builder Plugin');
+    window.dispatchEvent(new Event('pagehide'));
+    expect(removeListener).toHaveBeenCalledTimes(1);
+    expect(listeners.size).toBe(0);
+    setUiLanguage('ja');
+    expect(document.documentElement.lang).toBe('en');
+  } finally {
+    window.dispatchEvent(new Event('pagehide'));
+    globalThis.chrome = originalChrome;
+    setUiLanguage('ja');
+    document.body.innerHTML = '';
+  }
+});
 
 describe('startPopup / 選択モデルの API キー', () => {
   test.each([

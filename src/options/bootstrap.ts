@@ -1,7 +1,7 @@
-import { getUiLanguage, localizeDom, onUiLanguageChange, setUiLanguage } from '@/lib/i18n';
+import { t, getUiLanguage, localizeDom, onUiLanguageChange, setUiLanguage } from '@/lib/i18n';
 import { loadUiLanguage, subscribeUiLanguage } from '@/lib/i18n/uiLanguageStore';
 import { buildUiLanguageSection } from '@/app/views/uiLanguageSection';
-import { addLlmPermissionButtons, requestLlmHosts, HOST_PERMISSION_DENIED, type LlmHostPermissions } from '@/lib/llm/hostPermissions';
+import { addLlmPermissionButtons, requestLlmHosts, type LlmHostPermissions } from '@/lib/llm/hostPermissions';
 import { createChromeStoreDeps } from '@/features/project';
 import { AiConsentDeclinedError, createEnsureAiConsent } from '@/app/services/aiConsentService';
 import { updateGeminiDataNotice } from '@/lib/llm/aiDisclosure';
@@ -128,7 +128,7 @@ function populateModelSelect(
   if (selectedModelId && !Array.from(selectEl.options).some((option) => option.value === selectedModelId)) {
     const option = selectEl.ownerDocument.createElement('option');
     option.value = selectedModelId;
-    option.textContent = `${selectedModelId}（一覧にないモデル）`;
+    setText(option, () => t('options.unlistedModel', { id: selectedModelId }));
     option.selected = true;
     selectEl.appendChild(option);
   }
@@ -158,18 +158,18 @@ function updateTierBadge(
   switch (state) {
     case 'checking':
       badge.classList.add('options__tier-badge--checking');
-      badge.textContent = '確認中...';
+      setText(badge, () => t('options.checking'));
       break;
     case 'paid':
       badge.classList.add('options__tier-badge--paid');
-      badge.textContent = '有料プラン';
+      setText(badge, () => t('options.paid'));
       break;
     case 'free':
       badge.classList.add('options__tier-badge--free');
-      badge.textContent = '無料プラン';
+      setText(badge, () => t('options.free'));
       break;
     default:
-      badge.textContent = '';
+      setText(badge, () => '');
   }
 }
 
@@ -183,10 +183,10 @@ function renderCustomModelsList(
     const item = listEl.ownerDocument.createElement('div');
     item.className = 'options__custom-model-item';
     const span = listEl.ownerDocument.createElement('span');
-    span.textContent = m.label ? m.label + ' (' + m.id + ')' : m.id;
+    setText(span, () => m.label ? m.label + ' (' + m.id + ')' : m.id);
     const btn = listEl.ownerDocument.createElement('button');
     btn.type = 'button';
-    btn.textContent = '削除';
+    setText(btn, () => t('options.remove'));
     btn.addEventListener('click', () => onRemove(m.id));
     item.appendChild(span);
     item.appendChild(btn);
@@ -210,10 +210,10 @@ function buildInitialStatus(
   anthropic: string | undefined
 ): string {
   const parts: string[] = [];
-  parts.push(gemini ? 'Gemini: 保存済み' : 'Gemini: 未設定');
-  parts.push(openrouter ? 'OpenRouter: 保存済み' : 'OpenRouter: 未設定');
-  parts.push(anthropic ? 'Anthropic: 保存済み' : 'Anthropic: 未設定');
-  parts.push(ncbi ? 'NCBI: 保存済み' : 'NCBI: 未設定（3 req/s 枠）');
+  parts.push(gemini ? t('options.geminiSaved') : t('options.geminiUnset'));
+  parts.push(openrouter ? t('options.orSaved') : t('options.orUnset'));
+  parts.push(anthropic ? t('options.anthropicSaved') : t('options.anthropicUnset'));
+  parts.push(ncbi ? t('options.ncbiSaved') : t('options.ncbiUnset'));
   return parts.join(' / ');
 }
 
@@ -251,6 +251,7 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
   else doc.body.appendChild(languageSection);
   const refreshLanguage = (): void => {
     localizeDom(doc);
+    refreshText(doc);
     doc.documentElement.lang = getUiLanguage();
     const select = languageSection.querySelector('select');
     if (select) select.value = getUiLanguage();
@@ -322,7 +323,7 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
       } catch (err) {
         if (err instanceof AiConsentDeclinedError) {
           updateTierBadge(doc, 'unknown');
-          if (status) status.textContent = err.message;
+          if (status) setText(status, () => err.message);
           return;
         }
         tier = 'unknown';
@@ -347,7 +348,7 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
         renderCustomModelsList(customModelsListEl, models, handleRemoveCustomModel);
       }
       if (status) {
-        status.textContent = 'カスタムモデルを削除しました。';
+        setText(status, () => t('options.removed'));
       }
     })();
   }
@@ -357,7 +358,7 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
   }
 
   if (status) {
-    status.textContent = buildInitialStatus(existingGemini, existingOpenRouter, existingNcbi, existingAnthropic);
+    setText(status, () => buildInitialStatus(existingGemini, existingOpenRouter, existingNcbi, existingAnthropic));
   }
 
   selectEl?.addEventListener('change', () => {
@@ -366,7 +367,7 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
     void deps.writeKey(STORAGE_KEY_LLM_MODEL, selectedModel);
     refreshProviderCards(doc, selectedModel);
     void hostPermission.then((allowed) => {
-      if (!allowed && status) status.textContent = HOST_PERMISSION_DENIED;
+      if (!allowed && status) setText(status, () => t('options.permissionDenied'));
     });
   });
 
@@ -374,17 +375,17 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
     const id = customModelIdInput?.value.trim() ?? '';
     const label = customModelLabelInput?.value.trim();
     if (!id) {
-      if (status) status.textContent = 'モデルIDを入力してください。';
+      if (status) setText(status, () => t('options.missingId'));
       return;
     }
     const raw = await deps.readKey(STORAGE_KEY_CUSTOM_MODELS);
     const models = parseCustomModels(raw);
     if (models.length >= MAX_CUSTOM_MODELS_LIMIT) {
-      if (status) status.textContent = 'カスタムモデルの上限（20件）に達しています。';
+      if (status) setText(status, () => t('options.limit'));
       return;
     }
     if (models.some((m) => m.id === id)) {
-      if (status) status.textContent = 'そのモデルIDはすでに登録されています。';
+      if (status) setText(status, () => t('options.duplicate'));
       return;
     }
     const newEntry: CustomModelEntry = label ? { id, label } : { id };
@@ -399,7 +400,7 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
     if (customModelsListEl) {
       renderCustomModelsList(customModelsListEl, models, handleRemoveCustomModel);
     }
-    if (status) status.textContent = 'カスタムモデルを追加しました。';
+    if (status) setText(status, () => t('options.added'));
   });
 
   if (saveBtn?.parentElement) addLlmPermissionButtons(saveBtn.parentElement, deps.hostPermissions, 'options__button');
@@ -414,7 +415,7 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
     const ncbiVal = ncbiInput?.value ?? '';
     let selectedModel = selectEl?.value ?? DEFAULT_MODEL_ID;
 
-    if (status) status.textContent = '保存中...';
+    if (status) setText(status, () => t('options.saving'));
 
     void (async () => {
       try {
@@ -437,7 +438,7 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
         if (!hostAllowed) {
           const notice = doc.createElement('p');
           notice.setAttribute('role', 'alert');
-          notice.textContent = HOST_PERMISSION_DENIED;
+          setText(notice, () => t('options.permissionDenied'));
           saveBtn?.parentElement?.appendChild(notice);
         }
 
@@ -452,7 +453,7 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
           updateTierBadge(doc, 'unknown');
         }
         if (deps.detectGeminiTier && geminiVal.trim() !== '' && provider === 'gemini') {
-          if (status) status.textContent = 'APIプランを確認中...';
+          if (status) setText(status, () => t('options.checkingPlan'));
           updateTierBadge(doc, 'checking');
 
           let tier: 'paid' | 'free' | 'unknown' | 'unavailable';
@@ -496,7 +497,7 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
         if (hostAllowed && pendingNow === '1' && keyForProvider.trim() !== '') {
           await deps.removeKey(STORAGE_KEY_PENDING_APP_TAB);
           if (status) {
-            status.textContent = '保存しました。トップ画面に戻ります…';
+            setText(status, () => t('options.returning'));
           }
           deps.openAppTab();
           return;
@@ -504,22 +505,42 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
 
         if (status) {
           if (modelSwitchedToFree) {
-            status.textContent = '保存しました。無料プランを検出。Gemini 3.5 Flash Lite に切り替えました。';
+            setText(status, () => t('options.switched'));
           } else if (tierUnavailable) {
-            status.textContent =
-              '保存しました。（Gemini が混雑中のためプランを判定できませんでした。時間をおいてこの画面を開くと自動で再判定されます）';
+            setText(status, () => t('options.unavailable'));
           } else if (tierUndetermined) {
-            status.textContent =
-              '保存しました。（Gemini プランを自動判定できませんでした。コンソールログを確認してください）';
+            setText(status, () => t('options.undetermined'));
           } else {
-            status.textContent = '保存しました。';
+            setText(status, () => t('options.saved'));
           }
         }
       } catch (err) {
         if (status) {
-          status.textContent = `保存に失敗しました: ${err instanceof Error ? err.message : String(err)}`;
+          setText(status, () => t('options.saveFailed', { error: err instanceof Error ? err.message : String(err) }));
         }
       }
     })();
   });
+}
+
+const localizedText = new WeakMap<Document, Map<HTMLElement, () => string>>();
+
+function setText(element: HTMLElement, render: () => string): void {
+  let entries = localizedText.get(element.ownerDocument);
+  if (!entries) {
+    entries = new Map();
+    localizedText.set(element.ownerDocument, entries);
+  }
+  entries.set(element, render);
+  element.textContent = render();
+}
+
+function refreshText(doc: Document): void {
+  for (const [element, render] of localizedText.get(doc) ?? []) {
+    if (doc.contains(element)) {
+      element.textContent = render();
+    } else {
+      localizedText.get(doc)?.delete(element);
+    }
+  }
 }
