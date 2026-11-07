@@ -1,3 +1,9 @@
+import * as i18n from '@/lib/i18n';
+import * as languageStore from '@/lib/i18n/uiLanguageStore';
+
+beforeEach(() => { jest.spyOn(languageStore, 'loadUiLanguage').mockResolvedValue('ja'); });
+afterEach(() => { i18n.setUiLanguage('ja'); jest.restoreAllMocks(); });
+
 import {
   STORAGE_KEY_GEMINI,
   STORAGE_KEY_OPENROUTER,
@@ -950,4 +956,40 @@ test.each([
   expect(data['llm.selectedModel']).toBe(model);
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(doc.body.textContent?.includes('許可がないため、このプロバイダには送信できません')).toBe(!allowed);
+});
+
+
+test('表示言語の選択で現在言語を変更し保存する', async () => {
+  const set = jest.spyOn(i18n, 'setUiLanguage');
+  const save = jest.spyOn(languageStore, 'saveUiLanguage').mockResolvedValue(undefined);
+  const container = document.implementation.createHTMLDocument('options');
+  await startOptions(container, { readKey: async () => undefined, writeKey: async () => undefined,
+    removeKey: async () => undefined, openAppTab: jest.fn() });
+  const select = container.querySelector('#ui-language') as HTMLSelectElement;
+  expect(select.value).toBe('ja');
+  expect(container.querySelector('label[for="ui-language"]')).not.toBeNull();
+  select.value = 'en';
+  select.dispatchEvent(new Event('change'));
+  expect(set).toHaveBeenCalledWith('en');
+  expect(i18n.getUiLanguage()).toBe('en');
+  expect(save).toHaveBeenCalledWith('en');
+});
+
+
+test('保存済み言語を起動時に反映し、他の画面の言語変更にも追従する', async () => {
+  jest.mocked(languageStore.loadUiLanguage).mockResolvedValue('en');
+  const doc = document.implementation.createHTMLDocument('options');
+  doc.body.innerHTML = '<h1 class="options__title">設定</h1><p>説明</p><section id="existing"></section>';
+  await startOptions(doc, { readKey: async () => undefined, writeKey: async () => undefined,
+    removeKey: async () => undefined, openAppTab: jest.fn() });
+  const select = doc.querySelector('#ui-language') as HTMLSelectElement;
+  expect(select.value).toBe('en');
+  expect(doc.documentElement.lang).toBe('en');
+  expect(doc.querySelector('section')?.nextElementSibling?.id).toBe('existing');
+  // Options は h1 の下に h2 の節が並ぶので、言語の節も h2 で出す。
+  expect(doc.querySelector('section h2')?.textContent).toBe('Display language');
+  i18n.setUiLanguage('ja');
+  expect(select.value).toBe('ja');
+  expect(doc.documentElement.lang).toBe('ja');
+  expect(doc.querySelector('section h2')?.textContent).toBe('表示言語');
 });

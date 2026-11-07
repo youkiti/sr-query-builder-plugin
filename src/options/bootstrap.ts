@@ -1,3 +1,6 @@
+import { getUiLanguage, localizeDom, onUiLanguageChange, setUiLanguage } from '@/lib/i18n';
+import { loadUiLanguage, subscribeUiLanguage } from '@/lib/i18n/uiLanguageStore';
+import { buildUiLanguageSection } from '@/app/views/uiLanguageSection';
 import { addLlmPermissionButtons, requestLlmHosts, HOST_PERMISSION_DENIED, type LlmHostPermissions } from '@/lib/llm/hostPermissions';
 import { createChromeStoreDeps } from '@/features/project';
 import { AiConsentDeclinedError, createEnsureAiConsent } from '@/app/services/aiConsentService';
@@ -239,6 +242,26 @@ export function createChromeOptionsDeps(doc: Document = document): OptionsDeps {
 }
 
 export async function startOptions(doc: Document, deps: OptionsDeps): Promise<void> {
+  setUiLanguage(await loadUiLanguage());
+  // Options は h1 の下に h2 の節が並ぶので、見出しを h2 にそろえる。
+  const languageSection = buildUiLanguageSection(doc, 'h2');
+  languageSection.className = 'options__section';
+  const firstSection = doc.querySelector('section');
+  if (firstSection) firstSection.before(languageSection);
+  else doc.body.appendChild(languageSection);
+  const refreshLanguage = (): void => {
+    localizeDom(doc);
+    doc.documentElement.lang = getUiLanguage();
+    const select = languageSection.querySelector('select');
+    if (select) select.value = getUiLanguage();
+  };
+  refreshLanguage();
+  const unsubscribeLanguage = onUiLanguageChange(refreshLanguage);
+  const unsubscribeStorage = subscribeUiLanguage();
+  doc.defaultView?.addEventListener('pagehide', () => {
+    unsubscribeLanguage();
+    unsubscribeStorage();
+  }, { once: true });
   const buildDateEl = doc.getElementById('options-build-date');
   if (buildDateEl) {
     buildDateEl.textContent = `build: ${__BUILD_DATE__}`;

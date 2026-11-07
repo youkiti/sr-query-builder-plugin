@@ -1,3 +1,7 @@
+import { setUiLanguage } from '@/lib/i18n';
+
+afterEach(() => { setUiLanguage('ja'); });
+
 import { AI_CONSENT_VERSION } from '@/lib/llm/aiDisclosure';
 import { DEFAULT_QUERY_OPTIMIZATION_SETTINGS } from './services/queryOptimizationSettingsService';
 import {
@@ -2966,4 +2970,46 @@ describe('createLocationOptions', () => {
     opts.setHash('#/seeds');
     expect((fakeWin.location as Location).hash).toBe('#/seeds');
   });
+});
+
+
+test('設定画面の未保存キーを保持したまま言語変更で英語の見出しへ更新する', async () => {
+  const doc = buildDocument();
+  const app = startApp(doc, {
+    ...noopHashOptions('#/settings'),
+    viewOptions: { settings: {
+      readKey: async (key) => key === 'apiKeys.ncbi' ? 'saved' : undefined,
+      writeKey: async () => undefined,
+      removeKey: async () => undefined,
+    } },
+  });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const input = doc.querySelector<HTMLInputElement>('#settings-ncbi-key')!;
+    input.value = 'unsaved';
+    input.dispatchEvent(new Event('input'));
+    setUiLanguage('en');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(doc.querySelector('#app-content h2')?.textContent).toBe('Settings');
+    const updatedInput = doc.querySelector<HTMLInputElement>('#settings-ncbi-key')!;
+    expect(updatedInput).not.toBe(input);
+    expect(updatedInput.value).toBe('unsaved');
+  } finally {
+    app.dispose();
+  }
+});
+
+test('言語変更で同じ render を通じてホーム・サイドバー・静的 HTML を更新し、dispose で解除する', () => {
+  const doc = buildDocument();
+  doc.body.insertAdjacentHTML('beforeend', '<span data-i18n="shell.tours"></span>');
+  const app = startApp(doc, noopHashOptions('#/home'));
+  expect(doc.documentElement.lang).toBe('ja');
+  setUiLanguage('en');
+  expect(doc.querySelector('#app-content h2')?.textContent).toBe('Home');
+  expect(doc.querySelector('#app-sidebar nav')?.textContent).toContain('Search block approval');
+  expect(doc.querySelector('[data-i18n]')?.textContent).toBe('Tours');
+  expect(doc.documentElement.lang).toBe('en');
+  app.dispose();
+  setUiLanguage('ja');
+  expect(doc.querySelector('#app-content h2')?.textContent).toBe('Home');
 });

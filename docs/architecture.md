@@ -252,7 +252,7 @@ startApp(document);
 | `src/lib/guide/tourProgress.ts` | 進捗の型・解析・状態遷移・提案の判定（純関数）。保存キーは `guide_progress` |
 | `src/lib/guide/guideProgressStore.ts` | 進捗を `chrome.storage.local` へ保存・読込し、他タブの変更を購読する |
 | `src/app/guide/` | 画面側。`index.ts`（`initGuide`。`bootstrap.ts` の `startApp` が呼ぶ）、`tourRunner.ts`（カード・枠・進行）、`placement.ts`（カードの配置）、`tourEntry.ts`（一覧と表示言語の切り替え）、`suggestBand.ts`（提案帯）、`tourConditions.ts` / `guideEvents.ts`（条件とイベント）、`adapters/<名前>.ts`（ツアー固有の条件とイベント） |
-| `src/lib/i18n/` | ツアーの文面だけの日英辞書（`ja.ts` がキー集合の正典、`en.ts` は同じキー集合を型で強制）。`t(key)` で現在の言語の文言を引く。表示言語は `uiLanguageStore.ts` が `chrome.storage.local` の `uiLanguage` に保存する。アプリ本体の既存の文言は辞書に入れていない |
+| `src/lib/i18n/` | 画面文言の実行時日英辞書。`messages/<area>.ts` に領域ごとの日英を置き、`messages/index.ts` に登録し、`ja.ts` / `en.ts` から公開する。`t()`・`localizeDom()` と言語通知、`uiLanguageStore.ts` による保存・同期を提供する |
 | `src/app/styles/guide.css` | ツアーのスタイル。z-index は枠が 2001、カード・提案帯が 2002、一覧が 2003（カードを入れ直しても一覧のボタンが隠れない） |
 
 画面側の要素には `data-tour="<対象名>"` を付けて手順の `target` から指す。サイドバーのボタンは `nav-<ルート名>`（`bootstrap.ts` の `renderSidebar` が付ける）、サイドバー全体は `nav`、ヘッダーの「ツアー」ボタンは `tour-list`。
@@ -265,7 +265,7 @@ startApp(document);
 2. `tours/index.ts` の `GuideEventName` / `GuideCondition` に固有の型を足し、`GUIDE_TOURS` に登録する。
 3. 固有の条件・イベントがあれば `src/app/guide/adapters/<名前>.ts` に書き、`adapters/index.ts` と `tourConditions.ts` に合成する。
 4. 手順の対象になる要素に `data-tour` を付ける。実行時に組み立てる値は、`src/lib/guide/tours/tours.test.ts` の「定義と実装の照合」に規則を足す。
-5. `src/lib/i18n/ja.ts` と `en.ts` に文言を足す。見出しは `guide.tour<ID>Title`、説明は `guide.tour<ID>Desc`、手順の本文は `guide.tour<ID>Step<手順ID>`（`keys.ts` が生成する形）。
+5. `src/lib/i18n/messages/guide.ts` の日英辞書に文言を足す。見出しは `guide.tour<ID>Title`、説明は `guide.tour<ID>Desc`、手順の本文は `guide.tour<ID>Step<手順ID>`（`keys.ts` が生成する形）。
 6. テスト（定義の照合・単体・E2E）を足す。E2E の共通スタブは既定で提案帯を止めているので、提案帯を検証する spec だけが `guide_progress` を明示的に渡す。
 7. 通し検査のシナリオ `tools/guide-tour-check/scenarios/<ID>.mjs` を足す（ファイル名とシナリオ名はツアー ID と同じにする）。短い解説動画の対象にするなら `video/scripts/tour-videos.mjs` の `DEFAULT_TOURS` にも足す。
 
@@ -274,7 +274,7 @@ startApp(document);
 | 場所 | 役割 |
 |---|---|
 | `tools/guide-tour-check/` | 通し検査（`npm run check:tours`）。デモビルド（`dist-demo/`）を本物の Chromium に拡張として読み込み、ツアーを 1 手順ずつ実際に進める。各手順で「カードが出ている・対象に強調枠が重なっている・カードが画面内」を確かめ、画像を `.tmp/guide-tour-check/<ツアー ID>-<連番>-<手順 ID>.png` に残す。シナリオはツアーごとに 1 本（`scenarios/<ID>.mjs`）で、プロトコルの解析・ブロックの承認・自動調整・境界事例の判定・変換など、手順が前提とする操作を実際に行って、できるだけ全手順で対象が画面に出ている状態を撮る。デモの通信の差し替えで再現できない状態（保留候補など）の手順は、待機の状態で撮り、検査の集計に警告として載る |
-| `video/scripts/tour-videos.mjs` | ツアー 1 本につき 1 本の短い解説動画（`npm run video:tours`）。通し検査の画像と、辞書の文面（ナレーション原稿）から作る。手順は [video/README.md](../video/README.md) の「操作ツアーの解説動画」 |
+| `video/scripts/tour-videos.mjs` | ツアー 1 本につき 1 本の短い解説動画（`npm run video:tours`）。通し検査の画像と、`src/lib/i18n/messages/guide.ts` の指定言語の文面（ナレーション原稿）から作る。手順は [video/README.md](../video/README.md) の「操作ツアーの解説動画」 |
 
 ツアーの手順や文面・対象を変えたら、`npm run build:demo` → `npm run check:tours` を回す。本物のブラウザの窓が要るため CI では回らない（`npm run test:tools` は、検査と動画生成の部品の単体テストだけを CI で回す）。`check:tours` が落ちる変更は、短い動画の撮り直しも要る合図になる。ツアーの手順や文面を変えたら、動画も `npm run video:tours` で作り直す。`--lang en` で英語のカードも確かめられる。
 
@@ -294,7 +294,7 @@ startApp(document);
 トピックを 1 つ足す手順:
 
 1. `GuideTopicId`（今は `RouteName`）に当たるルートを足し、`GUIDE_TOPICS` と `GUIDE_TOPIC_TITLE_KEYS` に行を足す。`helpAnchor` は `hosted/help.html` の `<section id>` に合わせる。
-2. `src/lib/i18n/ja.ts` と `en.ts` に `guide.topic<Pascal>` を足す（ja は `ROUTE_LABELS` と同じ語）。
+2. `src/lib/i18n/messages/guide.ts` の日英辞書に `guide.topic<Pascal>` を足す（ja は `ROUTE_LABELS` と同じ語）。
 3. 対応する動画の章があれば `GUIDE_VIDEO_CHAPTERS` に足して `video` に指定する。ツアーがあれば `tourId` に指定する。
 4. `hosted/help.html` に節と、章の動画リンク（`?t=<秒>`）を足す。
 
@@ -310,6 +310,44 @@ startApp(document);
 `load.ts` は言語別データを必要時に動的 import する。
 画面から読み込まれると、webpack が `chunks/help-sections-ja.js` と `chunks/help-sections-en.js` を別のチャンクとして出力する（`output.chunkFilename`）。
 処理・送信範囲・終了理由・未評価の範囲は [部品の説明](../src/lib/help-consult/README.md) を参照。
+
+### 2.5 表示言語と文言の辞書
+
+`src/_locales/{ja,en}/messages.json` は manifest の拡張名・説明など、Chrome が表示する文字列だけを持つ。`chrome.i18n` がブラウザの言語で選び、実行中には切り替えられない。
+
+画面の文言はすべて実行時辞書へ置く。現在は外枠・ホーム・共用の読み込み失敗バナー・ツアー・言語選択が移行済みで、他の画面は各領域へ順次移す。表示言語は `chrome.storage.local` の `uiLanguage` に保存し、設定画面・Options・ツアー一覧から同じ値を切り替える。アプリと Options は他ページの保存変更を購読する。アプリは store 更新と同じ `render()` で再描画し、Options は `localizeDom()` で更新する。両方で `html.lang` も更新する。Popup は今後の移行対象。
+
+起動時は描画前に保存値を読む。保存値が無い・不正・読めない場合は、ブラウザの UI 言語が `ja` で始まれば日本語、それ以外は英語にする。`chrome.i18n` が無い場合は日本語にする。
+
+辞書は `src/lib/i18n/messages/<area>.ts` に置き、キーを `<area>.` で始める。各ファイルの日本語辞書をキー集合の正典とし、英語の不足・余分は TypeScript で検出する。全領域は登録済みなので、通常の文言追加で `messages/index.ts`・`ja.ts`・`en.ts` を変更する必要はない。`MessageKey` は全領域のキーのリテラル合併。
+
+| 領域 | 担当するビュー・部品 |
+|---|---|
+| common | `hydrateErrorBanner.ts`、`formatHelpers.ts`（複数ルートの共用部品） |
+| shell | `src/app/bootstrap.ts` の外枠、`router.ts` のルート名、`guards.ts` の理由、`app.html`、`notImplementedView.ts` |
+| guide | ツアーと「?」メニュー |
+| home | `homeView.ts` |
+| protocol | `protocolView.ts` |
+| blocks | `blocksView.ts`、`blocksHelpers.ts` |
+| seeds | `seedsView.ts` |
+| draft | `draftView.ts`、`queryOptimizationReview.ts`、`queryOptimizationHistory.ts`、`validationResults.ts`、`generationNotice.ts` |
+| expand | `expandView.ts` |
+| edit | `editView.ts`、`blockInspector.ts`、`editableBlock.ts`、`operandEdit.ts`、`meshExpressionEdit.ts`、`formulaDisplay.ts` |
+| export | `exportView.ts`、`methodsText.ts` |
+| done | `doneView.ts` |
+| history | `historyView.ts` |
+| settings | `settingsView.ts`（共通の表示言語選択を含む） |
+| popup | `src/popup/`（`popup.html` を含む） |
+| options | `src/options/`（`options.html` を含む） |
+
+部品が複数ルートから使われても、この割り当てを守る。文言を足すときは自分の領域ファイルの日英辞書へ同じキーを足し、ビューから `t('home.project', { title, id })` のように呼ぶ。可変部分は `{name}` 形式で書く。日本語の既存文面は変えず、英語は公開ページと既存の guide の用語に合わせて短く書く。
+
+静的 HTML は `data-i18n="key"` を文字だけの要素に付け、`localizeDom(root)` で `textContent` を更新する。子要素がある要素には付けない。属性は `data-i18n-placeholder`・`data-i18n-title`・`data-i18n-aria-label` を使う。HTML の初期文言は日本語で残す。
+
+テストは登録領域が指定の 16 個であること、日英キー集合、接頭辞、空文字が無いこと、プレースホルダ集合、領域間のキー重複が無いことを固定する。言語変更・保存・他ページからの同期・再描画も検証する。
+
+LLM に送るプロンプトと手順書、Sheets に保存する値とタブ名、公開ページはこの辞書の範囲外。
+
 
 ## 3. ビルド構成
 

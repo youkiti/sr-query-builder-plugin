@@ -55,6 +55,17 @@ export function parseDictionary(source) {
     return messages;
 }
 
+/** 同じファイルにある日英辞書を分け、指定言語だけを解釈する。 */
+export function parseGuideDictionary(source, lang) {
+    const boundary = source.search(/^export const guideEn\b/m);
+    if (boundary < 0) throw new Error('guide.ts に日英辞書の境となる export const guideEn 宣言が見つかりません。');
+    return parseDictionary(lang === 'en' ? source.slice(boundary) : source.slice(0, boundary));
+}
+
+export function readGuideDictionary(lang) {
+    return parseGuideDictionary(readFileSync(path.join(REPO_ROOT, 'src/lib/i18n/messages/guide.ts'), 'utf8'), lang);
+}
+
 const pascalCase = id => id.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join('');
 const keyBase = id => `guide.tour${pascalCase(id)}`;
 
@@ -325,7 +336,7 @@ async function buildTour(id, options, messages) {
 
 export async function main(args = process.argv.slice(2)) {
     const options = parseArgs(args);
-    const messages = parseDictionary(readFileSync(path.join(REPO_ROOT, `src/lib/i18n/${options.lang}.ts`), 'utf8'));
+    const messages = readGuideDictionary(options.lang);
     if (!options.silent) {
         await stage(options.tourIds.join(', '), '音声', '事前確認', 'VOICEVOX GET /version', () => requestVoice('/version'));
         options.speakerName = await stage(options.tourIds.join(', '), '音声', 'クレジット確認', 'VOICEVOX GET /speakers', async () =>

@@ -1,3 +1,39 @@
+import * as i18n from '@/lib/i18n';
+import * as languageStore from '@/lib/i18n/uiLanguageStore';
+import { startApp } from '../bootstrap';
+
+afterEach(() => { i18n.setUiLanguage('ja'); jest.restoreAllMocks(); });
+
+test('アプリの設定で言語を変えて再描画したあとも選択欄にフォーカスを戻す', () => {
+  document.body.innerHTML = '<aside id="app-sidebar"><nav></nav></aside><section id="app-content"></section>';
+  jest.spyOn(languageStore, 'saveUiLanguage').mockResolvedValue(undefined);
+  const app = startApp(document, {
+    getHash: () => '#/settings',
+    onHashChange: () => () => undefined,
+    setHash: jest.fn(),
+    runtime: null,
+    viewOptions: { settings: {
+      readKey: async () => undefined,
+      writeKey: async () => undefined,
+      removeKey: async () => undefined,
+    } },
+  });
+  try {
+    const select = document.querySelector<HTMLSelectElement>('#ui-language')!;
+    select.focus();
+    expect(document.activeElement).toBe(select);
+    select.value = 'en';
+    select.dispatchEvent(new Event('change'));
+    const updatedSelect = document.querySelector<HTMLSelectElement>('#ui-language')!;
+    expect(updatedSelect).not.toBe(select);
+    expect(updatedSelect.value).toBe('en');
+    expect(document.activeElement).toBe(updatedSelect);
+  } finally {
+    app.dispose();
+    document.body.innerHTML = '';
+  }
+});
+
 import { createSettingsView, type SettingsViewCallbacks } from './settingsView';
 import type { ViewContext } from './types';
 import type { AppState } from '../store';
@@ -41,6 +77,84 @@ describe('createSettingsView - Gemini プラン判定', () => {
 
   afterEach(() => {
     document.body.innerHTML = '';
+  });
+
+  const keyFields = [
+    ['settings-gemini-key', 'apiKeys.gemini'],
+    ['settings-openrouter-key', 'apiKeys.openrouter'],
+    ['settings-anthropic-key', 'apiKeys.anthropic'],
+    ['settings-ncbi-key', 'apiKeys.ncbi'],
+  ];
+
+  test.each([...keyFields, ['settings-custom-model-id', ''], ['settings-custom-model-label', '']])(
+    '非同期の保存値読み込み後も再描画前の未保存入力を保持する: %s', async (id, key) => {
+      const store = { [key!]: 'saved', 'gemini.detectedTier': 'paid' };
+      const view = createSettingsView(buildDeps(store));
+      const container = document.createElement('div');
+      view(container, buildCtx());
+      await flush();
+      const input = container.querySelector<HTMLInputElement>(`#${id}`)!;
+      input.value = 'unsaved';
+      input.dispatchEvent(new Event('input'));
+      view(container, buildCtx());
+      await flush();
+      expect(container.querySelector<HTMLInputElement>(`#${id}`)!.value).toBe('unsaved');
+    }
+  );
+
+  test.each(keyFields)('保存成功後は未保存入力を消し、最新の保存値を表示する: %s', async (id, key) => {
+    const store: Record<string, string> = { 'gemini.detectedTier': 'paid' };
+    const view = createSettingsView(buildDeps(store, jest.fn(async () => 'paid')));
+    const container = document.createElement('div');
+    view(container, buildCtx());
+    await flush();
+    const input = container.querySelector<HTMLInputElement>(`#${id}`)!;
+    input.value = 'edited';
+    input.dispatchEvent(new Event('input'));
+    container.querySelector<HTMLButtonElement>('#settings-save')!.click();
+    await flush();
+    expect(store[key!]).toBe('edited');
+    store[key!] = 'updated-elsewhere';
+    view(container, buildCtx());
+    await flush();
+    expect(container.querySelector<HTMLInputElement>(`#${id}`)!.value).toBe('updated-elsewhere');
+  });
+
+  test('保存値と同じ入力に戻した欄の記録を消す', async () => {
+    const store = { 'apiKeys.ncbi': 'saved' };
+    const view = createSettingsView(buildDeps(store));
+    const container = document.createElement('div');
+    view(container, buildCtx());
+    await flush();
+    const input = container.querySelector<HTMLInputElement>('#settings-ncbi-key')!;
+    for (const value of ['edited', 'saved']) {
+      input.value = value;
+      input.dispatchEvent(new Event('input'));
+    }
+    store['apiKeys.ncbi'] = 'updated-elsewhere';
+    view(container, buildCtx());
+    await flush();
+    expect(container.querySelector<HTMLInputElement>('#settings-ncbi-key')!.value).toBe('updated-elsewhere');
+  });
+
+  test('カスタムモデル追加成功後は再描画しても両入力欄が空のまま', async () => {
+    const store: Record<string, string> = {};
+    const view = createSettingsView(buildDeps(store));
+    const container = document.createElement('div');
+    view(container, buildCtx());
+    await flush();
+    for (const [id, value] of [['settings-custom-model-id', 'vendor/model'], ['settings-custom-model-label', 'My model']]) {
+      const input = container.querySelector<HTMLInputElement>(`#${id}`)!;
+      input.value = value!;
+      input.dispatchEvent(new Event('input'));
+    }
+    container.querySelector<HTMLButtonElement>('.settings__custom-model-form > button')!.click();
+    await flush();
+    expect(JSON.parse(store['llm.customModels']!)).toEqual([{ id: 'vendor/model', label: 'My model' }]);
+    view(container, buildCtx());
+    await flush();
+    expect(container.querySelector<HTMLInputElement>('#settings-custom-model-id')!.value).toBe('');
+    expect(container.querySelector<HTMLInputElement>('#settings-custom-model-label')!.value).toBe('');
   });
 
   test('選択が空のとき、空 ID の一覧外モデルを追加しない', async () => {
@@ -364,7 +478,7 @@ test.each([['claude-foo', 'Anthropic', 'anthropic'], ['a/b', 'OpenRouter', 'open
       createSettingsView({ readKey: async (k) => store[k], writeKey: jest.fn(),
         removeKey: jest.fn(), detectGeminiTier: jest.fn() })(container, { state: {} as AppState, navigate: jest.fn() });
       await new Promise((r) => setTimeout(r, 0));
-      expect(container.querySelector<HTMLSelectElement>('select')!.value).toBe(id);
+      expect(container.querySelector<HTMLSelectElement>('#settings-llm-model')!.value).toBe(id);
       expect(container.querySelector(`optgroup[label="${group}"] option[value="${id}"]`)).not.toBeNull();
       expect(container.querySelector(`#settings-${provider}-card`)?.classList.contains('settings__provider-card--active')).toBe(true);
     } finally { container.remove(); }
@@ -416,4 +530,21 @@ test.each([
   expect(data['llm.selectedModel']).toBe(model);
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(container.textContent?.includes('許可がないため、このプロバイダには送信できません')).toBe(!allowed);
+});
+
+
+test('表示言語の選択で現在言語を変更し保存する', async () => {
+  const set = jest.spyOn(i18n, 'setUiLanguage');
+  const save = jest.spyOn(languageStore, 'saveUiLanguage').mockResolvedValue(undefined);
+  const container = document.createElement('div');
+  createSettingsView({ readKey: async () => undefined, writeKey: async () => undefined,
+    removeKey: async () => undefined })(container, { state: {} as AppState, navigate: jest.fn() });
+  const select = container.querySelector('#ui-language') as HTMLSelectElement;
+  expect(select.value).toBe('ja');
+  expect(container.querySelector('label[for="ui-language"]')).not.toBeNull();
+  select.value = 'en';
+  select.dispatchEvent(new Event('change'));
+  expect(set).toHaveBeenCalledWith('en');
+  expect(i18n.getUiLanguage()).toBe('en');
+  expect(save).toHaveBeenCalledWith('en');
 });

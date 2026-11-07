@@ -1,3 +1,5 @@
+import { t } from '@/lib/i18n';
+
 /**
  * サイドバーのルート遷移ガード。
  *
@@ -19,10 +21,6 @@ export interface RouteGuard {
   reason: string;
 }
 
-const REASON_PROJECT = 'プロジェクトを選択してください';
-const REASON_PROTOCOL = '先にプロトコルを入力してください';
-const REASON_BLOCKS = '先にブロック承認を完了させてください';
-const REASON_FORMULA = '先に検索式を生成または読み込んでください';
 
 /**
  * 現在のストア状態から各ルートの enabled / reason を算出する。
@@ -43,17 +41,17 @@ export function evaluateGuards(state: AppState): Record<RouteName, RouteGuard> {
   const hasFormula = state.currentFormulaVersionId !== null;
 
   const needsProject = (): RouteGuard =>
-    hasProject ? allow() : deny(REASON_PROJECT);
+    hasProject ? allow() : deny(t('shell.guard.project'));
   const needsProtocol = (): RouteGuard =>
-    hasProject ? (hasProtocol ? allow() : deny(REASON_PROTOCOL)) : deny(REASON_PROJECT);
+    hasProject ? (hasProtocol ? allow() : deny(t('shell.guard.protocol'))) : deny(t('shell.guard.project'));
   const needsBlocks = (): RouteGuard =>
     hasProject
       ? hasApprovedBlocks
         ? allow()
-        : deny(REASON_BLOCKS)
-      : deny(REASON_PROJECT);
+        : deny(t('shell.guard.blocks'))
+      : deny(t('shell.guard.project'));
   const needsFormula = (): RouteGuard =>
-    hasProject ? (hasFormula ? allow() : deny(REASON_FORMULA)) : deny(REASON_PROJECT);
+    hasProject ? (hasFormula ? allow() : deny(t('shell.guard.formula'))) : deny(t('shell.guard.project'));
 
   return {
     home: allow(),
