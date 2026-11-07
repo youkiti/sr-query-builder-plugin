@@ -1,4 +1,5 @@
 import type { FormulaVersion } from '@/domain/formulaVersion';
+import { setUiLanguage } from '@/lib/i18n';
 import { INITIAL_STATE, type AppState } from '../store';
 import { createHistoryView } from './historyView';
 
@@ -34,6 +35,33 @@ async function flushAsync(): Promise<void> {
 }
 
 describe('createHistoryView', () => {
+  test('英語で見出し・読み込みボタン・状態を表示し、保存値は変えない', async () => {
+    const version = buildVersion({ note: 'MeSH 追加', model: '日本語のモデル名' });
+    const onLoad = jest.fn();
+    const view = createHistoryView({ onList: async () => [version], onLoad });
+    const container = buildContainer();
+    const ctx = { state: { ...stateWithProject, currentFormulaVersionId: 'v1' }, navigate: jest.fn() };
+    view(container, ctx);
+    await flushAsync();
+    try {
+      setUiLanguage('en');
+      view(container, ctx);
+      expect(container.querySelector('h2')?.textContent).toBe('Version history');
+      expect(container.querySelector('.history__status')?.textContent).toBe('Loading version history…');
+      await flushAsync();
+      expect(container.querySelector('.history__load')?.textContent).toBe('Load this version');
+      expect(container.querySelector('.history__status')?.textContent).toBe('Versions found: 1.');
+      expect(container.querySelector('.history__badge')?.textContent).toBe('Currently loaded');
+      expect(container.querySelector('.history__note')?.textContent).toBe('MeSH 追加');
+      expect(container.querySelector('.history__meta')?.textContent).toContain('ai_draft');
+      container.querySelector<HTMLButtonElement>('.history__load')!.click();
+      expect(onLoad).toHaveBeenCalledWith(version);
+      expect(version.model).toBe('日本語のモデル名');
+    } finally {
+      setUiLanguage('ja');
+    }
+  });
+
   test('プロジェクト未選択時は警告のみ', () => {
     const view = createHistoryView();
     const container = buildContainer();

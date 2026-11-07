@@ -1,4 +1,5 @@
 import { INITIAL_STATE, type AppState } from '../store';
+import { setUiLanguage } from '@/lib/i18n';
 import { renderDoneView } from './doneView';
 
 function buildContainer(): HTMLElement {
@@ -25,6 +26,26 @@ const SAMPLE_MD = [
 ].join('\n');
 
 describe('renderDoneView', () => {
+  test('英語で見出し・主なリンク・案内を表示する', () => {
+    try {
+      setUiLanguage('en');
+      const container = buildContainer();
+      renderDoneView(container, {
+        state: { ...stateWithProject, currentFormulaMarkdown: SAMPLE_MD },
+        navigate: jest.fn(),
+      });
+      expect(container.querySelector('h2')?.textContent).toBe('Done');
+      expect(Array.from(container.querySelectorAll('.done__links a')).map((node) => node.textContent)).toEqual([
+        'Open Cochrane CENTRAL', 'Open Embase (Dialog)', 'Open ClinicalTrials.gov', 'Open ICTRP',
+      ]);
+      expect(container.querySelector('.done__lead')?.textContent).toContain('Your search formula is ready.');
+      expect(container.querySelector('.done__pubmed-link span')?.textContent).toBe('Open directly in PubMed: ');
+      expect(container.querySelector('.done__link-note')?.textContent).toContain('Paste the converted search formula');
+    } finally {
+      setUiLanguage('ja');
+    }
+  });
+
   test('プロジェクト未選択時は警告のみ', () => {
     const container = buildContainer();
     renderDoneView(container, { state: INITIAL_STATE, navigate: jest.fn() });
