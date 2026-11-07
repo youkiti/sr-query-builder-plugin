@@ -1,0 +1,12 @@
+{
+  "version": "v1appgl",
+  "model": "gemini-3.5-flash-lite",
+  "generationSettings": "アプリの生成コード（Gemini の generateContent。1 問 1 答の経路で、道具は呼ばない。推論の強さ・温度などの生成設定はアプリの既定のまま）",
+  "inputs": ["protocol.md", "アプリのブロック抽出の指示（extractProtocol.ts の Gemini 用）", "アプリの 1 問 1 答の指示（designBlock / suggestMesh / designFreewords など）"],
+  "tools": ["submit"],
+  "maxMeasurements": 20,
+  "maxSubmissions": 4,
+  "costLimit": "アプリの 1 問 1 答の経路の呼び出し回数（ブロックごとに固定）",
+  "finalSelection": "最後に受け付けられた提出 1 本。採点結果による選び直しはしない",
+  "runner": "app-gemini"
+}
