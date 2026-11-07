@@ -1,3 +1,4 @@
+import { setUiLanguage } from '@/lib/i18n';
 import type { BoundaryCasesResult, ValidationSummary } from '@/app/services';
 import { INITIAL_STATE, type AppState, type ExpandApiWait, type ExpandRunState } from '../store';
 import type { PickerGrantResult } from '@/background/pickerGrant';
@@ -1460,5 +1461,115 @@ describe('createExpandView', () => {
       expect(container.querySelector('.expand__round-summary')).toBeNull();
       expect(container.querySelector('.expand__tracker')).not.toBeNull();
     });
+  });
+});
+
+
+describe('expand display language', () => {
+  test('renders the main heading, buttons, and experimental notice in English', () => {
+    setUiLanguage('en');
+    try {
+      const container = buildContainer();
+      createExpandView()(container, { state: readyState(), navigate: jest.fn() });
+      expect(container.querySelector('h2')?.textContent).toBe('Interactive seed expansion');
+      expect(container.querySelector('.expand__actions button')?.textContent).toBe('Fetch borderline cases');
+      expect(container.querySelector('.expand__dev')?.textContent).toContain('Experimental feature (dev)');
+      expect(Array.from(container.querySelectorAll('.expand__candidate-actions button'), (b) => b.textContent))
+        .toEqual(['include', 'exclude', 'maybe', 'include', 'exclude', 'maybe']);
+      expect(container.querySelectorAll('.expand__candidate-reason')[1]?.textContent).toBe('Why it is borderline: (None)');
+      createExpandView()(container, { state: errorState('403', 'permission'), navigate: jest.fn() });
+      expect(container.querySelector('.expand__error-title')?.textContent).toBe('⛔ Could not read this spreadsheet');
+      expect(container.querySelector('.expand__error-action--grant')?.textContent).toBe('Authorize with Google');
+      expect(container.querySelector('.expand__error-action--open')?.textContent).toBe('Open spreadsheet');
+    } finally {
+      setUiLanguage('ja');
+    }
+  });
+
+  test('translates progress and fallback labels at render time', () => {
+    const container = buildContainer();
+    const view = createExpandView();
+    view(container, { state: runningState('inside-design'), navigate: jest.fn() });
+    setUiLanguage('en');
+    try {
+      view(container, { state: runningState('inside-design'), navigate: jest.fn() });
+      expect(container.querySelector('.expand__actions button')?.textContent).toBe('Fetching…');
+      expect(container.querySelector('.expand__tracker')?.textContent).toContain('Design specific query');
+      expect(container.querySelector('progress')?.getAttribute('aria-label')).toBe('Fetch progress');
+      expect(container.querySelector('.expand__status')?.textContent).toContain('AI is designing');
+      const result = insideSpecificResult();
+      result.specific!.fallback = 'zero_hits';
+      view(container, { state: readyState(result), navigate: jest.fn() });
+      expect(container.querySelector('.expand__specific-title')?.textContent).toBe('AI-designed specific query (precision-first)');
+      expect(container.querySelector('.expand__specific-fallback')?.textContent).toContain('The specific query returned no hits.');
+    } finally {
+      setUiLanguage('ja');
+    }
+  });
+
+  test('keeps the checkbox and the open abstract through language re-rendering', () => {
+    const container = buildContainer();
+    const onInsideStrategyChange = jest.fn();
+    const view = createExpandView({ onInsideStrategyChange });
+    const ctx = { state: readyState(), navigate: jest.fn() };
+    view(container, ctx);
+    container.querySelector<HTMLInputElement>('.expand__inside-specific')!.click();
+    pressKey(container.ownerDocument.body, 'n');
+    expect(onInsideStrategyChange).toHaveBeenCalledWith('current');
+    setUiLanguage('en');
+    try {
+      view(container, ctx);
+      expect(container.querySelector<HTMLInputElement>('.expand__inside-specific')!.checked).toBe(false);
+      expect(container.querySelector('.expand__candidate--focused')?.getAttribute('data-pmid')).toBe('222');
+      expect(container.querySelector('.expand__candidate--focused .expand__candidate-abstract-body')?.textContent).toBe('(No abstract)');
+      setUiLanguage('ja');
+      view(container, ctx);
+      expect(container.querySelector<HTMLInputElement>('.expand__inside-specific')!.checked).toBe(false);
+      expect(container.querySelector('.expand__candidate--focused')?.getAttribute('data-pmid')).toBe('222');
+    } finally {
+      setUiLanguage('ja');
+    }
+  });
+
+  test('keeps pending and saved decisions and re-validation across language changes', async () => {
+    let resolveDecision!: (value: { seed: object }) => void;
+    const onDecide = jest.fn().mockImplementation(() => new Promise<{ seed: object }>((resolve) => {
+      resolveDecision = resolve;
+    }));
+    let resolveRound!: (value: ValidationSummary) => void;
+    const onRoundComplete = jest.fn(() => new Promise<ValidationSummary>((resolve) => {
+      resolveRound = resolve;
+    }));
+    const view = createExpandView({ onDecide, onRoundComplete });
+    const container = buildContainer();
+    const ctx = { state: readyState(sampleResult({ candidates: [sampleResult().candidates[0]!] })), navigate: jest.fn() };
+    view(container, ctx);
+    pressKey(container.ownerDocument.body, 'i');
+    setUiLanguage('en');
+    try {
+      view(container, ctx);
+      expect(container.querySelector('.expand__candidate-status')?.textContent).toBe('Saving include…');
+      pressKey(container.ownerDocument.body, 'e');
+      expect(onDecide).toHaveBeenCalledTimes(1);
+      expect(onDecide).toHaveBeenCalledWith(expect.objectContaining({ decision: 'include', reason: 'subset' }));
+      resolveDecision({ seed: {} });
+      await flushAsync();
+      expect(container.querySelector('.expand__candidate-status')?.textContent).toBe('Saved as include');
+      expect(container.querySelector('.expand__round-status')?.textContent).toBe('Round complete. Re-validating…');
+      setUiLanguage('ja');
+      view(container, ctx);
+      expect(container.querySelector('.expand__candidate-status')?.textContent).toBe('include として保存しました');
+      resolveRound(buildValidationSummary());
+      await flushAsync();
+      expect(container.querySelector('.expand__round-summary h3')?.textContent).toBe('再検証結果（ラウンド完了）');
+      setUiLanguage('en');
+      view(container, ctx);
+      expect(container.querySelector('.expand__round-summary h3')?.textContent).toBe('Re-validation results (round complete)');
+      expect(onRoundComplete).toHaveBeenCalledTimes(1);
+      pressKey(container.ownerDocument.body, 'e');
+      expect(onDecide).toHaveBeenCalledTimes(1);
+    } finally {
+      setUiLanguage('ja');
+    }
   });
 });
