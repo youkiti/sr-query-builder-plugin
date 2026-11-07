@@ -1,3 +1,4 @@
+import { formatLocalized, translate, type LocalizedText } from '@/lib/i18n';
 import { waitWithSignal } from '@/utils/abort';
 import { annotateLostSample, type AnnotateLostSampleInput } from '@/features/formula/skills/annotateLostSample';
 import {
@@ -139,27 +140,38 @@ export type OptimizationStopReason =
   | 'revalidation_failed' | 'diagnosed_block_held' | 'seed_capture_stalled' | 'held_candidates_collected'
   | 'ai_finished';
 
+function stopReasonMessage(stopReason: OptimizationStopReason): Exclude<LocalizedText, string> {
+  const messages: Record<OptimizationStopReason, Exclude<LocalizedText, string>> = {
+    conditions_met: { key: 'draft.stopReason.conditionsMet' },
+    iteration_limit: { key: 'draft.stopReason.iterationLimit' },
+    diagnosed_block_held: { key: 'draft.stopReason.diagnosedBlockHeld' },
+    repeated_formula: { key: 'draft.stopReason.repeatedFormula' },
+    no_improvement: { key: 'draft.stopReason.noImprovement' },
+    held_candidates_collected: { key: 'draft.stopReason.heldCandidatesCollected', params: { count: MAX_HELD_CANDIDATES } },
+    seed_capture_stalled: { key: 'draft.stopReason.seedCaptureStalled' },
+    user_stop: { key: 'draft.stopReason.userStop' },
+    api_error: { key: 'draft.stopReason.apiError' },
+    api_budget: { key: 'draft.stopReason.apiBudget' },
+    request_timeout: { key: 'draft.stopReason.requestTimeout' },
+    time_budget: { key: 'draft.stopReason.timeBudget' },
+    invalid_input: { key: 'draft.stopReason.invalidInput' },
+    revalidation_failed: { key: 'draft.stopReason.revalidationFailed' },
+    ai_finished: { key: 'draft.stopReason.aiFinished' },
+  };
+  return messages[stopReason];
+}
+
+function appendUnmetReason(result: Pick<QueryOptimizationResult, 'unmetReasons' | 'unmetReasonMessages'>, message: LocalizedText): void {
+  const messages = result.unmetReasonMessages ??= [...result.unmetReasons];
+  result.unmetReasons.push(formatLocalized('ja', message));
+  messages.push(message);
+}
+
 /** NCBI の失敗とは区別する、反復サービスの制御用例外。 */
 export class QueryOptimizationStopError extends Error {
   constructor(readonly stopReason: OptimizationStopReason) {
-    const messages: Record<OptimizationStopReason, string> = {
-      conditions_met: '目安件数と既知シードの捕捉を満たしたため終了しました。',
-      iteration_limit: '反復回数の上限に達したため終了しました。',
-      diagnosed_block_held: '診断したブロックを狭める案が、既に捕捉している文献を失うため連続して保留になり、終了しました。',
-      repeated_formula: '評価済みの同じ式に戻ったため終了しました。',
-      no_improvement: '採用できる変更も、人に判断を求める保留候補も得られない回が 2 回続いたため終了しました。',
-      held_candidates_collected: `実測で失う集合のある保留候補が ${MAX_HELD_CANDIDATES} 件そろったため終了しました。自動調整は既に捕捉している文献を失う変更を自動採用しないため、保留候補を最終レビューで判定してください。`,
-      seed_capture_stalled: 'ブロックの捕捉を増やす中間手を承認済みブロック数と同じ回数続けて採用しましたが、最終式の捕捉数が増えなかったため終了しました。',
-      user_stop: 'ユーザーの停止要求により処理を停止しました。',
-      api_error: 'API エラーにより処理を続けられません。',
-      api_budget: '通信回数の予算上限に達したため処理を停止しました。',
-      request_timeout: '通信の応答待ち時間の上限に達したため処理を停止しました。',
-      time_budget: '実行時間の予算上限に達したため処理を停止しました。',
-      invalid_input: '入力が不正なため処理を開始できません。',
-      revalidation_failed: '最終再検証で条件を満たさなかったため終了しました。',
-      ai_finished: 'AI が、これ以上の変更は不要、または語の変更では解決できず人の判断が必要と判断したため終了しました。',
-    };
-    super(messages[stopReason]);
+    const message = stopReasonMessage(stopReason);
+    super(translate('ja', message.key, message.params));
     this.name = 'QueryOptimizationStopError';
   }
 }
@@ -175,6 +187,7 @@ export interface QueryOptimizationResult {
   best: VerifiedOptimizationCandidate | null;
   trials: OptimizationTrial[];
   unmetReasons: string[];
+  unmetReasonMessages?: LocalizedText[];
   iterations: number;
   apiCalls: number;
   elapsedMs: number;
@@ -732,7 +745,9 @@ export async function runQueryOptimization(
     terminal = reason;
     runController.abort(new QueryOptimizationStopError(reason));
     const unmetReasons: string[] = [];
-    if (reason === 'seed_capture_stalled') unmetReasons.push(new QueryOptimizationStopError(reason).message);
+    const unmetReasonMessages: LocalizedText[] = [];
+    const addReason = (message: LocalizedText) => appendUnmetReason({ unmetReasons, unmetReasonMessages }, message);
+    if (reason === 'seed_capture_stalled') addReason(stopReasonMessage(reason));
     const seedDiagnoses: OptimizationSeedDiagnosis[] = (latestMeasurement?.missedPmids ?? []).map((pmid) => {
       const article = missedSeeds.find((item) => item.pmid === pmid);
       const capture = best?.measurement.seedCapture;
@@ -758,40 +773,43 @@ export async function runQueryOptimization(
         meshHeadingCount, blockingBlockIds, recoverableByTerms, note };
     });
     const unrecoverable = seedDiagnoses.filter((seed) => seed.recoverableByTerms === false);
-    if (unrecoverable.length) unmetReasons.push(`語の調整では回収できないシードがあります（${unrecoverable.map((seed) => seed.pmid).join(', ')}）。検索概念・フィルタが強すぎる可能性があるため、ブロック承認（#/blocks）で見直してください`);
-    if (diagnosedHeldId) unmetReasons.push(`ブロック #${diagnosedHeldId} を狭める案が 2 回続けて保留になりました（失う集合が残る）。このブロックは上位の MeSH でしか索引されない文献を含む可能性があります。狭めると適格文献を落とすおそれがあるため、目安件数の見直しを検討してください。`);
-    if (!best) unmetReasons.push('検証済み候補がありません');
-    if (pendingInformation) unmetReasons.push(`情報要求 ${pendingInformation.candidateId} への判断が未了です（文脈へ反映 ${pendingInformation.obtained} / 要求 ${pendingInformation.requested} 件）`);
+    if (unrecoverable.length) addReason({ key: 'draft.unmet.unrecoverableSeeds', params: { pmids: unrecoverable.map((seed) => seed.pmid).join(', ') } });
+    if (diagnosedHeldId) addReason({ key: 'draft.unmet.diagnosedBlockHeld', params: { blockId: diagnosedHeldId } });
+    if (!best) addReason({ key: 'draft.unmet.noVerifiedCandidate' });
+    if (pendingInformation) addReason({ key: 'draft.unmet.pendingInformation', params: { candidateId: pendingInformation.candidateId, obtained: pendingInformation.obtained, requested: pendingInformation.requested } });
     const lastFinishTrial = reason !== 'conditions_met' ? [...trials].reverse().find((trial) => trial.kind === 'finish') : undefined;
-    if (lastFinishTrial) unmetReasons.push(`${lastFinishTrial.finishRejectedReason ? '受け付けなかった AI の判断（変更不要）'
-      : lastFinishTrial.finishKind === 'no_change_needed' ? 'AI の判断（変更不要）' : 'AI の判断（人の判断が必要）'}: ${lastFinishTrial.rationale}`);
-    if (termBudgetExhausted) unmetReasons.push(`語別計測は ${MAX_TERM_API_CALLS} 通信の上限に達しました。追加取得していない語別件数・固有寄与は未測定です。`);
-    if (termBudgetReserved) unmetReasons.push('候補評価・差集合の実測・最終再検証の通信予算を確保するため、語別計測を打ち切りました。追加取得していない語別件数・固有寄与は未測定です。');
-    if (fixed.seedPmids.length === 0) unmetReasons.push('シードが未指定です');
+    if (lastFinishTrial) addReason(lastFinishTrial.finishRejectedReason ? { key: 'draft.unmet.rejectedAiFinish', params: { rationale: lastFinishTrial.rationale } }
+      : { key: lastFinishTrial.finishKind === 'no_change_needed' ? 'draft.unmet.aiNoChange' : 'draft.unmet.aiHumanJudgment', params: { rationale: lastFinishTrial.rationale } });
+    if (termBudgetExhausted) addReason({ key: 'draft.unmet.termBudgetExhausted', params: { count: MAX_TERM_API_CALLS } });
+    if (termBudgetReserved) addReason({ key: 'draft.unmet.termBudgetReserved' });
+    if (fixed.seedPmids.length === 0) addReason({ key: 'draft.unmet.seedsNotSpecified' });
     // 最良候補は保持し、最終再検証で崩れた値だけを未達理由の根拠に切り替える。
-    if (latestMeasurement?.missedPmids?.length) unmetReasons.push(`未捕捉シード: ${latestMeasurement.missedPmids.join(', ')}`);
+    if (latestMeasurement?.missedPmids?.length) addReason({ key: 'draft.unmet.missedSeeds', params: { pmids: latestMeasurement.missedPmids.join(', ') } });
     if (latestMeasurement?.totalHits != null && latestMeasurement.totalHits > fixed.maxHits) {
-      unmetReasons.push(`目安件数 ${fixed.maxHits} 件を超えています（実測 ${latestMeasurement.totalHits} 件）`);
+      addReason({ key: 'draft.unmet.overTarget', params: { target: fixed.maxHits, measured: latestMeasurement.totalHits } });
       if (['no_improvement', 'diagnosed_block_held', 'held_candidates_collected', 'iteration_limit', 'repeated_formula', 'ai_finished'].includes(reason)) {
         const heldCount = trials.filter((trial) => trial.held
           && typeof trial.before?.totalHits === 'number' && typeof trial.after?.totalHits === 'number'
           && trial.after.totalHits < trial.before.totalHits).length;
-        unmetReasons.push(heldCount > 0
-          ? '件数を減らす候補は見つかりましたが、既に捕捉している文献を失うため自動採用していません。自動調整は捕捉済みの文献を失わない変更だけを自動採用するので、自動では件数は減りません。件数を減らすには、保留候補を最終レビューで判定して採用するか、検索戦略のレビュー・目安件数の見直しを検討してください。'
-          : '件数を減らす変更案は得られませんでした。これは件数を減らせないことの証明ではありません。自動調整は捕捉済みの文献を失わない変更だけを自動採用するので、自動では件数は減りません。検索戦略のレビュー（概念と検索語の対応・AND/OR の論理・フィルタの適用対象）か、目安件数の見直しを検討してください。');
-        if (heldCount > 0) unmetReasons.push(`件数を減らす候補を ${heldCount} 件保留しました（削除影響の確認を参照）。`);
+        addReason(heldCount > 0
+          ? { key: 'draft.unmet.reducingCandidatesHeld' }
+          : { key: 'draft.unmet.noReducingCandidates' });
+        if (heldCount > 0) addReason({ key: 'draft.unmet.heldReducingCandidates', params: { count: heldCount } });
       }
     }
-    if (reason !== 'conditions_met') unmetReasons.push(`終了理由: ${reason}`);
+    if (reason !== 'conditions_met') addReason({ key: 'draft.unmet.stopReason', params: { reason: reason } });
     if (reason !== 'conditions_met') {
       for (const trial of trials.filter((item) => item.held)) {
-        unmetReasons.push(`レビュー候補として保留: ${trial.candidateId}（失う ${trial.impact?.lostHits ?? '未測定'} 件・増える ${trial.impact?.gainedHits ?? '未測定'} 件）`);
+        const lost = trial.impact?.lostHits;
+        const gained = trial.impact?.gainedHits;
+        addReason({ key: lost == null ? gained == null ? 'draft.unmet.heldCandidateUnmeasured' : 'draft.unmet.heldCandidateLostUnmeasured'
+          : gained == null ? 'draft.unmet.heldCandidateGainedUnmeasured' : 'draft.unmet.heldCandidate', params: { candidateId: trial.candidateId, lost: lost ?? 0, gained: gained ?? 0 } });
       }
     }
     const result: QueryOptimizationResult = {
       status: reason === 'conditions_met' ? 'achieved' : reason === 'user_stop' || reason === 'request_timeout' ? 'stopped'
         : reason === 'api_error' || reason === 'invalid_input' ? 'error' : 'needs_review',
-      stopReason: reason, best, trials, blockDiagnosis, unmetReasons, seedDiagnoses, iterations, informationTrials, apiCalls, elapsedMs: now() - startedAt,
+      stopReason: reason, best, trials, blockDiagnosis, unmetReasons, unmetReasonMessages, seedDiagnoses, iterations, informationTrials, apiCalls, elapsedMs: now() - startedAt,
     };
     // 終了後に残すのは確定した終了記録だけ。停止境界を通さず、候補・測定は更新しない。
     // 試行も通信消費も記録していない run は、既存の別 run のチェックポイントに触れない。
@@ -801,7 +819,7 @@ export async function runQueryOptimization(
             status: result.status, stopReason: result.stopReason, unmetReasons: result.unmetReasons,
           } }, deps.checkpoint);
       } catch (err) {
-        result.unmetReasons.push(`終了記録の保存に失敗しました: ${err instanceof Error ? err.message : String(err)}`);
+        appendUnmetReason(result, { key: 'draft.unmet.completionSaveFailed', params: { error: err instanceof Error ? err.message : String(err) } });
       }
     }
     step = 'review';
@@ -844,7 +862,7 @@ export async function runQueryOptimization(
     const error = validateInput(fixed, maxIterations, maxApiCalls, maxElapsedMs);
     if (error) {
       const result = await finish('invalid_input');
-      result.unmetReasons.push(error);
+      appendUnmetReason(result, error);
       return result;
     }
     notifyMeshContext();
@@ -1229,7 +1247,7 @@ export async function runQueryOptimization(
       }
     }
     const result = await finish(terminal ?? 'api_error');
-    result.unmetReasons.push(failure instanceof Error ? failure.message : String(failure));
+    appendUnmetReason(result, failure instanceof QueryOptimizationStopError ? stopReasonMessage(failure.stopReason) : failure instanceof Error ? failure.message : String(failure));
     return result;
   } finally {
     clearInterval(stopPoll);

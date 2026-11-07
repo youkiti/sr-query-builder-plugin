@@ -11,6 +11,12 @@ export type { MessageKey };
 /** UI 表示言語 */
 export type UiLanguage = 'ja' | 'en';
 
+export type LocalizedText = { key: MessageKey; params?: Record<string, string | number> } | string;
+
+export function formatLocalized(language: UiLanguage, text: LocalizedText): string {
+  return typeof text === 'string' ? text : translate(language, text.key, text.params);
+}
+
 export function isUiLanguage(value: unknown): value is UiLanguage {
   return value === 'ja' || value === 'en';
 }
@@ -45,8 +51,13 @@ export function onUiLanguageChange(listener: (language: UiLanguage) => void): ()
 
 /** 現在言語の文言を返す。params は `{name}` 形式のプレースホルダを全置換する。 */
 export function t(key: MessageKey, params?: Record<string, string | number>): string {
+  return translate(currentLanguage, key, params);
+}
+
+/** 指定言語の文言を返す。保存用の日本語は表示言語に依存させない。 */
+export function translate(language: UiLanguage, key: MessageKey, params?: Record<string, string | number>): string {
   // 実行時は Partial として扱い、未知キーは ja → キー文字列の順で倒す。
-  const dict: Partial<Record<MessageKey, string>> = currentLanguage === 'en' ? en : ja;
+  const dict: Partial<Record<MessageKey, string>> = language === 'en' ? en : ja;
   let text = dict[key] ?? ja[key] ?? key;
   if (params !== undefined) {
     for (const [name, value] of Object.entries(params)) {

@@ -1,8 +1,30 @@
-import { getUiLanguage, localizeDom, isUiLanguage, onUiLanguageChange, setUiLanguage, t, type MessageKey } from './index';
+import { formatLocalized, getUiLanguage, localizeDom, isUiLanguage, onUiLanguageChange, setUiLanguage, t, translate, type MessageKey } from './index';
 import { ja } from './ja';
 import { en } from './en';
 
 afterEach(() => { setUiLanguage('ja'); });
+
+test('指定言語で文言と生の文字列を整形し、現在言語を変えない', () => {
+  setUiLanguage('en');
+  expect(translate('ja', 'draft.unmet.overTarget', { target: 10, measured: 20 })).toBe('目安件数 10 件を超えています（実測 20 件）');
+  expect(formatLocalized('en', { key: 'draft.unmet.overTarget', params: { target: 10, measured: 20 } })).toBe('Target hit count 10 exceeded (measured 20 hits)');
+  expect(formatLocalized('en', '翻訳できない例外')).toBe('翻訳できない例外');
+  expect(getUiLanguage()).toBe('en');
+  expect(t('guide.next')).toBe(translate('en', 'guide.next'));
+});
+
+test('指定言語でも未定義キーと未指定・繰り返しのプレースホルダを従来どおり扱う', () => {
+  const key = 'draft.testFallback' as MessageKey;
+  (ja as Record<string, string>)[key] = '{name} と {name} が {count} 件';
+  try {
+    expect(translate('en', key, { name: 'A', count: 2 })).toBe('A と A が 2 件');
+    expect(translate('ja', key)).toBe('{name} と {name} が {count} 件');
+  } finally {
+    delete (ja as Record<string, string>)[key];
+  }
+  expect(translate('en', key)).toBe(key);
+  expect(formatLocalized('ja', { key })).toBe(key);
+});
 
 test('既定は ja で、切り替えると辞書が変わり、同じ言語への切り替えは通知しない', () => {
   expect(getUiLanguage()).toBe('ja');

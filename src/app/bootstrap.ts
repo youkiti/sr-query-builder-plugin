@@ -1,4 +1,4 @@
-import { getUiLanguage, localizeDom, onUiLanguageChange, t } from '@/lib/i18n';
+import { getUiLanguage, localizeDom, onUiLanguageChange, t, translate } from '@/lib/i18n';
 import { appendOptimizationLog, type OptimizationLogEvent } from '@/features/optimization/optimizationLogRepository';
 import { getExtensionVersion } from '@/utils/extensionVersion';
 import { detectGeminiTier } from '@/lib/llm/geminiTierDetector';
@@ -1405,7 +1405,7 @@ export async function runOptimizeQuery(
     update({ result, trials: result.trials, blockDiagnosis: result.blockDiagnosis });
     const outsideCheck: OptimizationOutsideCheckState = {
       unjudgedSeedPmids: allSeeds.filter((seed) => seed.pmid && seed.userDecision == null).map((seed) => seed.pmid!),
-      status: 'skipped', reason: '自動調整が停止・エラーで終了したため外側の確認は未実行です',
+      status: 'skipped', reason: translate('ja', 'draft.outsideReason.optimizationStopped'), reasonMessage: { key: 'draft.outsideReason.optimizationStopped' },
       originalHits: null, marginHits: null, evaluatedCount: 0, candidates: [], decisions: {},
     };
     const savedDecisions = new Map(allSeeds.filter((seed) => seed.pmid && seed.userDecision)
@@ -1424,6 +1424,7 @@ export async function runOptimizeQuery(
     if (result.best && (result.status === 'achieved' || result.status === 'needs_review')) {
       outsideCheck.status = 'running';
       outsideCheck.reason = null;
+      outsideCheck.reasonMessage = null;
       update({ outsideCheck: { ...outsideCheck, candidates: [...outsideCheck.candidates] }, progress: { ...store.getState().queryOptimizationRun!.progress,
         step: 'outside_check', task: null, apiWaiting: null } });
       try {
@@ -1449,7 +1450,10 @@ export async function runOptimizeQuery(
       } catch (err) {
         if (!owns(store.getState())) return;
         outsideCheck.status = shouldStop() ? 'skipped' : 'error';
-        outsideCheck.reason = shouldStop() ? 'ユーザーの停止要求で外側の確認を中止しました'
+        const stopped = shouldStop();
+        outsideCheck.reasonMessage = stopped ? { key: 'draft.outsideReason.userStop' }
+          : err instanceof Error ? err.message : String(err);
+        outsideCheck.reason = stopped ? translate('ja', 'draft.outsideReason.userStop')
           : err instanceof Error ? err.message : String(err);
       }
     }
@@ -1464,12 +1468,12 @@ export async function runOptimizeQuery(
   } catch (err) {
     publisher.flush();
     if (!owns(store.getState())) return;
-    update({ outsideCheck: { status: 'skipped', reason: '自動調整が停止・エラーで終了したため外側の確認は未実行です',
+    update({ outsideCheck: { status: 'skipped', reason: translate('ja', 'draft.outsideReason.optimizationStopped'), reasonMessage: { key: 'draft.outsideReason.optimizationStopped' },
       originalHits: null, marginHits: null, evaluatedCount: 0, candidates: [], decisions: {} } });
     if (err instanceof QueryOptimizationStopError && err.stopReason === 'user_stop') {
       const run = store.getState().queryOptimizationRun;
       update({ status: 'ready', finishedAtMs: Date.now(), result: { status: 'stopped', stopReason: 'user_stop', best: null,
-        trials: [], seedDiagnoses: [], unmetReasons: ['初期式の実測前に停止しました。'], iterations: 0, apiCalls: 0,
+        trials: [], seedDiagnoses: [], unmetReasons: [translate('ja', 'draft.unmet.stoppedBeforeMeasurement')], unmetReasonMessages: [{ key: 'draft.unmet.stoppedBeforeMeasurement' }], iterations: 0, apiCalls: 0,
         elapsedMs: Date.now() - (run?.startedAtMs ?? Date.now()) } });
     } else {
       update({ status: 'error', finishedAtMs: Date.now(), error: err instanceof Error ? err.message : String(err) });
