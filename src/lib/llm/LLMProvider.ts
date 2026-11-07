@@ -53,6 +53,7 @@ export interface ChatResponse {
   raw: unknown;
   modelReported?: string | null;
   providerReported?: string | null;
+  finishReason?: string | null;
 }
 
 export interface LLMProvider {

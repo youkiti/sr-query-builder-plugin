@@ -20,7 +20,8 @@ test('道具の要求と応答を扱い、thinking を含む配列を次の往�
   const tools = [{ name: 'tool', description: '道具', inputSchema: { type: 'object' } }];
   const signal = new AbortController().signal;
   const result = await provider.chatWithTools('system', [{ role: 'user', content: 'start' }], tools, { signal });
-  expect(result).toEqual({ content, raw, modelReported: null, text: 'ab', stopReason: 'tool_use', tokensIn: 80, tokensOut: 20,
+  expect(result).toEqual({ content, raw, modelReported: null, text: 'ab', stopReason: 'tool_use', finishReason: 'tool_use',
+    tokensIn: 80, tokensOut: 20,
     toolCalls: [{ id: 'toolu_1', name: 'tool', input: { command: 'check' } }] });
   expect(result.content).toBe(content);
   expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
@@ -84,7 +85,7 @@ test('Messages API のヘッダ・ロール・system・既定値を送り、text
     model: 'claude-opus-5-5', max_tokens: 16000, thinking: { type: 'adaptive' },
     system: 's1\n\ns2', messages: [{ role: 'user', content: 'q' }, { role: 'assistant', content: 'a' }],
   });
-  expect(result).toEqual({ modelReported: null, text: 'ab', tokensIn: 80, tokensOut: 20, raw });
+  expect(result).toEqual({ modelReported: null, finishReason: 'end_turn', text: 'ab', tokensIn: 80, tokensOut: 20, raw });
   expect(result.raw).toBe(raw);
 });
 
@@ -105,7 +106,7 @@ test('effort 単独指定、usage・content の省略とキャッシュ使用量
   const fetch = jest.fn().mockResolvedValueOnce(jsonResponse({}))
     .mockResolvedValueOnce(jsonResponse({ usage: { input_tokens: 2, output_tokens: 3 } }));
   const provider = new AnthropicProvider({ apiKey: 'test-key', model: 'claude-foo', fetch, effort: 'high' });
-  expect(await provider.chat([])).toEqual({ text: '', tokensIn: null, tokensOut: null, raw: {}, modelReported: null });
+  expect(await provider.chat([])).toEqual({ text: '', tokensIn: null, tokensOut: null, raw: {}, modelReported: null, finishReason: null });
   expect(JSON.parse(fetch.mock.calls[0][1].body).output_config).toEqual({ effort: 'high' });
   expect(await provider.chat([])).toMatchObject({ tokensIn: 2, tokensOut: 3 });
 });

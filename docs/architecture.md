@@ -300,6 +300,17 @@ startApp(document);
 
 動画を上げ直したら、`GUIDE_VIDEO_ID`・`GUIDE_VIDEO_CHAPTERS` の開始秒・`hosted/index.html` と `hosted/help.html` の埋め込み・`hosted/help.html` の章リンクを一緒に直す。
 
+#### ヘルプ相談の土台
+
+| 場所 | 役割 |
+|---|---|
+| `src/lib/help-consult/` | キー不要の端末内検索、固定モデルによる小節選択と一問一答、公開 Issue の下書き。会話履歴・自動再試行・プロジェクトへの記録を持たず、画面には未接続 |
+| `tools/webpack/help-sections.cjs` | `hosted/help.html` を日英それぞれ26小節に変換する純関数とローダー。本文から別言語・動画リンク・URL を除く |
+
+`load.ts` は言語別データを必要時に動的 import する。
+画面から読み込まれると、webpack が `chunks/help-sections-ja.js` と `chunks/help-sections-en.js` を別のチャンクとして出力する（`output.chunkFilename`）。
+処理・送信範囲・終了理由・未評価の範囲は [部品の説明](../src/lib/help-consult/README.md) を参照。
+
 ## 3. ビルド構成
 
 ### 3.1 webpack エントリ

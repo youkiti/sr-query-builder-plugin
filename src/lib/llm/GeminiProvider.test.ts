@@ -40,6 +40,7 @@ describe('GeminiProvider.chat', () => {
       tokensOut: 20,
       raw: expect.any(Object),
       modelReported: null,
+      finishReason: 'STOP',
     });
     expect(provider.providerId).toBe('gemini');
     expect(provider.model).toBe('gemini-3.5-flash-lite');

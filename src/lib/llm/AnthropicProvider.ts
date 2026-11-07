@@ -136,6 +136,7 @@ export class AnthropicProvider implements LLMProvider {
         + (json.usage.cache_read_input_tokens ?? 0) : null,
       tokensOut: json.usage?.output_tokens ?? null,
       raw: json,
+      finishReason: json.stop_reason ?? null,
       modelReported: json.model ?? null,
     };
   }

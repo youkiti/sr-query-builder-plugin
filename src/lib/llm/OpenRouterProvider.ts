@@ -87,6 +87,7 @@ export class OpenRouterProvider implements LLMProvider {
       tokensIn: json.usage?.prompt_tokens ?? null,
       tokensOut: json.usage?.completion_tokens ?? null,
       raw: json,
+      finishReason: json.choices?.[0]?.finish_reason ?? null,
       modelReported: json.model ?? null,
       providerReported: json.provider ?? null,
     };
