@@ -1583,7 +1583,10 @@ export function rejectHeldOptimizationCandidate(store: AppStore, runtime: Chrome
     : { ...s, queryOptimizationRun: { ...s.queryOptimizationRun!, heldRejections, heldRejectionSaving: true } });
   const pending = updateQueryOptimizationHeldRejections(run.projectId, runId, heldRejections, runtime.store,
     () => store.getState().queryOptimizationRun?.runId === runId
-  ).then(() => {
+  ).then((result) => {
+    if (result !== 'saved') {
+      return;
+    }
     recordOptimizationEvent(runtime, state.project?.spreadsheetId, { event: 'candidate_excluded', run_id: runId, recorded_at: nowIso(),
       candidate_id: candidateId, candidate_fingerprint: run.trials.find((item) => item.candidateId === candidateId)?.after?.fingerprint });
   }).catch((err) => {
@@ -1610,7 +1613,10 @@ export function undoHeldOptimizationCandidateRejection(store: AppStore, runtime:
     : { ...s, queryOptimizationRun: { ...s.queryOptimizationRun!, heldRejections, heldRejectionSaving: true } });
   const pending = updateQueryOptimizationHeldRejections(run.projectId, runId, heldRejections, runtime.store,
     () => store.getState().queryOptimizationRun?.runId === runId
-  ).then(() => {
+  ).then((result) => {
+    if (result !== 'saved') {
+      return;
+    }
     recordOptimizationEvent(runtime, state.project?.spreadsheetId, { event: 'candidate_exclusion_undone', run_id: runId, recorded_at: nowIso(),
       candidate_id: candidateId, candidate_fingerprint: run.trials.find((item) => item.candidateId === candidateId)?.after?.fingerprint });
   }).catch((err) => {

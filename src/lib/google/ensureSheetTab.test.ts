@@ -9,10 +9,10 @@ function connection(exists = false) {
 }
 const ensure = (deps: ReturnType<typeof connection>) => ensureSheetTab('sheet', 'OptimizationLog', headers, deps);
 
-test('既存タブには追加要求を送らず、見出しだけ確認する', async () => {
+test('既存タブの見出しがあるときは書き直さない', async () => {
   const deps = connection(true);
   await ensure(deps);
-  expect(deps.fetch.mock.calls.map((call) => call[1].method)).toEqual(['GET', 'GET']);
+  expect(deps.fetch.mock.calls.map((call) => call[1].method)).toEqual(['GET', 'GET', 'GET']);
   expect(deps.fetch.mock.calls[0]![0]).toContain('?fields=sheets.properties.title');
 });
 
@@ -47,7 +47,7 @@ test('別端末による作成との競合だけは既存タブとして見出�
   deps.fetch.mockResolvedValueOnce(response({ sheets: [] }))
     .mockResolvedValueOnce({ ok: false, status: 400, text: async () => 'A sheet already exists' });
   await ensure(deps);
-  expect(deps.fetch.mock.calls.map((call) => call[1].method)).toEqual(['GET', 'POST', 'GET']);
+  expect(deps.fetch.mock.calls.map((call) => call[1].method)).toEqual(['GET', 'POST', 'GET', 'GET']);
 });
 
 test('既に存在するという本文でも 400 以外は失敗として扱う', async () => {
@@ -64,5 +64,16 @@ test('既存タブの見出し確認が失敗したときも次の呼び出し�
     .mockRejectedValueOnce(new Error('確認失敗'));
   await expect(ensure(deps)).rejects.toThrow('確認失敗');
   await ensure(deps);
-  expect(deps.fetch.mock.calls.map((call) => call[1].method)).toEqual(['GET', 'GET', 'GET', 'GET']);
+  expect(deps.fetch.mock.calls.map((call) => call[1].method)).toEqual(['GET', 'GET', 'GET', 'GET', 'GET']);
+});
+
+
+test.each([{ values: [] }, { values: [[]] }])('既存タブの１行目が空なら見出しを書く（%j）', async ({ values }) => {
+  const deps = connection(true);
+  deps.fetch.mockResolvedValueOnce(response({ sheets: [{ properties: { title: 'OptimizationLog' } }] }))
+    .mockResolvedValueOnce(response({ values }));
+  await ensure(deps);
+  expect(deps.fetch.mock.calls.map((call) => call[1].method)).toEqual(['GET', 'GET', 'PUT']);
+  expect(deps.fetch.mock.calls[1]![0]).toContain('1%3A1');
+  expect(JSON.parse(deps.fetch.mock.calls[2]![1].body)).toEqual({ values: [headers] });
 });

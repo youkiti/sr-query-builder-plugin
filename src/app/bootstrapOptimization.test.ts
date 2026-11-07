@@ -893,7 +893,7 @@ test.each([false, true])('除外変更の保存失敗は操作前へ戻り、再
   seedCompletedCheckpoint(f, runId);
   if (undo) { rejectHeldOptimizationCandidate(f.store, f.runtime, 'candidate-1'); await flush(); }
   const before = f.store.getState().queryOptimizationRun!.heldRejections;
-  const pending = deferred<void>();
+  const pending = deferred<'saved' | 'skipped'>();
   jest.spyOn(checkpointService, 'updateQueryOptimizationHeldRejections').mockReturnValueOnce(pending.promise);
   const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
   const action = undo ? undoHeldOptimizationCandidateRejection : rejectHeldOptimizationCandidate;
@@ -932,7 +932,7 @@ test.each([false, true])('除外・取消の保存待ちでは別候補も無効
   for (const undo of [false, true]) {
     if (undo && fails) { rejectHeldOptimizationCandidate(f.store, f.runtime, 'candidate-1'); await flush(); }
     const before = f.store.getState().queryOptimizationRun!.heldRejections;
-    const pending = deferred<void>();
+    const pending = deferred<'saved' | 'skipped'>();
     const write = jest.spyOn(checkpointService, 'updateQueryOptimizationHeldRejections').mockReturnValueOnce(pending.promise);
     const calls = write.mock.calls.length;
     render();
@@ -946,7 +946,7 @@ test.each([false, true])('除外・取消の保存待ちでは別候補も無効
     rejectHeldOptimizationCandidate(f.store, f.runtime, 'candidate-2');
     expect(write.mock.calls.length).toBe(calls + 1);
     expect(f.store.getState().queryOptimizationRun!.heldRejections?.['candidate-2']).toBeUndefined();
-    if (fails) pending.reject(new Error('保存失敗')); else pending.resolve();
+    if (fails) pending.reject(new Error('保存失敗')); else pending.resolve('saved');
     await flush();
     expect(buttons().every((button) => !button.disabled)).toBe(true);
     expect(container.textContent).not.toContain('除外・取り消しを保存中');
@@ -1029,13 +1029,13 @@ test.each([false, true])('除外・取消は保存成功後だけ記録する（
     await flush();
   }
   f.log.mockClear();
-  const pending = deferred<void>();
+  const pending = deferred<'saved' | 'skipped'>();
   jest.spyOn(checkpointService, 'updateQueryOptimizationHeldRejections').mockReturnValueOnce(pending.promise);
   const action = undo ? undoHeldOptimizationCandidateRejection : rejectHeldOptimizationCandidate;
   action(f.store, f.runtime, 'candidate-1');
   await flush();
   expect(f.log).not.toHaveBeenCalled();
-  pending.resolve();
+  pending.resolve('saved');
   await flush();
   expect(f.log).toHaveBeenCalledTimes(1);
   expect(f.log.mock.calls[0]![1]).toMatchObject({ event: undo ? 'candidate_exclusion_undone' : 'candidate_excluded',
@@ -1084,4 +1084,38 @@ test('最良候補の実測値と操作した人を記録し、候補の fingerp
   undoHeldOptimizationCandidateRejection(f.store, f.runtime, 'candidate-1');
   await flush();
   expect(f.log.mock.calls[3]![1]).toMatchObject({ event: 'candidate_exclusion_undone', candidate_fingerprint: 'fp' });
+});
+
+
+test.each([false, true])('保存中に別の実行へ替わったチェックポイントには除外・取消を記録しない（取消 %s）', async (undo) => {
+  const f = setupOutside();
+  await f.invoke();
+  await flush();
+  addHeldTrial(f);
+  seedCompletedCheckpoint(f, f.store.getState().queryOptimizationRun!.runId);
+  if (undo) {
+    rejectHeldOptimizationCandidate(f.store, f.runtime, 'candidate-1');
+    await flush();
+  }
+  f.log.mockClear();
+  const pending = deferred<void>();
+  const read = jest.spyOn(f.runtime.store, 'read').mockImplementationOnce(async <T>() => {
+    await pending.promise;
+    return f.data.queryOptimizationCheckpoint as T;
+  });
+  const write = jest.spyOn(f.runtime.store, 'write');
+  write.mockClear();
+  const action = undo ? undoHeldOptimizationCandidateRejection : rejectHeldOptimizationCandidate;
+  action(f.store, f.runtime, 'candidate-1');
+  await flush();
+  expect(read).toHaveBeenCalledWith('queryOptimizationCheckpoint');
+  seedCompletedCheckpoint(f, 'next');
+  const checkpoint = f.data.queryOptimizationCheckpoint;
+  pending.resolve();
+  await flush();
+  expect(write).not.toHaveBeenCalled();
+  expect(f.data.queryOptimizationCheckpoint).toBe(checkpoint);
+  expect(f.log).not.toHaveBeenCalled();
+  expect(f.store.getState().queryOptimizationRun!.heldRejectionSaving).toBe(false);
+  expect(!!f.store.getState().queryOptimizationRun!.heldRejections?.['candidate-1']).toBe(!undo);
 });
