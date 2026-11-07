@@ -1,5 +1,5 @@
 /**
- * Google Sheets の 9 タブ定義。
+ * Google Sheets の 10 タブ定義。
  * requirements.md §3.1 参照。実 I/O は lib/google/sheets.ts 側で行う。
  */
 
@@ -13,6 +13,7 @@ export const SHEET_TABS = [
   'Conversions',
   'LLMApiLog',
   'Config',
+  'OptimizationLog',
 ] as const;
 
 export type SheetTabName = (typeof SHEET_TABS)[number];
@@ -117,4 +118,9 @@ export const SHEET_HEADERS: Record<SheetTabName, readonly string[]> = {
     'executed_by',
   ],
   Config: ['key', 'value'],
+  OptimizationLog: [
+    'event', 'run_id', 'recorded_at', 'recorded_by', 'app_version', 'max_hits', 'max_iterations',
+    'seed_count', 'model', 'resumed_from_run_id', 'status', 'stop_reason', 'final_hits',
+    'captured_seed_count', 'candidate_id', 'candidate_fingerprint', 'note',
+  ],
 };

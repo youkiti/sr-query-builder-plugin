@@ -1,3 +1,5 @@
+import { appendOptimizationLog, type OptimizationLogEvent } from '@/features/optimization/optimizationLogRepository';
+import { getExtensionVersion } from '@/utils/extensionVersion';
 import { detectGeminiTier } from '@/lib/llm/geminiTierDetector';
 import { createEnsureAiConsent } from './services/aiConsentService';
 declare const __BUILD_DATE__: string;
@@ -1208,6 +1210,29 @@ async function prepareQueryOptimization(store: AppStore, runtime: ChromeRuntimeD
   }
 }
 
+/**
+ * 証跡の失敗は操作に伝播させず、書き込み完了も待たない。
+ * 書き込み先は呼び出し元が run の開始時・操作時に確定した値を渡す（途中でプロジェクトを切り替えても別のシートへ書かない）。
+ */
+function recordOptimizationEvent(runtime: ChromeRuntimeDeps, spreadsheetId: string | null | undefined, event: OptimizationLogEvent): void {
+  if (!spreadsheetId) {
+    return;
+  }
+  void (async () => {
+    const email = await getCurrentUserEmail(runtime.profile).catch(() => null);
+    await appendOptimizationLog(spreadsheetId, { ...event, recorded_by: email }, runtime.google);
+  })().catch(() => {
+    console.warn('自動調整の証跡を保存できませんでした');
+  });
+}
+
+/** メールと長い英数字を伏せてから、保存するエラー文を制限する。 */
+function optimizationErrorNote(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[REDACTED]')
+    .replace(/[A-Z0-9]{20,}/gi, '[REDACTED]').slice(0, 200);
+}
+
 /** 自動調整の候補は実行状態だけに保持する。各非同期境界で run の所有権を確認する。 */
 export async function runOptimizeQuery(
   store: AppStore, runtime: ChromeRuntimeDeps,
@@ -1252,6 +1277,7 @@ export async function runOptimizeQuery(
       ...s, queryOptimizationRun: { ...s.queryOptimizationRun, ...patch },
     });
   };
+  let logStarted = false;
   const publisher = createOptimizationProgressPublisher(store, owns);
   const shouldStop = (): boolean => !owns(store.getState()) || !!store.getState().queryOptimizationRun?.stopRequested;
   const check = (): void => { if (shouldStop()) throw new QueryOptimizationStopError('user_stop'); };
@@ -1306,6 +1332,11 @@ export async function runOptimizeQuery(
             ? [...events, event] : events } });
       },
     });
+    logStarted = true;
+    recordOptimizationEvent(runtime, project.spreadsheetId, { event: 'run_started', run_id: runId, recorded_at: nowIso(),
+      app_version: getExtensionVersion(), max_hits: fixedSettings.maxHits,
+      max_iterations: resume?.available ? resume.remaining.evaluatedTrials : fixedSettings.maxIterations,
+      seed_count: seedPmids.length, model: factory.model, resumed_from_run_id: resume?.available ? resumeRunId : undefined });
     check();
     const eutils = await buildEutilsDeps({ google: runtime.google, store: runtime.store });
     check();
@@ -1422,6 +1453,9 @@ export async function runOptimizeQuery(
     if (!owns(store.getState())) return;
     update({ status: result.status === 'error' ? 'error' : 'ready', finishedAtMs: Date.now(), result, trials: result.trials,
       error: result.status === 'error' ? result.unmetReasons.join(' / ') : null });
+    recordOptimizationEvent(runtime, project.spreadsheetId, { event: 'run_finished', run_id: runId, recorded_at: nowIso(),
+      status: result.status, stop_reason: result.stopReason, final_hits: result.best?.measurement.totalHits ?? undefined,
+      captured_seed_count: result.best?.measurement.capturedPmids?.length });
   } catch (err) {
     publisher.flush();
     if (!owns(store.getState())) return;
@@ -1434,6 +1468,14 @@ export async function runOptimizeQuery(
         elapsedMs: Date.now() - (run?.startedAtMs ?? Date.now()) } });
     } else {
       update({ status: 'error', finishedAtMs: Date.now(), error: err instanceof Error ? err.message : String(err) });
+    }
+    if (logStarted) {
+      const stopped = err instanceof QueryOptimizationStopError && err.stopReason === 'user_stop';
+      const best = store.getState().queryOptimizationRun?.result?.best;
+      recordOptimizationEvent(runtime, project.spreadsheetId, { event: 'run_finished', run_id: runId, recorded_at: nowIso(),
+        status: stopped ? 'stopped' : 'error', stop_reason: stopped ? 'user_stop' : undefined,
+        final_hits: best?.measurement.totalHits ?? undefined, captured_seed_count: best?.measurement.capturedPmids?.length,
+        note: stopped ? undefined : optimizationErrorNote(err) });
     }
     await persistOptimizationReview(store, runtime, runId);
   } finally {
@@ -1541,7 +1583,13 @@ export function rejectHeldOptimizationCandidate(store: AppStore, runtime: Chrome
     : { ...s, queryOptimizationRun: { ...s.queryOptimizationRun!, heldRejections, heldRejectionSaving: true } });
   const pending = updateQueryOptimizationHeldRejections(run.projectId, runId, heldRejections, runtime.store,
     () => store.getState().queryOptimizationRun?.runId === runId
-  ).catch((err) => {
+  ).then((result) => {
+    if (result !== 'saved') {
+      return;
+    }
+    recordOptimizationEvent(runtime, state.project?.spreadsheetId, { event: 'candidate_excluded', run_id: runId, recorded_at: nowIso(),
+      candidate_id: candidateId, candidate_fingerprint: run.trials.find((item) => item.candidateId === candidateId)?.after?.fingerprint });
+  }).catch((err) => {
     store.setState((s) => s.queryOptimizationRun?.runId !== runId ? s
       : { ...s, queryOptimizationRun: { ...s.queryOptimizationRun!, heldRejections: run.heldRejections, heldRejectionSaving: true } });
     console.warn('保留候補の除外をチェックポイントに保存できませんでした', err);
@@ -1565,7 +1613,13 @@ export function undoHeldOptimizationCandidateRejection(store: AppStore, runtime:
     : { ...s, queryOptimizationRun: { ...s.queryOptimizationRun!, heldRejections, heldRejectionSaving: true } });
   const pending = updateQueryOptimizationHeldRejections(run.projectId, runId, heldRejections, runtime.store,
     () => store.getState().queryOptimizationRun?.runId === runId
-  ).catch((err) => {
+  ).then((result) => {
+    if (result !== 'saved') {
+      return;
+    }
+    recordOptimizationEvent(runtime, state.project?.spreadsheetId, { event: 'candidate_exclusion_undone', run_id: runId, recorded_at: nowIso(),
+      candidate_id: candidateId, candidate_fingerprint: run.trials.find((item) => item.candidateId === candidateId)?.after?.fingerprint });
+  }).catch((err) => {
     store.setState((s) => s.queryOptimizationRun?.runId !== runId ? s
       : { ...s, queryOptimizationRun: { ...s.queryOptimizationRun!, heldRejections: run.heldRejections, heldRejectionSaving: true } });
     console.warn('保留候補の除外の取り消しをチェックポイントに保存できませんでした', err);

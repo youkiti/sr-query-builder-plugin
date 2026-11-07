@@ -253,3 +253,30 @@ test('除外・確認状況・取消・次 run の保存は同じキーの read�
   await saveQueryOptimizationCheckpoint({ ...options, runId: 'next' }, deps);
   expect(await getQueryOptimizationCheckpoint('p', deps)).toMatchObject({ inheritedHumanRejections: [] });
 });
+
+
+test('除外判断を書き込んだときは保存済みを返す', async () => {
+  const { deps, options } = setup();
+  await saveQueryOptimizationCheckpoint({ ...options,
+    completion: { status: 'needs_review', stopReason: 'iteration_limit', unmetReasons: [] } }, deps);
+  const heldRejections = { initial: { rejectedAt: 'now' } };
+  await expect(updateQueryOptimizationHeldRejections('p', 'run', heldRejections, deps)).resolves.toBe('saved');
+  expect(await getQueryOptimizationCheckpoint('p', deps)).toMatchObject({ heldRejections });
+});
+
+test.each(['所有権なし', 'チェックポイントなし', '未完了', 'プロジェクト不一致', '実行不一致'])(
+'除外判断を保存できないときは書き込みを飛ばした結果を返す（%s）', async (kind) => {
+  const { deps, options, data } = setup();
+  if (kind !== 'チェックポイントなし') {
+    await saveQueryOptimizationCheckpoint({ ...options,
+      ...(kind === '未完了' ? {} : { completion: { status: 'achieved' as const,
+        stopReason: 'conditions_met' as const, unmetReasons: [] } }) }, deps);
+  }
+  const before = data.queryOptimizationCheckpoint;
+  const write = jest.spyOn(deps, 'write');
+  await expect(updateQueryOptimizationHeldRejections(kind === 'プロジェクト不一致' ? 'other' : 'p',
+    kind === '実行不一致' ? 'other' : 'run', { initial: { rejectedAt: 'now' } }, deps,
+    () => kind !== '所有権なし')).resolves.toBe('skipped');
+  expect(write).not.toHaveBeenCalled();
+  expect(data.queryOptimizationCheckpoint).toBe(before);
+});

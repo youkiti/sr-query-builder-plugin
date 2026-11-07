@@ -5,7 +5,7 @@ const sessions = new WeakMap<GoogleApiDeps, Map<string, Promise<void>>>();
 
 /** 同じ接続・シートの見出し確認を共有し、失敗時は次回に再試行する。 */
 export function ensureSheetHeaders(spreadsheetId: string, tab: string, headers: readonly string[],
-  deps: GoogleApiDeps): Promise<void> {
+  deps: GoogleApiDeps, throwOnFailure = false): Promise<void> {
   let checks = sessions.get(deps);
   if (!checks) { checks = new Map(); sessions.set(deps, checks); }
   const sessionChecks = checks;
@@ -20,8 +20,11 @@ export function ensureSheetHeaders(spreadsheetId: string, tab: string, headers: 
       return;
     }
     if (current.length < headers.length) await writeHeaderRow(spreadsheetId, tab, headers, deps);
-  })().catch(() => {
+  })().catch((error: unknown) => {
     sessionChecks.delete(key);
+    if (throwOnFailure) {
+      throw error;
+    }
     // 応答本文や認証情報を出さず、次回の追記時に再確認する。
     console.warn('シートの見出しを確認・更新できなかったため、追記を続けます');
   });

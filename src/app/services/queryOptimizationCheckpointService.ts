@@ -245,10 +245,13 @@ export async function updateQueryOptimizationHeldRejections(
   heldRejections: Record<string, { rejectedAt: string }>,
   deps: ProjectStoreDeps,
   owns: () => boolean = () => true
-): Promise<void> {
-  await serializeCheckpointUpdate(async () => {
+): Promise<'saved' | 'skipped'> {
+  return serializeCheckpointUpdate(async () => {
     const checkpoint = await deps.read<QueryOptimizationCheckpoint | null>(CHECKPOINT_KEY);
-    if (!owns() || !checkpoint?.completion || checkpoint.projectId !== projectId || checkpoint.runId !== runId) return;
+    if (!owns() || !checkpoint?.completion || checkpoint.projectId !== projectId || checkpoint.runId !== runId) {
+      return 'skipped';
+    }
     await deps.write({ [CHECKPOINT_KEY]: { ...checkpoint, heldRejections } });
+    return 'saved';
   });
 }
