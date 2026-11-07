@@ -1,7 +1,8 @@
+import { t } from '@/lib/i18n';
+import { ROUTE_LABELS } from '../router';
 import type { ProtocolSubmissionInput } from '@/app/services';
 import type { Protocol } from '@/domain/protocol';
 import type { ProtocolDraft } from '../store';
-import { ROUTE_LABELS } from '../router';
 import { buildHydrateErrorBanner } from './hydrateErrorBanner';
 import type { RenderView } from './types';
 
@@ -75,7 +76,19 @@ interface FormRenderOptions {
 }
 
 export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): RenderView {
-  return (container, ctx) => {
+  let editingBase: ProtocolDisplay | null = null;
+  let unsavedInputs: { text?: string; mode: SourceMode; file: File | null } = {
+    mode: 'manual', file: null,
+  };
+  let projectId: string | undefined;
+  let rerender: (() => void) | null = null;
+  const render: RenderView = (container, ctx) => {
+    rerender = () => render(container, ctx);
+    if (projectId !== ctx.state.project?.projectId) {
+      projectId = ctx.state.project?.projectId;
+      editingBase = null;
+      unsavedInputs = { mode: 'manual', file: null };
+    }
     container.innerHTML = '';
     const doc = container.ownerDocument;
 
@@ -92,20 +105,20 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
     const lead = doc.createElement('p');
     lead.className = 'protocol__lead';
     lead.textContent =
-      '最初にレビュー対象のプロトコルを入力します。手入力、または Markdown / Word (.docx) ファイルのアップロードで開始できます。';
+      t('protocol.lead');
     container.appendChild(lead);
 
     if (!ctx.state.project) {
       const warn = doc.createElement('p');
       warn.className = 'protocol__warning';
-      warn.textContent = '先にプロジェクトを選択してください。';
+      warn.textContent = t('protocol.noProject');
       container.appendChild(warn);
       return;
     }
 
     const project = doc.createElement('p');
     project.className = 'protocol__project';
-    project.textContent = `現在のプロジェクト: ${ctx.state.project.title}`;
+    project.textContent = t('protocol.project', { title: ctx.state.project.title });
     container.appendChild(project);
 
     // モード切替（読み取り専用 ↔ 編集）で描き替える領域
@@ -129,12 +142,12 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
         badge.setAttribute('role', 'status');
         const title = doc.createElement('strong');
         title.className = 'protocol__draft-status-title';
-        title.textContent = '⚠ 未保存の下書き';
+        title.textContent = t('protocol.unsaved');
         badge.appendChild(title);
         const desc = doc.createElement('span');
         desc.className = 'protocol__draft-status-desc';
         desc.textContent =
-          'このプロトコルはまだスプレッドシートに保存されていません。「ブロック承認」まで進むと確定保存されます。';
+          t('protocol.unsavedDescription');
         badge.appendChild(desc);
         body.appendChild(badge);
       }
@@ -150,31 +163,29 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
       form.className = 'protocol__form';
       form.dataset.tour = 'protocol-form';
 
-      const sourceSection = buildSection(doc, '入力形式', buildSourceModeRadios);
+      const sourceSection = buildSection(doc, t('protocol.inputFormat'), buildSourceModeRadios);
       form.appendChild(sourceSection);
 
-      const manualSection = buildSection(doc, '手入力', (sectionDoc) => {
+      const manualSection = buildSection(doc, t('protocol.manual'), (sectionDoc) => {
         const wrap = sectionDoc.createElement('div');
         wrap.className = 'protocol__section';
         const hint = sectionDoc.createElement('p');
         hint.className = 'protocol__hint';
-        hint.textContent =
-          'プロトコル全文を貼り付けてください。RQ・組入/除外基準・ブロックは AI が自動抽出し、' +
-          '次の「ブロック承認」画面で編集できます。';
+        hint.textContent = t('protocol.manualHint');
         wrap.appendChild(hint);
-        wrap.appendChild(buildField(sectionDoc, 'inline', 'プロトコル全文', opts.prefillText));
+        wrap.appendChild(buildField(sectionDoc, 'inline', t('protocol.fullText'), unsavedInputs.text ?? opts.prefillText));
         return wrap;
       });
       form.appendChild(manualSection);
 
-      const fileField = buildFileInput(doc, 'file', 'プロトコルファイル');
-      const fileSection = buildSection(doc, 'ファイルアップロード', (sectionDoc) => {
+      const fileField = buildFileInput(doc, 'file', t('protocol.file'));
+      const fileSection = buildSection(doc, t('protocol.upload'), (sectionDoc) => {
         const wrap = sectionDoc.createElement('div');
         wrap.className = 'protocol__section';
         const hint = sectionDoc.createElement('p');
         hint.className = 'protocol__hint';
         hint.textContent =
-          'Markdown (.md / .markdown) または Word (.docx) ファイルを選択してください。形式は拡張子で自動判定します。';
+          t('protocol.fileHint');
         wrap.appendChild(hint);
         wrap.appendChild(fileField);
         return wrap;
@@ -191,7 +202,7 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
         const cancel = doc.createElement('button');
         cancel.type = 'button';
         cancel.className = 'protocol__cancel';
-        cancel.textContent = '編集をやめる';
+        cancel.textContent = t('protocol.cancelEdit');
         cancel.addEventListener('click', () => opts.onCancel?.());
         actions.appendChild(cancel);
       }
@@ -210,13 +221,13 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
       const confirmPanel = doc.createElement('div');
       confirmPanel.className = 'protocol__revise-confirm';
       confirmPanel.setAttribute('role', 'group');
-      confirmPanel.setAttribute('aria-label', '検索ブロックの扱いを選択');
+      confirmPanel.setAttribute('aria-label', t('protocol.reviseChoice'));
       confirmPanel.hidden = true;
       if (opts.revising) {
         const question = doc.createElement('p');
         question.className = 'protocol__revise-question';
         question.textContent =
-          '検索ブロックを作り直しますか？ どちらを選んでもプロトコルは新しいバージョンとして追記され、元のバージョンは保持されます。';
+          t('protocol.reviseQuestion');
         confirmPanel.appendChild(question);
         form.appendChild(confirmPanel);
       }
@@ -225,11 +236,19 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
         handler: ((input: ProtocolSubmissionInput) => void | Promise<void>) | undefined
       ): void => {
         try {
-          const input = collectFormInput(form);
+          const input = collectFormInput(form, unsavedInputs.file);
+          const submitted = { ...unsavedInputs };
           submit.disabled = true;
           progress.start();
           void Promise.resolve(handler?.(input))
-            .catch((err: unknown) => {
+            .then(() => {
+              if (handler && unsavedInputs.text === submitted.text &&
+                unsavedInputs.mode === submitted.mode && unsavedInputs.file === submitted.file) {
+                unsavedInputs = { mode: 'manual', file: null };
+                editingBase = null;
+                if (opts.revising && container.querySelector('.protocol__form')) rerender?.();
+              }
+            }, (err: unknown) => {
               errorBox.textContent = formatError(err);
             })
             .finally(() => {
@@ -245,7 +264,7 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
         const rebuild = doc.createElement('button');
         rebuild.type = 'button';
         rebuild.className = 'protocol__revise-rebuild';
-        rebuild.textContent = 'AI でブロックを再抽出して作り直す';
+        rebuild.textContent = t('protocol.rebuild');
         rebuild.addEventListener('click', () => {
           confirmPanel.hidden = true;
           runSubmission(callbacks.onSubmit);
@@ -256,7 +275,7 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
           const keep = doc.createElement('button');
           keep.type = 'button';
           keep.className = 'protocol__revise-keep';
-          keep.textContent = '既存の検索ブロックを維持して保存';
+          keep.textContent = t('protocol.keepBlocks');
           keep.addEventListener('click', () => {
             confirmPanel.hidden = true;
             runSubmission(callbacks.onReviseKeepBlocks);
@@ -267,7 +286,7 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
         const cancelConfirm = doc.createElement('button');
         cancelConfirm.type = 'button';
         cancelConfirm.className = 'protocol__revise-cancel';
-        cancelConfirm.textContent = 'キャンセル';
+        cancelConfirm.textContent = t('protocol.cancel');
         cancelConfirm.addEventListener('click', () => {
           confirmPanel.hidden = true;
           submit.disabled = false;
@@ -277,20 +296,31 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
 
       const syncMode = (): void => {
         const mode = readSourceMode(form);
+        unsavedInputs.mode = mode;
         manualSection.hidden = mode !== 'manual';
         fileSection.hidden = mode !== 'file';
         if (opts.revising) {
-          submit.textContent = '新しいバージョンとして保存';
+          submit.textContent = t('protocol.saveVersion');
         } else {
           submit.textContent =
             mode === 'manual'
-              ? 'プロトコル本文を解析してブロック抽出へ'
-              : 'ファイルを解析してブロック抽出へ';
+              ? t('protocol.analyzeText')
+              : t('protocol.analyzeFile');
         }
       };
 
       const sourceInputs = form.querySelectorAll<HTMLInputElement>('input[name=sourceMode]');
+      sourceInputs.forEach((input) => { input.checked = input.value === unsavedInputs.mode; });
       sourceInputs.forEach((input) => input.addEventListener('change', syncMode));
+      const textInput = form.querySelector<HTMLTextAreaElement>('#inline')!;
+      textInput.addEventListener('input', () => { unsavedInputs.text = textInput.value; });
+      const fileInput = form.querySelector<HTMLInputElement>('input[type=file]')!;
+      if (unsavedInputs.file && typeof DataTransfer !== 'undefined') {
+        const dt = new DataTransfer();
+        dt.items.add(unsavedInputs.file);
+        fileInput.files = dt.files;
+      }
+      fileInput.addEventListener('change', () => { unsavedInputs.file = fileInput.files?.[0] ?? null; });
       syncMode();
 
       form.addEventListener('submit', (event) => {
@@ -302,7 +332,7 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
         }
         // 改訂時はまず入力を検証してから確認パネルを出す
         try {
-          collectFormInput(form);
+          collectFormInput(form, unsavedInputs.file);
         } catch (err) {
           errorBox.textContent = formatError(err);
           return;
@@ -321,9 +351,10 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
 
       const versionLabel = doc.createElement('p');
       versionLabel.className = 'protocol__version-label';
-      versionLabel.textContent = `確定済みプロトコル v${display.version ?? '—'}${
-        display.isLatest ? '（最新）' : '（過去バージョン）'
-      }`;
+      versionLabel.textContent = t('protocol.version', {
+        version: display.version ?? '—',
+        status: display.isLatest ? t('protocol.latest') : t('protocol.past'),
+      });
       wrap.appendChild(versionLabel);
 
       const errorBox = doc.createElement('p');
@@ -341,7 +372,7 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
         const note = doc.createElement('p');
         note.className = 'protocol__old-note';
         note.textContent =
-          '過去バージョンを表示中です。このバージョンをベースに編集して保存すると、最新の次のバージョンとして追記されます。';
+          t('protocol.oldNote');
         wrap.appendChild(note);
       }
 
@@ -349,15 +380,20 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
       edit.type = 'button';
       edit.className = 'protocol__edit';
       edit.textContent = display.isLatest
-        ? 'このプロトコルを編集する'
-        : 'このバージョンをベースに編集する';
+        ? t('protocol.edit')
+        : t('protocol.editBase');
       edit.addEventListener('click', () => {
+        editingBase = display;
         showForm({
           prefillText: display.rawTextInline ?? '',
           revising: true,
           unsavedBadge: false,
           notice: buildEditNotice(display),
-          onCancel: () => showReadOnly(display),
+          onCancel: () => {
+            editingBase = null;
+            unsavedInputs = { mode: 'manual', file: null };
+            showReadOnly(display);
+          },
         });
       });
       wrap.appendChild(edit);
@@ -377,7 +413,7 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
         const load = doc.createElement('button');
         load.type = 'button';
         load.className = 'protocol__load-versions';
-        load.textContent = '過去のバージョンを表示';
+        load.textContent = t('protocol.loadVersions');
         load.addEventListener('click', () => {
           load.disabled = true;
           void Promise.resolve(callbacks.onListVersions?.())
@@ -396,7 +432,7 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
       if (versions.length === 0) {
         const empty = doc.createElement('p');
         empty.className = 'protocol__versions-empty';
-        empty.textContent = '保存済みバージョンがまだありません。';
+        empty.textContent = t('protocol.noVersions');
         area.appendChild(empty);
         return area;
       }
@@ -404,14 +440,14 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
       const label = doc.createElement('label');
       label.className = 'protocol__version-select';
       const span = doc.createElement('span');
-      span.textContent = '表示するバージョン';
+      span.textContent = t('protocol.selectVersion');
       label.appendChild(span);
       const select = doc.createElement('select');
       select.id = 'protocol-version-select';
       for (const p of versions) {
         const option = doc.createElement('option');
         option.value = String(p.version);
-        option.textContent = `v${p.version}（${p.createdAt}）`;
+        option.textContent = t('protocol.versionOption', { version: p.version, createdAt: p.createdAt });
         if (p.version === display.version) {
           option.selected = true;
         }
@@ -431,7 +467,20 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
     };
 
     const draft = ctx.state.protocolDraft;
-    if (draft !== null && ctx.state.protocolDraftPersisted) {
+    if (editingBase !== null) {
+      const base = editingBase;
+      showForm({
+        prefillText: base.rawTextInline ?? '',
+        revising: true,
+        unsavedBadge: false,
+        notice: buildEditNotice(base),
+        onCancel: () => {
+          editingBase = null;
+          unsavedInputs = { mode: 'manual', file: null };
+          showReadOnly(base);
+        },
+      });
+    } else if (draft !== null && ctx.state.protocolDraftPersisted) {
       showReadOnly(displayFromDraft(draft, ctx.state.currentProtocolVersion));
     } else {
       showForm({
@@ -441,12 +490,13 @@ export function createProtocolView(callbacks: ProtocolViewCallbacks = {}): Rende
         unsavedBadge: draft !== null,
         notice:
           draft !== null
-            ? '本文を確認・修正して再解析するか、「ブロック承認」画面で続きを進めてください。'
+            ? t('protocol.resume')
             : null,
         onCancel: null,
       });
     }
   };
+  return render;
 }
 
 /**
@@ -492,37 +542,35 @@ function displayFromProtocol(protocol: Protocol, latestVersion: number | null): 
 }
 
 function buildEditNotice(display: ProtocolDisplay): string {
-  const base = `v${display.version ?? '—'} を編集中。保存すると新しいバージョンとして追記され、元のバージョンは保持されます。`;
+  const base = t('protocol.editNotice', { version: display.version ?? '—' });
   if (display.rawTextInline === null) {
-    return `${base} 元の本文（ファイル入力）は手元に無いため、本文を再入力または再アップロードしてください。`;
+    return t('protocol.missingText', { base });
   }
   return base;
 }
 
-const SOURCE_TYPE_LABELS: Record<ProtocolDisplay['sourceType'], string> = {
-  manual: '手入力',
-  markdown: 'Markdown ファイル',
-  docx: 'Word (.docx) ファイル',
-};
+function sourceTypeLabel(type: ProtocolDisplay['sourceType']): string {
+  return t(type === 'manual' ? 'protocol.manual' : type === 'markdown' ? 'protocol.markdown' : 'protocol.docx');
+}
 
 function buildSummary(doc: Document, display: ProtocolDisplay): HTMLElement {
   const dl = doc.createElement('dl');
   dl.className = 'protocol__summary';
   const rows: [string, string][] = [
-    ['フレームワーク', display.frameworkType],
-    ['リサーチクエスチョン', display.researchQuestion],
-    ['組入基準', display.inclusionCriteria],
-    ['除外基準', display.exclusionCriteria],
-    ['研究デザイン', display.studyDesign],
+    [t('protocol.framework'), display.frameworkType],
+    [t('protocol.question'), display.researchQuestion],
+    [t('protocol.inclusion'), display.inclusionCriteria],
+    [t('protocol.exclusion'), display.exclusionCriteria],
+    [t('protocol.design'), display.studyDesign],
     [
-      '入力形式',
+      t('protocol.inputFormat'),
       display.sourceFilename === null
-        ? SOURCE_TYPE_LABELS[display.sourceType]
-        : `${SOURCE_TYPE_LABELS[display.sourceType]}（${display.sourceFilename}）`,
+        ? sourceTypeLabel(display.sourceType)
+        : t('protocol.sourceFilename', { type: sourceTypeLabel(display.sourceType), filename: display.sourceFilename }),
     ],
-    ['本文', display.rawTextInline ?? display.rawTextPreview],
-    ['作成日時', display.createdAt ?? ''],
-    ['作成者', display.createdBy ?? ''],
+    [t('protocol.body'), display.rawTextInline ?? display.rawTextPreview],
+    [t('protocol.createdAt'), display.createdAt ?? ''],
+    [t('protocol.createdBy'), display.createdBy ?? ''],
   ];
   for (const [term, value] of rows) {
     const dt = doc.createElement('dt');
@@ -535,7 +583,7 @@ function buildSummary(doc: Document, display: ProtocolDisplay): HTMLElement {
   return dl;
 }
 
-function collectFormInput(form: HTMLFormElement): ProtocolSubmissionInput {
+function collectFormInput(form: HTMLFormElement, savedFile: File | null = null): ProtocolSubmissionInput {
   const mode = readSourceMode(form);
   if (mode === 'manual') {
     // 手入力かつ空文字の場合もエラーにしない（§4.2）。
@@ -545,9 +593,9 @@ function collectFormInput(form: HTMLFormElement): ProtocolSubmissionInput {
     return { sourceType: 'manual', inlineText: inline };
   }
   const fileInput = form.querySelector<HTMLInputElement>('input[type=file]');
-  const file = fileInput?.files?.[0] ?? null;
+  const file = fileInput?.files?.[0] ?? savedFile;
   if (!file) {
-    throw new Error('プロトコルファイルを選択してください');
+    throw new Error(t('protocol.selectFile'));
   }
   const detected = inferSourceTypeFromName(file.name);
   if (detected === 'markdown') {
@@ -562,7 +610,7 @@ function collectFormInput(form: HTMLFormElement): ProtocolSubmissionInput {
       docxFile: { name: file.name, arrayBuffer: () => file.arrayBuffer() },
     };
   }
-  throw new Error('対応形式は .md / .markdown / .docx です');
+  throw new Error(t('protocol.supportedFiles'));
 }
 
 function readSourceMode(form: HTMLFormElement): SourceMode {
@@ -604,8 +652,8 @@ function buildSourceModeRadios(doc: Document): HTMLElement {
   const wrap = doc.createElement('div');
   wrap.className = 'protocol__source-types';
   const labels: Record<SourceMode, string> = {
-    manual: '手入力',
-    file: 'ファイルアップロード (.md / .docx)',
+    manual: t('protocol.manual'),
+    file: t('protocol.uploadOption'),
   };
   for (const value of ['manual', 'file'] as const) {
     const label = doc.createElement('label');
@@ -635,7 +683,7 @@ function buildField(doc: Document, id: string, label: string, initialValue = '')
   if (id === 'inline') {
     control.rows = 14;
     control.placeholder =
-      'RQ・対象集団・介入/曝露・アウトカム・組入/除外基準などを含むプロトコルを貼り付けてください';
+      t('protocol.textPlaceholder');
   }
   control.value = initialValue;
   wrap.appendChild(control);
@@ -710,9 +758,9 @@ function buildProgress(doc: Document): ProgressHandle {
 }
 
 function stageLabel(seconds: number): string {
-  if (seconds < 3) return 'AI がプロトコルを読み取り中…';
-  if (seconds < 15) return 'AI がブロック候補を抽出中…';
-  return 'まだ処理中です。LLM の応答を待っています…';
+  if (seconds < 3) return t('protocol.reading');
+  if (seconds < 15) return t('protocol.extracting');
+  return t('protocol.waiting');
 }
 
 function buildFileInput(doc: Document, id: string, label: string): HTMLElement {

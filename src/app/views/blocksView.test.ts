@@ -1,3 +1,5 @@
+import { setUiLanguage } from '@/lib/i18n';
+import { explainDefaultFilterSelection } from '@/features/formula/skills';
 import {
   INITIAL_STATE,
   createStore,
@@ -6,6 +8,8 @@ import {
   type ProtocolDraft,
 } from '../store';
 import { createBlocksView } from './blocksView';
+
+afterEach(() => setUiLanguage('ja'));
 
 function protocolOf(overrides: Partial<ProtocolDraft> = {}): ProtocolDraft {
   return {
@@ -55,6 +59,45 @@ async function flushAsync(): Promise<void> {
 }
 
 describe('createBlocksView', () => {
+  test.each(['ja', 'en'] as const)('renders the mixed-design skip notice in %s', (language) => {
+    setUiLanguage(language);
+    const studyDesign = 'RCT / observational / cohort';
+    const reason = explainDefaultFilterSelection(studyDesign).rctSkippedReason;
+    expect(reason).not.toBeNull();
+    const store = createStore(withProject({
+      blocksDraft: draftOf(2, '#1 AND #2'),
+      protocolDraft: protocolOf({ studyDesign }),
+    }));
+    const container = buildContainer();
+    createBlocksView(store)(container, { state: store.getState(), navigate: jest.fn() });
+    const notice = container.querySelector('.blocks__filter-selector > p.blocks__field-hint');
+    expect(notice?.textContent).toBe(language === 'ja'
+      ? reason
+      : 'The study design includes non-RCT designs (observational, cohort), so the RCT filter is not selected by default. Select it under Search filters if needed.');
+  });
+
+  test('renders English labels, filters and accessible attributes', () => {
+    setUiLanguage('en');
+    const store = createStore(withProject({
+      blocksDraft: draftOf(2, '#1 AND #2'),
+      blocksDraftSavedAt: '2026-07-01T00:00:00Z',
+      protocolDraft: protocolOf({ studyDesign: 'RCT / observational', rawTextInline: 'Source text' }),
+    }));
+    const container = buildContainer();
+    createBlocksView(store)(container, { state: store.getState(), navigate: jest.fn() });
+    expect(container.querySelector('h2')?.textContent).toBe('Search block approval');
+    expect(container.textContent).toContain('① Block list');
+    expect(container.querySelector('.blocks__btn-primary')?.textContent).toBe('Approve and go to seed papers →');
+    expect(container.querySelector('.blocks__label-input')?.getAttribute('aria-label')).toBe('Block 1 name');
+    const japanese = /[\u3040-\u30ff\u4e00-\u9fff]/;
+    expect(container.textContent).not.toMatch(japanese);
+    for (const el of container.querySelectorAll('[aria-label], [title], [placeholder]')) {
+      for (const attr of ['aria-label', 'title', 'placeholder']) {
+        expect(el.getAttribute(attr) ?? '').not.toMatch(japanese);
+      }
+    }
+  });
+
   test('プロジェクト未選択時は警告だけ', () => {
     const store = createStore();
     const view = createBlocksView(store);
