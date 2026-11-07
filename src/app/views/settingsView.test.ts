@@ -90,7 +90,7 @@ describe('createSettingsView - Gemini プラン判定', () => {
   });
 
   test.each([
-    ['gemini-3.5-flash', '', '', 'gemini-3.5-flash'],
+    ['gemini-3.5-flash', '', '', 'gemini-3.6-flash'],
     ['qwen/qwen3-235b-a22b-2507', 'a', 'g', 'qwen/qwen3-235b-a22b-2507'],
     [undefined, '', '', undefined],
     ['', '  ', '  ', undefined],
@@ -175,8 +175,8 @@ describe('createSettingsView - Gemini プラン判定', () => {
     expect(detect).not.toHaveBeenCalled();
   });
 
-  test('無料プラン検出時: 保存でバッジが無料プランになりモデルが gemini-2.0-flash に切り替わる', async () => {
-    const store: Record<string, string> = {};
+  test('無料プラン検出時: 保存でバッジが無料プランになりモデルが gemini-3.5-flash-lite に切り替わる', async () => {
+    const store: Record<string, string> = { 'llm.selectedModel': 'gemini-3.6-flash' };
     const detect = jest.fn(async () => 'free' as const);
     const container = render(buildDeps(store, detect));
     await flush();
@@ -189,13 +189,13 @@ describe('createSettingsView - Gemini プラン判定', () => {
     expect(badge?.textContent).toBe('無料プラン');
     expect(container.querySelector('.gemini-data-notice')?.textContent).toContain('Google の説明では、Gemini API の無料枠では送った内容と応答が製品の改善に使われ、人が読むことがあるとされています。未公開のプロトコルなど機密の内容は送らないでください。');
     expect(container.querySelector('.gemini-data-notice a')?.getAttribute('href')).toBe('https://ai.google.dev/gemini-api/terms');
-    expect(store['llm.selectedModel']).toBe('gemini-2.0-flash');
+    expect(store['llm.selectedModel']).toBe('gemini-3.5-flash-lite');
     expect(store['gemini.detectedTier']).toBe('free');
     expect(
       (container.querySelector('#settings-llm-model') as HTMLSelectElement).value
-    ).toBe('gemini-2.0-flash');
+    ).toBe('gemini-3.5-flash-lite');
     const status = container.querySelector('.settings__status');
-    expect(status?.textContent).toContain('Gemini 2.0 Flash');
+    expect(status?.textContent).toContain('Gemini 3.5 Flash Lite');
   });
 
   test('有料プラン検出時: 保存でバッジが有料プランになりモデルは変わらない', async () => {
@@ -275,12 +275,12 @@ describe('createSettingsView - Gemini プラン判定', () => {
     expect(detect).not.toHaveBeenCalled();
   });
 
-  test('モデルセレクトに gemini-2.0-flash が含まれている', async () => {
+  test('モデルセレクトに gemini-2.0-flash が含まれていない', async () => {
     const container = render(buildDeps({}));
     await flush();
     const select = container.querySelector('#settings-llm-model') as HTMLSelectElement;
     const values = Array.from(select.querySelectorAll('option')).map((o) => o.value);
-    expect(values).toContain('gemini-2.0-flash');
+    expect(values).not.toContain('gemini-2.0-flash');
   });
 
   test('モデルセレクトに gemini-3.5-flash-lite が含まれている', async () => {
@@ -298,15 +298,18 @@ describe('createSettingsView - Gemini プラン判定', () => {
     expect(select.value).toBe('claude-opus-5-5');
   });
 
-  test('既存モデルとして gemini-3.5-flash が保存済みなら選択値は維持され、保存しても書き換わらない', async () => {
+  test('保存済み gemini-3.5-flash は後継を選択し、保存操作で書き戻す', async () => {
     const store: Record<string, string> = { 'llm.selectedModel': 'gemini-3.5-flash' };
     const container = render(buildDeps(store));
     await flush();
     const select = container.querySelector('#settings-llm-model') as HTMLSelectElement;
-    expect(select.value).toBe('gemini-3.5-flash');
+    expect(select.value).toBe('gemini-3.6-flash');
+    expect(Array.from(select.options).some(option => option.value === 'gemini-3.5-flash')).toBe(false);
+    expect(select.selectedOptions[0]!.textContent).not.toContain('一覧にないモデル');
+    expect(store['llm.selectedModel']).toBe('gemini-3.5-flash');
     (container.querySelector('#settings-save') as HTMLButtonElement).click();
     await flush();
-    expect(store['llm.selectedModel']).toBe('gemini-3.5-flash');
+    expect(store['llm.selectedModel']).toBe('gemini-3.6-flash');
   });
 });
 

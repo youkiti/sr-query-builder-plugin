@@ -27,7 +27,7 @@ export const MODEL_PRICING: Readonly<Record<string, ModelPricing>> = {
   // Gemini 2.5 Pro: 入力 $1.25 / 出力 $10.00（per 1M tokens）
   'gemini-2.5-pro': { inputPerMillion: 1.25, outputPerMillion: 10.0 },
   // 以下は 2026-06 時点の概算価格。実際の単価は各プロバイダの料金ページで確認すること。
-  // gemini-2.0-flash は無料枠ではコスト 0 だが、従量課金枠での参考単価を記載する。
+  // gemini-2.0-flash は停止済み（過去の記録の費用表示用）。
   'gemini-2.0-flash': { inputPerMillion: 0.10, outputPerMillion: 0.40 },
   'gemini-3.5-flash': { inputPerMillion: 1.5, outputPerMillion: 9.0 },
   // 2026-07-22 追加。Gemini 3.6 Flash / gemini-3.5-flash-lite（公式料金ページで確認・更新）。

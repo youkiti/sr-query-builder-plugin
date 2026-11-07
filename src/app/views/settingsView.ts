@@ -250,7 +250,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
     geminiMuted.className = 'settings__muted';
     geminiMuted.textContent =
       'キーの保存時（未判定の場合はこの画面を開いたとき）にプランを自動確認します。' +
-      '無料プランを検出した場合はモデルを Gemini 2.0 Flash に自動切り替えします。';
+      '無料プランを検出した場合はモデルを Gemini 3.5 Flash Lite に自動切り替えします。';
     geminiCard.appendChild(geminiMuted);
     llmSection.appendChild(geminiCard);
 
@@ -642,7 +642,7 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
 
         if (modelSwitchedToFree) {
           status.textContent =
-            '保存しました。無料プランを検出。Gemini 2.0 Flash に切り替えました。';
+            '保存しました。無料プランを検出。Gemini 3.5 Flash Lite に切り替えました。';
         } else if (tierUnavailable) {
           status.textContent =
             '保存しました。（Gemini が混雑中のためプランを判定できませんでした。時間をおいてこの画面を開くと自動で再判定されます）';

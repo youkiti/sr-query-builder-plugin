@@ -30,6 +30,10 @@ describe('detectGeminiTier', () => {
   test('HTTP 200 → paid', async () => {
     const fetchMock = makeFetch(200, { candidates: [] });
     await expect(detectGeminiTier('valid-key', fetchMock)).resolves.toBe('paid');
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/models/gemini-4-argon:generateContent'),
+      expect.any(Object),
+    );
   });
 
   test('FAILED_PRECONDITION → free', async () => {
@@ -166,7 +170,6 @@ describe('detectGeminiTier', () => {
   });
 
   test('FREE_TIER_MODEL_ID が定義されている', () => {
-    expect(typeof FREE_TIER_MODEL_ID).toBe('string');
-    expect(FREE_TIER_MODEL_ID.length).toBeGreaterThan(0);
+    expect(FREE_TIER_MODEL_ID).toBe('gemini-3.5-flash-lite');
   });
 });

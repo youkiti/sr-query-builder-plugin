@@ -88,7 +88,7 @@ describe('startOptions', () => {
   });
 
   test.each([
-    ['gemini-3.5-flash', '', '', 'gemini-3.5-flash'],
+    ['gemini-3.5-flash', '', '', 'gemini-3.6-flash'],
     ['qwen/qwen3-235b-a22b-2507', 'a', 'g', 'qwen/qwen3-235b-a22b-2507'],
     [undefined, '', '', undefined],
     ['', '  ', '  ', undefined],
@@ -164,7 +164,7 @@ describe('startOptions', () => {
     await startOptions(doc, deps);
     const select = doc.getElementById('llm-model-select') as HTMLSelectElement;
     const optionValues = Array.from(select.querySelectorAll('option')).map((o) => o.value);
-    expect(optionValues).toContain('gemini-3.5-flash');
+    expect(optionValues).toContain('gemini-3.6-flash');
     expect(optionValues).toContain('gemini-3.5-flash-lite');
     expect(optionValues).toContain('qwen/qwen3-235b-a22b-2507');
     expect(optionValues).toContain('deepseek/deepseek-v4-flash');
@@ -181,7 +181,7 @@ describe('startOptions', () => {
     expect(select.value).toBe('claude-opus-5-5');
   });
 
-  test('既存モデルとして gemini-3.5-flash が保存済みなら選択値は維持され、保存しても書き換わらない', async () => {
+  test('保存済み gemini-3.5-flash は後継を選択し、保存操作で書き戻す', async () => {
     const doc = buildDocument();
     const store: Record<string, string> = { [STORAGE_KEY_LLM_MODEL]: 'gemini-3.5-flash' };
     const writeKey = jest.fn<Promise<void>, [string, string]>(async (key, value) => {
@@ -195,10 +195,14 @@ describe('startOptions', () => {
     };
     await startOptions(doc, deps);
     const select = doc.getElementById('llm-model-select') as HTMLSelectElement;
-    expect(select.value).toBe('gemini-3.5-flash');
+    expect(select.value).toBe('gemini-3.6-flash');
+    expect(Array.from(select.options).some(option => option.value === 'gemini-3.5-flash')).toBe(false);
+    expect(select.selectedOptions[0]!.textContent).not.toContain('一覧にないモデル');
+    expect(store[STORAGE_KEY_LLM_MODEL]).toBe('gemini-3.5-flash');
+    expect(writeKey).not.toHaveBeenCalledWith(STORAGE_KEY_LLM_MODEL, expect.anything());
     (doc.getElementById('save-keys') as HTMLButtonElement).click();
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(store[STORAGE_KEY_LLM_MODEL]).toBe('gemini-3.5-flash');
+    expect(store[STORAGE_KEY_LLM_MODEL]).toBe('gemini-3.6-flash');
   });
 
   test('既定のモデル（Anthropic）が選択されていると Anthropic カードが active', async () => {
@@ -547,9 +551,9 @@ describe('startOptions', () => {
     expect(doc.getElementById('options-status')?.textContent).toBe('保存しました。');
   });
 
-  test('無料プラン検出時: バッジが無料プランになりモデルが gemini-2.0-flash に切り替わる', async () => {
+  test('無料プラン検出時: バッジが無料プランになりモデルが gemini-3.5-flash-lite に切り替わる', async () => {
     const doc = buildDocumentWithBadge();
-    const store: Record<string, string> = {};
+    const store: Record<string, string> = { [STORAGE_KEY_LLM_MODEL]: 'gemini-3.6-flash' };
     const detectGeminiTierMock = jest.fn(async () => 'free' as const);
     const deps: OptionsDeps = {
       readKey: jest.fn(async (key) => store[key]),
@@ -570,9 +574,9 @@ describe('startOptions', () => {
     expect(doc.querySelector('.gemini-data-notice')?.textContent).toContain('Google の説明では、Gemini API の無料枠では送った内容と応答が製品の改善に使われ、人が読むことがあるとされています。未公開のプロトコルなど機密の内容は送らないでください。');
     expect(doc.querySelector('.gemini-data-notice a')?.getAttribute('href')).toBe('https://ai.google.dev/gemini-api/terms');
     expect(badge?.classList.contains('options__tier-badge--free')).toBe(true);
-    expect(store[STORAGE_KEY_LLM_MODEL]).toBe('gemini-2.0-flash');
-    expect((doc.getElementById('llm-model-select') as HTMLSelectElement).value).toBe('gemini-2.0-flash');
-    expect(doc.getElementById('options-status')?.textContent).toContain('Gemini 2.0 Flash');
+    expect(store[STORAGE_KEY_LLM_MODEL]).toBe('gemini-3.5-flash-lite');
+    expect((doc.getElementById('llm-model-select') as HTMLSelectElement).value).toBe('gemini-3.5-flash-lite');
+    expect(doc.getElementById('options-status')?.textContent).toContain('Gemini 3.5 Flash Lite');
   });
 
   test('Gemini キーが空のときはプラン確認が呼ばれない', async () => {
@@ -742,13 +746,13 @@ describe('startOptions', () => {
     expect(detectGeminiTierMock).not.toHaveBeenCalled();
   });
 
-  test('モデルセレクトに gemini-2.0-flash が含まれている', async () => {
+  test('モデルセレクトに gemini-2.0-flash が含まれていない', async () => {
     const doc = buildDocument();
     const deps = readStoredValues({});
     await startOptions(doc, deps);
     const select = doc.getElementById('llm-model-select') as HTMLSelectElement;
     const optionValues = Array.from(select.querySelectorAll('option')).map((o) => o.value);
-    expect(optionValues).toContain('gemini-2.0-flash');
+    expect(optionValues).not.toContain('gemini-2.0-flash');
   });
 });
 

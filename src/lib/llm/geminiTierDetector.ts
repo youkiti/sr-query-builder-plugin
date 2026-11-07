@@ -1,8 +1,9 @@
 /**
  * Google AI Studio API キーが無料プランか有料プランかを検出する。
  *
- * 有料モデル（gemini-3.5-flash）へ最小プロンプトを送り、
+ * 有料モデル（gemini-4-argon）へ最小プロンプトを送り、
  * レスポンスのエラーコードからプランを判定する。
+ * 無料枠で使えないモデルでないとプランの判定にならないため Argon を使う。
  *
  * | 状態                                          | 戻り値        |
  * |----------------------------------------------|---------------|
@@ -22,10 +23,10 @@
 export type GeminiTier = 'paid' | 'free' | 'unknown' | 'unavailable';
 
 /** 無料プラン検出時に自動設定するモデル ID */
-export const FREE_TIER_MODEL_ID = 'gemini-2.0-flash';
+export const FREE_TIER_MODEL_ID = 'gemini-3.5-flash-lite';
 
 /** プラン判定に用いる有料モデル ID */
-const PROBE_MODEL_ID = 'gemini-3.5-flash';
+const PROBE_MODEL_ID = 'gemini-4-argon';
 const ENDPOINT_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 interface GeminiErrorBody {

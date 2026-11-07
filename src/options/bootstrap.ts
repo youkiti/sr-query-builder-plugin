@@ -16,7 +16,7 @@ import { updateGeminiDataNotice } from '@/lib/llm/aiDisclosure';
  * 使用モデルの選択とカスタムモデルの追加/削除は即時保存する。
  *
  * 保存時に Gemini API キーが設定されている場合、プラン（無料/有料）を自動判定し、
- * 無料プランが検出されたときはモデルを gemini-2.0-flash に自動切り替えする。
+ * 無料プランが検出されたときはモデルを gemini-3.5-flash-lite に自動切り替えする。
  * 保存済みキーがあるのにプラン未判定（ティア判定機能の導入前に保存した等）の場合は、
  * ページ読み込み時にも自動判定してバッジへ反映する。
  */
@@ -481,7 +481,7 @@ export async function startOptions(doc: Document, deps: OptionsDeps): Promise<vo
 
         if (status) {
           if (modelSwitchedToFree) {
-            status.textContent = '保存しました。無料プランを検出。Gemini 2.0 Flash に切り替えました。';
+            status.textContent = '保存しました。無料プランを検出。Gemini 3.5 Flash Lite に切り替えました。';
           } else if (tierUnavailable) {
             status.textContent =
               '保存しました。（Gemini が混雑中のためプランを判定できませんでした。時間をおいてこの画面を開くと自動で再判定されます）';

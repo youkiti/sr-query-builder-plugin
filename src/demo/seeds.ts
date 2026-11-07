@@ -53,7 +53,7 @@ export const DEMO_PROJECT_TITLE = 'ARDS/ECMO 生存率 SR（デモ・架空デ�
 const DEMO_GEMINI_API_KEY = 'demo-gemini-api-key-not-real';
 const FORMULA_V1_ID = 'v1-demo';
 const FORMULA_V2_ID = 'v2-demo';
-const DEMO_MODEL = 'gemini-3.5-flash';
+const DEMO_MODEL = 'gemini-3.6-flash';
 
 function makeDemoGoogleDeps(): GoogleApiDeps {
   // installDemoFetch() 済みの globalThis.fetch（demoFetch）をそのまま使う。
