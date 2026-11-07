@@ -1,3 +1,4 @@
+import { t, type MessageKey } from '@/lib/i18n';
 import type {
   BoundaryCaseView,
   BoundaryCasesResult,
@@ -47,7 +48,7 @@ import type { RenderView } from './types';
  * 保持して再描画に耐えるようにする（draftRun / validationResult と同じ理由）。
  * 一方、候補の判定（recordDecision）とラウンド完了の再検証（runValidation）は LLM を
  * 呼ばず setState を起こさない（= 再描画されない）ため、判定 UI と再検証結果はビュー側の
- * ローカル DOM で扱う。
+ * クロージャに保持し、再描画時に復元する。
  *
  * **キーボードショートカット**（requirements.md §7、ui-flow.md §6）:
  * - `i` / `e` / `m`: 現在アクティブな候補を include / exclude / maybe で判定。
@@ -97,7 +98,30 @@ interface CandidateItemHandle {
 
 const candidateShortcutCleanup = new WeakMap<Document, () => void>();
 
+interface CandidateState {
+  decision?: SeedUserDecision;
+  pending: boolean;
+  decided: boolean;
+  error?: string;
+  refresh?: () => void;
+  onDecided?: (decision: SeedUserDecision) => void;
+}
+
+interface CandidateSession {
+  result: BoundaryCasesResult;
+  focusIndex: number;
+  includedPmids: Set<string>;
+  candidates: Map<string, CandidateState>;
+  roundTriggered: boolean;
+  roundPending?: boolean;
+  roundSummary?: ValidationSummary;
+  roundError?: string;
+  refreshRound?: () => void;
+}
+
 export function createExpandView(callbacks: ExpandViewCallbacks = {}): RenderView {
+  let session: CandidateSession | undefined;
+  let strategyDraft: { projectId: string; saved: InsideStrategy; value: InsideStrategy } | undefined;
   return (container, ctx) => {
     const doc = container.ownerDocument;
     candidateShortcutCleanup.get(doc)?.();
@@ -109,14 +133,14 @@ export function createExpandView(callbacks: ExpandViewCallbacks = {}): RenderVie
     if (!ctx.state.project) {
       const warn = doc.createElement('p');
       warn.className = 'view__placeholder';
-      warn.textContent = '先にプロジェクトを選択してください。';
+      warn.textContent = t('expand.projectRequired');
       container.appendChild(warn);
       return;
     }
     if (!ctx.state.currentFormulaMarkdown) {
       const warn = doc.createElement('p');
       warn.className = 'view__placeholder';
-      warn.textContent = '先に /draft で検索式を生成してください。';
+      warn.textContent = t('expand.formulaRequired');
       container.appendChild(warn);
       return;
     }
@@ -124,23 +148,23 @@ export function createExpandView(callbacks: ExpandViewCallbacks = {}): RenderVie
     const devNote = doc.createElement('p');
     devNote.className = 'expand__dev';
     devNote.setAttribute('role', 'note');
-    devNote.textContent =
-      '⚠ 実験的機能（dev）: 検索ヒット数をあえて増やし、検索式の「外側」に潜む境界事例を探します。動作・精度は発展途上です。';
+    devNote.textContent = t('expand.devNote');
     container.appendChild(devNote);
 
     const lead = doc.createElement('p');
     lead.className = 'expand__lead';
-    lead.textContent =
-      '現検索式を 2 軸（MeSH を一段広く / フリーワード追加）で緩めた拡張式を作り、その外側（拡張式 NOT 現式）から判定が迷いやすい候補を抽出します。include 判定は SeedPapers に追加され、ラウンド終了時に再検証します。現式の外側を include した場合は捕捉率が下がり、どの拡張語で拾えたか＝検索式の更新提案として表示します。有効なシード論文がまだ 0 件のときは、代わりに式の内側から初期シードの候補を提示します（手元にシード論文が無いときの入口）。';
+    lead.textContent = t('expand.lead');
     container.appendChild(lead);
 
     const shortcuts = doc.createElement('p');
     shortcuts.className = 'expand__shortcuts';
-    shortcuts.textContent =
-      'ショートカット: i = include / e = exclude / m = maybe（判定すると自動で次の未判定へ下がります） / ↓↑ = 上下移動 / n または → = 次の未判定へ / p または ← = 前へ（アブストラクト本文はアクティブなカードに表示）';
+    shortcuts.textContent = t('expand.shortcuts');
     container.appendChild(shortcuts);
 
     const run = ctx.state.expandRun;
+    if (session?.result !== run?.result) {
+      session = undefined;
+    }
     const running = run?.status === 'running';
 
     const actions = doc.createElement('div');
@@ -148,7 +172,7 @@ export function createExpandView(callbacks: ExpandViewCallbacks = {}): RenderVie
     const fetchBtn = doc.createElement('button');
     fetchBtn.type = 'button';
     fetchBtn.dataset.tour = 'expand-fetch';
-    fetchBtn.textContent = running ? '取得中…' : '境界事例を取得';
+    fetchBtn.textContent = running ? t('expand.fetching') : t('expand.fetch');
     fetchBtn.disabled = running;
     actions.appendChild(fetchBtn);
     container.appendChild(actions);
@@ -160,16 +184,22 @@ export function createExpandView(callbacks: ExpandViewCallbacks = {}): RenderVie
     const specificToggle = doc.createElement('input');
     specificToggle.type = 'checkbox';
     specificToggle.className = 'expand__inside-specific';
-    specificToggle.checked = ctx.state.expandInsideStrategy === 'specific';
+    const savedStrategy = ctx.state.expandInsideStrategy;
+    if (strategyDraft?.projectId !== ctx.state.project.projectId || strategyDraft.saved !== savedStrategy) {
+      strategyDraft = undefined;
+    }
+    specificToggle.checked = (strategyDraft?.value ?? savedStrategy) === 'specific';
     specificToggle.disabled = running;
     optionLabel.appendChild(specificToggle);
     optionLabel.appendChild(
       doc.createTextNode(
-        ' 有効なシード論文が 0 件のときは、AI に specific（精度優先）な絞り込み式を設計させ、その relevance 上位 50 件から最大 5 件の初期シード候補を選ぶ（外すと現検索式そのものの上位から選ぶ）'
+        t('expand.specificOption')
       )
     );
     specificToggle.addEventListener('change', () => {
-      callbacks.onInsideStrategyChange?.(specificToggle.checked ? 'specific' : 'current');
+      const value = specificToggle.checked ? 'specific' : 'current';
+      strategyDraft = { projectId: ctx.state.project!.projectId, saved: savedStrategy, value };
+      callbacks.onInsideStrategyChange?.(value);
     });
     container.appendChild(optionLabel);
 
@@ -228,7 +258,7 @@ export function createExpandView(callbacks: ExpandViewCallbacks = {}): RenderVie
       return;
     }
     if (run?.status === 'error') {
-      errorBox.textContent = run.error ?? '不明なエラー';
+      errorBox.textContent = run.error ?? t('expand.unknownError');
       const panel = renderErrorGuidance(doc, run.errorKind, {
         spreadsheetId: ctx.state.project.spreadsheetId,
         onOpenSpreadsheet: callbacks.onOpenSpreadsheet,
@@ -253,9 +283,16 @@ export function createExpandView(callbacks: ExpandViewCallbacks = {}): RenderVie
       } else if (result.mode === 'inside') {
         status.textContent = insideStatusText(result);
       } else {
-        status.textContent = `${result.candidates.length} 件の境界事例（現式 ${result.originalHits} 件 → 拡張式 ${result.broadenedHits} 件 / 外側 ${result.marginHits} 件から評価 ${result.evaluatedCount} 件）`;
+        status.textContent = t('expand.marginStatus', { count: result.candidates.length, originalHits: result.originalHits, broadenedHits: result.broadenedHits, marginHits: result.marginHits, evaluatedCount: result.evaluatedCount });
       }
-      setupCandidates(doc, list, round, result, callbacks);
+      session ??= {
+        result,
+        focusIndex: 0,
+        includedPmids: new Set(),
+        candidates: new Map(),
+        roundTriggered: false,
+      };
+      setupCandidates(doc, list, round, result, callbacks, session);
     }
   };
 }
@@ -264,28 +301,27 @@ export function createExpandView(callbacks: ExpandViewCallbacks = {}): RenderVie
  * 取得結果（store 保持）から候補カードを組み立て、判定・キーボード操作・ラウンド完了の
  * ローカルな対話ロジックを配線する。
  *
- * 取得完了（status='ready'）後は recordDecision / runValidation とも setState を
- * 起こさない（再描画されない）ため、items / focusIndex / roundTriggered といった対話状態は
- * この描画 1 回ぶんのクロージャに閉じてよい。
+ * 判定・選択・再検証の状態は、同じ取得結果の間は再描画されても保持する。
  */
 function setupCandidates(
   doc: Document,
   list: HTMLElement,
   round: HTMLElement,
   result: BoundaryCasesResult,
-  callbacks: ExpandViewCallbacks
+  callbacks: ExpandViewCallbacks,
+  session: CandidateSession
 ): void {
   const items: CandidateItemHandle[] = [];
   // include 判定された候補の PMID。ラウンド完了時に更新提案の集計対象にする。
-  const includedPmids = new Set<string>();
-  let focusIndex = -1;
-  let roundTriggered = false;
+  const includedPmids = session.includedPmids;
+  let focusIndex = session.focusIndex;
 
   const setFocus = (index: number, scroll = true): void => {
     /* istanbul ignore if -- 呼び出し側で items.length > 0 を保証しているための防御 */
     if (items.length === 0) return;
     const next = clampIndex(index, items.length);
     focusIndex = next;
+    session.focusIndex = next;
     for (let i = 0; i < items.length; i++) {
       items[i]!.element.classList.toggle('expand__candidate--focused', i === next);
     }
@@ -315,11 +351,13 @@ function setupCandidates(
 
   const checkRoundComplete = (): void => {
     /* istanbul ignore if -- 1 候補ごとに 1 回しか onDecided が呼ばれないので二重ガード */
-    if (roundTriggered) return;
+    if (session.roundTriggered) {
+      return;
+    }
     /* istanbul ignore if -- onDecided は items が非空のときにのみ呼ばれる */
     if (items.length === 0) return;
     if (!items.every((it) => it.isDecided())) return;
-    roundTriggered = true;
+    session.roundTriggered = true;
     const includedPapers: IncludedPaper[] = result.candidates
       .filter((c) => includedPmids.has(c.pmid))
       .map((c) => ({
@@ -334,7 +372,8 @@ function setupCandidates(
       callbacks.onRoundComplete,
       includedPapers,
       result.additions,
-      result.mode
+      result.mode,
+      session
     );
   };
 
@@ -375,7 +414,12 @@ function setupCandidates(
   observer.observe(doc, { childList: true, subtree: true });
 
   result.candidates.forEach((candidate, index) => {
-    const handle = buildCandidateItem(doc, candidate, callbacks.onDecide, {
+    let candidateState = session.candidates.get(candidate.pmid);
+    if (!candidateState) {
+      candidateState = { pending: false, decided: false };
+      session.candidates.set(candidate.pmid, candidateState);
+    }
+    const handle = buildCandidateItem(doc, candidate, callbacks.onDecide, candidateState, {
       // 判定が保存され次第、アクティブを次の未判定へ下ろし、全件終了ならラウンド完了へ。
       // 保存確定後に進めることで、連打で隣のカードを誤判定する事故も防ぐ。
       onDecided: (decision) => {
@@ -399,7 +443,11 @@ function setupCandidates(
     // ツアーが枠を付ける対象。候補があるときだけ付け、空の一覧には付けない。
     list.dataset.tour = 'expand-candidates';
     list.focus({ preventScroll: true });
-    setFocus(0);
+    setFocus(session.focusIndex);
+  }
+  if (session.roundTriggered) {
+    const includedPapers = result.candidates.filter((c) => includedPmids.has(c.pmid));
+    runRoundComplete(doc, round, undefined, includedPapers, result.additions, result.mode, session);
   }
 }
 
@@ -465,37 +513,37 @@ function fetchStepsFor(
 }
 
 /** チップに出す短いラベル */
-const FETCH_STEP_LABELS: Record<ExpandFetchStep, string> = {
-  protocol: 'プロトコル取得',
-  broaden: '拡張語の提案',
-  esearch: '外側を検索',
-  dedup: '重複除去',
-  efetch: '候補論文の取得',
-  'pick-boundary': 'AI 選定',
-  'inside-design': 'specific 式の設計',
-  'inside-esearch': '内側を検索',
-  'inside-dedup': '重複除去',
-  'inside-efetch': '候補論文の取得',
-  'pick-seed': 'AI 選定',
+const FETCH_STEP_LABELS: Record<ExpandFetchStep, MessageKey> = {
+  protocol: 'expand.stepProtocol',
+  broaden: 'expand.stepBroaden',
+  esearch: 'expand.stepOutside',
+  dedup: 'expand.stepDedup',
+  efetch: 'expand.stepPapers',
+  'pick-boundary': 'expand.stepPick',
+  'inside-design': 'expand.stepDesign',
+  'inside-esearch': 'expand.stepInside',
+  'inside-dedup': 'expand.stepDedupInside',
+  'inside-efetch': 'expand.stepPapersInside',
+  'pick-seed': 'expand.stepPickSeed',
 };
 
 /**
  * ステータス 1 行表示用の進行中ラベル（〜中）。'done' は取得完了直後の経過表示にだけ使う
  * （通常は実行中＝いずれかの段階なので 'done' は出ない）。
  */
-const FETCH_STEP_ACTIVE_LABELS: Record<ExpandFetchStep | 'done', string> = {
-  protocol: 'プロトコルを取得中',
-  broaden: 'AI が拡張語（MeSH/フリーワード）を提案中',
-  esearch: '検索式の外側（margin）を検索中',
-  dedup: '既存 seed と重複を除去中',
-  efetch: '候補論文のメタデータを取得中',
-  'pick-boundary': 'AI が境界事例を選定中',
-  'inside-design': 'AI が specific（精度優先）な絞り込み式を設計中',
-  'inside-esearch': '式の内側（初期シード候補の母集団）を検索中',
-  'inside-dedup': '既存 seed と重複を除去中',
-  'inside-efetch': '候補論文のメタデータを取得中',
-  'pick-seed': 'AI が初期シード候補を選定中',
-  done: '完了',
+const FETCH_STEP_ACTIVE_LABELS: Record<ExpandFetchStep | 'done', MessageKey> = {
+  protocol: 'expand.activeProtocol',
+  broaden: 'expand.activeBroaden',
+  esearch: 'expand.activeOutside',
+  dedup: 'expand.activeDedup',
+  efetch: 'expand.activePapers',
+  'pick-boundary': 'expand.activePick',
+  'inside-design': 'expand.activeDesign',
+  'inside-esearch': 'expand.activeInside',
+  'inside-dedup': 'expand.activeDedupInside',
+  'inside-efetch': 'expand.activePapersInside',
+  'pick-seed': 'expand.activePickSeed',
+  done: 'expand.activeDone',
 };
 
 type StepState = 'done' | 'active' | 'pending';
@@ -545,10 +593,10 @@ function renderFetchTracker(
   bar.className = 'draft__progressbar';
   bar.max = total;
   bar.value = Math.min(current, total);
-  bar.setAttribute('aria-label', '取得の進捗');
+  bar.setAttribute('aria-label', t('expand.fetchProgress'));
   const counter = doc.createElement('span');
   counter.className = 'draft__step-counter';
-  counter.textContent = `ステップ ${Math.min(current + 1, total)} / ${total}`;
+  counter.textContent = t('expand.stepCounter', { current: Math.min(current + 1, total), total });
   header.appendChild(bar);
   header.appendChild(counter);
   section.appendChild(header);
@@ -557,7 +605,7 @@ function renderFetchTracker(
   const subWrap = doc.createElement('div');
   subWrap.className = 'draft__substeps';
   steps.forEach((s, i) => {
-    subWrap.appendChild(renderStepChip(doc, FETCH_STEP_LABELS[s], stepStateFor(i, current)));
+    subWrap.appendChild(renderStepChip(doc, t(FETCH_STEP_LABELS[s]), stepStateFor(i, current)));
   });
   section.appendChild(subWrap);
 
@@ -589,7 +637,7 @@ function startElapsedTicker(
 }
 
 function runningStatusText(step: ExpandFetchStep | 'done', startedAtMs: number): string {
-  return `[取得] ${FETCH_STEP_ACTIVE_LABELS[step]}（経過 ${formatElapsed(Date.now() - startedAtMs)}）`;
+  return t('expand.runningStatus', { step: t(FETCH_STEP_ACTIVE_LABELS[step]), elapsed: formatElapsed(Date.now() - startedAtMs) });
 }
 
 /**
@@ -610,15 +658,15 @@ function renderApiWait(doc: Document, wait: ExpandApiWait): HTMLElement {
 function apiWaitText(wait: ExpandApiWait): string {
   if (wait.kind === 'rate_limit') {
     // 相手が 429 を返したわけではなく、こちらが枠（3 / 10 req/s）を守って待っている状態。
-    return `⏳ ${wait.source} の呼び出し間隔を調整しています。順番が来るまで待っています。`;
+    return t('expand.rateWait', { source: wait.source });
   }
   const after =
-    wait.waitMs === null ? '待ってから' : `約 ${Math.max(1, Math.round(wait.waitMs / 1000))} 秒待ってから`;
+    wait.waitMs === null ? t('expand.retryAfter') : t('expand.retrySeconds', { seconds: Math.max(1, Math.round(wait.waitMs / 1000)) });
   const count =
     wait.attempt === null || wait.maxAttempts === null
       ? ''
-      : `（${wait.attempt} / ${wait.maxAttempts} 回目）`;
-  return `⏳ ${wait.source} が応答しませんでした。${after}自動で再試行します${count}。`;
+      : t('expand.retryCount', { attempt: wait.attempt, maxAttempts: wait.maxAttempts });
+  return t('expand.retryWait', { source: wait.source, after, count });
 }
 
 interface ErrorGuidanceOptions {
@@ -656,18 +704,17 @@ function renderErrorGuidance(
   panel.appendChild(body);
 
   if (kind === 'permission') {
-    title.textContent = '⛔ このスプレッドシートを読めませんでした';
+    title.textContent = t('expand.permissionTitle');
     // 403 / 404 は「Picker 未選択」「共有されていない」「削除済み」「ID 誤り」のいずれでも
     // 返るため断定しない（popup の許可導線と同じ作法）。
-    body.textContent =
-      'いまログインしているアカウントで、このスプレッドシートを読めませんでした。拡張機能にまだ許可していない場合は「Google で許可する」から対象のシートを選んでください（初回のみ）。許可しても読めない場合は、共有設定で自分に権限が付いているかを確認してください（シートが削除されている / ID が違う場合も同じ応答になります）。権限が直るまでは、同じ操作を繰り返しても結果は変わりません。';
+    body.textContent = t('expand.permissionBody');
     const status = doc.createElement('p');
     status.className = 'expand__error-grant-status';
     status.setAttribute('role', 'status');
     const grant = doc.createElement('button');
     grant.type = 'button';
     grant.className = 'expand__error-action expand__error-action--grant';
-    grant.textContent = 'Google で許可する';
+    grant.textContent = t('expand.authorize');
     const writeOutcome = (message: string, retry: boolean): void => {
       // 許可待ちの間に再描画された場合は、現在のパネルへ結果を書く。
       const currentStatus = status.isConnected
@@ -687,31 +734,31 @@ function renderErrorGuidance(
     grant.addEventListener('click', async () => {
       if (!options.onRequestSpreadsheetAccess) return;
       grant.disabled = true;
-      status.textContent = '許可画面を開いています…';
+      status.textContent = t('expand.grantOpening');
       try {
         const result = await options.onRequestSpreadsheetAccess(options.spreadsheetId);
         switch (result.status) {
           case 'granted':
-            writeOutcome('許可しました。もう一度取得しています…', true);
+            writeOutcome(t('expand.grantSuccess'), true);
             break;
           case 'cancelled':
-            writeOutcome('許可がキャンセルされました。', false);
+            writeOutcome(t('expand.grantCancelled'), false);
             break;
           case 'busy':
-            writeOutcome('許可画面を開いています。表示された画面で操作してください。', false);
+            writeOutcome(t('expand.grantBusy'), false);
             break;
           case 'failed':
-            writeOutcome(`許可に失敗しました: ${result.message}`, false);
+            writeOutcome(t('expand.grantFailed', { error: result.message }), false);
         }
       } catch (err) {
-        writeOutcome(`許可に失敗しました: ${err instanceof Error ? err.message : String(err)}`, false);
+        writeOutcome(t('expand.grantException', { error: err instanceof Error ? err.message : String(err) }), false);
       }
     });
     panel.appendChild(grant);
     const open = doc.createElement('button');
     open.type = 'button';
     open.className = 'expand__error-action expand__error-action--open';
-    open.textContent = 'スプレッドシートを開く';
+    open.textContent = t('expand.openSpreadsheet');
     open.addEventListener('click', () => options.onOpenSpreadsheet?.(options.spreadsheetId));
     panel.appendChild(open);
     panel.appendChild(status);
@@ -719,18 +766,16 @@ function renderErrorGuidance(
   }
 
   if (kind === 'rate_limit') {
-    title.textContent = '⏱ 呼び出しが集中しています';
-    body.textContent =
-      '自動の再試行を使い切っても復帰しませんでした。少し時間を置いてからもう一度お試しください。NCBI の API キーを設定画面で登録すると、1 秒あたりの呼び出し枠が 3 回から 10 回に広がります。';
+    title.textContent = t('expand.rateTitle');
+    body.textContent = t('expand.rateBody');
   } else {
-    title.textContent = '↻ 一時的な障害の可能性があります';
-    body.textContent =
-      '相手のサービスが一時的に応答できない状態でした。自動で再試行しても復帰しなかっただけで、入力や設定が誤っているとは限りません。もう一度お試しください。';
+    title.textContent = t('expand.temporaryTitle');
+    body.textContent = t('expand.temporaryBody');
   }
   const retry = doc.createElement('button');
   retry.type = 'button';
   retry.className = 'expand__error-action';
-  retry.textContent = 'もう一度取得する';
+  retry.textContent = t('expand.retry');
   retry.addEventListener('click', options.onRetry);
   panel.appendChild(retry);
   return panel;
@@ -740,7 +785,7 @@ function formatElapsed(ms: number): string {
   const totalSec = Math.max(0, Math.floor(ms / 1000));
   const min = Math.floor(totalSec / 60);
   const sec = totalSec % 60;
-  return min > 0 ? `${min}分${sec}秒` : `${sec}秒`;
+  return min > 0 ? t('expand.elapsedMinutes', { minutes: min, seconds: sec }) : t('expand.elapsedSeconds', { seconds: sec });
 }
 
 type ShortcutAction = (ctx: {
@@ -795,6 +840,7 @@ function buildCandidateItem(
   doc: Document,
   candidate: BoundaryCaseView,
   onDecide: ExpandViewCallbacks['onDecide'],
+  state: CandidateState,
   hooks: CandidateItemHooks
 ): CandidateItemHandle {
   const li = doc.createElement('li');
@@ -809,13 +855,13 @@ function buildCandidateItem(
   const meta = doc.createElement('span');
   meta.className = 'expand__candidate-meta';
   const year = candidate.year === null ? '-' : String(candidate.year);
-  meta.textContent = ` (${year}) ${candidate.title ?? '(no title)'}`;
+  meta.textContent = ` (${year}) ${candidate.title ?? t('expand.noTitle')}`;
   head.appendChild(meta);
   li.appendChild(head);
 
   const reason = doc.createElement('p');
   reason.className = 'expand__candidate-reason';
-  reason.textContent = `迷う理由: ${candidate.reason === '' ? '(無し)' : candidate.reason}`;
+  reason.textContent = t('expand.candidateReason', { reason: candidate.reason === '' ? t('expand.noReason') : candidate.reason });
   li.appendChild(reason);
 
   // アブストラクト本文。常時 DOM に置き、表示はフォーカス中カードのみ（CSS で制御）。
@@ -823,12 +869,12 @@ function buildCandidateItem(
   abstractWrap.className = 'expand__candidate-abstract';
   const abstractLabel = doc.createElement('div');
   abstractLabel.className = 'expand__candidate-abstract-label';
-  abstractLabel.textContent = 'Abstract';
+  abstractLabel.textContent = t('expand.abstract');
   abstractWrap.appendChild(abstractLabel);
   const abstractBody = doc.createElement('p');
   if (candidate.abstract === null || candidate.abstract === '') {
     abstractBody.className = 'expand__candidate-abstract-body expand__candidate-abstract-body--empty';
-    abstractBody.textContent = '(アブストラクトなし)';
+    abstractBody.textContent = t('expand.noAbstract');
   } else {
     abstractBody.className = 'expand__candidate-abstract-body';
     // textContent で代入（XSS 回避）。構造化抄録の改行は white-space: pre-wrap で保持。
@@ -844,25 +890,35 @@ function buildCandidateItem(
   decisionRow.appendChild(status);
 
   const buttons: Record<SeedUserDecision, HTMLButtonElement> = {
-    include: makeBtn(doc, 'include', 'include'),
-    exclude: makeBtn(doc, 'exclude', 'exclude'),
-    maybe: makeBtn(doc, 'maybe', 'maybe'),
+    include: makeBtn(doc, t('expand.include'), 'include'),
+    exclude: makeBtn(doc, t('expand.exclude'), 'exclude'),
+    maybe: makeBtn(doc, t('expand.maybe'), 'maybe'),
   };
 
-  let decided = false;
-  let pending = false;
+  state.onDecided = hooks.onDecided;
+  state.refresh = () => {
+    li.classList.toggle('expand__candidate--decided', state.decided);
+    for (const button of Object.values(buttons)) {
+      button.disabled = state.pending || state.decided;
+    }
+    if (state.error !== undefined) {
+      status.textContent = t('expand.saveFailed', { error: state.error });
+    } else if (state.decision !== undefined) {
+      status.textContent = t(state.pending ? 'expand.deciding' : 'expand.decisionSaved', { decision: state.decision });
+    }
+  };
+  state.refresh();
   const triggerDecision = (decision: SeedUserDecision): void => {
-    if (!onDecide) return;
-    /* istanbul ignore if -- decideFocused 側で isDecided() ガード済み + button.disabled でも防がれる */
-    if (decided || pending) return;
-    pending = true;
-    const btn = buttons[decision];
-    btn.disabled = true;
-    const others = (Object.keys(buttons) as SeedUserDecision[])
-      .filter((k) => k !== decision)
-      .map((k) => buttons[k]);
-    others.forEach((b) => (b.disabled = true));
-    status.textContent = `${decision} 判定中…`;
+    if (!onDecide) {
+      return;
+    }
+    if (state.decided || state.pending) {
+      return;
+    }
+    state.pending = true;
+    state.decision = decision;
+    state.error = undefined;
+    state.refresh?.();
     onDecide({
       pmid: candidate.pmid,
       title: candidate.title,
@@ -871,17 +927,15 @@ function buildCandidateItem(
       reason: candidate.reason,
     })
       .then(() => {
-        status.textContent = `${decision} として保存しました`;
-        li.classList.add('expand__candidate--decided');
-        pending = false;
-        decided = true;
-        hooks.onDecided(decision);
+        state.pending = false;
+        state.decided = true;
+        state.refresh?.();
+        state.onDecided?.(decision);
       })
       .catch((err: unknown) => {
-        pending = false;
-        status.textContent = `保存失敗: ${formatError(err)}`;
-        btn.disabled = false;
-        others.forEach((b) => (b.disabled = false));
+        state.pending = false;
+        state.error = formatError(err);
+        state.refresh?.();
       });
   };
 
@@ -899,8 +953,8 @@ function buildCandidateItem(
   return {
     element: li,
     decide: triggerDecision,
-    isDecided: () => decided,
-    isPending: () => pending,
+    isDecided: () => state.decided,
+    isPending: () => state.pending,
   };
 }
 
@@ -918,48 +972,54 @@ function runRoundComplete(
   onRoundComplete: ExpandViewCallbacks['onRoundComplete'],
   includedPapers: IncludedPaper[],
   additions: BoundaryCasesResult['additions'],
-  mode: BoundaryCasesResult['mode']
+  mode: BoundaryCasesResult['mode'],
+  session: CandidateSession
 ): void {
-  round.innerHTML = '';
-  // 再検証（捕捉率）とは独立に、include した「式の外側」論文から更新提案を組み立てる。
-  // inside モードは additions=[] なので提案は出ない（式の内側で初期 seed を作る作業のため）。
   const proposals = buildUpdateProposals(includedPapers, additions);
-  if (!onRoundComplete) {
-    const note = doc.createElement('p');
-    note.className = 'expand__round-note';
-    note.textContent =
-      'ラウンド完了。/validate を開いて捕捉率を再確認してください（自動再検証は無効）。';
-    round.appendChild(note);
+  session.refreshRound = () => {
+    round.innerHTML = '';
+    if (session.roundError !== undefined) {
+      const error = doc.createElement('p');
+      error.className = 'expand__round-error';
+      error.textContent = t('expand.roundFailed', { error: session.roundError });
+      round.appendChild(error);
+      return;
+    }
+    if (session.roundSummary) {
+      round.appendChild(buildRoundSummary(doc, session.roundSummary));
+    } else {
+      const status = doc.createElement('p');
+      status.className = callbacksEnabled ? 'expand__round-status' : 'expand__round-note';
+      status.setAttribute('aria-live', 'polite');
+      status.textContent = t(callbacksEnabled ? 'expand.roundRunning' : 'expand.roundManual');
+      round.appendChild(status);
+      if (callbacksEnabled) {
+        return;
+      }
+    }
     if (mode === 'inside') {
       round.appendChild(buildInsideRoundNote(doc, includedPapers.length));
     }
     if (proposals.length > 0) {
       round.appendChild(buildProposals(doc, proposals));
     }
+  };
+  const callbacksEnabled = session.roundPending || onRoundComplete !== undefined;
+  session.refreshRound();
+  if (!onRoundComplete) {
     return;
   }
-  const status = doc.createElement('p');
-  status.className = 'expand__round-status';
-  status.setAttribute('aria-live', 'polite');
-  status.textContent = 'ラウンド完了。再検証を実行中…';
-  round.appendChild(status);
+  session.roundPending = true;
   onRoundComplete()
     .then((summary) => {
-      round.innerHTML = '';
-      round.appendChild(buildRoundSummary(doc, summary));
-      if (mode === 'inside') {
-        round.appendChild(buildInsideRoundNote(doc, includedPapers.length));
-      }
-      if (proposals.length > 0) {
-        round.appendChild(buildProposals(doc, proposals));
-      }
+      session.roundSummary = summary;
+      session.roundPending = false;
+      session.refreshRound?.();
     })
     .catch((err: unknown) => {
-      round.innerHTML = '';
-      const error = doc.createElement('p');
-      error.className = 'expand__round-error';
-      error.textContent = `再検証に失敗しました: ${formatError(err)}`;
-      round.appendChild(error);
+      session.roundError = formatError(err);
+      session.roundPending = false;
+      session.refreshRound?.();
     });
 }
 
@@ -973,13 +1033,12 @@ function buildProposals(doc: Document, proposals: UpdateProposal[]): HTMLElement
   wrap.className = 'expand__proposals';
   wrap.dataset.tour = 'expand-proposals';
   const title = doc.createElement('h3');
-  title.textContent = '検索式の更新提案（推定）';
+  title.textContent = t('expand.proposalsTitle');
   wrap.appendChild(title);
 
   const note = doc.createElement('p');
   note.className = 'expand__proposals-note';
-  note.textContent =
-    'include した「式の外側」の論文を拾うために、各ブロックへ追加すると有効そうな語です。/draft で式を編集して採用してください。';
+  note.textContent = t('expand.proposalsNote');
   wrap.appendChild(note);
 
   for (const proposal of proposals) {
@@ -987,7 +1046,7 @@ function buildProposals(doc: Document, proposals: UpdateProposal[]): HTMLElement
     block.className = 'expand__proposal';
     const head = doc.createElement('p');
     head.className = 'expand__proposal-head';
-    head.textContent = `ブロック #${proposal.blockId}（${proposal.recoveredPmids.length} 件回収）`;
+    head.textContent = t('expand.proposalBlock', { blockId: proposal.blockId, count: proposal.recoveredPmids.length });
     block.appendChild(head);
 
     const ul = doc.createElement('ul');
@@ -1000,7 +1059,7 @@ function buildProposals(doc: Document, proposals: UpdateProposal[]): HTMLElement
       li.appendChild(code);
       const meta = doc.createElement('span');
       meta.className = 'expand__proposal-term-meta';
-      meta.textContent = ` [${axis}] ${term.recoveredPmids.length} 件: ${term.rationale}`;
+      meta.textContent = t('expand.proposalTerm', { axis, count: term.recoveredPmids.length, rationale: term.rationale });
       li.appendChild(meta);
       ul.appendChild(li);
     }
@@ -1018,8 +1077,7 @@ function renderInsideBanner(doc: Document): HTMLElement {
   const banner = doc.createElement('p');
   banner.className = 'expand__inside-banner';
   banner.setAttribute('role', 'note');
-  banner.textContent =
-    '有効なシード論文がまだ 0 件のため、今回は式の「内側」から組入基準に該当しそうな代表例を提示します。include した論文が初期シードになります（この段階では捕捉率は 100% が正常）。シードができたら、もう一度実行すると式の外側の取りこぼし探索に切り替わります。';
+  banner.textContent = t('expand.insideBanner');
   return banner;
 }
 
@@ -1029,8 +1087,8 @@ function buildInsideRoundNote(doc: Document, includedCount: number): HTMLElement
   note.className = 'expand__round-note';
   note.textContent =
     includedCount > 0
-      ? `初期シードを ${includedCount} 件登録しました。これらは式の内側なので捕捉率 100% は想定どおりです。次回の実行から式の外側（取りこぼし）探索に切り替わります。`
-      : 'include 判定が無かったため初期シードは追加されていません。条件を見直すか、別の候補で再実行してください。';
+      ? t('expand.insideRoundAdded', { count: includedCount })
+      : t('expand.insideRoundEmpty');
   return note;
 }
 
@@ -1038,19 +1096,19 @@ function buildInsideRoundNote(doc: Document, includedCount: number): HTMLElement
 function insideStatusText(result: BoundaryCasesResult): string {
   const specific = result.specific;
   if (specific !== null && specific.fallback === null) {
-    return `${result.candidates.length} 件の初期シード候補（有効 seed 0 件のため、AI が設計した specific 式のヒット ${specific.hits} 件の relevance 上位 ${result.evaluatedCount} 件から選定。現検索式は ${result.originalHits} 件）`;
+    return t('expand.insideSpecificStatus', { count: result.candidates.length, hits: specific.hits, evaluatedCount: result.evaluatedCount, originalHits: result.originalHits });
   }
-  return `${result.candidates.length} 件の初期シード候補（有効 seed 0 件のため、式の内側 ${result.originalHits} 件から代表例 ${result.evaluatedCount} 件を評価）`;
+  return t('expand.insideStatus', { count: result.candidates.length, originalHits: result.originalHits, evaluatedCount: result.evaluatedCount });
 }
 
 /** specific 式にフォールバックが起きたときの案内文。 */
-const SPECIFIC_FALLBACK_TEXT: Record<SpecificQueryFallback, string> = {
+const SPECIFIC_FALLBACK_TEXT: Record<SpecificQueryFallback, MessageKey> = {
   design_failed:
-    'AI の応答から有効な specific 式を組み立てられなかったため、現検索式の relevance 上位から候補を選びました。',
+    'expand.fallbackDesign',
   zero_hits:
-    'specific 式のヒットが 0 件だったため、現検索式の relevance 上位から候補を選びました（式は参考として表示）。',
+    'expand.fallbackZero',
   search_failed:
-    'specific 式が PubMed で構文エラーになったため、現検索式の relevance 上位から候補を選びました（式は参考として表示）。',
+    'expand.fallbackSearch',
 };
 
 /**
@@ -1063,7 +1121,7 @@ function renderSpecificQuery(doc: Document, specific: SpecificQueryOutcome): HTM
   wrap.className = 'expand__specific';
   const title = doc.createElement('h3');
   title.className = 'expand__specific-title';
-  title.textContent = 'AI が設計した specific 式（精度優先）';
+  title.textContent = t('expand.specificTitle');
   wrap.appendChild(title);
 
   if (specific.query !== null) {
@@ -1075,15 +1133,15 @@ function renderSpecificQuery(doc: Document, specific: SpecificQueryOutcome): HTM
     wrap.appendChild(pre);
     const meta = doc.createElement('p');
     meta.className = 'expand__specific-meta';
-    const rationale = specific.rationale ? `設計意図: ${specific.rationale} / ` : '';
-    meta.textContent = `${rationale}ヒット ${specific.hits} 件`;
+    const rationale = specific.rationale ? t('expand.specificRationale', { rationale: specific.rationale }) : '';
+    meta.textContent = t('expand.specificHits', { rationale, hits: specific.hits });
     wrap.appendChild(meta);
   }
   if (specific.fallback !== null) {
     const note = doc.createElement('p');
     note.className = 'expand__specific-fallback';
     note.setAttribute('role', 'note');
-    note.textContent = `⚠ ${SPECIFIC_FALLBACK_TEXT[specific.fallback]}`;
+    note.textContent = `⚠ ${t(SPECIFIC_FALLBACK_TEXT[specific.fallback])}`;
     wrap.appendChild(note);
   }
   return wrap;
@@ -1094,45 +1152,45 @@ function emptyResultText(result: BoundaryCasesResult): string {
   if (result.mode === 'inside') {
     const specific = result.specific;
     if (specific !== null && specific.fallback === null) {
-      return `specific 式のヒット ${specific.hits} 件はすべて既存 seed と重複しており、新たな初期シード候補がありませんでした（現検索式は ${result.originalHits} 件）。`;
+      return t('expand.emptySpecific', { hits: specific.hits, originalHits: result.originalHits });
     }
     if (result.originalHits === 0) {
-      return '現検索式のヒットが 0 件のため、内側から初期シード候補を出せませんでした（式を /draft で見直してください）。';
+      return t('expand.emptyInsideZero');
     }
-    return `式の内側 ${result.originalHits} 件はすべて既存 seed と重複しており、新たな初期シード候補がありませんでした。`;
+    return t('expand.emptyInside', { hits: result.originalHits });
   }
   if (result.additions.length === 0) {
-    return '拡張語が提案されなかったため、式の外側を探索できませんでした（式が網羅的か、拡張が弱い可能性）。';
+    return t('expand.emptyAdditions');
   }
   if (result.marginHits === 0) {
-    return `式の外側に新規論文が見つかりませんでした（現式 ${result.originalHits} 件 / 拡張しても増分 0）。`;
+    return t('expand.emptyMarginZero', { hits: result.originalHits });
   }
-  return `式の外側 ${result.marginHits} 件はすべて既存 seed と重複していました（現式 ${result.originalHits} 件）。`;
+  return t('expand.emptyMargin', { marginHits: result.marginHits, originalHits: result.originalHits });
 }
 
 function buildRoundSummary(doc: Document, summary: ValidationSummary): HTMLElement {
   const wrap = doc.createElement('div');
   wrap.className = 'expand__round-summary';
   const title = doc.createElement('h3');
-  title.textContent = '再検証結果（ラウンド完了）';
+  title.textContent = t('expand.roundTitle');
   wrap.appendChild(title);
 
   const seedsLine = doc.createElement('p');
-  seedsLine.textContent = `有効 seed: ${summary.eligibleSeedCount} / ${summary.totalSeedCount} 件`;
+  seedsLine.textContent = t('expand.validSeeds', { eligible: summary.eligibleSeedCount, total: summary.totalSeedCount });
   wrap.appendChild(seedsLine);
 
   const rate = doc.createElement('p');
   if (summary.finalQueryError !== null) {
-    rate.textContent = `final_query 取得に失敗: ${summary.finalQueryError}`;
+    rate.textContent = t('expand.finalQueryFailed', { error: summary.finalQueryError });
     rate.className = 'expand__round-error';
   } else {
     const captured = summary.finalQuery.capturedPmids.length;
     const total = captured + summary.finalQuery.missedPmids.length;
     if (summary.finalQuery.captureRate === null) {
-      rate.textContent = '捕捉率: （有効シード 0 件のため未計測）';
+      rate.textContent = t('expand.captureUnmeasured');
     } else {
       const percent = (summary.finalQuery.captureRate * 100).toFixed(1);
-      rate.textContent = `捕捉率: ${percent}% (${captured}/${total})`;
+      rate.textContent = t('expand.captureRate', { percent, captured, total });
     }
   }
   wrap.appendChild(rate);
