@@ -315,7 +315,7 @@ startApp(document);
 
 `src/_locales/{ja,en}/messages.json` は manifest の拡張名・説明など、Chrome が表示する文字列だけを持つ。`chrome.i18n` がブラウザの言語で選び、実行中には切り替えられない。
 
-画面の文言はすべて実行時辞書へ置く。現在は外枠・ホーム・共用の読み込み失敗バナー・ツアー・言語選択が移行済みで、他の画面は各領域へ順次移す。表示言語は `chrome.storage.local` の `uiLanguage` に保存し、設定画面・Options・ツアー一覧から同じ値を切り替える。アプリと Options は他ページの保存変更を購読する。アプリは store 更新と同じ `render()` で再描画し、Options は `localizeDom()` で更新する。両方で `html.lang` も更新する。Popup は今後の移行対象。
+画面の文言はすべて実行時辞書へ置く。現在は外枠・ホーム・共用の読み込み失敗バナー・ツアー・言語選択・`#/edit` と検索式の編集部品が移行済みで、他の画面は各領域へ順次移す。表示言語は `chrome.storage.local` の `uiLanguage` に保存し、設定画面・Options・ツアー一覧から同じ値を切り替える。アプリと Options は他ページの保存変更を購読する。アプリは store 更新と同じ `render()` で再描画し、Options は `localizeDom()` で更新する。両方で `html.lang` も更新する。Popup は今後の移行対象。
 
 起動時は描画前に保存値を読む。保存値が無い・不正・読めない場合は、ブラウザの UI 言語が `ja` で始まれば日本語、それ以外は英語にする。`chrome.i18n` が無い場合は日本語にする。
 
