@@ -1,3 +1,4 @@
+import { t, type MessageKey } from '@/lib/i18n';
 import { expandFormula } from '@/features/validation';
 import { buildPubmedSearchUrl } from '@/lib/ncbi';
 import { parsePubmedFormulaMd } from '@/lib/search-formula-md';
@@ -15,26 +16,26 @@ import type { RenderView } from './types';
  * Advanced Search への手入力手順を案内する。
  */
 
-const EXTERNAL_LINKS: Array<{ label: string; url: string; note: string }> = [
+const EXTERNAL_LINKS: Array<{ label: MessageKey; url: string; note: MessageKey }> = [
   {
-    label: 'Cochrane CENTRAL で開く',
+    label: 'done.centralLink',
     url: 'https://www.cochranelibrary.com/central/',
-    note: 'Advanced search → 変換後の検索式を貼り付け',
+    note: 'done.centralNote',
   },
   {
-    label: 'Embase (Dialog) で開く',
+    label: 'done.dialogLink',
     url: 'https://dialog.proquest.com/',
-    note: '契約機関のアカウントでログイン → Advanced Search に変換後の検索式（S1〜）を 1 行ずつ入力',
+    note: 'done.dialogNote',
   },
   {
-    label: 'ClinicalTrials.gov で開く',
+    label: 'done.clinicaltrialsLink',
     url: 'https://clinicaltrials.gov/search',
-    note: 'Condition / Intervention / Other Terms に変換後のキーワードを分けて入力',
+    note: 'done.clinicaltrialsNote',
   },
   {
-    label: 'ICTRP で開く',
+    label: 'done.ictrpLink',
     url: 'https://trialsearch.who.int/',
-    note: 'Basic search に変換後のキーワードを貼り付け（自由語のみ対応）',
+    note: 'done.ictrpNote',
   },
 ];
 
@@ -48,14 +49,14 @@ export const renderDoneView: RenderView = (container, ctx) => {
   if (!ctx.state.project) {
     const warn = doc.createElement('p');
     warn.className = 'view__placeholder';
-    warn.textContent = '先にプロジェクトを選択してください。';
+    warn.textContent = t('done.noProject');
     container.appendChild(warn);
     return;
   }
   if (!ctx.state.currentFormulaMarkdown) {
     const warn = doc.createElement('p');
     warn.className = 'view__placeholder';
-    warn.textContent = '先に /draft で検索式を生成してください。';
+    warn.textContent = t('done.noFormula');
     container.appendChild(warn);
     return;
   }
@@ -63,7 +64,7 @@ export const renderDoneView: RenderView = (container, ctx) => {
   const lead = doc.createElement('p');
   lead.className = 'done__lead';
   lead.textContent =
-    '検索式の開発が完了しました。各データベースで検索を実行して、結果を nbib / RIS 形式でダウンロードしてください。';
+    t('done.lead');
   container.appendChild(lead);
 
   const pubmedLink = buildPubmedLink(doc, ctx.state.currentFormulaMarkdown);
@@ -81,7 +82,7 @@ export const renderDoneView: RenderView = (container, ctx) => {
   const note = doc.createElement('p');
   note.className = 'done__note';
   note.textContent =
-    'PubMed は「Send to → Citation manager → PubMed format (NBIB)」、CT.gov / ICTRP は各画面の XML / CSV から書き出せます。';
+    t('done.downloadNote');
   container.appendChild(note);
 };
 
@@ -98,7 +99,7 @@ function buildPubmedLink(doc: Document, markdown: string): HTMLElement | null {
   const wrap = doc.createElement('p');
   wrap.className = 'done__pubmed-link';
   const label = doc.createElement('span');
-  label.textContent = 'PubMed で直接開く: ';
+  label.textContent = t('done.pubmedLink');
   const a = doc.createElement('a');
   a.href = buildPubmedSearchUrl(expanded);
   a.target = '_blank';
@@ -111,17 +112,17 @@ function buildPubmedLink(doc: Document, markdown: string): HTMLElement | null {
 
 function buildExternalLink(
   doc: Document,
-  entry: { label: string; url: string; note: string }
+  entry: { label: MessageKey; url: string; note: MessageKey }
 ): HTMLElement {
   const li = doc.createElement('li');
   const a = doc.createElement('a');
   a.href = entry.url;
   a.target = '_blank';
   a.rel = 'noopener noreferrer';
-  a.textContent = entry.label;
+  a.textContent = t(entry.label);
   const note = doc.createElement('span');
   note.className = 'done__link-note';
-  note.textContent = ` — ${entry.note}`;
+  note.textContent = ` — ${t(entry.note)}`;
   li.appendChild(a);
   li.appendChild(note);
   return li;

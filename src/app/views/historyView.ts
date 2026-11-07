@@ -1,3 +1,4 @@
+import { t } from '@/lib/i18n';
 import type { FormulaVersion } from '@/domain/formulaVersion';
 import { ROUTE_LABELS } from '../router';
 import type { RenderView } from './types';
@@ -29,7 +30,7 @@ export function createHistoryView(callbacks: HistoryViewCallbacks = {}): RenderV
     if (!ctx.state.project) {
       const warn = doc.createElement('p');
       warn.className = 'view__placeholder';
-      warn.textContent = '先にプロジェクトを選択してください。';
+      warn.textContent = t('history.noProject');
       container.appendChild(warn);
       return;
     }
@@ -37,7 +38,7 @@ export function createHistoryView(callbacks: HistoryViewCallbacks = {}): RenderV
     const status = doc.createElement('p');
     status.className = 'history__status';
     status.setAttribute('aria-live', 'polite');
-    status.textContent = '履歴を読み込み中…';
+    status.textContent = t('history.loading');
     container.appendChild(status);
 
     const errorBox = doc.createElement('p');
@@ -58,10 +59,10 @@ export function createHistoryView(callbacks: HistoryViewCallbacks = {}): RenderV
       .onList()
       .then((versions) => {
         if (versions.length === 0) {
-          status.textContent = 'まだバージョンが登録されていません。';
+          status.textContent = t('history.empty');
           return;
         }
-        status.textContent = `${versions.length} 件のバージョンが見つかりました。`;
+        status.textContent = t('history.found', { count: versions.length });
         for (const v of versions) {
           list.appendChild(buildItem(doc, v, ctx.state.currentFormulaVersionId, callbacks.onLoad));
         }
@@ -96,7 +97,7 @@ function buildItem(
   if (version.versionId === activeVersionId) {
     const badge = doc.createElement('span');
     badge.className = 'history__badge';
-    badge.textContent = '読み込み中';
+    badge.textContent = t('history.active');
     head.appendChild(badge);
   }
   li.appendChild(head);
@@ -116,7 +117,7 @@ function buildItem(
   const btn = doc.createElement('button');
   btn.type = 'button';
   btn.className = 'history__load';
-  btn.textContent = 'このバージョンを読み込む';
+  btn.textContent = t('history.load');
   btn.addEventListener('click', () => {
     if (onLoad) {
       onLoad(version);

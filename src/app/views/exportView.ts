@@ -1,3 +1,4 @@
+import { t } from '@/lib/i18n';
 import type { TargetDatabase } from '@/domain/conversion';
 import type { ExportResult } from '@/app/services';
 import { suggestFileName, toDownloadUrl } from '@/app/services';
@@ -26,7 +27,25 @@ export interface ExportViewCallbacks {
 }
 
 export function createExportView(callbacks: ExportViewCallbacks = {}): RenderView {
+  let exportState: {
+    key: string;
+    result: ExportResult | null;
+    pending: boolean;
+    error: string;
+    openDetails: Map<string, boolean>;
+  } | null = null;
+  let updateResults = (): void => {};
   return (container, ctx) => {
+    const key = JSON.stringify([ctx.state.project?.projectId, ctx.state.currentFormulaVersionId, ctx.state.currentFormulaMarkdown]);
+    if (exportState?.key !== key) {
+      exportState = { key, result: null, pending: false, error: '', openDetails: new Map() };
+    } else {
+      for (const details of Array.from(container.querySelectorAll<HTMLDetailsElement>('.export__result'))) {
+        exportState.openDetails.set(details.dataset['db']!, details.open);
+      }
+    }
+    const saved = exportState;
+    updateResults = (): void => {};
     container.innerHTML = '';
     const doc = container.ownerDocument;
     const heading = doc.createElement('h2');
@@ -36,14 +55,14 @@ export function createExportView(callbacks: ExportViewCallbacks = {}): RenderVie
     if (!ctx.state.project) {
       const warn = doc.createElement('p');
       warn.className = 'view__placeholder';
-      warn.textContent = '先にプロジェクトを選択してください。';
+      warn.textContent = t('export.noProject');
       container.appendChild(warn);
       return;
     }
     if (!ctx.state.currentFormulaVersionId || !ctx.state.currentFormulaMarkdown) {
       const warn = doc.createElement('p');
       warn.className = 'view__placeholder';
-      warn.textContent = '先に /draft で検索式を生成してください。';
+      warn.textContent = t('export.noFormula');
       container.appendChild(warn);
       return;
     }
@@ -63,11 +82,11 @@ export function createExportView(callbacks: ExportViewCallbacks = {}): RenderVie
       const notice = doc.createElement('p');
       notice.className = 'export__validation-warning';
       notice.setAttribute('role', 'note');
-      notice.append('⚠ この版は AI が作ったままで、人が確かめていません。');
+      notice.append(t('export.unreviewed'));
       const edit = doc.createElement('a');
       edit.href = '#/edit';
-      edit.textContent = '編集画面';
-      notice.append(edit, ' で確かめてから使ってください。');
+      edit.textContent = t('export.editLink');
+      notice.append(edit, t('export.reviewPrompt'));
       container.appendChild(notice);
     }
 
@@ -75,7 +94,7 @@ export function createExportView(callbacks: ExportViewCallbacks = {}): RenderVie
     actions.className = 'export__actions';
     const exportBtn = doc.createElement('button');
     exportBtn.type = 'button';
-    exportBtn.textContent = '4 DB へ変換して保存';
+    exportBtn.textContent = t('export.convert');
     exportBtn.dataset.tour = 'export-run';
     actions.appendChild(exportBtn);
     container.appendChild(actions);
@@ -101,29 +120,48 @@ export function createExportView(callbacks: ExportViewCallbacks = {}): RenderVie
 
     container.appendChild(buildMethodsSection(doc, ctx.state.currentFormulaModel, ctx.state.currentFormulaModelsUsed, ctx.state.currentFormulaAppVersion));
 
-    exportBtn.addEventListener('click', () => {
-      if (!callbacks.onExport) {
-        return;
-      }
-      exportBtn.disabled = true;
-      status.textContent = '変換中…';
-      errorBox.textContent = '';
+    updateResults = () => {
+      exportBtn.disabled = saved.pending;
+      status.textContent = saved.pending ? t('export.converting') : saved.result ? t('export.converted') : '';
+      errorBox.textContent = saved.error;
       results.innerHTML = '';
       delete results.dataset['tour'];
+      if (saved.result) {
+        renderResults(doc, results, saved.result);
+        for (const details of Array.from(results.querySelectorAll<HTMLDetailsElement>('.export__result'))) {
+          const open = saved.openDetails.get(details.dataset['db']!);
+          if (open !== undefined) {
+            details.open = open;
+          }
+        }
+        // ツアーが枠を付ける対象。変換結果があるときだけ付け、空の領域には付けない。
+        results.dataset.tour = 'export-results';
+      }
+    };
+    updateResults();
+
+    exportBtn.addEventListener('click', () => {
+      if (!callbacks.onExport || saved.pending) {
+        return;
+      }
+      saved.pending = true;
+      saved.result = null;
+      saved.error = '';
+      saved.openDetails.clear();
+      updateResults();
       callbacks
         .onExport()
         .then((result) => {
-          status.textContent = '変換が完了しました。';
-          renderResults(doc, results, result);
-          // ツアーが枠を付ける対象。変換結果があるときだけ付け、空の領域には付けない。
-          results.dataset.tour = 'export-results';
+          saved.result = result;
         })
         .catch((err: unknown) => {
-          errorBox.textContent = formatError(err);
-          status.textContent = '';
+          saved.error = formatError(err);
         })
         .finally(() => {
-          exportBtn.disabled = false;
+          saved.pending = false;
+          if (exportState === saved) {
+            updateResults();
+          }
         });
     });
   };
@@ -143,25 +181,27 @@ export function createExportView(callbacks: ExportViewCallbacks = {}): RenderVie
 export function buildValidationWarning(state: AppState): string | null {
   const entry = state.validationResult;
   if (entry === null || entry.formulaVersionId !== state.currentFormulaVersionId) {
-    return '⚠ この検索式はまだ検証されていません。#/draft の「検証のみ再実行」でシード捕捉率を確認してからのエクスポートを推奨します。';
+    return t('export.unvalidated');
   }
   const summary = entry.summary;
   if (summary.finalQueryError !== null) {
-    return '⚠ 検証でシード捕捉率を確認できていません（final_query の実行に失敗）。#/draft で再検証してからのエクスポートを推奨します。';
+    return t('export.validationFailed');
   }
   const captured = summary.finalQuery.capturedPmids.length;
   const seedTotal = captured + summary.finalQuery.missedPmids.length;
-  if (seedTotal === 0) return '⚠ 既知の文献（シード論文）での検証をしていません';
+  if (seedTotal === 0) {
+    return t('export.noSeeds');
+  }
   if (seedTotal > 0 && summary.finalQuery.captureRate !== null && summary.finalQuery.captureRate < 1) {
     const percent = (summary.finalQuery.captureRate * 100).toFixed(1);
-    return `⚠ シード捕捉率が ${percent}%（${captured}/${seedTotal} 件）です。未捕捉シードの原因を #/draft で確認してからのエクスポートを推奨します。`;
+    return t('export.lowCapture', { percent, captured, seedTotal });
   }
   return null;
 }
 
 function renderResults(doc: Document, container: HTMLElement, result: ExportResult): void {
   const note = doc.createElement('p');
-  note.textContent = 'この変換は規則に基づくもので、AI は使っていません。各行を、変換先のデータベースで確かめてください。';
+  note.textContent = t('export.conversionNote');
   container.appendChild(note);
   for (const conversion of result.conversions) {
     const details = doc.createElement('details');
@@ -191,7 +231,7 @@ function renderResults(doc: Document, container: HTMLElement, result: ExportResu
     const downloadLink = doc.createElement('a');
     downloadLink.href = toDownloadUrl(conversion);
     downloadLink.download = suggestFileName(conversion.targetDb);
-    downloadLink.textContent = `${suggestFileName(conversion.targetDb)} をダウンロード`;
+    downloadLink.textContent = t('export.download', { filename: suggestFileName(conversion.targetDb) });
     downloadLink.className = 'export__download';
     details.appendChild(downloadLink);
 
@@ -210,18 +250,18 @@ function buildMethodsSection(doc: Document, model: string | null, modelsUsed?: s
   section.className = 'export__methods';
 
   const heading = doc.createElement('h3');
-  heading.textContent = '論文 Methods 用の文案';
+  heading.textContent = t('export.methodsTitle');
   section.appendChild(heading);
 
   const note = doc.createElement('p');
   note.className = 'export__methods-note';
   note.textContent =
     model === null
-      ? '検索式の下書きに生成 AI を使ったことを論文の方法（Methods）に記載するための定型文です。この検索式にはモデル情報が記録されていないため、{ } の部分は使用したモデル名に置き換えてください。'
-      : '検索式の下書きに生成 AI を使ったことを論文の方法（Methods）に記載するための定型文です。必要に応じて調整して使ってください。';
+      ? t('export.methodsNoModel')
+      : t('export.methodsNote');
   section.appendChild(note);
   const fillIn = doc.createElement('strong');
-  fillIn.textContent = '［ ］内に、著者が AI の下書きをどう確かめ、直したかを必ず記入してください。';
+  fillIn.textContent = t('export.methodsFillIn');
   section.appendChild(fillIn);
 
   const status = doc.createElement('p');
@@ -229,8 +269,8 @@ function buildMethodsSection(doc: Document, model: string | null, modelsUsed?: s
   status.setAttribute('aria-live', 'polite');
 
   const variants: Array<{ lang: string; label: string; text: string }> = [
-    { lang: 'en', label: '英語版', text: texts.en },
-    { lang: 'ja', label: '日本語版', text: texts.ja },
+    { lang: 'en', label: t('export.englishVersion'), text: texts.en },
+    { lang: 'ja', label: t('export.japaneseVersion'), text: texts.ja },
   ];
   for (const variant of variants) {
     const item = doc.createElement('div');
@@ -251,15 +291,15 @@ function buildMethodsSection(doc: Document, model: string | null, modelsUsed?: s
     const copyBtn = doc.createElement('button');
     copyBtn.type = 'button';
     copyBtn.className = 'export__methods-copy';
-    copyBtn.textContent = `${variant.label}をコピー`;
+    copyBtn.textContent = t('export.copyVersion', { label: variant.label });
     copyBtn.addEventListener('click', () => {
       copyToClipboard(variant.text).then(
         () => {
-          status.textContent = `${variant.label}の文案をコピーしました。`;
+          status.textContent = t('export.copiedVersion', { label: variant.label });
         },
         () => {
           status.textContent =
-            'コピーに失敗しました。テキストを選択して手動でコピーしてください。';
+            t('export.copyFailed');
         }
       );
     });
@@ -275,7 +315,7 @@ function buildMethodsSection(doc: Document, model: string | null, modelsUsed?: s
 function copyToClipboard(text: string): Promise<void> {
   const clipboard = globalThis.navigator?.clipboard;
   if (!clipboard) {
-    return Promise.reject(new Error('クリップボード API が利用できません'));
+    return Promise.reject(new Error(t('export.clipboardUnavailable')));
   }
   return clipboard.writeText(text);
 }
@@ -293,7 +333,7 @@ function buildPubmedLink(doc: Document, markdown: string): HTMLElement | null {
   const wrap = doc.createElement('p');
   wrap.className = 'export__pubmed-link';
   const label = doc.createElement('span');
-  label.textContent = 'PubMed で直接開く: ';
+  label.textContent = t('export.pubmedLink');
   const a = doc.createElement('a');
   a.href = buildPubmedSearchUrl(expandedQuery);
   a.target = '_blank';
