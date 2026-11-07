@@ -1,3 +1,4 @@
+import { t } from '@/lib/i18n';
 import type {
   AnalyzeMissedSeedsResult,
   ValidationProgress,
@@ -24,15 +25,15 @@ export interface ValidationResultsCallbacks {
 /** ValidationProgress を表示用ラベルへ変換する（draftView.formatDraftProgress と同型） */
 export function formatValidationProgress(progress: ValidationProgress): string {
   const label = {
-    line_hits: '行ごとのヒット数を集計中',
-    final_query: 'シード捕捉率を確認中',
-    mesh: 'Seed の MeSH を抽出中',
-    mesh_hierarchy: 'MeSH 階層を取得中',
-    logging: '結果を記録中',
-    done: '完了',
+    line_hits: t('draft.validation.countingHitsByLine'),
+    final_query: t('draft.validation.checkingSeedCapture'),
+    mesh: t('draft.validation.extractingSeedMesh'),
+    mesh_hierarchy: t('draft.validation.retrievingMeshHierarchy'),
+    logging: t('draft.validation.loggingResults'),
+    done: t('draft.validation.done'),
   }[progress.step];
   if (progress.step === 'line_hits' && progress.blockCount !== undefined) {
-    return `${label}（ブロック ${progress.blockIndex ?? 0}/${progress.blockCount}）`;
+    return t('draft.validation.block', { label: label, blockNumber: progress.blockIndex ?? 0, blockCount: progress.blockCount });
   }
   return label;
 }
@@ -62,7 +63,7 @@ export function readStoredAnalysis(state: AppState): AnalyzeMissedSeedsResult | 
 }
 
 export function summaryStatusText(summary: ValidationSummary): string {
-  return `検証完了（有効 seed ${summary.eligibleSeedCount}/${summary.totalSeedCount} 件）`;
+  return t('draft.validation.validationCompleteEligibleSeeds', { eligibleCount: summary.eligibleSeedCount, totalCount: summary.totalSeedCount });
 }
 
 export function renderValidationResults(
@@ -81,17 +82,17 @@ function renderLineHits(doc: Document, summary: ValidationSummary): HTMLElement 
   const section = doc.createElement('section');
   section.className = 'validate__line-hits';
   const h3 = doc.createElement('h3');
-  h3.textContent = '行ごとのヒット数';
+  h3.textContent = t('draft.validation.hitsByLine');
   section.appendChild(h3);
 
   const ul = doc.createElement('ul');
   for (const line of summary.lineHits) {
     const li = doc.createElement('li');
     if (line.error !== null) {
-      li.textContent = `#${line.blockId}: エラー — ${line.error}`;
+      li.textContent = t('draft.validation.error', { blockId: line.blockId, error: line.error });
       li.className = 'validate__line-error';
     } else {
-      li.textContent = `#${line.blockId}: ${line.hitCount} 件`;
+      li.textContent = t('draft.validation.hits', { blockId: line.blockId, count: line.hitCount });
     }
     ul.appendChild(li);
   }
@@ -108,19 +109,19 @@ function renderFinalQuery(
   const section = doc.createElement('section');
   section.className = 'validate__final';
   const h3 = doc.createElement('h3');
-  h3.textContent = '最終検索式とシード捕捉率';
+  h3.textContent = t('draft.validation.finalFormulaAndSeedCapture');
   section.appendChild(h3);
 
   if (summary.finalQueryError !== null) {
     const error = doc.createElement('p');
     error.className = 'validate__final-error';
-    error.textContent = `final_query の取得に失敗しました: ${summary.finalQueryError}`;
+    error.textContent = t('draft.validation.couldNotRetrieveFinalQuery', { error: summary.finalQueryError });
     section.appendChild(error);
     return section;
   }
 
   const total = doc.createElement('p');
-  total.textContent = `全体ヒット数: ${summary.finalQuery.totalHits}`;
+  total.textContent = t('draft.validation.totalHits', { count: summary.finalQuery.totalHits });
   section.appendChild(total);
 
   const rate = doc.createElement('p');
@@ -128,15 +129,15 @@ function renderFinalQuery(
   const seedTotal = captured + summary.finalQuery.missedPmids.length;
   rate.textContent =
     summary.finalQuery.captureRate === null
-      ? '捕捉率: （有効シード 0 件のため未計測）'
-      : `捕捉率: ${(summary.finalQuery.captureRate * 100).toFixed(1)}% (${captured}/${seedTotal})`;
+      ? t('draft.validation.captureRateNotMeasuredNo')
+      : t('draft.validation.captureRate', { rate: (summary.finalQuery.captureRate * 100).toFixed(1), capturedCount: captured, seedCount: seedTotal });
   section.appendChild(rate);
 
   if (summary.finalQuery.missedPmids.length > 0) {
     const missedList = doc.createElement('ul');
     missedList.className = 'validate__missed';
     const lead = doc.createElement('li');
-    lead.textContent = '未捕捉 PMID:';
+    lead.textContent = t('draft.validation.missedPmids');
     missedList.appendChild(lead);
     for (const pmid of summary.finalQuery.missedPmids) {
       const li = doc.createElement('li');
@@ -168,7 +169,7 @@ function renderMissedAnalysis(
   const btn = doc.createElement('button');
   btn.type = 'button';
   btn.className = 'validate__analyze-missed';
-  btn.textContent = 'AI で原因を分析する';
+  btn.textContent = t('draft.validation.analyzeCausesWithAi');
   wrap.appendChild(btn);
 
   const status = doc.createElement('p');
@@ -187,10 +188,10 @@ function renderMissedAnalysis(
 
   const showResult = (result: AnalyzeMissedSeedsResult): void => {
     if (result.analyses.length === 0) {
-      status.textContent = '分析結果が得られませんでした。';
+      status.textContent = t('draft.validation.noAnalysisResultsReturned');
       return;
     }
-    status.textContent = `${result.analyses.length} 件の原因を分析しました。`;
+    status.textContent = t('draft.validation.analyzedCausesForPapers', { count: result.analyses.length });
     for (const analysis of result.analyses) {
       list.appendChild(renderAnalysisItem(doc, analysis));
     }
@@ -206,7 +207,7 @@ function renderMissedAnalysis(
       return;
     }
     btn.disabled = true;
-    status.textContent = '原因を分析中…';
+    status.textContent = t('draft.validation.analyzingCauses');
     errorBox.textContent = '';
     list.innerHTML = '';
     callbacks
@@ -233,8 +234,8 @@ function renderAnalysisItem(
 
   const head = doc.createElement('p');
   head.className = 'validate__analysis-pmid';
-  const block = analysis.relatedBlock === null ? '不明' : `#${analysis.relatedBlock}`;
-  head.textContent = `PMID ${analysis.pmid}（推定ブロック: ${block}）`;
+  const block = analysis.relatedBlock === null ? t('draft.validation.unknown') : `#${analysis.relatedBlock}`;
+  head.textContent = t('draft.validation.pmidLikelyBlock', { pmid: analysis.pmid, block: block });
   li.appendChild(head);
 
   const cause = doc.createElement('p');
@@ -245,7 +246,7 @@ function renderAnalysisItem(
   if (analysis.suggestedTerms.length > 0) {
     const termsLabel = doc.createElement('p');
     termsLabel.className = 'validate__analysis-terms-label';
-    termsLabel.textContent = '改善候補語:';
+    termsLabel.textContent = t('draft.validation.suggestedTerms');
     li.appendChild(termsLabel);
 
     const termsList = doc.createElement('ul');
@@ -265,18 +266,18 @@ function renderMesh(doc: Document, summary: ValidationSummary): HTMLElement {
   const section = doc.createElement('section');
   section.className = 'validate__mesh';
   const h3 = doc.createElement('h3');
-  h3.textContent = 'Seed の MeSH（頻度順）';
+  h3.textContent = t('draft.validation.seedMeshByFrequency');
   section.appendChild(h3);
   if (summary.meshError !== null) {
     const error = doc.createElement('p');
     error.className = 'validate__mesh-error';
-    error.textContent = `MeSH の取得に失敗しました: ${summary.meshError}`;
+    error.textContent = t('draft.validation.couldNotRetrieveMesh', { error: summary.meshError });
     section.appendChild(error);
     return section;
   }
   if (summary.meshFrequency.length === 0) {
     const empty = doc.createElement('p');
-    empty.textContent = 'Seed が無いため MeSH 頻度を集計できません。';
+    empty.textContent = t('draft.validation.cannotCountMeshFrequencyWithout');
     section.appendChild(empty);
     return section;
   }
@@ -300,20 +301,20 @@ function renderMeshHierarchy(doc: Document, summary: ValidationSummary): HTMLEle
   const wrap = doc.createElement('div');
   wrap.className = 'validate__mesh-hierarchy';
   const h4 = doc.createElement('h4');
-  h4.textContent = 'MeSH 階層（Mermaid）';
+  h4.textContent = t('draft.validation.meshHierarchyMermaid');
   wrap.appendChild(h4);
 
   if (summary.meshHierarchyError !== null) {
     const err = doc.createElement('p');
     err.className = 'validate__mesh-hierarchy-error';
-    err.textContent = `MeSH 階層の取得に失敗しました: ${summary.meshHierarchyError}`;
+    err.textContent = t('draft.validation.couldNotRetrieveMeshHierarchy', { error: summary.meshHierarchyError });
     wrap.appendChild(err);
     return wrap;
   }
 
   if (summary.meshHierarchy.length === 0) {
     const empty = doc.createElement('p');
-    empty.textContent = '階層情報が取得できませんでした（該当する tree number 無し）。';
+    empty.textContent = t('draft.validation.noHierarchyInformationFoundNo');
     wrap.appendChild(empty);
     return wrap;
   }
@@ -321,7 +322,7 @@ function renderMeshHierarchy(doc: Document, summary: ValidationSummary): HTMLEle
   const note = doc.createElement('p');
   note.className = 'validate__mesh-hierarchy-note';
   note.textContent =
-    '下の Mermaid ソースを https://mermaid.live に貼ると SVG として描画できます。';
+    t('draft.validation.pasteTheMermaidSourceBelow');
   wrap.appendChild(note);
 
   const pre = doc.createElement('pre');
