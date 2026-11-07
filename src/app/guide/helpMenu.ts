@@ -9,6 +9,7 @@ export interface HelpMenuHost {
   conditions: () => GuideConditionValues;
   start: (id: GuideTourId) => void;
   openTourList: () => void;
+  openConsult?: (button: HTMLElement) => void;
 }
 
 const MENU_CLASS = 'guide-help-menu';
@@ -100,6 +101,10 @@ export function createHelpMenu(doc: Document, host: HelpMenuHost) {
       items.push(action('start-tour', t('guide.menuStartTour'), () => host.start(tourId)));
     }
     items.push(action('tour-list', t('guide.menuTourList'), () => host.openTourList()));
+    if (host.openConsult) {
+      const returnFocus = activeButton!;
+      items.push(action('consult', t('guide.consult'), () => host.openConsult!(returnFocus)));
+    }
     menu.replaceChildren(...items);
     if (focused !== null) items.find(item => item.dataset.helpAction === focused)?.focus();
   }

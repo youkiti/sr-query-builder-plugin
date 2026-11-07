@@ -1,3 +1,5 @@
+import { consultHelp } from '@/lib/help-consult/consult';
+import { loadHelpSections } from '@/lib/help-consult/load';
 import {
   demoFetch,
   installDemoFetch,
@@ -108,4 +110,19 @@ describe('人工レイテンシ', () => {
 test('Anthropic 宛はデモ非対応のエラーを投げる', async () => {
   await expect(demoFetch('https://api.anthropic.com/v1/messages', { method: 'POST', body: '{}' }))
     .rejects.toThrow('[demo] デモビルドは Anthropic 経由の LLM プロバイダに対応していません。Options 画面で Gemini モデルを選択してください。');
+});
+
+test.each(['anthropic', 'gemini'] as const)('相談の二段階問い合わせを %s の偽通信で完結する', async providerId => {
+  const fetch = jest.fn(demoFetch);
+  const sections = await loadHelpSections('ja');
+  const result = await consultHelp({
+    question: 'プロジェクトの作成方法', lang: 'ja', sections, providerId, apiKey: 'fake-consult-key', fetch,
+    permissions: { contains: async () => true, request: async () => true },
+  });
+  expect(result.status).toBe('success');
+  expect(fetch).toHaveBeenCalledTimes(2);
+  if (result.status === 'success') {
+    expect(result.sectionIds).toHaveLength(1);
+    expect(result.answer).not.toBe('');
+  }
 });

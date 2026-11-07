@@ -2,6 +2,8 @@
 
 ## 未リリース
 
+- アプリの「?」メニューに「相談する」を追加し、端末内ヘルプ検索、AI への一問一答、公開 Issue の下書きを画面から使えるようにする。
+
 - ヘルプ相談の土台を追加。
   固定モデルは Gemini `gemini-3.5-flash-lite`、Anthropic `claude-haiku-5-5`、OpenRouter `deepseek/deepseek-v4-flash`。
   指示文は `help-consult-v1`、出力上限は 8,192 トークン。

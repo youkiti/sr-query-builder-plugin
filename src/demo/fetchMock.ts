@@ -28,7 +28,7 @@
 
 import { handleEutilsRequest } from './eutilsMock';
 import { jsonResponse } from './fakeResponse';
-import { handleGeminiGenerateContent } from './llmFixtures';
+import { handleGeminiGenerateContent, helpConsultFixture } from './llmFixtures';
 import { handleDriveRequest, handleSheetsRequest } from './sheetStore';
 
 /** 実 API 相当の待ち時間（ミリ秒）。`latencyFactor` を掛けて使う。 */
@@ -102,6 +102,14 @@ export async function demoFetch(input: RequestInfo | URL, init?: RequestInit): P
     );
   }
   if (url.startsWith('https://api.anthropic.com/v1/messages')) {
+    const consult = helpConsultFixture(bodyText);
+    if (consult !== null) {
+      await sleep(LATENCY_MS.llm * latencyFactor);
+      return jsonResponse({
+        content: [{ type: 'text', text: consult }], stop_reason: 'end_turn',
+        usage: { input_tokens: 10, output_tokens: 20 },
+      });
+    }
     throw new Error(
       '[demo] デモビルドは Anthropic 経由の LLM プロバイダに対応していません。Options 画面で Gemini モデルを選択してください。'
     );

@@ -438,6 +438,13 @@ export function handleGeminiGenerateContent(init: RequestInit): Response {
   const userText = (body.contents ?? [])
     .map((c) => (c.parts ?? []).map((p) => p.text ?? '').join(''))
     .join('\n');
+  const consult = helpConsultFixture(rawBody);
+  if (consult !== null) {
+    return jsonResponse({
+      candidates: [{ content: { parts: [{ text: consult }], role: 'model' }, finishReason: 'STOP' }],
+      usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 },
+    });
+  }
   const skill = detectSkill(systemText);
   const responseObj = buildResponseObject(skill, userText);
   const responseText = JSON.stringify(responseObj);
@@ -452,4 +459,22 @@ export function handleGeminiGenerateContent(init: RequestInit): Response {
     },
   };
   return jsonResponse(envelope);
+}
+
+/** 相談の指示を本文で識別し、選択 JSON と回答を一回ずつ返す。 */
+export function helpConsultFixture(body: string): string | null {
+  if (body.includes('質問に関連するヘルプの小節を最大3つ選んでください')) {
+    const decoded = JSON.parse(body) as {
+      messages?: Array<{ role: string; content: string }>;
+      contents?: Array<{ parts?: Array<{ text?: string }> }>;
+    };
+    const text = decoded.messages?.find(message => message.role === 'user')?.content
+      ?? decoded.contents?.[0]?.parts?.[0]?.text ?? '{}';
+    const data = JSON.parse(text) as { sections?: Array<{ id: string }> };
+    return JSON.stringify({ sectionIds: data.sections?.slice(0, 1).map(section => section.id) ?? [] });
+  }
+  if (body.includes('ヘルプの案内役です') || body.includes('You are the help guide for the Chrome extension')) {
+    return 'ホーム画面からプロジェクトを作成できます。 / You can create a project from the Home screen.';
+  }
+  return null;
 }

@@ -71,6 +71,13 @@ OpenRouter の説明では、OpenRouter 自身は既定ではプロンプトと�
 - [OpenRouter provider logging and training](https://openrouter.ai/docs/guides/privacy/provider-logging)
 - [OpenRouter ZDR](https://openrouter.ai/docs/guides/features/zdr)
 
+## ヘルプ相談
+
+ヘルプ相談では、質問と AI が選んだヘルプの一部を、利用者が登録した API キーの社へ送信します。
+プロジェクトの中身やメールアドレスは送信しません。
+端末内のヘルプ検索は外部へ送信しません。
+Issue の下書きは、利用者が GitHub で投稿するまで送信されません。
+
 ## データの保存・削除
 
 - すべてのデータは利用者自身の Google アカウント（Sheets / Drive）とブラウザローカルストレージに保存されます。削除は、利用者が Google Drive / Sheets 上のファイルを削除し、拡張を削除（またはブラウザのストレージをクリア）することで完結します。

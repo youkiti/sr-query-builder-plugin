@@ -1,3 +1,4 @@
+import { t } from '@/lib/i18n';
 import type { LlmProviderId } from '@/domain/llmApiLog';
 import type { ProjectStoreDeps } from '@/features/project';
 import { AI_CONSENT_KEY, AI_CONSENT_VERSION, GEMINI_DATA_TERMS_URL } from '@/lib/llm/aiDisclosure';
@@ -75,5 +76,63 @@ export function createEnsureAiConsent(doc: Document, store: ProjectStoreDeps): (
     pending.set(provider, request);
     queue = request.catch(() => undefined);
     return request;
+  };
+}
+
+export const HELP_CONSULT_CONSENT_KEY = 'aiConsentHelpConsult';
+export const HELP_CONSULT_CONSENT_VERSION = 'help-consult-v1';
+
+/** プロトコル送信の同意を尊重し、相談だけの同意は独立して保存する。 */
+export function createEnsureHelpConsultConsent(doc: Document, store: ProjectStoreDeps): (provider: LlmProviderId) => Promise<void> {
+  return async provider => {
+    const existing = await store.read<ConsentRecords>(AI_CONSENT_KEY);
+    if (existing?.[provider]?.version === AI_CONSENT_VERSION) {
+      return;
+    }
+    const records = await store.read<ConsentRecords>(HELP_CONSULT_CONSENT_KEY) ?? {};
+    if (records[provider]?.version === HELP_CONSULT_CONSENT_VERSION) {
+      return;
+    }
+    if (provider === 'openai') {
+      throw new Error('Unsupported provider');
+    }
+    const disclosure = disclosures[provider];
+    const content = doc.createElement('div');
+    content.className = 'guide-consult__consent';
+    for (const text of [
+      t('guide.consultConsentDestination', { destination: {
+        anthropic: 'Anthropic (api.anthropic.com)',
+        gemini: 'Google Gemini (generativelanguage.googleapis.com)',
+        openrouter: 'OpenRouter (openrouter.ai)',
+      }[provider] }),
+      t('guide.consultConsentContent'),
+    ]) {
+      const paragraph = doc.createElement('p');
+      paragraph.textContent = text;
+      content.append(paragraph);
+    }
+    const urls = [...disclosure.links, 'https://youkiti.github.io/sr-query-builder-plugin/privacy-policy.html'];
+    urls.forEach((url, index) => {
+      const paragraph = doc.createElement('p');
+      const link = doc.createElement('a');
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = index === disclosure.links.length ? t('guide.consultPrivacy')
+        : t('guide.consultConsentOfficial', { number: index + 1 });
+      paragraph.append(link);
+      content.append(paragraph);
+    });
+    const accepted = await showConfirmationModal(doc, {
+      title: t('guide.consultConsentTitle'), content,
+      acceptLabel: t('guide.consultAccept'), cancelLabel: t('guide.consultDecline'),
+    });
+    if (!accepted) {
+      throw new AiConsentDeclinedError();
+    }
+    const latest = await store.read<ConsentRecords>(HELP_CONSULT_CONSENT_KEY) ?? {};
+    await store.write({ [HELP_CONSULT_CONSENT_KEY]: { ...latest, [provider]: {
+      version: HELP_CONSULT_CONSENT_VERSION, acceptedAt: new Date().toISOString(),
+    } } });
   };
 }

@@ -1,3 +1,4 @@
+import type { ProjectStoreDeps } from '@/features/project';
 import { availableTours, hasRemainingSteps, shouldSuggest, suppressSuggestions } from '../../lib/guide/tourProgress';
 import type { GuideTourId } from '../../lib/guide/tours';
 import {
@@ -19,6 +20,7 @@ import { guideEvents, routeGuideEvent } from './guideEvents';
 
 export interface GuideInitOptions {
   store: AppStore;
+  consultStore?: ProjectStoreDeps;
   win: Window;
   doc: Document;
   /** 前提条件のガードを通る画面遷移（startApp の navigate） */
@@ -31,7 +33,7 @@ export interface GuideInitOptions {
  * ヘルプツアーを起動する。入口のボタン（#app-open-tours）または表示領域（#app-content）が
  * 無い文書では何もせず、後始末は空の関数を返す。戻り値は購読・表示を片づける関数。
  */
-export async function initGuide({ store, win, doc, navigate, getHash, onHashChange }: GuideInitOptions): Promise<() => void> {
+export async function initGuide({ store, consultStore, win, doc, navigate, getHash, onHashChange }: GuideInitOptions): Promise<() => void> {
   const anchor = doc.getElementById('app-open-tours');
   const content = doc.getElementById('app-content');
   if (!anchor || !content) return () => {};
@@ -48,7 +50,30 @@ export async function initGuide({ store, win, doc, navigate, getHash, onHashChan
     refresh();
   }
   const entry = createTourEntry(doc, anchor, conditions, start);
-  const helpMenu = createHelpMenu(doc, { conditions, start, openTourList: () => entry.open() });
+  let closeConsult: (() => void) | undefined;
+  let consultLoading = false;
+  let guideDisposed = false;
+  const helpMenu = createHelpMenu(doc, {
+    conditions, start, openTourList: () => entry.open(),
+    openConsult: consultStore ? button => {
+      if (consultLoading) {
+        return;
+      }
+      consultLoading = true;
+      void import(/* webpackChunkName: "help-consult" */ './consult').then(({ openHelpConsult }) => {
+        if (!guideDisposed) {
+          closeConsult?.();
+          closeConsult = openHelpConsult(doc, button, {
+            store: consultStore, route: parseRoute(getHash()), conditions, start,
+          });
+        }
+      }).catch(() => {
+        button.focus();
+      }).finally(() => {
+        consultLoading = false;
+      });
+    } : undefined,
+  });
   /** 見出しの横の「?」を現在のルートのトピックで差し直し、開いているメニューを追従させる。 */
   function mountHelp(): void {
     mountHelpButtons(content!, topicForRoute(parseRoute(getHash())));
@@ -88,6 +113,8 @@ export async function initGuide({ store, win, doc, navigate, getHash, onHashChan
   };
   const cleanups: Array<() => void> = [() => runner.stop(), () => entry.destroy(), () => helpMenu.destroy()];
   const dispose = (): void => {
+    guideDisposed = true;
+    closeConsult?.();
     cleanups.splice(0).reverse().forEach(cleanup => cleanup());
   };
   try {
