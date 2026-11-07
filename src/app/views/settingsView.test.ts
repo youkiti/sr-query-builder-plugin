@@ -79,6 +79,84 @@ describe('createSettingsView - Gemini プラン判定', () => {
     document.body.innerHTML = '';
   });
 
+  const keyFields = [
+    ['settings-gemini-key', 'apiKeys.gemini'],
+    ['settings-openrouter-key', 'apiKeys.openrouter'],
+    ['settings-anthropic-key', 'apiKeys.anthropic'],
+    ['settings-ncbi-key', 'apiKeys.ncbi'],
+  ];
+
+  test.each([...keyFields, ['settings-custom-model-id', ''], ['settings-custom-model-label', '']])(
+    '非同期の保存値読み込み後も再描画前の未保存入力を保持する: %s', async (id, key) => {
+      const store = { [key!]: 'saved', 'gemini.detectedTier': 'paid' };
+      const view = createSettingsView(buildDeps(store));
+      const container = document.createElement('div');
+      view(container, buildCtx());
+      await flush();
+      const input = container.querySelector<HTMLInputElement>(`#${id}`)!;
+      input.value = 'unsaved';
+      input.dispatchEvent(new Event('input'));
+      view(container, buildCtx());
+      await flush();
+      expect(container.querySelector<HTMLInputElement>(`#${id}`)!.value).toBe('unsaved');
+    }
+  );
+
+  test.each(keyFields)('保存成功後は未保存入力を消し、最新の保存値を表示する: %s', async (id, key) => {
+    const store: Record<string, string> = { 'gemini.detectedTier': 'paid' };
+    const view = createSettingsView(buildDeps(store, jest.fn(async () => 'paid')));
+    const container = document.createElement('div');
+    view(container, buildCtx());
+    await flush();
+    const input = container.querySelector<HTMLInputElement>(`#${id}`)!;
+    input.value = 'edited';
+    input.dispatchEvent(new Event('input'));
+    container.querySelector<HTMLButtonElement>('#settings-save')!.click();
+    await flush();
+    expect(store[key!]).toBe('edited');
+    store[key!] = 'updated-elsewhere';
+    view(container, buildCtx());
+    await flush();
+    expect(container.querySelector<HTMLInputElement>(`#${id}`)!.value).toBe('updated-elsewhere');
+  });
+
+  test('保存値と同じ入力に戻した欄の記録を消す', async () => {
+    const store = { 'apiKeys.ncbi': 'saved' };
+    const view = createSettingsView(buildDeps(store));
+    const container = document.createElement('div');
+    view(container, buildCtx());
+    await flush();
+    const input = container.querySelector<HTMLInputElement>('#settings-ncbi-key')!;
+    for (const value of ['edited', 'saved']) {
+      input.value = value;
+      input.dispatchEvent(new Event('input'));
+    }
+    store['apiKeys.ncbi'] = 'updated-elsewhere';
+    view(container, buildCtx());
+    await flush();
+    expect(container.querySelector<HTMLInputElement>('#settings-ncbi-key')!.value).toBe('updated-elsewhere');
+  });
+
+  test('カスタムモデル追加成功後は再描画しても両入力欄が空のまま', async () => {
+    const store: Record<string, string> = {};
+    const view = createSettingsView(buildDeps(store));
+    const container = document.createElement('div');
+    view(container, buildCtx());
+    await flush();
+    for (const [id, value] of [['settings-custom-model-id', 'vendor/model'], ['settings-custom-model-label', 'My model']]) {
+      const input = container.querySelector<HTMLInputElement>(`#${id}`)!;
+      input.value = value!;
+      input.dispatchEvent(new Event('input'));
+    }
+    container.querySelector<HTMLButtonElement>('.settings__custom-model-form > button')!.click();
+    await flush();
+    expect(JSON.parse(store['llm.customModels']!)).toEqual([{ id: 'vendor/model', label: 'My model' }]);
+    view(container, buildCtx());
+    await flush();
+    expect(container.querySelector<HTMLInputElement>('#settings-custom-model-id')!.value).toBe('');
+    expect(container.querySelector<HTMLInputElement>('#settings-custom-model-label')!.value).toBe('');
+  });
+
   test('選択が空のとき、空 ID の一覧外モデルを追加しない', async () => {
     const container = render(buildDeps({}));
     await flush();

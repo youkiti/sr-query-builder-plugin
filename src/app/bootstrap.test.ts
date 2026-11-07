@@ -2973,6 +2973,32 @@ describe('createLocationOptions', () => {
 });
 
 
+test('設定画面の未保存キーを保持したまま言語変更で英語の見出しへ更新する', async () => {
+  const doc = buildDocument();
+  const app = startApp(doc, {
+    ...noopHashOptions('#/settings'),
+    viewOptions: { settings: {
+      readKey: async (key) => key === 'apiKeys.ncbi' ? 'saved' : undefined,
+      writeKey: async () => undefined,
+      removeKey: async () => undefined,
+    } },
+  });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const input = doc.querySelector<HTMLInputElement>('#settings-ncbi-key')!;
+    input.value = 'unsaved';
+    input.dispatchEvent(new Event('input'));
+    setUiLanguage('en');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(doc.querySelector('#app-content h2')?.textContent).toBe('Settings');
+    const updatedInput = doc.querySelector<HTMLInputElement>('#settings-ncbi-key')!;
+    expect(updatedInput).not.toBe(input);
+    expect(updatedInput.value).toBe('unsaved');
+  } finally {
+    app.dispose();
+  }
+});
+
 test('言語変更で同じ render を通じてホーム・サイドバー・静的 HTML を更新し、dispose で解除する', () => {
   const doc = buildDocument();
   doc.body.insertAdjacentHTML('beforeend', '<span data-i18n="shell.tours"></span>');

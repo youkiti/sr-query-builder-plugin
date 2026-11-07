@@ -176,6 +176,7 @@ function renderCustomModelsList(
 }
 
 export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView {
+  const unsavedInputs = new Map<string, string>();
   return (container, ctx) => {
     container.innerHTML = '';
     const doc = container.ownerDocument;
@@ -438,6 +439,22 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
 
     const detectTier = callbacks.detectGeminiTier ?? defaultDetectGeminiTier;
 
+    const textInputs = [geminiInput, orInput, anthropicInput, ncbiInput,
+      customModelIdInput, customModelLabelInput];
+    const savedInputs = new Map<string, string>();
+    for (const input of textInputs) {
+      input.addEventListener('input', () => {
+        if (input.value === savedInputs.get(input.id)) unsavedInputs.delete(input.id);
+        else unsavedInputs.set(input.id, input.value);
+      });
+    }
+
+    function clearSavedInput(input: HTMLInputElement, value: string): void {
+      savedInputs.set(input.id, value);
+      // 保存中に新たに入力された値は保持する。
+      if (unsavedInputs.get(input.id) === value) unsavedInputs.delete(input.id);
+    }
+
     // ---- 非同期初期化 ----
     void (async () => {
       const [pending, gemini, openrouter, anthropic, ncbi, rawModel, rawCustom, savedTier] =
@@ -462,6 +479,16 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
       if (openrouter) orInput.value = openrouter;
       if (anthropic) anthropicInput.value = anthropic;
       if (ncbi) ncbiInput.value = ncbi;
+
+      // 保存値の非同期読み込み後に、未保存の入力を復元する。
+      const savedValues = [gemini ?? '', openrouter ?? '', anthropic ?? '', ncbi ?? '', '', ''];
+      for (const [index, input] of textInputs.entries()) {
+        const savedValue = savedValues[index]!;
+        savedInputs.set(input.id, savedValue);
+        const draft = unsavedInputs.get(input.id);
+        if (draft === savedValue) unsavedInputs.delete(input.id);
+        else if (draft !== undefined) input.value = draft;
+      }
 
       const selectedModel = resolveEffectiveModel(rawModel, { anthropic, gemini });
       const customModels = parseCustomModels(rawCustom);
@@ -544,6 +571,8 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
         await callbacks.writeKey(KEY_CUSTOM_MODELS, JSON.stringify(models));
         customModelIdInput.value = '';
         customModelLabelInput.value = '';
+        unsavedInputs.delete(customModelIdInput.id);
+        unsavedInputs.delete(customModelLabelInput.id);
         populateModelSelect(modelSelect, models, modelSelect.value ?? DEFAULT_MODEL);
         renderCustomModelsList(customModelsList, models, handleRemoveCustomModel);
         status.textContent = 'カスタムモデルを追加しました。';
@@ -571,10 +600,10 @@ export function createSettingsView(callbacks: SettingsViewCallbacks): RenderView
         }
 
         await Promise.all([
-          callbacks.writeKey(KEY_GEMINI, geminiVal),
-          callbacks.writeKey(KEY_OPENROUTER, orVal),
-          callbacks.writeKey(KEY_ANTHROPIC, anthropicVal),
-          callbacks.writeKey(KEY_NCBI, ncbiVal),
+          callbacks.writeKey(KEY_GEMINI, geminiVal).then(() => clearSavedInput(geminiInput, geminiVal)),
+          callbacks.writeKey(KEY_OPENROUTER, orVal).then(() => clearSavedInput(orInput, orVal)),
+          callbacks.writeKey(KEY_ANTHROPIC, anthropicVal).then(() => clearSavedInput(anthropicInput, anthropicVal)),
+          callbacks.writeKey(KEY_NCBI, ncbiVal).then(() => clearSavedInput(ncbiInput, ncbiVal)),
           ...(shouldSaveModel ? [callbacks.writeKey(KEY_LLM_MODEL, selectedModel)] : []),
         ]);
 
