@@ -1,7 +1,7 @@
 // 実機確認の半自動ハーネス（docs/manual-testing.md の Selenium 版）。
 //
 // 方針: Selenium が「操作 + 検証」を自動化し、人にしかできない箇所
-// （Google ログイン / OAuth 同意 / API キー入力）だけコンソールで一時停止して
+// （Google ログイン / OAuth 同意 / API キー入力 / AI 送信の同意 / Anthropic・OpenRouter への送信の許可）だけコンソールで一時停止して
 // ユーザーに委ねる。jest / Playwright（すべて stub）ではカバーできない
 // 「本物の Chrome + 本物の Google API + 本物の Gemini / NCBI」の結合部を通す
 // ためのツールであり、CI では実行しない。
@@ -170,10 +170,198 @@ async function setValue(driver, element, value) {
   );
 }
 
+/** LLM の送信先プロバイダごとの manifest の optional_host_permissions のオリジン（src/lib/llm/hostPermissions.ts と同じ値） */
+const LLM_HOST_ORIGINS = {
+  anthropic: 'https://api.anthropic.com/*',
+  openrouter: 'https://openrouter.ai/*',
+};
+const PROVIDER_LABELS = { anthropic: 'Anthropic', openrouter: 'OpenRouter', gemini: 'Gemini' };
+const HOST_PERMISSION_DENIED_TEXT = '許可がないため、このプロバイダには送信できません';
+
+/** モデル ID からプロバイダを決める（src/lib/llm/modelRegistry.ts の resolveProviderId と同じ規則） */
+function providerOfModel(modelId) {
+  if (modelId.includes('/')) return 'openrouter';
+  if (modelId.startsWith('claude-')) return 'anthropic';
+  return 'gemini';
+}
+
+/** 送り先の文字列からプロバイダを見分ける。判別できなければ null */
+function providerOfDestination(destination) {
+  for (const provider of ['Anthropic', 'Gemini', 'OpenRouter']) {
+    if (destination.includes(provider)) return provider.toLowerCase();
+  }
+  return null;
+}
+
+/** プロトコル保存エラーが送信の許可・同意の不足なら、次の手を案内する */
+function logConsentHint(errorText) {
+  if (errorText.includes('への送信を許可')) {
+    log('  → 先に options シーンを流し、送信を許可してください（npm run manual:check -- options）');
+  }
+  if (errorText.includes('送らずに中止') || errorText.includes('同意しなかったため中止')) {
+    log('  → 同意しなかったため中止されました。もう一度流して『同意して続ける』を押してください');
+  }
+}
+
+/**
+ * 表示中の確認の枠（.confirmation-modal）の題・送り先の行・本文の要約を読む。
+ * 枠が無ければ null。1 回の executeScript で読み、再描画による stale を避ける
+ */
+async function confirmationModalSummary(driver) {
+  return driver.executeScript(() => {
+    const modal = document.querySelector('.confirmation-modal');
+    if (modal === null) return null;
+    const title = modal.querySelector('h2')?.textContent.trim() ?? '';
+    const destination = modal.querySelector('p')?.textContent.trim() ?? '';
+    const summary = (modal.querySelector('h2')?.nextElementSibling?.textContent ?? '')
+      .replace(/\s+/g, ' ').trim().slice(0, 200);
+    return { title, destination, summary };
+  });
+}
+
+/**
+ * 確認の枠が出ていれば、題で種類を見分け、本人が枠を閉じるまで待つ。
+ * 確認は本人の操作なので、スクリプトは枠のボタンを押さない（--auto でも同じ）。
+ * 枠が出ていなければ false、出ていて待ち終えたら true。上限を超えたら Error
+ */
+async function waitForConfirmationIfShown(driver, where) {
+  const first = await confirmationModalSummary(driver).catch(() => null);
+  if (first === null) {
+    return false;
+  }
+  const isAiConsent = first.title === 'AI へ送る前に確認してください';
+  if (isAiConsent) {
+    log(`\n>>> [${where}] AI への送信の確認が出ています: ${first.title} / ${first.destination}`);
+    log('>>> ブラウザで内容を読み、『同意して続ける』か『送らずに中止する』を押してください（スクリプトは押しません）');
+  } else if (first.title === '保存前の確認') {
+    log(`\n>>> [${where}] 保存の確認が出ています: ${first.title} / ${first.summary}`);
+    log('>>> 人が最終式を確かめて『確かめたうえで保存する』か『中止する』を押してください（スクリプトは押しません）');
+  } else {
+    log(`\n>>> [${where}] 確認の枠が出ています: ${first.title}`);
+    log('>>> ブラウザで内容を読み、本人が枠を閉じてください（スクリプトは押しません）');
+  }
+  const deadline = Date.now() + USER_ACTION_TIMEOUT;
+  while ((await confirmationModalSummary(driver).catch(() => null)) !== null) {
+    if (Date.now() > deadline) {
+      throw new Error(`確認の枠が閉じられません: ${first.title}（${where}）`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  if (!isAiConsent) return true;
+  const provider = providerOfDestination(first.destination);
+  if (provider === null) {
+    log('  （送り先のプロバイダを判別できなかったため、同意の記録は確認しません）');
+    return true;
+  }
+  const label = PROVIDER_LABELS[provider];
+  const consent = await driver
+    .executeAsyncScript(
+      'const cb = arguments[arguments.length - 1];' +
+        'try { chrome.storage.local.get("aiConsent", (o) => cb(o.aiConsent || null)); }' +
+        'catch (e) { cb(null); }',
+    )
+    .catch(() => null);
+  if (consent !== null && consent[provider] && consent[provider].version === '1') {
+    ok(`${label} への送信に同意しました`);
+  } else {
+    ng(`${label} への送信に同意しませんでした（この後の LLM 送信は中止されます）`);
+  }
+  return true;
+}
+
+/**
+ * driver.wait の代わりの自前ポーリング（500ms 間隔）。毎回まず確認の枠が閉じるのを待ち、
+ * 枠を待っていた時間は timeoutMs から差し引かない（本人の操作待ちを LLM の上限に数えないため）。
+ * predicate の例外は外へ伝える。truthy な値をそのまま返し、時間切れは Error(message)
+ */
+async function waitUntil(driver, predicate, timeoutMs, message) {
+  let deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const before = Date.now();
+    if (await waitForConfirmationIfShown(driver, message)) {
+      deadline += Date.now() - before;
+    }
+    const value = await predicate();
+    if (value) {
+      return value;
+    }
+    if (Date.now() > deadline) {
+      throw new Error(message);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+}
+
+async function hostPermissionGranted(driver, provider) {
+  return driver.executeAsyncScript(
+    'const cb = arguments[arguments.length - 1];' +
+      'try { chrome.permissions.contains({ origins: [arguments[0]] }, (r) => cb(r === true)); }' +
+      'catch (e) { cb(null); }',
+    LLM_HOST_ORIGINS[provider],
+  );
+}
+
+/**
+ * Options 画面を開いた状態で、Anthropic / OpenRouter への送信の許可を確かめる。
+ * 無ければ「〇〇への送信を許可する」を押して Chrome の確認を出し、本人が「許可」を押すのを待つ。
+ * Chrome の確認（ブラウザの UI）はスクリプトから押せない
+ */
+async function ensureHostPermission(driver, provider) {
+  if (provider === 'gemini') {
+    log('  Gemini は送信の許可が要りません');
+    return;
+  }
+  const label = PROVIDER_LABELS[provider];
+  const granted = await hostPermissionGranted(driver, provider).catch(() => null);
+  if (granted === null) {
+    ng(`${label} への送信の許可を確かめられません（chrome.permissions が使えない）`);
+    throw new Error('送信の許可の確認に失敗');
+  }
+  if (granted) {
+    ok(`${label} への送信は許可済みです`);
+    return;
+  }
+  await waitForConfirmationIfShown(driver, 'options');
+  const buttonXpath = `//button[normalize-space(.)='${label} への送信を許可する']`;
+  const clickButton = async () => driver.findElement(By.xpath(buttonXpath)).click();
+  try {
+    await clickButton();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!message.includes('element click intercepted')) throw err;
+    await waitForConfirmationIfShown(driver, 'options');
+    await clickButton();
+  }
+  log(`\n>>> Chrome の確認で『許可』を押してください（${label} への送信。スクリプトは押しません）`);
+  const deadline = Date.now() + USER_ACTION_TIMEOUT;
+  for (;;) {
+    if (await hostPermissionGranted(driver, provider).catch(() => false)) {
+      ok(`${label} への送信を許可しました`);
+      return;
+    }
+    // 許可ボタンはプロバイダごとに「ボタン → 結果の行」の順に並ぶ。先頭の行は別のプロバイダの結果の
+    // ことがあるので、押したボタンの直後の行を読む
+    const status = await driver
+      .findElement(By.xpath(`${buttonXpath}/following-sibling::p[contains(concat(' ', normalize-space(@class), ' '), ' llm-permission__status ')][1]`))
+      .then((element) => element.getText())
+      .then((text) => text.trim())
+      .catch(() => '');
+    if (status.includes(HOST_PERMISSION_DENIED_TEXT)) {
+      ng(`${label} への送信が許可されませんでした`);
+      throw new Error('送信の許可が得られませんでした');
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`${label} への送信の許可が得られません（時間切れ）`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+}
+
 /** いずれかのセレクタが表示されるまで待ち、一致したセレクタ文字列を返す */
 async function waitForAnyVisible(driver, selectors, timeoutMs, what) {
   let matched = null;
-  await driver.wait(
+  await waitUntil(
+    driver,
     async () => {
       for (const selector of selectors) {
         if ((await findVisible(driver, selector)) !== null) {
@@ -261,7 +449,7 @@ async function optimizeAndValidateDraft(driver) {
   }
   await retryOnStale(async () => driver.findElement(By.css('.optimization__start')).click());
   log('  自動調整を実行中（目安100件・反復上限1回。初期式生成・実測・外側の確認で数分かかります）…');
-  const review = await driver.wait(async () => draftOutcome(driver, 'review'), LLM_TIMEOUT, '自動調整が完了しません');
+  const review = await waitUntil(driver, async () => draftOutcome(driver, 'review'), LLM_TIMEOUT, '自動調整が完了しません');
   if (review === 'error') {
     throw new Error(`自動調整エラー: ${await textOf(driver, '.optimization__setup [role="alert"]')}`);
   }
@@ -275,7 +463,7 @@ async function optimizeAndValidateDraft(driver) {
     }
     await adopt.click();
   });
-  const saved = await driver.wait(async () => draftOutcome(driver, 'saved'), 60000, '採用保存が完了しません');
+  const saved = await waitUntil(driver, async () => draftOutcome(driver, 'saved'), 60000, '採用保存が完了しません（保存前の確認で中止した場合を含む）');
   if (saved === 'error') {
     throw new Error(`採用保存エラー: ${await textOf(driver, '.optimization__save-error')}`);
   }
@@ -287,7 +475,7 @@ async function optimizeAndValidateDraft(driver) {
   // 'user_edit' ではないため、破棄確認パネル（.draft__discard-confirm）は出ない。
   await retryOnStale(async () => driver.findElement(By.css('.draft__generate')).click());
   log('  「最初から作り直す」実行中（LLM でブロック展開 → NCBI でヒット数 → 捕捉率検証。数分かかります）…');
-  const validated = await driver.wait(async () => draftOutcome(driver, 'validated'), LLM_TIMEOUT, '生成・検証が完了しません');
+  const validated = await waitUntil(driver, async () => draftOutcome(driver, 'validated'), LLM_TIMEOUT, '生成・検証が完了しません');
   if (validated === 'error') {
     throw new Error(`生成・検証エラー: ${await textOf(driver, '.draft__error')}`);
   }
@@ -593,20 +781,35 @@ async function sceneProject(driver) {
   }
 }
 
+/** Options の状態確定後、Gemini の同意の枠（detectGeminiTier 経由で非同期に出る）を最大 3 秒待ってから片付ける */
+async function settleOptionsConsent(driver) {
+  const until3s = Date.now() + 3000;
+  while (Date.now() < until3s && (await confirmationModalSummary(driver).catch(() => null)) === null) {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+  await waitForConfirmationIfShown(driver, 'options');
+}
+
+async function readSelectedModel(driver) {
+  const modelSelect = await findVisible(driver, '#llm-model-select');
+  return modelSelect === null ? '' : ((await modelSelect.getAttribute('value')) ?? '');
+}
+
 async function sceneOptions(driver) {
-  log('\n[options] Gemini API キーの保存 + モデル選択');
+  log('\n[options] API キーの保存・AI 送信の同意・送信の許可 + モデル選択');
   await driver.get(OPTIONS_URL);
   await driver.wait(until.elementLocated(By.css('#options-status')), 10000);
   await driver.wait(async () => {
     const text = await textOf(driver, '#options-status');
     return text !== '' && !text.includes('読み込み中');
   }, 15000, 'Options の状態が確定しません');
+  await settleOptionsConsent(driver);
 
-  const modelSelect = await findVisible(driver, '#llm-model-select');
-  if (modelSelect !== null) {
-    const model = (await modelSelect.getAttribute('value')) ?? '';
+  const model = await readSelectedModel(driver);
+  if (model !== '' || (await findVisible(driver, '#llm-model-select')) !== null) {
     ok(`使用モデル（llm-model-select）: ${model === '' ? '(未選択)' : model}`);
   }
+  await ensureHostPermission(driver, providerOfModel(model));
 
   const status = await textOf(driver, '#options-status');
   if (status.includes('保存済み') || status.includes('設定済み')) {
@@ -615,11 +818,13 @@ async function sceneOptions(driver) {
   }
   log('\n>>> 開いた Options 画面で Gemini API キーを入力し「保存」を押してください');
   log('>>> （「保存しました。」の表示を自動検知します。キーの値はログに出しません）');
-  await driver.wait(async () => {
+  await waitUntil(driver, async () => {
     const text = await textOf(driver, '#options-status');
     return text.includes('保存しました');
   }, USER_ACTION_TIMEOUT, 'API キーが保存されません');
   ok('Gemini API キーを保存しました');
+  await settleOptionsConsent(driver);
+  await ensureHostPermission(driver, providerOfModel(await readSelectedModel(driver)));
 }
 
 async function sceneProtocol(driver) {
@@ -655,7 +860,9 @@ async function sceneProtocol(driver) {
     'プロトコルの保存が完了しません',
   );
   if (result === '.protocol__error') {
-    ng(`保存エラー: ${await textOf(driver, '.protocol__error')}`);
+    const perr = await textOf(driver, '.protocol__error');
+    ng(`保存エラー: ${perr}`);
+    logConsentHint(perr);
     throw new Error('protocol 失敗');
   }
   ok(`保存完了（読み取り専用へ遷移）: ${(await textOf(driver, '.protocol__summary')).replace(/\s+/g, ' ').slice(0, 80)}`);
@@ -862,6 +1069,7 @@ async function sceneModelSwitch(driver) {
   // Options で別モデルへ切替 → 保存
   await driver.get(OPTIONS_URL);
   await driver.wait(until.elementLocated(By.css('#llm-model-select')), 10000);
+  await settleOptionsConsent(driver);
   const select = await driver.findElement(By.css('#llm-model-select'));
   const options = await select.findElements(By.css('option'));
   const current = (await select.getAttribute('value')) ?? '';
@@ -886,6 +1094,8 @@ async function sceneModelSwitch(driver) {
       }, 15000, 'モデル切替が保存されません').catch(() => undefined);
     }
     ok(`Options のモデルを ${current || '(未選択)'} → ${switched} に切替えて保存`);
+    // スクリプトの change はユーザー操作でないため、アプリの自動要求は拒否される。許可はここで確かめる
+    await ensureHostPermission(driver, providerOfModel(switched));
   }
 
   // export に戻って文案が変わっていないこと（生成時のモデルのまま）
@@ -998,7 +1208,8 @@ async function sceneFull(driver) {
     await setValue(driver, await driver.findElement(By.css('textarea#inline')), SAMPLE_PROTOCOL);
     await driver.findElement(By.css('.protocol__submit')).click();
     log('  プロトコル保存 + ブロック抽出中（extract-protocol の LLM 実弾。成功で #/blocks へ自動遷移）…');
-    await driver.wait(
+    await waitUntil(
+      driver,
       async () =>
         (await findVisible(driver, '.protocol__error')) !== null ||
         (await findVisible(driver, '.blocks__item')) !== null,
@@ -1008,6 +1219,7 @@ async function sceneFull(driver) {
     const perr = await textOf(driver, '.protocol__error');
     if (perr !== '') {
       ng(`プロトコル保存エラー: ${perr}`);
+      logConsentHint(perr);
       throw new Error('full 失敗');
     }
     ok('プロトコル保存 + ブロック抽出 完了（#/blocks へ自動遷移）');

@@ -203,7 +203,8 @@ export const HARNESS_CONTRACT: ContractEntry[] = [
         step:
           'sceneOptions(): OPTIONS_URL（options/options.html）を直接開き、`#options-status` の' +
           ' 確定待ち → `#llm-model-select` の value 読み取り → 保存後は' +
-          ' `#options-status` が「保存しました」を含むことを待つ',
+          ' `#options-status` が「保存しました」を含むことを待つ。あわせて同意の枠の片付けと、' +
+          ' Anthropic / OpenRouter への送信の許可の確認（ensureHostPermission）も行う',
       },
     ],
     precondition:
@@ -215,6 +216,80 @@ export const HARNESS_CONTRACT: ContractEntry[] = [
       '（実 options.html のマークアップに対して検証する）',
     verified: true,
     verifiedBy: 'options.html（実ファイル）> プロバイダカード・モデル選択・保存後の status',
+  },
+  {
+    id: 'options.llm-permission-buttons',
+    consumers: [
+      {
+        file: 'tools/selenium/manualCheck.mjs',
+        step:
+          'ensureHostPermission(): Options 画面で `chrome.permissions.contains` が false のとき、' +
+          ' 文言が「<Anthropic|OpenRouter> への送信を許可する」のボタンを押して Chrome の確認を出し、' +
+          ' 直後の `p.llm-permission__status` に HOST_PERMISSION_DENIED が出たら拒否として止める。' +
+          ' オリジン（LLM_HOST_ORIGINS）は providerOrigins の値と同じ',
+      },
+    ],
+    precondition: 'options.html を起動し、deps.hostPermissions（contains / request）を差し込める状態にする',
+    expectation:
+      '「Anthropic への送信を許可する」「OpenRouter への送信を許可する」のボタンがそれぞれ 1 個あり、' +
+      '押すと request が `https://api.anthropic.com/*` / `https://openrouter.ai/*` で呼ばれる。' +
+      ' request が false を返すと直後の `p.llm-permission__status` に HOST_PERMISSION_DENIED が出る',
+    verified: true,
+    verifiedBy: 'options.html（実ファイル）> 送信の許可ボタンとオリジン・拒否時の status',
+  },
+
+  // ── AI 送信の同意の枠・プロバイダ判定（ハーネスが待ち、読み取る対象） ───────
+  {
+    id: 'consent.confirmation-modal-structure',
+    consumers: [
+      {
+        file: 'tools/selenium/manualCheck.mjs',
+        step:
+          'confirmationModalSummary() / waitForConfirmationIfShown(): `.confirmation-modal` の `h2`（題）で' +
+          ' AI 送信の同意の枠を見分け、最初の `p`（「送り先: 」で始まる行）を読んでログに出し、枠が DOM から消えるまで待つ。' +
+          ' 消えた後は `chrome.storage.local` の `aiConsent` の version を確かめる。' +
+          ' 送り先の文字列でプロバイダを見分ける。枠のボタンは押さない',
+      },
+    ],
+    precondition: 'createEnsureAiConsent(doc, store)(provider) を、同意の記録が無い store で呼ぶ',
+    expectation:
+      'doc に `.confirmation-modal` が 1 個現れ、中に `[role=dialog]`、`h2`（「AI へ送る前に確認してください」）、' +
+      '「送り先: 」で始まり送り先のプロバイダ名（Anthropic / Gemini / OpenRouter）を含む最初の `p`、' +
+      '`button` 2 個（「送らずに中止する」「同意して続ける」）がある。「同意して続ける」で枠が消えて' +
+      ' store に aiConsent[provider].version が書かれ、「送らずに中止する」では枠が消えて記録は書かれない',
+    verified: true,
+    verifiedBy: 'createEnsureAiConsent > 枠の構造・同意と中止での消え方・送り先のプロバイダ名',
+  },
+  {
+    id: 'draft.confirm-before-saving-title',
+    consumers: [
+      {
+        file: 'tools/selenium/manualCheck.mjs',
+        step:
+          'optimizeAndValidateDraft() の採用保存待ち（waitUntil）から waitForConfirmationIfShown() を呼び、' +
+          ' 題で保存前の確認の枠を見分け、本文の要約をログに出して本人が閉じるまで待つ。枠のボタンは押さない',
+      },
+    ],
+    precondition: '表示言語が日本語で、採用保存時に保存前の確認の枠が出る',
+    expectation:
+      "t('draft.review.confirmBeforeSaving') が「保存前の確認」で、ハーネスが題で見分けるのに使う文言と一致する",
+    verified: true,
+    verifiedBy: 'draft の日本語辞書 > 保存前の確認の題とハーネスの判別文字列の一致',
+  },
+  {
+    id: 'llm.provider-rule-for-harness',
+    consumers: [
+      {
+        file: 'tools/selenium/manualCheck.mjs',
+        step: 'providerOfModel(): モデル ID から送信先プロバイダ（許可の確認の対象）を決める',
+      },
+    ],
+    precondition: 'BUILTIN_MODELS の各モデル ID',
+    expectation:
+      '`/` を含めば openrouter、`claude-` で始まれば anthropic、それ以外は gemini という規則が、' +
+      '組み込みの全モデル ID で resolveProviderId の答えと一致する',
+    verified: true,
+    verifiedBy: 'BUILTIN_MODELS の全 id > resolveProviderId との一致',
   },
 
   // ── #/settings（アプリ内設定。popup の「設定を開く」がここへ飛ぶ） ──────────
