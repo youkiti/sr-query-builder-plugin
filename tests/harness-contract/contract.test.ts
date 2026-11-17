@@ -10,7 +10,10 @@ import { AI_CONSENT_VERSION } from '@/lib/llm/aiDisclosure';
  * test() が実際に走ったことを機械的に確認する。
  */
 
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 import { createDraftView } from '@/app/views/draftView';
+import { draftJa } from '@/lib/i18n/messages/draft';
 import { INITIAL_STATE, type AppState, type BlocksDraft } from '@/app/store';
 import type { ChromeRuntimeDeps } from '@/app/services/factories';
 import { sharedEutilsRateLimiters } from '@/lib/ncbi';
@@ -21,6 +24,10 @@ import { startOptions, type OptionsDeps } from '@/options/bootstrap';
 import { createSettingsView, type SettingsViewCallbacks } from '@/app/views/settingsView';
 import type { ViewContext } from '@/app/views/types';
 import { startApp } from '@/app/bootstrap';
+import { createEnsureAiConsent } from '@/app/services/aiConsentService';
+import type { ProjectStoreDeps } from '@/features/project';
+import { HOST_PERMISSION_DENIED, providerOrigins } from '@/lib/llm/hostPermissions';
+import { BUILTIN_MODELS, resolveProviderId } from '@/lib/llm/modelRegistry';
 import { getContract, HARNESS_CONTRACT } from './contract';
 import { loadHtmlBody } from './loadHtmlBody';
 
@@ -86,6 +93,13 @@ function draftState(extra: Partial<AppState> = {}): AppState {
 const EXISTING_MD = '## PubMed/MEDLINE\n\n```\n#1 x\n```\n';
 
 describe('harness contract > #/draft', () => {
+  contractTest('draft.confirm-before-saving-title', () => {
+    const title = draftJa['draft.review.confirmBeforeSaving'];
+    expect(title).toBe('保存前の確認');
+    const harness = readFileSync(resolve(__dirname, '../../tools/selenium/manualCheck.mjs'), 'utf8');
+    expect(harness).toContain(`first.title === '${title}'`);
+  });
+
   contractTest('draft.no-formula.single-primary-action', () => {
     const container = buildContainer();
     const onOptimize = jest.fn(async () => undefined);
@@ -360,6 +374,130 @@ describe('harness contract > options', () => {
     (doc.getElementById('save-keys') as HTMLButtonElement).click();
     await flush();
     expect(doc.getElementById('options-status')?.textContent).toContain('保存しました');
+  });
+
+  contractTest('options.llm-permission-buttons', async () => {
+    const doc = buildOptionsDoc();
+    const contains = jest.fn().mockResolvedValue(false);
+    const request = jest.fn().mockResolvedValue(true);
+    await startOptions(doc, { ...buildOptionsDeps(), hostPermissions: { contains, request } });
+    const buttonOf = (text: string): HTMLButtonElement[] =>
+      Array.from(doc.querySelectorAll('button')).filter(
+        (b) => (b.textContent ?? '').replace(/\s+/g, ' ').trim() === text
+      );
+    const anthropic = buttonOf('Anthropic への送信を許可する');
+    const openrouter = buttonOf('OpenRouter への送信を許可する');
+    expect(anthropic).toHaveLength(1);
+    expect(openrouter).toHaveLength(1);
+
+    anthropic[0]!.click();
+    expect(request).toHaveBeenLastCalledWith({ origins: ['https://api.anthropic.com/*'] });
+    openrouter[0]!.click();
+    expect(request).toHaveBeenLastCalledWith({ origins: ['https://openrouter.ai/*'] });
+    await flush();
+
+    // 拒否されると直後の p.llm-permission__status に HOST_PERMISSION_DENIED が出る
+    request.mockResolvedValue(false);
+    anthropic[0]!.click();
+    await flush();
+    const status = anthropic[0]!.nextElementSibling as HTMLElement;
+    expect(status.matches('p.llm-permission__status')).toBe(true);
+    expect(status.textContent).toBe(HOST_PERMISSION_DENIED);
+
+    // manualCheck.mjs の LLM_HOST_ORIGINS と同じ値（.mjs は import できないので文字列を直接書いて照合する）
+    expect(providerOrigins(['anthropic'])).toEqual(['https://api.anthropic.com/*']);
+    expect(providerOrigins(['openrouter'])).toEqual(['https://openrouter.ai/*']);
+  });
+});
+
+// ── AI 送信の同意の枠・プロバイダ判定 ─────────────────────────────────────
+
+describe('harness contract > consent / provider', () => {
+  function memoryStore(): { store: ProjectStoreDeps; data: Record<string, unknown> } {
+    const data: Record<string, unknown> = {};
+    return {
+      data,
+      store: {
+        read: async <T,>(key: string) => data[key] as T | undefined,
+        write: async (items) => {
+          Object.assign(data, items);
+        },
+      },
+    };
+  }
+
+  async function flush(times = 5): Promise<void> {
+    for (let i = 0; i < times; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }
+
+  function buildConsentDoc(): Document {
+    return document.implementation.createHTMLDocument('harness-contract-consent');
+  }
+
+  const buttonsIn = (modal: Element): HTMLButtonElement[] => Array.from(modal.querySelectorAll('button'));
+  const labelOf: Record<'anthropic' | 'gemini' | 'openrouter', string> = {
+    anthropic: 'Anthropic',
+    gemini: 'Gemini',
+    openrouter: 'OpenRouter',
+  };
+
+  contractTest('consent.confirmation-modal-structure', async () => {
+    // 同意して続ける
+    {
+      const doc = buildConsentDoc();
+      const { store, data } = memoryStore();
+      const pending = createEnsureAiConsent(doc, store)('anthropic');
+      await flush();
+      const modals = doc.querySelectorAll('.confirmation-modal');
+      expect(modals).toHaveLength(1);
+      const modal = modals[0]!;
+      expect(modal.querySelector('[role=dialog]')).not.toBeNull();
+      expect(modal.querySelector('h2')?.textContent).toBe('AI へ送る前に確認してください');
+      const first = modal.querySelector('p')?.textContent ?? '';
+      expect(first.startsWith('送り先: ')).toBe(true);
+      expect(first).toContain('Anthropic');
+      const buttons = buttonsIn(modal);
+      expect(buttons.map((b) => b.textContent)).toEqual(['送らずに中止する', '同意して続ける']);
+      buttons[1]!.click();
+      await pending;
+      expect(doc.querySelector('.confirmation-modal')).toBeNull();
+      const records = data['aiConsent'] as Record<string, { version: string }>;
+      expect(records['anthropic']!.version).toBe(AI_CONSENT_VERSION);
+    }
+    // 送らずに中止する
+    {
+      const doc = buildConsentDoc();
+      const { store, data } = memoryStore();
+      const pending = createEnsureAiConsent(doc, store)('anthropic');
+      const rejected = expect(pending).rejects.toThrow();
+      await flush();
+      buttonsIn(doc.querySelector('.confirmation-modal')!)[0]!.click();
+      await rejected;
+      expect(doc.querySelector('.confirmation-modal')).toBeNull();
+      expect(data['aiConsent']).toBeUndefined();
+    }
+    // 送り先の行にプロバイダ名が入る（ハーネスが送り先の文字列でプロバイダを見分ける）
+    for (const provider of ['gemini', 'openrouter'] as const) {
+      const doc = buildConsentDoc();
+      const { store } = memoryStore();
+      void createEnsureAiConsent(doc, store)(provider);
+      await flush();
+      const first = doc.querySelector('.confirmation-modal p')?.textContent ?? '';
+      expect(first.startsWith('送り先: ')).toBe(true);
+      expect(first).toContain(labelOf[provider]);
+    }
+  });
+
+  contractTest('llm.provider-rule-for-harness', () => {
+    // manualCheck.mjs の providerOfModel と同じ規則
+    const harnessRule = (id: string): 'openrouter' | 'anthropic' | 'gemini' =>
+      id.includes('/') ? 'openrouter' : id.startsWith('claude-') ? 'anthropic' : 'gemini';
+    expect(BUILTIN_MODELS.length).toBeGreaterThan(0);
+    for (const model of BUILTIN_MODELS) {
+      expect(harnessRule(model.id)).toBe(resolveProviderId(model.id));
+    }
   });
 });
 
