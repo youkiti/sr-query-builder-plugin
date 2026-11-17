@@ -339,7 +339,13 @@ async function ensureHostPermission(driver, provider) {
       ok(`${label} への送信を許可しました`);
       return;
     }
-    const status = await textOf(driver, 'p.llm-permission__status');
+    // 許可ボタンはプロバイダごとに「ボタン → 結果の行」の順に並ぶ。先頭の行は別のプロバイダの結果の
+    // ことがあるので、押したボタンの直後の行を読む
+    const status = await driver
+      .findElement(By.xpath(`${buttonXpath}/following-sibling::p[contains(concat(' ', normalize-space(@class), ' '), ' llm-permission__status ')][1]`))
+      .then((element) => element.getText())
+      .then((text) => text.trim())
+      .catch(() => '');
     if (status.includes(HOST_PERMISSION_DENIED_TEXT)) {
       ng(`${label} への送信が許可されませんでした`);
       throw new Error('送信の許可が得られませんでした');
