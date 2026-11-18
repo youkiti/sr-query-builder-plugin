@@ -473,7 +473,13 @@ async function optimizeAndValidateDraft(driver) {
   // 通し確認の対象に含めるため、LLM を呼ばない「検証のみ再実行」（.draft__revalidate）
   // ではなくこちらを使う（issue #180）。採用保存は createdBy='auto_optimize' になり
   // 'user_edit' ではないため、破棄確認パネル（.draft__discard-confirm）は出ない。
-  await retryOnStale(async () => driver.findElement(By.css('.draft__generate')).click());
+  // 保存前の確認の枠が閉じるとフォーカスが「採用して保存」へ戻って画面が下へずれ、
+  // ボタンが上端の固定表示の下に隠れてクリックを取られる。押す前に画面の中央へ寄せる
+  await retryOnStale(async () => {
+    const generate = await driver.findElement(By.css('.draft__generate'));
+    await driver.executeScript("arguments[0].scrollIntoView({ block: 'center' });", generate);
+    await generate.click();
+  });
   log('  「最初から作り直す」実行中（LLM でブロック展開 → NCBI でヒット数 → 捕捉率検証。数分かかります）…');
   const validated = await waitUntil(driver, async () => draftOutcome(driver, 'validated'), LLM_TIMEOUT, '生成・検証が完了しません');
   if (validated === 'error') {
