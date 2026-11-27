@@ -165,14 +165,23 @@ test('不足は全対象を先に数え、通信しない', async () => {
   expect(f.fetchImpl).not.toHaveBeenCalled();
 });
 
-test.each(['validation', 'test'])('開発群以外を拒む: %s', async (subset) => {
-  const f = setup(); f.args[3] = subset;
-  await expect(main(f.args, f.runtime)).rejects.toThrow('原著式との比較は開発群でだけ実行できます');
+test('検証群を引数の検査で拒まない', async () => {
+  const f = setup(); f.args[3] = 'validation';
+  try { await main(f.args, f.runtime); }
+  catch (error) {
+    expect(String(error)).not.toContain('原著式との比較は試験群では実行できません');
+    expect(String(error)).not.toContain('原著式との比較は開発群でだけ実行できます');
+  }
+});
+test('試験群を通信前に拒む', async () => {
+  const f = setup(); f.args[3] = 'test';
+  await expect(main(f.args, f.runtime)).rejects.toThrow('原著式との比較は試験群では実行できません');
   expect(f.fetchImpl).not.toHaveBeenCalled();
 });
 test('試験群の解放・不正なラベル・異なる結合形式を拒む', async () => {
   const f = setup();
-  await expect(main([...f.args, '--open-test-set'], f.runtime)).rejects.toThrow('原著式との比較は開発群でだけ実行できます');
+  await expect(main([...f.args, '--open-test-set'], f.runtime)).rejects.toThrow('原著式との比較は試験群では実行できません');
+  expect(f.fetchImpl).not.toHaveBeenCalled();
   await expect(main([...f.args.slice(0, -1), '../escape'], f.runtime)).rejects.toThrow('実行引数が不正です');
   for (const combine of [{ versions: ['v1', 'v2'] }, { from: 'v1', k: 2, blocks: { minOverlap: 0, minMargin: 0, maxConcepts: 2 } }]) {
     writeJson(join(f.runtime.harnessDir!, 'bundle/conditions.json'), { ...f.conditions, combine });

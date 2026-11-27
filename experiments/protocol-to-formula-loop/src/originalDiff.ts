@@ -30,8 +30,8 @@ type Cached = { fingerprint: string; measuredAt: string } &
   ({ status: 'measured'; capturedPmids: string[] } | { status: 'rejected' });
 
 function parseOptions(args: string[]) {
-  if (args.includes('--open-test-set') || args.some((arg, i) => arg === '--subset' && ['validation', 'test'].includes(args[i + 1] ?? ''))) {
-    throw new DiffError('原著式との比較は開発群でだけ実行できます');
+  if (args.includes('--open-test-set') || args.some((arg, i) => arg === '--subset' && args[i + 1] === 'test')) {
+    throw new DiffError('原著式との比較は試験群では実行できません');
   }
   const values = new Map<string, string>();
   for (let i = 0; i < args.length; i++) {
