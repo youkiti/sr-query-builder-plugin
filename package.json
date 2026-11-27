@@ -75,6 +75,7 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "shots": "playwright test --config playwright.shots.config.ts",
+    "shots:paper": "playwright test --config playwright.paper.config.ts",
     "manual:check": "node tools/selenium/manualCheck.mjs",
     "check:tours": "node tools/guide-tour-check/run.mjs",
     "video:setup": "bash video/scripts/setup.sh",

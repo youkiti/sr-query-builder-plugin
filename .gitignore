@@ -71,3 +71,6 @@ experiments/protocol-to-formula-loop/results/
 # Agent ツールの worktree 隔離（isolation: worktree）が作るチェックアウト。リポジトリの
 # 作業コピーそのものなのでコミットしない。
 .claude/worktrees/
+
+# 論文の図の撮影結果（npm run shots:paper の出力。図そのものは論文のリポジトリに置く）
+tests/paper-figures/output/
