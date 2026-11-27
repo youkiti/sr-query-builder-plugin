@@ -20,7 +20,7 @@ const unit = (query: string, translator = 'translator-a'): NonNullable<BenchRow[
 });
 function setup(units = [unit('(originala[Mesh] AND originalb[tiab]) AND 2020[edat]')],
   expressions = ['alpha[Mesh] AND beta[tiab]', 'alpha[Mesh] AND beta[tiab]',
-    'alpha[Mesh] AND trial[pt]', 'alpha[Mesh] AND beta[tiab]']) {
+    'alpha[Mesh] AND trial[pt]', 'alpha[Mesh] AND beta[tiab]'], subset: 'smoke' | 'validation' = 'smoke') {
   const root = mkdtempSync(join(tmpdir(), 'p2f-original-diff-'));
   const casesDir = join(root, 'cases'), harnessDir = join(root, 'harness'), runs = join(root, 'runs');
   const rows = Array.from({ length: 10 }, (_, i) => ({ ...review(i + 1), units, n_records: 100,
@@ -31,15 +31,17 @@ function setup(units = [unit('(originala[Mesh] AND originalb[tiab]) AND 2020[eda
   })));
   writeLines(join(casesDir, 'evaluable.jsonl'), rows.map((row) => ({ pmcid: row.pmcid,
     cutoffDate: row.cutoffDate, existing: [...gold, outside], withinCutoff: gold, measuredAt: '2026-01-01T00:00:00Z' })));
-  const selected = rows.find((row) => splitReviews(rows).get(row.pmcid) === 'development')!;
-  writeJson(join(casesDir, 'subsets.json'), { smoke: [selected.pmcid], fixed: [selected.pmcid] });
+  const splits = splitReviews(rows), development = rows.find((row) => splits.get(row.pmcid) === 'development')!;
+  const selectedRows = subset === 'validation' ? rows.filter((row) => splits.get(row.pmcid) === 'validation') : [development];
+  const selected = selectedRows[0]!;
+  writeJson(join(casesDir, 'subsets.json'), { smoke: [development.pmcid], fixed: [development.pmcid] });
   const protocolPath = join(root, 'protocol.md'); writeFileSync(protocolPath, '合成プロトコル');
   const conditions = { ...loadConditions('v1'), version: 'bundle', combine: { from: 'v1', k: 2 } };
   mkdirSync(join(harnessDir, 'bundle'), { recursive: true }); writeJson(join(harnessDir, 'bundle/conditions.json'), conditions);
   const source = (i = 1) => runPath(runs, 'v1', selected.pmcid, i);
   const bundle = (i = 1) => runPath(runs, 'bundle', selected.pmcid, i);
-  const create = (version: string, i: number, expression: string, pmids: string[] = []) => {
-    const dir = createRun({ root: runs, version, pmcid: selected.pmcid, runIndex: i, cutoffDate: selected.cutoffDate,
+  const create = (row: typeof selected, version: string, i: number, expression: string, pmids: string[] = []) => {
+    const dir = createRun({ root: runs, version, pmcid: row.pmcid, runIndex: i, cutoffDate: row.cutoffDate,
       conditions: version === 'v1' ? loadConditions('v1') : conditions, protocolPath, now: () => new Date('2026-01-01') });
     const text = md(expression), validated = validateFormulaMd(text);
     if (!validated.ok) throw new Error('合成式が不正です');
@@ -49,9 +51,11 @@ function setup(units = [unit('(originala[Mesh] AND originalb[tiab]) AND 2020[eda
     writeJson(join(dir, 'score.json'), { status: 'scored', submission: state.fingerprint, submitAttempts: state.submitAttempts,
       outcome: { status: 'measured', hits: i * 100, capturedPmids: pmids } });
   };
-  expressions.forEach((expression, i) => create('v1', i + 1, expression));
-  create('bundle', 1, 'bundled[tiab]', [gold[1]!, outside]);
-  create('bundle', 2, 'bundled[tiab]', [gold[1]!, gold[2]!, outside]);
+  for (const row of selectedRows) {
+    expressions.forEach((expression, i) => create(row, 'v1', i + 1, expression));
+    create(row, 'bundle', 1, 'bundled[tiab]', [gold[1]!, outside]);
+    create(row, 'bundle', 2, 'bundled[tiab]', [gold[1]!, gold[2]!, outside]);
+  }
   const fetchImpl = jest.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const url = new URL(String(input)), params = init?.method === 'POST' ? new URLSearchParams(String(init.body)) : url.searchParams;
     if (url.pathname.endsWith('/esummary.fcgi')) return new Response(JSON.stringify({ result: Object.fromEntries(
@@ -69,8 +73,8 @@ function setup(units = [unit('(originala[Mesh] AND originalb[tiab]) AND 2020[eda
     env: { COCHRANE_BENCH_DIR: root, NCBI_API_KEY: 'FAKE_SECRET' }, fetchImpl,
     rateLimiter: { acquire: async () => undefined }, sleep: async () => undefined,
     now: () => new Date('2026-01-01'), stdout: jest.fn(), stderr: jest.fn() };
-  const args = ['--runs', runs, '--subset', 'smoke', '--bundle', 'bundle', '--bundle-runs', '2', '--label', 'example'];
-  const reportPath = join(runtime.reportsDir!, 'original-diff-bundle-smoke.json');
+  const args = ['--runs', runs, '--subset', subset, '--bundle', 'bundle', '--bundle-runs', '2', '--label', 'example'];
+  const reportPath = join(runtime.reportsDir!, `original-diff-bundle-${subset}.json`);
   const report = () => JSON.parse(readFileSync(reportPath, 'utf8'));
   const readingPath = join(runs, '_original-diff/example', `${selected.pmcid}.md`);
   return { root, runs, selected, args, runtime, fetchImpl, source, bundle, reportPath, report, readingPath, conditions };
@@ -165,13 +169,16 @@ test('不足は全対象を先に数え、通信しない', async () => {
   expect(f.fetchImpl).not.toHaveBeenCalled();
 });
 
-test('検証群を引数の検査で拒まない', async () => {
-  const f = setup(); f.args[3] = 'validation';
-  try { await main(f.args, f.runtime); }
-  catch (error) {
-    expect(String(error)).not.toContain('原著式との比較は試験群では実行できません');
-    expect(String(error)).not.toContain('原著式との比較は開発群でだけ実行できます');
-  }
+test('検証群の比較は成功し、題を取得せず読み物を書かずに集計だけを書く', async () => {
+  const f = setup(undefined, undefined, 'validation');
+  expect(await main(f.args, f.runtime)).toBe(0);
+  expect(existsSync(join(f.runs, '_original-diff'))).toBe(false);
+  expect(f.fetchImpl).toHaveBeenCalled();
+  expect(f.fetchImpl.mock.calls.some(([input]) => String(input).includes('esummary'))).toBe(false);
+  expect(existsSync(f.reportPath)).toBe(true);
+  expect(f.report()).toMatchObject({ subset: 'validation', reviews: 3,
+    structure: { ai: { formulas: 12 }, original: { formulas: 3 } } });
+  expect(f.runtime.stdout).toHaveBeenCalledWith('読み物: 0 件（検証群では書かない）\n');
 });
 test('試験群を通信前に拒む', async () => {
   const f = setup(); f.args[3] = 'test';
