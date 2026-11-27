@@ -101,6 +101,15 @@ test('式単位の分布・研究と実行の組・回に対応する型を数�
   expect(f.report().measurements.cached).toBe(10);
 });
 
+test('原著式と束ねた版がともに落とした研究を原著の翻訳に帰属させる', async () => {
+  const f = setup();
+  await main(f.args, f.runtime);
+  expect(f.report().neitherCaptured).toEqual({
+    pairs: { single_concept: 0, single_filter: 0, multiple: 2, none: 0, no_lines: 0, excluded: 0 },
+    studies: { all_single_concept: 0, all_single_filter: 0, all_multiple: 2, mixed: 0, incomplete: 0 },
+  });
+});
+
 test('長い部分・壊れた要素・OR の AI 実行を帰属から除く', async () => {
   const f = setup([unit(`(${'x'.repeat(20001)} AND originalb[tiab]) AND 2020[edat]`), unit('壊れた式(')],
     ['alpha[Mesh] OR beta[tiab]', 'alpha[Mesh] AND beta[tiab]', 'alpha[Mesh] AND beta[tiab]', 'alpha[Mesh] AND beta[tiab]']);

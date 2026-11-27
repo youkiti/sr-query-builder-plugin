@@ -152,6 +152,7 @@ async function originalDiff(args: string[], runtime: RunRuntime): Promise<number
   const base = createDeps({ env, fetchImpl, sleep, rateLimiter: runtime.rateLimiter });
   const exclusions = { undeterminedRuns: 0, undeterminedElements: 0, unmeasurableParts: 0, rejectedUnits: 0, excludedRuns: 0, excludedElements: 0 };
   const aiStructure = structure(), originalStructure = structure(), originalOnly = attribution(), bundleOnly = attribution();
+  const neitherCaptured = attribution();
   const translators: Record<string, number> = Object.create(null) as Record<string, number>;
   const ratios: number[] = [], dates: string[] = [];
   const readings: { pmcid: string; text: string }[] | null = options.subset === 'validation' ? null : [];
@@ -208,8 +209,10 @@ async function originalDiff(args: string[], runtime: RunRuntime): Promise<number
     const differences = bundles.map((bundle, i) => {
       const left = review.studies.filter((study) => captured(study, originalPmids) && !captured(study, bundle.capturedPmids));
       const right = review.studies.filter((study) => !captured(study, originalPmids) && captured(study, bundle.capturedPmids));
+      const neither = review.studies.filter((study) => !captured(study, originalPmids) && !captured(study, bundle.capturedPmids));
       addAttribution(originalOnly, left, sources.slice(i * k, (i + 1) * k));
       addAttribution(bundleOnly, right, originals);
+      addAttribution(neitherCaptured, neither, originals);
       const both = review.studies.filter((study) => captured(study, originalPmids) && captured(study, bundle.capturedPmids)).length;
       return { left, right, both, neither: review.studies.length - both - left.length - right.length };
     });
@@ -249,7 +252,7 @@ async function originalDiff(args: string[], runtime: RunRuntime): Promise<number
   const report = { bundle: options.bundle, subset: options.subset, bundleRuns: options.runsPerReview, label: options.label, source: from, k,
     reviews: reviews.length, generatedAt: now().toISOString(), measuredFrom: dates[0] ?? null, measuredTo: dates[dates.length - 1] ?? null,
     measurements: { measured, cached }, translators, exclusions,
-    structure: { ai: summarizeStructure(aiStructure), original: summarizeStructure(originalStructure), hitsRatio: distribution(ratios) }, originalOnly, bundleOnly };
+    structure: { ai: summarizeStructure(aiStructure), original: summarizeStructure(originalStructure), hitsRatio: distribution(ratios) }, originalOnly, bundleOnly, neitherCaptured };
   const reportsDir = runtime.reportsDir ?? resolve(__dirname, '../reports');
   if (readings) {
     const readingDir = join(options.root, '_original-diff', options.label);

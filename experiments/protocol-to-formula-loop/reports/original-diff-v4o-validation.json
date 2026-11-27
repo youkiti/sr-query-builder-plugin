@@ -6,12 +6,12 @@
   "source": "v1o",
   "k": 3,
   "reviews": 74,
-  "generatedAt": "2026-11-27T02:41:05.086Z",
+  "generatedAt": "2026-11-27T03:48:51.723Z",
   "measuredFrom": "2026-11-27T02:31:33.169Z",
   "measuredTo": "2026-11-27T02:41:05.083Z",
   "measurements": {
-    "measured": 922,
-    "cached": 147
+    "measured": 0,
+    "cached": 1069
   },
   "translators": {
     "rules": 81,
@@ -156,6 +156,23 @@
       "all_multiple": 16,
       "mixed": 7,
       "incomplete": 49
+    }
+  },
+  "neitherCaptured": {
+    "pairs": {
+      "single_concept": 43,
+      "single_filter": 29,
+      "multiple": 13,
+      "none": 0,
+      "no_lines": 6,
+      "excluded": 23
+    },
+    "studies": {
+      "all_single_concept": 16,
+      "all_single_filter": 14,
+      "all_multiple": 5,
+      "mixed": 3,
+      "incomplete": 16
     }
   }
 }
