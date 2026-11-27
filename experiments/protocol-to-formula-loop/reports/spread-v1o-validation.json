@@ -1,0 +1,50 @@
+{
+  "version": "v1o",
+  "subset": "validation",
+  "reviews": 74,
+  "runsPerReview": 3,
+  "generatedAt": "2026-11-27T02:29:43.793Z",
+  "runs": 222,
+  "failedRuns": 0,
+  "recallSpread": {
+    "reviews": 74,
+    "mean": 0.01017329021935056,
+    "median": 0,
+    "max": 0.13468700594029476
+  },
+  "hitsRange": {
+    "reviews": 74,
+    "median": 1.302457906781051,
+    "max": 17.80188679245283,
+    "over10x": 4
+  },
+  "largeHits": {
+    "runs": 222,
+    "over10000": 32,
+    "over50000": 0
+  },
+  "toolUse": {
+    "measurements": {
+      "median": 1,
+      "max": 5,
+      "zero": 0
+    },
+    "submissions": {
+      "median": 1,
+      "max": 1
+    }
+  },
+  "byCutoff": {
+    "splitDate": "2021-02-01",
+    "older": {
+      "reviews": 37,
+      "allCapturedRate": 0.5315315315315314,
+      "studyRecall": 0.9456403350328936
+    },
+    "newer": {
+      "reviews": 37,
+      "allCapturedRate": 0.6126126126126126,
+      "studyRecall": 0.9591315401191342
+    }
+  }
+}

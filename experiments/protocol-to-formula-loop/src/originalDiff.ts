@@ -30,8 +30,8 @@ type Cached = { fingerprint: string; measuredAt: string } &
   ({ status: 'measured'; capturedPmids: string[] } | { status: 'rejected' });
 
 function parseOptions(args: string[]) {
-  if (args.includes('--open-test-set') || args.some((arg, i) => arg === '--subset' && ['validation', 'test'].includes(args[i + 1] ?? ''))) {
-    throw new DiffError('原著式との比較は開発群でだけ実行できます');
+  if (args.includes('--open-test-set') || args.some((arg, i) => arg === '--subset' && args[i + 1] === 'test')) {
+    throw new DiffError('原著式との比較は試験群では実行できません');
   }
   const values = new Map<string, string>();
   for (let i = 0; i < args.length; i++) {
@@ -152,8 +152,10 @@ async function originalDiff(args: string[], runtime: RunRuntime): Promise<number
   const base = createDeps({ env, fetchImpl, sleep, rateLimiter: runtime.rateLimiter });
   const exclusions = { undeterminedRuns: 0, undeterminedElements: 0, unmeasurableParts: 0, rejectedUnits: 0, excludedRuns: 0, excludedElements: 0 };
   const aiStructure = structure(), originalStructure = structure(), originalOnly = attribution(), bundleOnly = attribution();
+  const neitherCaptured = attribution();
   const translators: Record<string, number> = Object.create(null) as Record<string, number>;
-  const ratios: number[] = [], dates: string[] = [], readings: { pmcid: string; text: string }[] = [];
+  const ratios: number[] = [], dates: string[] = [];
+  const readings: { pmcid: string; text: string }[] | null = options.subset === 'validation' ? null : [];
   let measured = 0, cached = 0;
   for (const { review, bundles, sources } of prepared) {
     if (!/^PMC\d+$/.test(review.pmcid)) throw new DiffError('対象レビューの識別子が不正です');
@@ -207,11 +209,14 @@ async function originalDiff(args: string[], runtime: RunRuntime): Promise<number
     const differences = bundles.map((bundle, i) => {
       const left = review.studies.filter((study) => captured(study, originalPmids) && !captured(study, bundle.capturedPmids));
       const right = review.studies.filter((study) => !captured(study, originalPmids) && captured(study, bundle.capturedPmids));
+      const neither = review.studies.filter((study) => !captured(study, originalPmids) && !captured(study, bundle.capturedPmids));
       addAttribution(originalOnly, left, sources.slice(i * k, (i + 1) * k));
       addAttribution(bundleOnly, right, originals);
+      addAttribution(neitherCaptured, neither, originals);
       const both = review.studies.filter((study) => captured(study, originalPmids) && captured(study, bundle.capturedPmids)).length;
       return { left, right, both, neither: review.studies.length - both - left.length - right.length };
     });
+    if (!readings) continue;
     const lines = [`# ${review.pmcid}`, `研究数: ${review.studies.length}`];
     differences.forEach((difference, i) => lines.push(`回 ${i + 1}: 両方 ${difference.both}、原著だけ ${difference.left.length}、束ねた版だけ ${difference.right.length}、どちらも拾えず ${difference.neither}`));
     const partText = (part: Part) => `単位 ${part.id}: ${part.kind}${part.negative ? '（否定）' : ''}、拾った研究数: ${part.captured === null ? '未測定' : review.studies.filter((study) => captured(study, part.captured!)).length}`;
@@ -247,15 +252,18 @@ async function originalDiff(args: string[], runtime: RunRuntime): Promise<number
   const report = { bundle: options.bundle, subset: options.subset, bundleRuns: options.runsPerReview, label: options.label, source: from, k,
     reviews: reviews.length, generatedAt: now().toISOString(), measuredFrom: dates[0] ?? null, measuredTo: dates[dates.length - 1] ?? null,
     measurements: { measured, cached }, translators, exclusions,
-    structure: { ai: summarizeStructure(aiStructure), original: summarizeStructure(originalStructure), hitsRatio: distribution(ratios) }, originalOnly, bundleOnly };
-  const readingDir = join(options.root, '_original-diff', options.label), reportsDir = runtime.reportsDir ?? resolve(__dirname, '../reports');
-  mkdirSync(readingDir, { recursive: true }); mkdirSync(reportsDir, { recursive: true });
-  for (const reading of readings) writeFileSync(join(readingDir, `${reading.pmcid}.md`), redact(reading.text, [env.NCBI_API_KEY ?? '']));
+    structure: { ai: summarizeStructure(aiStructure), original: summarizeStructure(originalStructure), hitsRatio: distribution(ratios) }, originalOnly, bundleOnly, neitherCaptured };
+  const reportsDir = runtime.reportsDir ?? resolve(__dirname, '../reports');
+  if (readings) {
+    const readingDir = join(options.root, '_original-diff', options.label);
+    mkdirSync(readingDir, { recursive: true }); mkdirSync(reportsDir, { recursive: true });
+    for (const reading of readings) writeFileSync(join(readingDir, `${reading.pmcid}.md`), redact(reading.text, [env.NCBI_API_KEY ?? '']));
+  } else mkdirSync(reportsDir, { recursive: true });
   writeJson(join(reportsDir, `original-diff-${options.bundle}-${options.subset}.json`), report);
   stdout(`対象のレビュー: ${reviews.length} 件\n`);
   stdout(`測定: 新規 ${measured} 回、保存済み ${cached} 回\n`);
   stdout(`分解できない実行: ${exclusions.undeterminedRuns} 件、分解できない要素: ${exclusions.undeterminedElements} 件、測れない部分: ${exclusions.unmeasurableParts} 件、拒否された単位: ${exclusions.rejectedUnits} 件\n`);
-  stdout(`読み物: ${readings.length} 件\n`);
+  stdout(readings ? `読み物: ${readings.length} 件\n` : '読み物: 0 件（検証群では書かない）\n');
   return 0;
 }
 

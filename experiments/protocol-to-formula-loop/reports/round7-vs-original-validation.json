@@ -1,0 +1,525 @@
+{
+  "reviews": 74,
+  "original": {
+    "reviews": 74,
+    "allCapturedRate": 0.581081081081081,
+    "studyRecall": 0.9137615894010411,
+    "pmidRecall": 0.8920007011767247,
+    "missedStudies": 228,
+    "failures": {
+      "zeroHits": 0,
+      "invalidSubmission": 0,
+      "noSubmission": 0
+    },
+    "failureRate": 0,
+    "f7": 0.3470684695204012,
+    "reviewsWithoutSuccessfulRuns": 0,
+    "medianHits": 1929,
+    "tiers": {
+      "cc-by": {
+        "reviews": 13,
+        "allCapturedRate": 0.7692307692307693,
+        "studyRecall": 0.9305957270530189,
+        "pmidRecall": 0.9077483860581995,
+        "missedStudies": 53,
+        "failures": {
+          "zeroHits": 0,
+          "invalidSubmission": 0,
+          "noSubmission": 0
+        },
+        "failureRate": 0,
+        "f7": 0.24768840914827292,
+        "reviewsWithoutSuccessfulRuns": 0,
+        "medianHits": 3035
+      },
+      "cc-by-nc": {
+        "reviews": 61,
+        "allCapturedRate": 0.5409836065573771,
+        "studyRecall": 0.9101739862948818,
+        "pmidRecall": 0.8886446371855912,
+        "missedStudies": 175,
+        "failures": {
+          "zeroHits": 0,
+          "invalidSubmission": 0,
+          "noSubmission": 0
+        },
+        "failureRate": 0,
+        "f7": 0.36824782664888756,
+        "reviewsWithoutSuccessfulRuns": 0,
+        "medianHits": 1541
+      }
+    }
+  },
+  "v1o": {
+    "summary": {
+      "reviews": 74,
+      "allCapturedRate": 0.5720720720720722,
+      "studyRecall": 0.9523859375760138,
+      "pmidRecall": 0.9391080121613842,
+      "missedStudies": 108.33333333333333,
+      "failures": {
+        "zeroHits": 0,
+        "invalidSubmission": 0,
+        "noSubmission": 0
+      },
+      "failureRate": 0,
+      "f7": 0.33369732515013817,
+      "reviewsWithoutSuccessfulRuns": 0,
+      "medianHits": 1847,
+      "tiers": {
+        "cc-by": {
+          "reviews": 13,
+          "allCapturedRate": 0.5897435897435898,
+          "studyRecall": 0.9717570619383662,
+          "pmidRecall": 0.9645699918982733,
+          "missedStudies": 10.333333333333332,
+          "failures": {
+            "zeroHits": 0,
+            "invalidSubmission": 0,
+            "noSubmission": 0
+          },
+          "failureRate": 0,
+          "f7": 0.3541119734772587,
+          "reviewsWithoutSuccessfulRuns": 0,
+          "medianHits": 2444.3333333333335
+        },
+        "cc-by-nc": {
+          "reviews": 61,
+          "allCapturedRate": 0.5683060109289618,
+          "studyRecall": 0.9482576651709225,
+          "pmidRecall": 0.9336816886108994,
+          "missedStudies": 98,
+          "failures": {
+            "zeroHits": 0,
+            "invalidSubmission": 0,
+            "noSubmission": 0
+          },
+          "failureRate": 0,
+          "f7": 0.32934666239189947,
+          "reviewsWithoutSuccessfulRuns": 0,
+          "medianHits": 1835.3333333333333
+        }
+      }
+    },
+    "versusOriginal": {
+      "reviews": 74,
+      "allCapturedRate": {
+        "base": 0.581081081081081,
+        "candidate": 0.5720720720720722,
+        "difference": -0.009009009009008806
+      },
+      "studyRecall": {
+        "base": 0.9137615894010411,
+        "candidate": 0.952385937576014,
+        "difference": 0.038624348174972845,
+        "confidenceInterval": [
+          0.005799759884083345,
+          0.07694329779242916
+        ]
+      },
+      "missedStudies": {
+        "base": 228,
+        "candidate": 108.33333333333333,
+        "difference": -119.66666666666667
+      },
+      "failureRate": {
+        "base": 0,
+        "candidate": 0,
+        "difference": 0
+      },
+      "hitsRatio": {
+        "reviews": 30,
+        "ratio": 0.8982278286322443,
+        "confidenceInterval": [
+          0.5122940165163454,
+          1.4976954658101638
+        ]
+      },
+      "hitsRatioAll": {
+        "reviews": 74,
+        "median": 1.3929606783903554
+      },
+      "medianHits": {
+        "base": 1929,
+        "candidate": 1847
+      },
+      "tiers": {
+        "cc-by": {
+          "reviews": 13,
+          "allCapturedRate": {
+            "base": 0.7692307692307693,
+            "candidate": 0.5897435897435898,
+            "difference": -0.17948717948717952
+          },
+          "studyRecall": {
+            "base": 0.9305957270530189,
+            "candidate": 0.9717570619383662,
+            "difference": 0.041161334885347345,
+            "confidenceInterval": [
+              -0.017934706459296616,
+              0.11322147103463359
+            ]
+          },
+          "missedStudies": {
+            "base": 53,
+            "candidate": 10.333333333333332,
+            "difference": -42.66666666666667
+          },
+          "failureRate": {
+            "base": 0,
+            "candidate": 0,
+            "difference": 0
+          },
+          "hitsRatio": {
+            "reviews": 7,
+            "ratio": 0.4635036792718505,
+            "confidenceInterval": [
+              0.20748396435109984,
+              0.889452557703622
+            ]
+          },
+          "hitsRatioAll": {
+            "reviews": 13,
+            "median": 0.842583017350339
+          },
+          "medianHits": {
+            "base": 3035,
+            "candidate": 2444.3333333333335
+          }
+        },
+        "cc-by-nc": {
+          "reviews": 61,
+          "allCapturedRate": {
+            "base": 0.5409836065573771,
+            "candidate": 0.5683060109289618,
+            "difference": 0.02732240437158473
+          },
+          "studyRecall": {
+            "base": 0.9101739862948818,
+            "candidate": 0.9482576651709225,
+            "difference": 0.038083678876040694,
+            "confidenceInterval": [
+              0.0015857994113371648,
+              0.08230466338684378
+            ]
+          },
+          "missedStudies": {
+            "base": 175,
+            "candidate": 98,
+            "difference": -77
+          },
+          "failureRate": {
+            "base": 0,
+            "candidate": 0,
+            "difference": 0
+          },
+          "hitsRatio": {
+            "reviews": 23,
+            "ratio": 1.098590343988249,
+            "confidenceInterval": [
+              0.5614072985619615,
+              2.0281925374334824
+            ]
+          },
+          "hitsRatioAll": {
+            "reviews": 61,
+            "median": 1.4382911392405062
+          },
+          "medianHits": {
+            "base": 1541,
+            "candidate": 1835.3333333333333
+          }
+        }
+      },
+      "verdict": "reject",
+      "reasons": [
+        "全捕捉の割合が下がっています"
+      ],
+      "improvedBy": [
+        "recall"
+      ],
+      "conditions": {
+        "allCapturedNonDecreasing": false,
+        "recallNonDecreasing": true,
+        "missedStudiesNonIncreasing": true,
+        "recallAndMissedNonWorsening": true,
+        "failureNonIncreasing": true,
+        "recallImproved": true,
+        "hitsImproved": false,
+        "anyImprovement": true,
+        "tierDirections": {
+          "recall": {
+            "cc-by": "consistent",
+            "cc-by-nc": "consistent"
+          },
+          "hits": {
+            "cc-by": "consistent",
+            "cc-by-nc": "inconsistent"
+          }
+        },
+        "tierDirectionConsistent": true
+      }
+    },
+    "hitsRatioQuartiles": {
+      "all": {
+        "reviews": 74,
+        "droppedAllFailed": 0,
+        "q1": 0.619472278071594,
+        "median": 1.3929606783903554,
+        "q3": 3.18327962653116
+      },
+      "cc-by": {
+        "reviews": 13,
+        "droppedAllFailed": 0,
+        "q1": 0.3144403372713875,
+        "median": 0.842583017350339,
+        "q3": 1.4609306409130816
+      },
+      "cc-by-nc": {
+        "reviews": 61,
+        "droppedAllFailed": 0,
+        "q1": 0.6894308943089431,
+        "median": 1.4382911392405062,
+        "q3": 3.7088607594936707
+      }
+    }
+  },
+  "v4o": {
+    "summary": {
+      "reviews": 74,
+      "allCapturedRate": 0.6486486486486487,
+      "studyRecall": 0.9654164706951907,
+      "pmidRecall": 0.9525991094979666,
+      "missedStudies": 84,
+      "failures": {
+        "zeroHits": 0,
+        "invalidSubmission": 0,
+        "noSubmission": 0
+      },
+      "failureRate": 0,
+      "f7": 0.28042723239910916,
+      "reviewsWithoutSuccessfulRuns": 0,
+      "medianHits": 3089.5,
+      "tiers": {
+        "cc-by": {
+          "reviews": 13,
+          "allCapturedRate": 0.6153846153846154,
+          "studyRecall": 0.9739663153866588,
+          "pmidRecall": 0.970973094519606,
+          "missedStudies": 9,
+          "failures": {
+            "zeroHits": 0,
+            "invalidSubmission": 0,
+            "noSubmission": 0
+          },
+          "failureRate": 0,
+          "f7": 0.26421608575413835,
+          "reviewsWithoutSuccessfulRuns": 0,
+          "medianHits": 3227
+        },
+        "cc-by-nc": {
+          "reviews": 61,
+          "allCapturedRate": 0.6557377049180327,
+          "studyRecall": 0.9635943726461891,
+          "pmidRecall": 0.9486833421982726,
+          "missedStudies": 75,
+          "failures": {
+            "zeroHits": 0,
+            "invalidSubmission": 0,
+            "noSubmission": 0
+          },
+          "failureRate": 0,
+          "f7": 0.2838820669300046,
+          "reviewsWithoutSuccessfulRuns": 0,
+          "medianHits": 3050
+        }
+      }
+    },
+    "versusOriginal": {
+      "reviews": 74,
+      "allCapturedRate": {
+        "base": 0.581081081081081,
+        "candidate": 0.6486486486486487,
+        "difference": 0.06756756756756765
+      },
+      "studyRecall": {
+        "base": 0.9137615894010411,
+        "candidate": 0.9654164706951907,
+        "difference": 0.051654881294149524,
+        "confidenceInterval": [
+          0.019409812761033495,
+          0.0892851125926213
+        ]
+      },
+      "missedStudies": {
+        "base": 228,
+        "candidate": 84,
+        "difference": -144
+      },
+      "failureRate": {
+        "base": 0,
+        "candidate": 0,
+        "difference": 0
+      },
+      "hitsRatio": {
+        "reviews": 36,
+        "ratio": 1.2620558598021212,
+        "confidenceInterval": [
+          0.7930233895516574,
+          1.9825487940643622
+        ]
+      },
+      "hitsRatioAll": {
+        "reviews": 74,
+        "median": 1.5204408326726706
+      },
+      "medianHits": {
+        "base": 1929,
+        "candidate": 3089.5
+      },
+      "tiers": {
+        "cc-by": {
+          "reviews": 13,
+          "allCapturedRate": {
+            "base": 0.7692307692307693,
+            "candidate": 0.6153846153846154,
+            "difference": -0.15384615384615385
+          },
+          "studyRecall": {
+            "base": 0.9305957270530189,
+            "candidate": 0.9739663153866588,
+            "difference": 0.04337058833363994,
+            "confidenceInterval": [
+              -0.016348638441661695,
+              0.11547749745967527
+            ]
+          },
+          "missedStudies": {
+            "base": 53,
+            "candidate": 9,
+            "difference": -44
+          },
+          "failureRate": {
+            "base": 0,
+            "candidate": 0,
+            "difference": 0
+          },
+          "hitsRatio": {
+            "reviews": 8,
+            "ratio": 0.8284950265827389,
+            "confidenceInterval": [
+              0.3738382145318813,
+              1.784805059220255
+            ]
+          },
+          "hitsRatioAll": {
+            "reviews": 13,
+            "median": 1.1123750430885901
+          },
+          "medianHits": {
+            "base": 3035,
+            "candidate": 3227
+          }
+        },
+        "cc-by-nc": {
+          "reviews": 61,
+          "allCapturedRate": {
+            "base": 0.5409836065573771,
+            "candidate": 0.6557377049180327,
+            "difference": 0.11475409836065564
+          },
+          "studyRecall": {
+            "base": 0.9101739862948818,
+            "candidate": 0.9635943726461891,
+            "difference": 0.0534203863513073,
+            "confidenceInterval": [
+              0.017538798621229687,
+              0.09707412566397018
+            ]
+          },
+          "missedStudies": {
+            "base": 175,
+            "candidate": 75,
+            "difference": -100
+          },
+          "failureRate": {
+            "base": 0,
+            "candidate": 0,
+            "difference": 0
+          },
+          "hitsRatio": {
+            "reviews": 28,
+            "ratio": 1.4233244587982838,
+            "confidenceInterval": [
+              0.8175540207601761,
+              2.3727179189354475
+            ]
+          },
+          "hitsRatioAll": {
+            "reviews": 61,
+            "median": 1.8941798941798942
+          },
+          "medianHits": {
+            "base": 1541,
+            "candidate": 3050
+          }
+        }
+      },
+      "verdict": "adopt",
+      "reasons": [
+        "悪化していない条件をすべて満たし、改善の根拠となる指標のティアの向きに不一致がありません"
+      ],
+      "improvedBy": [
+        "recall"
+      ],
+      "conditions": {
+        "allCapturedNonDecreasing": true,
+        "recallNonDecreasing": true,
+        "missedStudiesNonIncreasing": true,
+        "recallAndMissedNonWorsening": true,
+        "failureNonIncreasing": true,
+        "recallImproved": true,
+        "hitsImproved": false,
+        "anyImprovement": true,
+        "tierDirections": {
+          "recall": {
+            "cc-by": "consistent",
+            "cc-by-nc": "consistent"
+          },
+          "hits": {
+            "cc-by": "inconsistent",
+            "cc-by-nc": "consistent"
+          }
+        },
+        "tierDirectionConsistent": true
+      }
+    },
+    "hitsRatioQuartiles": {
+      "all": {
+        "reviews": 74,
+        "droppedAllFailed": 0,
+        "q1": 0.7203275830782456,
+        "median": 1.5204408326726706,
+        "q3": 4.394527006267913
+      },
+      "cc-by": {
+        "reviews": 13,
+        "droppedAllFailed": 0,
+        "q1": 0.40990371389270974,
+        "median": 1.1123750430885901,
+        "q3": 2.441789081341811
+      },
+      "cc-by-nc": {
+        "reviews": 61,
+        "droppedAllFailed": 0,
+        "q1": 0.7518070027222379,
+        "median": 1.8941798941798942,
+        "q3": 4.86697247706422
+      }
+    }
+  },
+  "v1oMeasuredFrom": "2026-11-27T02:03:40.867Z",
+  "v1oMeasuredTo": "2026-11-27T02:08:07.845Z",
+  "v4oMeasuredFrom": "2026-11-27T02:08:09.269Z",
+  "v4oMeasuredTo": "2026-11-27T02:09:49.227Z"
+}
